@@ -13,36 +13,46 @@
 use std::cell::RefCell;
 
 use smithay::{
-    backend::renderer::element::{
-        solid::{SolidColorBuffer, SolidColorRenderElement},
-        Kind,
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            element::{
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                solid::{SolidColorBuffer, SolidColorRenderElement},
+                Kind,
+            },
+            ImportAll, ImportMem, Renderer,
+        },
     },
     desktop::Window,
     reexports::wayland_protocols::xdg::{
         decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
         shell::server::xdg_toplevel,
     },
-    utils::{Logical, Physical, Point, Rectangle, Scale},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Transform},
 };
+use tracing::warn;
 
-use crate::grabs::resize_grab::ResizeEdge;
+use crate::{grabs::resize_grab::ResizeEdge, render::PilaRenderElement};
 
 pub const TITLE_BAR_HEIGHT: i32 = 28;
-/// Each button's clickable cell is square, at the right end of the bar.
-const BUTTON_WIDTH: i32 = TITLE_BAR_HEIGHT;
-/// The visible button is inset this much inside its cell.
-const BUTTON_INSET: i32 = 8;
+/// Width of each button cell (clickable and hover-highlighted), at the right
+/// end of the bar. Cells are the full bar height.
+const BUTTON_WIDTH: i32 = 36;
 /// Width of the invisible resize border outside the window and title bar.
 const BORDER: i32 = 6;
 /// Distance from a corner, along each edge, that resizes diagonally.
 const CORNER: i32 = 20;
 
-const BAR_FOCUSED: [f32; 4] = [0.21, 0.36, 0.58, 1.0];
-const BAR_UNFOCUSED: [f32; 4] = [0.24, 0.25, 0.28, 1.0];
-const MAXIMIZE: [f32; 4] = [0.80, 0.66, 0.26, 1.0];
-const MAXIMIZE_HOVER: [f32; 4] = [0.98, 0.82, 0.35, 1.0];
-const CLOSE: [f32; 4] = [0.78, 0.30, 0.28, 1.0];
-const CLOSE_HOVER: [f32; 4] = [0.97, 0.38, 0.34, 1.0];
+// Neutral dark greys; focus is shown by the bar and icon brightness.
+const BAR_FOCUSED: [f32; 4] = [0.184, 0.192, 0.212, 1.0]; // #2f3136
+const BAR_UNFOCUSED: [f32; 4] = [0.149, 0.153, 0.169, 1.0]; // #26272b
+const ICON_FOCUSED: [f32; 3] = [0.875, 0.882, 0.898]; // #dfe1e5
+const ICON_UNFOCUSED: [f32; 3] = [0.502, 0.514, 0.541]; // #80838a
+const HOVER_BG: [f32; 3] = [0.247, 0.259, 0.286]; // #3f4249
+const HOVER_ICON: [f32; 3] = [0.949, 0.953, 0.961]; // #f2f3f5
+const CLOSE_HOVER_BG: [f32; 3] = [0.769, 0.169, 0.110]; // #c42b1c
+const CLOSE_HOVER_ICON: [f32; 3] = [1.0, 1.0, 1.0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleBarPart {
@@ -174,24 +184,54 @@ fn band_edges(p: f64, start: f64, len: f64, low: ResizeEdge, high: ResizeEdge) -
     }
 }
 
-/// Solid color buffers for one window's title bar, kept in its user data so
-/// the damage tracker sees the same elements from frame to frame.
+/// Which glyph a button shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Icon {
+    Close,
+    Maximize,
+    /// Shown on the maximize button of a maximized window.
+    Restore,
+}
+
+/// A button's colors: depends on window focus and pointer hover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Focused,
+    Unfocused,
+    Hover,
+}
+
+/// A rasterized button and what it was drawn for, so it's only redrawn
+/// (and re-uploaded) when the icon or look changes.
+struct ButtonTexture {
+    key: (Icon, Look),
+    buffer: MemoryRenderBuffer,
+}
+
+/// One window's title bar buffers, kept in its user data so the damage
+/// tracker sees the same elements from frame to frame. Buffers can't be
+/// shared between windows: element ids must be unique within a frame.
 #[derive(Default)]
 struct TitleBarBuffers {
     bar: SolidColorBuffer,
-    maximize: SolidColorBuffer,
-    close: SolidColorBuffer,
+    maximize: Option<ButtonTexture>,
+    close: Option<ButtonTexture>,
 }
 
 /// Render elements for a title bar at `rect` (relative to the output origin),
 /// front to back.
-pub fn title_bar_elements(
+pub fn title_bar_elements<R>(
+    renderer: &mut R,
     window: &Window,
     rect: Rectangle<i32, Logical>,
     focused: bool,
     hover: Option<TitleBarPart>,
     scale: Scale<f64>,
-) -> Vec<SolidColorRenderElement> {
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
     window
         .user_data()
         .insert_if_missing(|| RefCell::new(TitleBarBuffers::default()));
@@ -200,43 +240,163 @@ pub fn title_bar_elements(
         .get::<RefCell<TitleBarBuffers>>()
         .unwrap()
         .borrow_mut();
+    let TitleBarBuffers {
+        bar,
+        maximize,
+        close,
+    } = &mut *buffers;
 
-    let button_size = (
-        BUTTON_WIDTH - 2 * BUTTON_INSET,
-        TITLE_BAR_HEIGHT - 2 * BUTTON_INSET,
-    );
-    let pick = |part, normal, hovered| {
-        if hover == Some(part) {
-            hovered
-        } else {
-            normal
-        }
+    let maximized = window.toplevel().is_some_and(|t| {
+        t.current_state()
+            .states
+            .contains(xdg_toplevel::State::Maximized)
+    });
+    let look = |part| match (hover == Some(part), focused) {
+        (true, _) => Look::Hover,
+        (false, true) => Look::Focused,
+        (false, false) => Look::Unfocused,
     };
-    buffers
-        .bar
-        .update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
-    buffers
-        .close
-        .update(button_size, pick(TitleBarPart::Close, CLOSE, CLOSE_HOVER));
-    buffers.maximize.update(
-        button_size,
-        pick(TitleBarPart::Maximize, MAXIMIZE, MAXIMIZE_HOVER),
-    );
-
-    let close_loc = Point::from((
-        rect.loc.x + rect.size.w - BUTTON_WIDTH + BUTTON_INSET,
-        rect.loc.y + BUTTON_INSET,
-    ));
+    let close_loc = Point::from((rect.loc.x + rect.size.w - BUTTON_WIDTH, rect.loc.y));
     let maximize_loc = close_loc - Point::from((BUTTON_WIDTH, 0));
-    let element = |buffer: &SolidColorBuffer, loc: Point<i32, Logical>| {
-        let loc: Point<i32, Physical> = loc.to_physical_precise_round(scale);
-        SolidColorRenderElement::from_buffer(buffer, loc, scale, 1.0, Kind::Unspecified)
+    let maximize_icon = if maximized {
+        Icon::Restore
+    } else {
+        Icon::Maximize
     };
-    vec![
-        element(&buffers.close, close_loc),
-        element(&buffers.maximize, maximize_loc),
-        element(&buffers.bar, rect.loc),
-    ]
+
+    let mut elements = Vec::with_capacity(3);
+    for (slot, icon, part, loc) in [
+        (close, Icon::Close, TitleBarPart::Close, close_loc),
+        (
+            maximize,
+            maximize_icon,
+            TitleBarPart::Maximize,
+            maximize_loc,
+        ),
+    ] {
+        let key = (icon, look(part));
+        if slot.as_ref().is_none_or(|texture| texture.key != key) {
+            *slot = Some(ButtonTexture {
+                key,
+                buffer: button_buffer(icon, key.1),
+            });
+        }
+        let buffer = &slot.as_ref().unwrap().buffer;
+        let loc: Point<f64, Physical> = loc.to_f64().to_physical(scale);
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc,
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            Ok(element) => elements.push(element.into()),
+            Err(err) => warn!(?err, "failed to upload title bar button"),
+        }
+    }
+
+    bar.update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
+    let loc: Point<i32, Physical> = rect.loc.to_physical_precise_round(scale);
+    elements
+        .push(SolidColorRenderElement::from_buffer(bar, loc, scale, 1.0, Kind::Unspecified).into());
+    elements
+}
+
+/// Draw one button cell (`BUTTON_WIDTH` x `TITLE_BAR_HEIGHT`): a background
+/// (transparent unless hovered, so the bar shows through) and an
+/// anti-aliased 10px glyph in the middle.
+fn button_buffer(icon: Icon, look: Look) -> MemoryRenderBuffer {
+    let (background, color) = match (look, icon) {
+        (Look::Hover, Icon::Close) => (Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON),
+        (Look::Hover, _) => (Some(HOVER_BG), HOVER_ICON),
+        (Look::Focused, _) => (None, ICON_FOCUSED),
+        (Look::Unfocused, _) => (None, ICON_UNFOCUSED),
+    };
+    let pixels = rasterize_button(icon, background, color);
+    MemoryRenderBuffer::from_slice(
+        &pixels,
+        Fourcc::Argb8888,
+        (BUTTON_WIDTH, TITLE_BAR_HEIGHT),
+        1,
+        Transform::Normal,
+        None,
+    )
+}
+
+/// Premultiplied ARGB8888 pixels (little-endian: B, G, R, A) for a button.
+fn rasterize_button(icon: Icon, background: Option<[f32; 3]>, color: [f32; 3]) -> Vec<u8> {
+    let (w, h) = (BUTTON_WIDTH, TITLE_BAR_HEIGHT);
+    // Glyph center. Outline edges land on pixel centers, so 1px strokes are crisp.
+    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let p = (x as f64 + 0.5, y as f64 + 0.5);
+            let coverage = glyph_coverage(icon, p, (cx, cy)) as f32;
+            let (bg, bg_alpha) = match background {
+                Some(bg) => (bg, 1.0),
+                None => ([0.0; 3], 0.0),
+            };
+            let channel = |i: usize| color[i] * coverage + bg[i] * bg_alpha * (1.0 - coverage);
+            let alpha = coverage + bg_alpha * (1.0 - coverage);
+            let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            pixels.extend([
+                byte(channel(2)),
+                byte(channel(1)),
+                byte(channel(0)),
+                byte(alpha),
+            ]);
+        }
+    }
+    pixels
+}
+
+/// How much of the pixel at `p` the glyph covers (0..=1).
+fn glyph_coverage(icon: Icon, p: (f64, f64), (cx, cy): (f64, f64)) -> f64 {
+    // A stroke `width` wide along a shape at distance `dist` from p.
+    let stroke = |dist: f64, width: f64| (width / 2.0 + 0.5 - dist).clamp(0.0, 1.0);
+    match icon {
+        Icon::Close => {
+            let r = 4.5;
+            let d1 = segment_distance(p, (cx - r, cy - r), (cx + r, cy + r));
+            let d2 = segment_distance(p, (cx + r, cy - r), (cx - r, cy + r));
+            stroke(d1.min(d2), 1.4)
+        }
+        Icon::Maximize => stroke(box_sdf(p, (cx, cy), 4.5).abs(), 1.0),
+        Icon::Restore => {
+            // A front square, and the part of a back square (up and right)
+            // that isn't hidden behind it. Together they span the same 10px
+            // as the maximize square, with edges on pixel centers.
+            let front = box_sdf(p, (cx - 1.5, cy + 1.5), 3.0);
+            let back = box_sdf(p, (cx + 1.5, cy - 1.5), 3.0);
+            let back = if front < -0.5 {
+                0.0
+            } else {
+                stroke(back.abs(), 1.0)
+            };
+            stroke(front.abs(), 1.0).max(back)
+        }
+    }
+}
+
+/// Distance from `p` to the segment `a`-`b`.
+fn segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (abx, aby) = (b.0 - a.0, b.1 - a.1);
+    let (apx, apy) = (p.0 - a.0, p.1 - a.1);
+    let t = ((apx * abx + apy * aby) / (abx * abx + aby * aby)).clamp(0.0, 1.0);
+    let (dx, dy) = (apx - abx * t, apy - aby * t);
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// Signed distance from `p` to a square centered at `c` with half-size
+/// `half` (negative inside).
+fn box_sdf(p: (f64, f64), c: (f64, f64), half: f64) -> f64 {
+    let qx = (p.0 - c.0).abs() - half;
+    let qy = (p.1 - c.1).abs() - half;
+    let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+    outside + qx.max(qy).min(0.0)
 }
 
 #[cfg(test)]
@@ -265,6 +425,29 @@ mod tests {
             TitleBarPart::Drag
         );
         assert_eq!(title_bar_part(bar(), (101.0, y).into()), TitleBarPart::Drag);
+    }
+
+    fn alpha_at(pixels: &[u8], x: i32, y: i32) -> u8 {
+        pixels[((y * BUTTON_WIDTH + x) * 4 + 3) as usize]
+    }
+
+    #[test]
+    fn button_glyphs_are_crisp_and_centered() {
+        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED);
+        // The square's left edge (x = 13.5) lands on pixel column 13.
+        assert_eq!(alpha_at(&px, 13, TITLE_BAR_HEIGHT / 2), 255);
+        assert_eq!(alpha_at(&px, 12, TITLE_BAR_HEIGHT / 2), 0);
+        // Inside the outline and the cell's corner stay transparent.
+        assert_eq!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2), 0);
+        assert_eq!(alpha_at(&px, 0, 0), 0);
+
+        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED);
+        assert!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2) > 200); // the cross
+        assert_eq!(alpha_at(&px, 0, 0), 0);
+
+        // Hovered buttons fill their whole cell.
+        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON);
+        assert!(px.chunks(4).all(|p| p[3] == 255));
     }
 
     #[test]

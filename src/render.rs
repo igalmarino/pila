@@ -10,11 +10,12 @@
 use smithay::{
     backend::renderer::{
         element::{
+            memory::MemoryRenderBufferRenderElement,
             solid::SolidColorRenderElement,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             AsRenderElements, Kind,
         },
-        ImportAll, Renderer,
+        ImportAll, ImportMem, Renderer,
     },
     desktop::Window,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -27,9 +28,10 @@ use crate::decoration::{self, TitleBarPart};
 const SCALE: f64 = 1.0;
 
 smithay::backend::renderer::element::render_elements! {
-    pub PilaRenderElement<R> where R: ImportAll;
+    pub PilaRenderElement<R> where R: ImportAll + ImportMem;
     Surface=WaylandSurfaceRenderElement<R>,
     Solid=SolidColorRenderElement,
+    Memory=MemoryRenderBufferRenderElement<R>,
 }
 
 /// A mapped window as it should be drawn this frame.
@@ -55,8 +57,8 @@ pub fn scene_elements<R>(
     output_location: Point<i32, Logical>,
 ) -> Vec<PilaRenderElement<R>>
 where
-    R: Renderer + ImportAll,
-    R::TextureId: Clone + 'static,
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
 {
     let scale = Scale::from(SCALE);
     let mut elements = Vec::new();
@@ -74,11 +76,14 @@ where
         );
         if let Some(bar) = &entry.title_bar {
             let rect = Rectangle::new(bar.rect.loc - output_location, bar.rect.size);
-            elements.extend(
-                decoration::title_bar_elements(&entry.window, rect, bar.focused, bar.hover, scale)
-                    .into_iter()
-                    .map(PilaRenderElement::from),
-            );
+            elements.extend(decoration::title_bar_elements(
+                renderer,
+                &entry.window,
+                rect,
+                bar.focused,
+                bar.hover,
+                scale,
+            ));
         }
     }
     elements
@@ -92,8 +97,8 @@ pub fn cursor_elements<R>(
     output_location: Point<i32, Logical>,
 ) -> Vec<PilaRenderElement<R>>
 where
-    R: Renderer + ImportAll,
-    R::TextureId: Clone + 'static,
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
 {
     let Some((surface, location)) = cursor else {
         return Vec::new();
