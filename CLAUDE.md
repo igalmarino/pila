@@ -64,6 +64,9 @@ Key flows and invariants:
   pila renders the surface itself (`src/cursor.rs`, backend-neutral; the winit redraw
   passes it to `render_output` as a custom element and sends it frame callbacks). Winit
   doesn't report the pointer leaving the window, so a drawn cursor lingers at the edge.
+  Keys held when the host takes focus away (e.g. Alt of GNOME's Alt+Tab) never get a
+  release event (Smithay's winit backend drops winit's synthetic ones), so
+  `WinitEvent::Focus(false)` calls `Pila::release_all_keys` to avoid stuck modifiers.
   `Pila::new` hard-codes a keyboard and pointer. A DRM/libinput backend must also draw
   named shapes itself (xcursor theme) and track input-device hotplug. `Pila::backend` holds the winit backend so `DmabufHandler`
   (`handlers/compositor.rs`) can test-import client buffers; a DRM backend needs its own

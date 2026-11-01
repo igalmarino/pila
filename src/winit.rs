@@ -82,6 +82,8 @@ pub fn init_winit(
                     );
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
+                // Keys held when the host takes focus away never get a release.
+                WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => redraw(state, display, &output, &mut damage_tracker),
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),

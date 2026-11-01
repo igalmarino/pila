@@ -78,6 +78,38 @@ impl Pila {
         }
     }
 
+    /// Release every key pila thinks is held. Nested: when pila's host window
+    /// loses focus, the host delivers the releases of keys held at that moment
+    /// to whatever got focus instead (and Smithay's winit backend drops winit's
+    /// synthetic releases), so e.g. the Alt of a host Alt+Tab would stay
+    /// pressed, turning Enter into Alt+Return. Called on `WinitEvent::Focus(false)`.
+    pub fn release_all_keys(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let time = self.start_time.elapsed().as_millis() as u32;
+        for keycode in keyboard.pressed_keys() {
+            let serial = SERIAL_COUNTER.next_serial();
+            keyboard.input::<(), _>(
+                self,
+                keycode,
+                KeyState::Released,
+                serial,
+                time,
+                |state, _, _| {
+                    // Like a real release: a key whose press triggered a
+                    // binding was never seen by the client.
+                    if state.suppressed_keys.remove(&keycode) {
+                        FilterResult::Intercept(())
+                    } else {
+                        FilterResult::Forward
+                    }
+                },
+            );
+        }
+        self.suppressed_keys.clear();
+    }
+
     fn on_pointer_motion_absolute<I: InputBackend>(
         &mut self,
         event: I::PointerMotionAbsoluteEvent,
