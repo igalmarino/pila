@@ -6,22 +6,30 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            gles::GlesRenderer, ImportDma,
+            damage::OutputDamageTracker,
+            element::{
+                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+                Kind,
+            },
+            gles::GlesRenderer,
+            ImportDma,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    input::pointer::{CursorIcon, CursorImageStatus},
+    desktop::utils::send_frames_surface_tree,
+    input::pointer::CursorImageStatus,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{
-        calloop::EventLoop, wayland_server::DisplayHandle, winit::window::Window as WinitWindow,
+        calloop::EventLoop,
+        wayland_server::{DisplayHandle, Resource},
+        winit::window::Window as WinitWindow,
     },
     utils::{Rectangle, Transform},
     wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState},
 };
 use tracing::{error, info, warn};
 
-use crate::{CalloopData, Pila};
+use crate::{cursor, CalloopData, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -89,8 +97,39 @@ pub fn init_winit(
                     let size = backend.window_size();
                     let damage = Rectangle::from_size(size);
 
+                    // A destroyed cursor surface falls back to the default arrow.
+                    if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive())
+                    {
+                        state.cursor_status = CursorImageStatus::default_named();
+                        apply_cursor(backend.window(), &state.cursor_status);
+                    }
+                    let pointer_location = state
+                        .seat
+                        .get_pointer()
+                        .map(|p| p.current_location())
+                        .unwrap_or_default();
+                    let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
+                    let output_location = state
+                        .space
+                        .output_geometry(&output)
+                        .map(|geo| geo.loc)
+                        .unwrap_or_default();
+
                     let rendered = match backend.bind() {
                         Ok((renderer, mut framebuffer)) => {
+                            // Drawn on top of the windows. Scale 1, like render_output below.
+                            let cursor_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+                                match &cursor {
+                                    Some((surface, location)) => render_elements_from_surface_tree(
+                                        renderer,
+                                        surface,
+                                        (*location - output_location).to_physical(1),
+                                        1.0,
+                                        1.0,
+                                        Kind::Cursor,
+                                    ),
+                                    None => Vec::new(),
+                                };
                             smithay::desktop::space::render_output::<
                                 _,
                                 WaylandSurfaceRenderElement<GlesRenderer>,
@@ -103,7 +142,7 @@ pub fn init_winit(
                                 1.0,
                                 0,
                                 [&state.space],
-                                &[],
+                                &cursor_elements,
                                 &mut damage_tracker,
                                 BACKGROUND,
                             )
@@ -129,6 +168,15 @@ pub fn init_winit(
                             |_, _| Some(output.clone()),
                         );
                     }
+                    if let Some((surface, _)) = &cursor {
+                        send_frames_surface_tree(
+                            surface,
+                            &output,
+                            state.start_time.elapsed(),
+                            Some(Duration::ZERO),
+                            |_, _| Some(output.clone()),
+                        );
+                    }
 
                     state.space.refresh();
                     state.popups.cleanup();
@@ -145,7 +193,7 @@ pub fn init_winit(
 }
 
 /// Show the client's requested cursor on the host window. Client-drawn cursor
-/// surfaces aren't rendered yet, so those fall back to the host's default arrow.
+/// surfaces are rendered by pila itself (see `cursor`), so the host's is hidden.
 pub fn apply_cursor(window: &WinitWindow, status: &CursorImageStatus) {
     match status {
         CursorImageStatus::Hidden => window.set_cursor_visible(false),
@@ -153,10 +201,7 @@ pub fn apply_cursor(window: &WinitWindow, status: &CursorImageStatus) {
             window.set_cursor(*icon);
             window.set_cursor_visible(true);
         }
-        CursorImageStatus::Surface(_) => {
-            window.set_cursor(CursorIcon::Default);
-            window.set_cursor_visible(true);
-        }
+        CursorImageStatus::Surface(_) => window.set_cursor_visible(false),
     }
 }
 

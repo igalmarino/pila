@@ -37,7 +37,8 @@ on **Smithay 0.7.x**.
   while nested.
 - Test clients available inside the nested compositor: `foot`, `weston-terminal`,
   `weston-simple-egl`, `wayland-info`, and `gtk4-widget-factory` / `gtk4-demo` (menus,
-  popovers, dropdowns: the way to exercise popups and popup grabs).
+  popovers, dropdowns: the way to exercise popups and popup grabs). `foot` and GTK use
+  cursor-shape (named cursors); `weston-terminal` draws its own cursor surfaces.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 
@@ -53,11 +54,14 @@ Key flows and invariants:
 
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`); intercepted
   keycodes go in `suppressed_keys` so their release isn't forwarded to the client either.
-- **Nested-only assumptions:** the host draws the cursor: `cursor_image` in
-  `handlers/mod.rs` stores the request in `Pila::cursor_status` and forwards it to the
-  winit window (`winit::apply_cursor`); client cursor surfaces fall back to the host
-  arrow. `Pila::new` hard-codes a keyboard and pointer. A DRM/libinput backend must
-  render the cursor itself (named shapes and surfaces) and track input-device hotplug. `Pila::backend` holds the winit backend so `DmabufHandler`
+- **Nested-only assumptions:** `cursor_image` in `handlers/mod.rs` stores the request in
+  `Pila::cursor_status` and forwards it to the winit window (`winit::apply_cursor`): named
+  shapes are drawn by the host; for client cursor surfaces the host cursor is hidden and
+  pila renders the surface itself (`src/cursor.rs`, backend-neutral; the winit redraw
+  passes it to `render_output` as a custom element and sends it frame callbacks). Winit
+  doesn't report the pointer leaving the window, so a drawn cursor lingers at the edge.
+  `Pila::new` hard-codes a keyboard and pointer. A DRM/libinput backend must also draw
+  named shapes itself (xcursor theme) and track input-device hotplug. `Pila::backend` holds the winit backend so `DmabufHandler`
   (`handlers/compositor.rs`) can test-import client buffers; a DRM backend needs its own
   renderer there and must create the linux-dmabuf global itself (see `winit::init_dmabuf`).
   Other single-output, winit-only shortcuts: `process_input_event` handles only absolute

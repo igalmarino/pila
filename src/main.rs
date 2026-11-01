@@ -11,6 +11,7 @@
 #![allow(irrefutable_let_patterns)]
 
 mod config;
+mod cursor;
 mod grabs;
 mod handlers;
 mod input;
