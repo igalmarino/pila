@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Terminal workflow for the dev container (no VS Code needed).
+# Requires the Dev Containers CLI: npm install -g @devcontainers/cli
+#
+#   scripts/dev up         build (if needed) and start the container
+#   scripts/dev rebuild    rebuild the image and recreate the container
+#   scripts/dev shell      open a shell inside the container (default)
+#   scripts/dev claude     start Claude Code inside the container
+#   scripts/dev <cmd...>   run any command inside, e.g. scripts/dev cargo build
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if ! command -v devcontainer >/dev/null; then
+    echo "devcontainer CLI not found. Install it with: npm install -g @devcontainers/cli" >&2
+    exit 1
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ] || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    echo "WAYLAND_DISPLAY/XDG_RUNTIME_DIR are not set; run this from your GNOME session." >&2
+    exit 1
+fi
+
+up() { devcontainer up --workspace-folder . >/dev/null; }
+
+cmd="${1:-shell}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+    up)      devcontainer up --workspace-folder . "$@" ;;
+    rebuild) devcontainer up --workspace-folder . --remove-existing-container --build-no-cache "$@" ;;
+    shell)   up && exec devcontainer exec --workspace-folder . bash -l ;;
+    claude)  up && exec devcontainer exec --workspace-folder . claude "$@" ;;
+    *)       up && exec devcontainer exec --workspace-folder . "$cmd" "$@" ;;
+esac

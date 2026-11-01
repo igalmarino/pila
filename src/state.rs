@@ -1,0 +1,567 @@
+use std::{cell::RefCell, collections::HashSet, ffi::OsString, process::Command, sync::Arc};
+
+use smithay::{
+    backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
+    desktop::{find_popup_root_surface, PopupManager, Space, Window, WindowSurfaceType},
+    input::{
+        keyboard::Keycode,
+        pointer::{CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData},
+        Seat, SeatHandler, SeatState,
+    },
+    reexports::{
+        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            protocol::wl_surface::WlSurface,
+            Display, DisplayHandle, Resource,
+        },
+    },
+    utils::{Logical, Point, Rectangle, Serial},
+    wayland::{
+        compositor::{CompositorClientState, CompositorState},
+        cursor_shape::CursorShapeManagerState,
+        dmabuf::DmabufState,
+        output::OutputManagerState,
+        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        shell::xdg::{decoration::XdgDecorationState, XdgShellState},
+        shm::ShmState,
+        socket::ListeningSocketSource,
+        xdg_activation::XdgActivationState,
+    },
+};
+use tracing::{debug, info, warn};
+
+use crate::{
+    config::{Action, Config},
+    grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
+    CalloopData,
+};
+
+/// Offset applied to each new window that would land exactly on top of another.
+const CASCADE_STEP: i32 = 32;
+
+pub struct Pila {
+    pub start_time: std::time::Instant,
+    pub socket_name: OsString,
+    pub display_handle: DisplayHandle,
+    pub loop_signal: LoopSignal,
+    pub config: Config,
+
+    /// Mapped windows, in stacking order (back to front).
+    pub space: Space<Window>,
+    /// Toplevels that exist but haven't committed a buffer yet.
+    pub unmapped: Vec<Window>,
+    /// Keys whose press triggered a binding; their release is swallowed too.
+    pub suppressed_keys: HashSet<Keycode>,
+
+    // Smithay protocol state
+    pub compositor_state: CompositorState,
+    pub xdg_shell_state: XdgShellState,
+    pub shm_state: ShmState,
+    pub output_manager_state: OutputManagerState,
+    pub seat_state: SeatState<Pila>,
+    pub data_device_state: DataDeviceState,
+    pub primary_selection_state: PrimarySelectionState,
+    pub xdg_decoration_state: XdgDecorationState,
+    pub xdg_activation_state: XdgActivationState,
+    pub cursor_shape_state: CursorShapeManagerState,
+    /// Its global is created by the backend, which knows the render device and formats.
+    pub dmabuf_state: DmabufState,
+    pub popups: PopupManager,
+
+    pub seat: Seat<Self>,
+    /// Cursor most recently requested by the client under the pointer.
+    pub cursor_status: CursorImageStatus,
+
+    /// Nested-only: set by `init_winit`. It lives here (not in the redraw closure) so
+    /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
+    /// needs its own renderer handle here instead.
+    pub backend: Option<WinitGraphicsBackend<GlesRenderer>>,
+}
+
+impl Pila {
+    pub fn new(
+        event_loop: &mut EventLoop<CalloopData>,
+        display: Display<Self>,
+        config: Config,
+    ) -> Self {
+        let start_time = std::time::Instant::now();
+        let dh = display.handle();
+
+        let compositor_state = CompositorState::new::<Self>(&dh);
+        let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let shm_state = ShmState::new::<Self>(&dh, vec![]);
+        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
+        let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
+        let cursor_shape_state = CursorShapeManagerState::new::<Self>(&dh);
+        let dmabuf_state = DmabufState::new();
+        let popups = PopupManager::default();
+
+        let mut seat_state = SeatState::new();
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
+        // Nested: the host always gives us a keyboard and pointer.
+        // A real-hardware backend should track hotplug instead.
+        seat.add_keyboard(Default::default(), 200, 25)
+            .expect("failed to initialize keyboard");
+        seat.add_pointer();
+
+        let socket_name = Self::init_wayland_listener(display, event_loop);
+        let loop_signal = event_loop.get_signal();
+
+        Self {
+            start_time,
+            socket_name,
+            display_handle: dh,
+            loop_signal,
+            config,
+            space: Space::default(),
+            unmapped: Vec::new(),
+            suppressed_keys: HashSet::new(),
+            compositor_state,
+            xdg_shell_state,
+            shm_state,
+            output_manager_state,
+            seat_state,
+            data_device_state,
+            primary_selection_state,
+            xdg_decoration_state,
+            xdg_activation_state,
+            cursor_shape_state,
+            dmabuf_state,
+            popups,
+            seat,
+            cursor_status: CursorImageStatus::default_named(),
+            backend: None,
+        }
+    }
+
+    fn init_wayland_listener(
+        display: Display<Pila>,
+        event_loop: &mut EventLoop<CalloopData>,
+    ) -> OsString {
+        // Picks the next free wayland-N name in $XDG_RUNTIME_DIR.
+        let listening_socket =
+            ListeningSocketSource::new_auto().expect("failed to create Wayland socket");
+        let socket_name = listening_socket.socket_name().to_os_string();
+        info!(socket = ?socket_name, "listening for Wayland clients");
+
+        let loop_handle = event_loop.handle();
+        loop_handle
+            .insert_source(listening_socket, |client_stream, _, data| {
+                if let Err(err) = data
+                    .display_handle
+                    .insert_client(client_stream, Arc::new(ClientState::default()))
+                {
+                    warn!(?err, "failed to insert client");
+                }
+            })
+            .expect("failed to init the Wayland listening source");
+
+        loop_handle
+            .insert_source(
+                Generic::new(display, Interest::READ, Mode::Level),
+                |_, display, data| {
+                    // SAFETY: the display is never dropped while the source is alive.
+                    unsafe {
+                        display.get_mut().dispatch_clients(&mut data.state).unwrap();
+                    }
+                    Ok(PostAction::Continue)
+                },
+            )
+            .expect("failed to init the Wayland display source");
+
+        socket_name
+    }
+
+    // ---------------------------------------------------------------------
+    // Lookups
+    // ---------------------------------------------------------------------
+
+    pub fn surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.space
+            .element_under(pos)
+            .and_then(|(window, location)| {
+                window
+                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, p)| (s, (p + location).to_f64()))
+            })
+    }
+
+    /// Find a window (mapped or not) by its toplevel surface.
+    pub fn window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
+        self.space
+            .elements()
+            .chain(self.unmapped.iter())
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .cloned()
+    }
+
+    /// The window with keyboard focus. While a menu is open the focus is on
+    /// the popup, so this resolves it to the popup's parent window.
+    pub fn focused_window(&self) -> Option<Window> {
+        let focus = self.seat.get_keyboard()?.current_focus()?;
+        let focus = self.popup_root(&focus).unwrap_or(focus);
+        self.space
+            .elements()
+            .find(|w| w.toplevel().is_some_and(|t| *t.wl_surface() == focus))
+            .cloned()
+    }
+
+    /// The toplevel surface a popup belongs to, if `surface` is a popup.
+    fn popup_root(&self, surface: &WlSurface) -> Option<WlSurface> {
+        let popup = self.popups.find_popup(surface)?;
+        find_popup_root_surface(&popup).ok()
+    }
+
+    /// Geometry of the output under `pos`, or the first output.
+    pub fn output_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        let output = self
+            .space
+            .output_under(pos)
+            .next()
+            .or_else(|| self.space.outputs().next())?;
+        self.space.output_geometry(output)
+    }
+
+    /// Geometry of the output a window is mostly on, falling back to the pointer's output.
+    fn output_geometry_for_window(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        let pos = match self.space.element_geometry(window) {
+            Some(geo) => (geo.loc + geo.size.downscale(2).to_point()).to_f64(),
+            None => self.seat.get_pointer()?.current_location(),
+        };
+        self.output_geometry_at(pos)
+    }
+
+    // ---------------------------------------------------------------------
+    // Window management
+    // ---------------------------------------------------------------------
+
+    /// Map a window the first time it has content: centered on the pointer's
+    /// output (cascaded if that spot is taken), or filling the output if the
+    /// client asked for maximize/fullscreen before mapping.
+    pub fn place_new_window(&mut self, window: Window) {
+        let pointer_location = self
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let output_geo = self
+            .output_geometry_at(pointer_location)
+            .unwrap_or_else(|| Rectangle::from_size((800, 600).into()));
+
+        let (maximized, fullscreen) = fill_state(&window);
+        let location = if maximized || fullscreen {
+            output_geo.loc
+        } else {
+            let size = window.geometry().size;
+            let mut loc = output_geo.loc
+                + Point::from((
+                    (output_geo.size.w - size.w).max(0) / 2,
+                    (output_geo.size.h - size.h).max(0) / 2,
+                ));
+            while self
+                .space
+                .elements()
+                .any(|w| self.space.element_location(w) == Some(loc))
+            {
+                loc += Point::from((CASCADE_STEP, CASCADE_STEP));
+            }
+            loc
+        };
+
+        debug!(?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
+        self.space.map_element(window.clone(), location, true);
+        self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());
+    }
+
+    /// Give keyboard focus to `window` and raise it, or clear focus.
+    pub fn focus_window(&mut self, window: Option<Window>, serial: Serial) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        // A popup grab ignores focus changes, so close the menu first.
+        self.dismiss_popup_grab();
+        match window {
+            Some(window) => {
+                self.space.raise_element(&window, true);
+                let surface = window.toplevel().map(|t| t.wl_surface().clone());
+                keyboard.set_focus(self, surface, serial);
+            }
+            None => {
+                for w in self.space.elements() {
+                    w.set_activated(false);
+                }
+                keyboard.set_focus(self, None, serial);
+            }
+        }
+        for w in self.space.elements() {
+            if let Some(toplevel) = w.toplevel() {
+                toplevel.send_pending_configure();
+            }
+        }
+    }
+
+    /// If a menu holds a popup grab, dismiss its popups and release the
+    /// keyboard grab. The pointer grab ends itself once the client destroys
+    /// the dismissed popups.
+    fn dismiss_popup_grab(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        // Popup grabs are the only keyboard grabs pila takes.
+        if !keyboard.is_grabbed() {
+            return;
+        }
+        // A dead focus (its window was just destroyed) has no popups left to close.
+        if let Some(focus) = keyboard.current_focus().filter(|f| f.is_alive()) {
+            let root = self.popup_root(&focus).unwrap_or(focus);
+            for (popup, _) in PopupManager::popups_for_surface(&root) {
+                let _ = PopupManager::dismiss_popup(&root, &popup);
+            }
+        }
+        keyboard.unset_grab(self);
+    }
+
+    /// Raise the bottom-most window: repeated presses walk through all windows.
+    pub fn cycle_focus(&mut self, serial: Serial) {
+        if self.space.elements().len() < 2 {
+            return;
+        }
+        let bottom = self.space.elements().next().cloned();
+        self.focus_window(bottom, serial);
+    }
+
+    pub fn close_focused(&mut self) {
+        if let Some(toplevel) = self.focused_window().as_ref().and_then(|w| w.toplevel()) {
+            toplevel.send_close();
+        }
+    }
+
+    /// Set a window's maximized/fullscreen states. Entering either state from
+    /// a normal window remembers its geometry; leaving both restores it.
+    pub fn set_fill_state(&mut self, window: &Window, maximized: bool, fullscreen: bool) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let mapped_loc = self.space.element_location(window);
+        let (was_maximized, was_fullscreen) = fill_state(window);
+        window
+            .user_data()
+            .insert_if_missing(RestoreGeometry::default);
+        let restore = &window.user_data().get::<RestoreGeometry>().unwrap().0;
+
+        if maximized || fullscreen {
+            let Some(output_geo) = self.output_geometry_for_window(window) else {
+                return;
+            };
+            if let (Some(loc), false) = (mapped_loc, was_maximized || was_fullscreen) {
+                *restore.borrow_mut() = Some(Rectangle::new(loc, window.geometry().size));
+            }
+            toplevel.with_pending_state(|state| {
+                set_state(&mut state.states, xdg_toplevel::State::Maximized, maximized);
+                set_state(
+                    &mut state.states,
+                    xdg_toplevel::State::Fullscreen,
+                    fullscreen,
+                );
+                state.size = Some(output_geo.size);
+            });
+            if mapped_loc.is_some() {
+                self.space.map_element(window.clone(), output_geo.loc, true);
+            }
+        } else {
+            let saved = restore.borrow_mut().take();
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+                state.states.unset(xdg_toplevel::State::Fullscreen);
+                // None lets the client pick its own size.
+                state.size = saved.map(|r| r.size);
+            });
+            if let (Some(saved), Some(_)) = (saved, mapped_loc) {
+                self.space.map_element(window.clone(), saved.loc, true);
+            }
+        }
+
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
+    pub fn begin_move(
+        &mut self,
+        window: Window,
+        start_data: PointerGrabStartData<Self>,
+        serial: Serial,
+    ) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+
+        // Dragging a maximized/fullscreen window restores it under the cursor.
+        let (maximized, fullscreen) = fill_state(&window);
+        if maximized || fullscreen {
+            let width = restore_geometry(&window)
+                .map(|r| r.size.w)
+                .unwrap_or(window.geometry().size.w);
+            self.set_fill_state(&window, false, false);
+            let loc = Point::from((
+                start_data.location.x as i32 - width / 2,
+                start_data.location.y as i32 - CASCADE_STEP / 2,
+            ));
+            self.space.map_element(window.clone(), loc, true);
+        }
+
+        let Some(initial_window_location) = self.space.element_location(&window) else {
+            return;
+        };
+        let grab = MoveSurfaceGrab {
+            start_data,
+            window,
+            initial_window_location,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+        // After set_grab: clearing the focus resets the cursor to the default.
+        self.set_cursor(CursorImageStatus::Named(CursorIcon::Grabbing));
+    }
+
+    pub fn begin_resize(
+        &mut self,
+        window: Window,
+        edges: ResizeEdge,
+        start_data: PointerGrabStartData<Self>,
+        serial: Serial,
+    ) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let (maximized, fullscreen) = fill_state(&window);
+        if maximized || fullscreen {
+            return;
+        }
+        let Some(location) = self.space.element_location(&window) else {
+            return;
+        };
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+
+        let size = window.geometry().size;
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Resizing);
+        });
+        toplevel.send_pending_configure();
+
+        let grab =
+            ResizeSurfaceGrab::start(start_data, window, edges, Rectangle::new(location, size));
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+        // After set_grab: clearing the focus resets the cursor to the default.
+        self.set_cursor(CursorImageStatus::Named(edges.cursor_icon()));
+    }
+
+    /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The
+    /// grabs reset it to the default when they end; the client under the
+    /// pointer then sets its own on re-enter.
+    pub fn set_cursor(&mut self, status: CursorImageStatus) {
+        let seat = self.seat.clone();
+        self.cursor_image(&seat, status);
+    }
+
+    // ---------------------------------------------------------------------
+    // Actions
+    // ---------------------------------------------------------------------
+
+    pub fn run_action(&mut self, action: Action, serial: Serial) {
+        match action {
+            Action::Spawn(command) => self.spawn(&command),
+            Action::CloseFocused => self.close_focused(),
+            Action::CycleFocus => self.cycle_focus(serial),
+            Action::ToggleMaximize => {
+                if let Some(window) = self.focused_window() {
+                    let (maximized, fullscreen) = fill_state(&window);
+                    self.set_fill_state(&window, !maximized, fullscreen);
+                }
+            }
+            Action::ToggleFullscreen => {
+                if let Some(window) = self.focused_window() {
+                    let (maximized, fullscreen) = fill_state(&window);
+                    self.set_fill_state(&window, maximized, !fullscreen);
+                }
+            }
+            Action::Quit => {
+                info!("quit requested");
+                self.loop_signal.stop();
+            }
+        }
+    }
+
+    /// Run a shell command as a client of this compositor.
+    pub fn spawn(&self, command: &str) {
+        info!(command, "spawning");
+        match Command::new("/bin/sh")
+            .arg("-c")
+            .arg(command)
+            .env("WAYLAND_DISPLAY", &self.socket_name)
+            .spawn()
+        {
+            // Reap the child so exited clients don't linger as zombies.
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(err) => warn!(command, ?err, "failed to spawn"),
+        }
+    }
+}
+
+/// Geometry to restore when a window leaves maximized/fullscreen.
+#[derive(Default)]
+struct RestoreGeometry(RefCell<Option<Rectangle<i32, Logical>>>);
+
+fn restore_geometry(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    window
+        .user_data()
+        .get::<RestoreGeometry>()
+        .and_then(|r| *r.0.borrow())
+}
+
+/// (maximized, fullscreen) as last requested by the compositor.
+pub fn fill_state(window: &Window) -> (bool, bool) {
+    window.toplevel().map_or((false, false), |toplevel| {
+        toplevel.with_pending_state(|state| {
+            (
+                state.states.contains(xdg_toplevel::State::Maximized),
+                state.states.contains(xdg_toplevel::State::Fullscreen),
+            )
+        })
+    })
+}
+
+fn set_state(
+    states: &mut smithay::wayland::shell::xdg::ToplevelStateSet,
+    state: xdg_toplevel::State,
+    on: bool,
+) {
+    if on {
+        states.set(state);
+    } else {
+        states.unset(state);
+    }
+}
+
+#[derive(Default)]
+pub struct ClientState {
+    pub compositor_state: CompositorClientState,
+}
+
+impl ClientData for ClientState {
+    fn initialized(&self, _client_id: ClientId) {}
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}

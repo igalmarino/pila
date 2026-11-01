@@ -1,0 +1,29 @@
+# Outbound allowlist for init-firewall.sh. One domain per line; '#' starts a comment.
+# GitHub's IP ranges are added automatically from api.github.com/meta.
+# This file is copied into the image, so changes need a container rebuild.
+
+# Claude Code (https://code.claude.com/docs/en/network-config)
+api.anthropic.com
+claude.ai
+claude.com
+platform.claude.com
+downloads.claude.ai
+code.claude.com
+mcp-proxy.anthropic.com
+raw.githubusercontent.com
+registry.npmjs.org
+# Optional operational telemetry; remove these two and set DISABLE_TELEMETRY=1 to opt out.
+http-intake.logs.us5.datadoghq.com
+browser-intake-us5-datadoghq.com
+
+# Rust / Cargo
+crates.io
+index.crates.io
+static.crates.io
+static.rust-lang.org
+docs.rs
+
+# VS Code server extensions
+marketplace.visualstudio.com
+vscode.blob.core.windows.net
+update.code.visualstudio.com

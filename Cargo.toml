@@ -1,0 +1,16 @@
+[package]
+name = "pila"
+version = "0.1.0"
+edition = "2021"
+description = "A stacking Wayland compositor built on Smithay"
+license = "MIT"
+
+[dependencies]
+bitflags = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dependencies.smithay]
+version = "0.7"
+default-features = false
+features = ["backend_winit","wayland_frontend", "desktop"]

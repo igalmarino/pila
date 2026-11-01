@@ -1,0 +1,67 @@
+{
+  "name": "Wayland compositor (Rust + Smithay)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Costa_Rica}",
+      "FULL_SUDO": "false"
+    }
+  },
+
+  // Non-root user; on Linux its UID/GID is rewritten to match your host user,
+  // which is required to connect to the host Wayland socket.
+  "remoteUser": "dev",
+  "updateRemoteUserUID": true,
+
+  "runArgs": [
+    // Needed by init-firewall.sh (egress allowlist).
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    // GPU for EGL/GLES rendering (Intel/AMD via Mesa).
+    "--device=/dev/dri"
+  ],
+
+  "mounts": [
+    // Only the host compositor's Wayland socket, not the whole XDG_RUNTIME_DIR
+    // (which would also expose D-Bus, PipeWire, the keyring, ...).
+    "source=${localEnv:XDG_RUNTIME_DIR}/${localEnv:WAYLAND_DISPLAY:wayland-0},target=/run/host-wayland/wayland-0,type=bind",
+    // Claude Code auth/settings/history survive rebuilds.
+    "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
+    // Crate download cache survives rebuilds.
+    "source=cargo-registry-${devcontainerId},target=/home/dev/.cargo/registry,type=volume",
+    "source=bashhistory-${devcontainerId},target=/commandhistory,type=volume"
+  ],
+
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/dev/.claude",
+    // Clients started in the container (including your nested compositor's
+    // winit window) connect straight to GNOME through the mounted socket.
+    "WAYLAND_DISPLAY": "/run/host-wayland/wayland-0",
+    // Private runtime dir where your compositor creates its own socket.
+    "XDG_RUNTIME_DIR": "/tmp/xdg-runtime",
+    "RUST_BACKTRACE": "1",
+    // Set DEVCONTAINER_FIREWALL=0 on the host to start without the firewall.
+    "ENABLE_FIREWALL": "${localEnv:DEVCONTAINER_FIREWALL:1}"
+  },
+
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+
+  "postStartCommand": "/usr/local/bin/post-start.sh",
+  "waitFor": "postStartCommand",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
