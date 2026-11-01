@@ -18,6 +18,7 @@ mod handlers;
 mod input;
 mod render;
 mod state;
+mod text;
 mod winit;
 
 use smithay::reexports::{
@@ -72,6 +73,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    // Slow (system font scan), so it runs in the background; title bars get
+    // their text once it's done.
+    text::init();
 
     let config = Config::from_env();
     tracing::info!(?config, "starting pila");

@@ -30,6 +30,7 @@ use smithay::{
         shell::server::xdg_toplevel,
     },
     utils::{Logical, Physical, Point, Rectangle, Scale, Transform},
+    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
 };
 use tracing::warn;
 
@@ -39,6 +40,11 @@ pub const TITLE_BAR_HEIGHT: i32 = 28;
 /// Width of each button cell (clickable and hover-highlighted), at the right
 /// end of the bar. Cells are the full bar height.
 const BUTTON_WIDTH: i32 = 36;
+/// Space between the bar's left end and the title, and between the title and
+/// the buttons.
+const TITLE_PADDING: i32 = 10;
+/// Narrower than this, the title isn't drawn at all.
+const MIN_TITLE_WIDTH: i32 = 24;
 /// Width of the invisible resize border outside the window and title bar.
 const BORDER: i32 = 6;
 /// Distance from a corner, along each edge, that resizes diagonally.
@@ -216,6 +222,39 @@ struct TitleBarBuffers {
     bar: SolidColorBuffer,
     maximize: Option<ButtonTexture>,
     close: Option<ButtonTexture>,
+    title: Option<TitleTexture>,
+}
+
+/// The rendered title and what it was rendered for (text, width, focus), so
+/// it's only re-shaped when one of those changes.
+struct TitleTexture {
+    key: (String, i32, bool),
+    buffer: MemoryRenderBuffer,
+    /// Width of the rendered text, for centering.
+    width: i32,
+}
+
+/// Where a title `text_width` wide starts in a bar at `bar_x`, `bar_width`
+/// wide: centered on the bar, but slid left as needed to clear the buttons,
+/// and never left of the padding.
+fn title_x(bar_x: i32, bar_width: i32, text_width: i32) -> i32 {
+    let centered = bar_x + (bar_width - text_width) / 2;
+    let rightmost = bar_x + bar_width - 2 * BUTTON_WIDTH - TITLE_PADDING - text_width;
+    centered.min(rightmost).max(bar_x + TITLE_PADDING)
+}
+
+/// The window's title as set by the client (`xdg_toplevel.set_title`).
+fn window_title(window: &Window) -> Option<String> {
+    let toplevel = window.toplevel()?;
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()?
+            .lock()
+            .ok()?
+            .title
+            .clone()
+    })
 }
 
 /// Render elements for a title bar at `rect` (relative to the output origin),
@@ -244,6 +283,7 @@ where
         bar,
         maximize,
         close,
+        title,
     } = &mut *buffers;
 
     let maximized = window.toplevel().is_some_and(|t| {
@@ -264,7 +304,58 @@ where
         Icon::Maximize
     };
 
-    let mut elements = Vec::with_capacity(3);
+    let mut elements = Vec::with_capacity(4);
+    let upload = |renderer: &mut R, buffer: &MemoryRenderBuffer, loc: Point<i32, Logical>| {
+        let loc: Point<f64, Physical> = loc.to_f64().to_physical(scale);
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            loc,
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        )
+        .map_err(|err| warn!(?err, "failed to upload title bar texture"))
+        .ok()
+    };
+
+    // The title: at most the space between the left padding and the buttons,
+    // centered on the bar where it fits (see `title_x`).
+    let title_width = rect.size.w - 2 * BUTTON_WIDTH - 2 * TITLE_PADDING;
+    match window_title(window) {
+        Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
+            let key = (text, title_width, focused);
+            if title.as_ref().is_none_or(|texture| texture.key != key) {
+                let color = if focused {
+                    ICON_FOCUSED
+                } else {
+                    ICON_UNFOCUSED
+                };
+                // None until the fonts have loaded; then the next frame draws it.
+                *title = crate::text::render_title(&key.0, color, title_width, TITLE_BAR_HEIGHT)
+                    .map(|(pixels, width)| TitleTexture {
+                        buffer: MemoryRenderBuffer::from_slice(
+                            &pixels,
+                            Fourcc::Argb8888,
+                            (width, TITLE_BAR_HEIGHT),
+                            1,
+                            Transform::Normal,
+                            None,
+                        ),
+                        width,
+                        key,
+                    });
+            }
+            if let Some(texture) = title.as_ref() {
+                let x = title_x(rect.loc.x, rect.size.w, texture.width);
+                let loc = Point::from((x, rect.loc.y));
+                elements.extend(upload(renderer, &texture.buffer, loc).map(Into::into));
+            }
+        }
+        _ => *title = None,
+    }
+
     for (slot, icon, part, loc) in [
         (close, Icon::Close, TitleBarPart::Close, close_loc),
         (
@@ -282,19 +373,7 @@ where
             });
         }
         let buffer = &slot.as_ref().unwrap().buffer;
-        let loc: Point<f64, Physical> = loc.to_f64().to_physical(scale);
-        match MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            loc,
-            buffer,
-            None,
-            None,
-            None,
-            Kind::Unspecified,
-        ) {
-            Ok(element) => elements.push(element.into()),
-            Err(err) => warn!(?err, "failed to upload title bar button"),
-        }
+        elements.extend(upload(renderer, buffer, loc).map(Into::into));
     }
 
     bar.update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
@@ -448,6 +527,21 @@ mod tests {
         // Hovered buttons fill their whole cell.
         let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON);
         assert!(px.chunks(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn titles_center_on_the_bar_but_clear_the_buttons() {
+        let buttons = 2 * BUTTON_WIDTH;
+        // Short title on a wide bar: centered on the whole bar.
+        assert_eq!(title_x(100, 600, 80), 100 + (600 - 80) / 2);
+        // Wider title: centering would overlap the buttons, so it slides left
+        // until it ends TITLE_PADDING before them.
+        let x = title_x(100, 300, 180);
+        assert_eq!(x + 180, 100 + 300 - buttons - TITLE_PADDING);
+        assert!(x < 100 + (300 - 180) / 2);
+        // A title filling all the space starts at the left padding.
+        let full = 300 - buttons - 2 * TITLE_PADDING;
+        assert_eq!(title_x(100, 300, full), 100 + TITLE_PADDING);
     }
 
     #[test]
