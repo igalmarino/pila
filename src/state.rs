@@ -34,7 +34,9 @@ use tracing::{debug, info, warn};
 
 use crate::{
     config::{Action, Config},
+    decoration::{self, Decoration},
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
+    render::{SceneTitleBar, SceneWindow},
     CalloopData,
 };
 
@@ -181,17 +183,74 @@ impl Pila {
     // Lookups
     // ---------------------------------------------------------------------
 
+    /// The client surface under `pos` (with its origin), for pointer focus.
+    /// `None` over pila's own decorations.
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        match self.element_under(pos)? {
+            (_, Hit::Surface(surface, origin)) => Some((surface, origin)),
+            (_, Hit::Decoration(_)) => None,
+        }
+    }
+
+    /// The topmost window under `pos` and what part of it was hit. Per window,
+    /// front to back: title bar, client surfaces (incl. popups), resize border.
+    pub fn element_under(&self, pos: Point<f64, Logical>) -> Option<(Window, Hit)> {
+        self.space.elements().rev().find_map(|window| {
+            let loc = self.space.element_location(window)?;
+            if let Some(bar) = decoration::title_bar_rect(window, loc) {
+                if bar.to_f64().contains(pos) {
+                    let part = decoration::title_bar_part(bar, pos);
+                    return Some((window.clone(), Hit::Decoration(Decoration::TitleBar(part))));
+                }
+            }
+            let render_loc = loc - window.geometry().loc;
+            if let Some((surface, origin)) =
+                window.surface_under(pos - render_loc.to_f64(), WindowSurfaceType::ALL)
+            {
+                let origin = (origin + render_loc).to_f64();
+                return Some((window.clone(), Hit::Surface(surface, origin)));
+            }
+            decoration::border_edges(window, loc, pos)
+                .map(|edges| (window.clone(), Hit::Decoration(Decoration::Border(edges))))
+        })
+    }
+
+    /// Mapped windows front to back, with what's needed to draw their title
+    /// bars. Collected up front so a backend can render without borrowing `self`.
+    pub fn scene(&self) -> Vec<SceneWindow> {
+        let focused = self.focused_window();
+        let pointer = self
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let hovered = match self.element_under(pointer) {
+            Some((window, Hit::Decoration(Decoration::TitleBar(part)))) => Some((window, part)),
+            _ => None,
+        };
         self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, p)| (s, (p + location).to_f64()))
+            .elements()
+            .rev()
+            .filter_map(|window| {
+                let loc = self.space.element_location(window)?;
+                let title_bar = decoration::title_bar_rect(window, loc).map(|rect| SceneTitleBar {
+                    rect,
+                    focused: focused.as_ref() == Some(window),
+                    hover: hovered
+                        .as_ref()
+                        .filter(|(w, _)| w == window)
+                        .map(|(_, part)| *part),
+                });
+                Some(SceneWindow {
+                    window: window.clone(),
+                    render_location: loc - window.geometry().loc,
+                    title_bar,
+                })
             })
+            .collect()
     }
 
     /// Find a window (mapped or not) by its toplevel surface.
@@ -257,14 +316,17 @@ impl Pila {
             .unwrap_or_else(|| Rectangle::from_size((800, 600).into()));
 
         let (maximized, fullscreen) = fill_state(&window);
+        // Room for the title bar above the window, if pila draws one.
+        let bar = decoration::layout_offset(&window, fullscreen);
         let location = if maximized || fullscreen {
-            output_geo.loc
+            output_geo.loc + Point::from((0, bar))
         } else {
+            // Center the window and its title bar together.
             let size = window.geometry().size;
             let mut loc = output_geo.loc
                 + Point::from((
                     (output_geo.size.w - size.w).max(0) / 2,
-                    (output_geo.size.h - size.h).max(0) / 2,
+                    (output_geo.size.h - size.h - bar).max(0) / 2 + bar,
                 ));
             while self
                 .space
@@ -358,9 +420,13 @@ impl Pila {
         let restore = &window.user_data().get::<RestoreGeometry>().unwrap().0;
 
         if maximized || fullscreen {
-            let Some(output_geo) = self.output_geometry_for_window(window) else {
+            let Some(mut output_geo) = self.output_geometry_for_window(window) else {
                 return;
             };
+            // A maximized window's title bar stays visible above it.
+            let bar = decoration::layout_offset(window, fullscreen);
+            output_geo.loc.y += bar;
+            output_geo.size.h -= bar;
             if let (Some(loc), false) = (mapped_loc, was_maximized || was_fullscreen) {
                 *restore.borrow_mut() = Some(Rectangle::new(loc, window.geometry().size));
             }
@@ -411,9 +477,16 @@ impl Pila {
                 .map(|r| r.size.w)
                 .unwrap_or(window.geometry().size.w);
             self.set_fill_state(&window, false, false);
+            // Keep the grab point on the title bar if pila draws one,
+            // otherwise near the top of the client's own.
+            let y_offset = if decoration::is_ssd(&window) {
+                -decoration::TITLE_BAR_HEIGHT / 2
+            } else {
+                CASCADE_STEP / 2
+            };
             let loc = Point::from((
                 start_data.location.x as i32 - width / 2,
-                start_data.location.y as i32 - CASCADE_STEP / 2,
+                start_data.location.y as i32 - y_offset,
             ));
             self.space.map_element(window.clone(), loc, true);
         }
@@ -519,6 +592,13 @@ impl Pila {
             Err(err) => warn!(command, ?err, "failed to spawn"),
         }
     }
+}
+
+/// What's under a point: a client surface (with its origin in global
+/// coordinates), or a part of a window that pila draws or handles itself.
+pub enum Hit {
+    Surface(WlSurface, Point<f64, Logical>),
+    Decoration(Decoration),
 }
 
 /// Geometry to restore when a window leaves maximized/fullscreen.

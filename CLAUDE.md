@@ -27,8 +27,9 @@ on **Smithay 0.7.x**.
 - Build: `cargo build`
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt`
-- Test: `cargo test`; single test: `cargo test <name_substring>`. There are no tests yet;
-  pure logic such as `Config::action_for` is the natural place to start.
+- Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
+  logic only (e.g. title bar/border hit math in `decoration.rs`); anything needing a
+  `Window` or a client is tested nested.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
@@ -69,9 +70,12 @@ Key flows and invariants:
   and `fullscreen_request` ignores the requested output. Smithay is built with
   `default-features = false` and only the winit features, so a DRM backend must also add
   features such as `backend_drm`, `backend_libinput` and `backend_session_libseat` in `Cargo.toml`.
-- **Render loop** (`winit.rs`, `WinitEvent::Redraw`): renders the whole `Space` with full
-  damage, sends frame callbacks to every window, runs `space.refresh()` and
-  `popups.cleanup()`, flushes clients, then requests the next redraw (it redraws continuously).
+- **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
+  their title bars) and the cursor *before* borrowing the backend, builds elements with
+  `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
+  `render_output` directly. Smithay's `space::render_output` isn't used because it can't
+  interleave title bars with windows. Then frame callbacks, `space.refresh()`,
+  `popups.cleanup()`, flush, and the next redraw (it redraws continuously).
 - **Pointer grabs:** Mod+drag installs the move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
   via `Pila::set_cursor`, which must be called *after* `set_grab` (`Focus::Clear` resets the
@@ -92,9 +96,14 @@ Key flows and invariants:
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.
-- **Decorations:** `XdgDecorationHandler` (`handlers/xdg_shell.rs`) always answers
-  client-side, because pila draws no title bars. Server-side decorations need rendering
-  first; only then should `request_mode` honor `ServerSide`.
+- **Decorations** (`decoration.rs`): pila prefers server-side and honors client requests
+  (`handlers/xdg_shell.rs`); clients that don't bind xdg-decoration (GTK, weston) draw
+  their own. A decorated window's `Space` location is still its geometry origin; the title
+  bar (`TITLE_BAR_HEIGHT`) sits above it and an invisible resize border surrounds both.
+  Hit testing goes through `Pila::element_under`, which returns a `Hit` (client surface or
+  `Decoration`) front to back; `surface_under` (pointer focus) ignores decorations. Layout
+  (placement, maximize) uses the *pending* decoration mode via `layout_offset`; drawing and
+  hit testing use the *committed* state (`has_title_bar`). No title text yet.
 - **Resize** uses per-surface `ResizeSurfaceState` in the surface data map;
   `resize_grab::handle_commit` (called from `CompositorHandler::commit`) repositions the
   window when resizing from the top/left edges once the client commits the new size.

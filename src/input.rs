@@ -3,14 +3,22 @@ use smithay::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
+    desktop::Window,
     input::{
         keyboard::FilterResult,
-        pointer::{AxisFrame, ButtonEvent, GrabStartData as PointerGrabStartData, MotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus,
+            GrabStartData as PointerGrabStartData, MotionEvent,
+        },
     },
-    utils::SERIAL_COUNTER,
+    utils::{Logical, Point, Serial, SERIAL_COUNTER},
 };
 
-use crate::{grabs::resize_grab::ResizeEdge, state::Pila};
+use crate::{
+    decoration::{Decoration, TitleBarPart},
+    grabs::resize_grab::ResizeEdge,
+    state::{fill_state, Hit, Pila},
+};
 
 // Linux input event codes (linux/input-event-codes.h).
 const BTN_LEFT: u32 = 0x110;
@@ -96,6 +104,52 @@ impl Pila {
             },
         );
         pointer.frame(self);
+
+        // Over pila's own decorations no client sets the cursor, so pila does.
+        if !pointer.is_grabbed() {
+            self.update_decoration_cursor(location);
+        }
+    }
+
+    /// Resize arrows over a window's resize border, the default arrow over a
+    /// title bar or the background. Client surfaces set their own.
+    fn update_decoration_cursor(&mut self, pos: Point<f64, Logical>) {
+        let icon = match self.element_under(pos) {
+            Some((_, Hit::Surface(..))) => return,
+            Some((_, Hit::Decoration(Decoration::Border(edges)))) => edges.cursor_icon(),
+            _ => CursorIcon::Default,
+        };
+        let status = CursorImageStatus::Named(icon);
+        if self.cursor_status != status {
+            self.set_cursor(status);
+        }
+    }
+
+    /// A left click on a title bar or resize border. The window has already
+    /// been focused and raised; the client gets no pointer events here.
+    fn on_decoration_press(
+        &mut self,
+        window: Window,
+        decoration: Decoration,
+        start_data: PointerGrabStartData<Pila>,
+        serial: Serial,
+    ) {
+        if start_data.button != BTN_LEFT {
+            return;
+        }
+        match decoration {
+            Decoration::TitleBar(TitleBarPart::Drag) => self.begin_move(window, start_data, serial),
+            Decoration::TitleBar(TitleBarPart::Maximize) => {
+                let (maximized, fullscreen) = fill_state(&window);
+                self.set_fill_state(&window, !maximized, fullscreen);
+            }
+            Decoration::TitleBar(TitleBarPart::Close) => {
+                if let Some(toplevel) = window.toplevel() {
+                    toplevel.send_close();
+                }
+            }
+            Decoration::Border(edges) => self.begin_resize(window, edges, start_data, serial),
+        }
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
@@ -111,10 +165,9 @@ impl Pila {
 
         if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
             let location = pointer.current_location();
-            let under = self.space.element_under(location).map(|(w, _)| w.clone());
 
-            match under {
-                Some(window) => {
+            match self.element_under(location) {
+                Some((window, hit)) => {
                     // Click to focus and raise.
                     self.focus_window(Some(window.clone()), serial);
 
@@ -122,12 +175,16 @@ impl Pila {
                     // installed before the press is delivered, so the client
                     // never sees this click.
                     let mods = keyboard.modifier_state();
-                    if self.config.mod_key.is_pressed(&mods) {
-                        let start_data = PointerGrabStartData {
-                            focus: None,
-                            button,
-                            location,
-                        };
+                    let start_data = PointerGrabStartData {
+                        focus: None,
+                        button,
+                        location,
+                    };
+                    if let (false, Hit::Decoration(decoration)) =
+                        (self.config.mod_key.is_pressed(&mods), &hit)
+                    {
+                        self.on_decoration_press(window, *decoration, start_data, serial);
+                    } else if self.config.mod_key.is_pressed(&mods) {
                         match button {
                             BTN_LEFT => self.begin_move(window, start_data, serial),
                             BTN_RIGHT => {

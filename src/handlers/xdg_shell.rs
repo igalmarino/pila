@@ -194,31 +194,31 @@ delegate_xdg_shell!(Pila);
 
 // zxdg_decoration_manager_v1
 //
-// pila doesn't draw title bars yet, so every toplevel is told to decorate
-// itself, even if it asks for server-side. Answering ServerSide without
-// drawing anything would leave the window with no title bar at all.
+// pila draws title bars (see `decoration.rs`), so it prefers server-side
+// decorations but honors a client that asks to draw its own. Clients that
+// never bind xdg-decoration (e.g. GTK) always draw their own.
 
 impl XdgDecorationHandler for Pila {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         // Goes out with the initial configure (or the next one if that's already sent).
-        set_client_side(&toplevel);
+        set_decoration_mode(&toplevel, DecorationMode::ServerSide);
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
-        // The protocol requires a configure in response, even if the mode is unchanged.
-        set_client_side(&toplevel);
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        set_decoration_mode(&toplevel, mode);
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        set_client_side(&toplevel);
+        set_decoration_mode(&toplevel, DecorationMode::ServerSide);
     }
 }
 delegate_xdg_decoration!(Pila);
 
-fn set_client_side(toplevel: &ToplevelSurface) {
+fn set_decoration_mode(toplevel: &ToplevelSurface, mode: DecorationMode) {
     toplevel.with_pending_state(|state| {
-        state.decoration_mode = Some(DecorationMode::ClientSide);
+        state.decoration_mode = Some(mode);
     });
+    // The protocol requires a configure in response, even if the mode is unchanged.
     if toplevel.is_initial_configure_sent() {
         toplevel.send_configure();
     }

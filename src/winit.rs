@@ -5,15 +5,7 @@ use std::{os::unix::fs::MetadataExt, path::PathBuf, time::Duration};
 use smithay::{
     backend::{
         egl::EGLDevice,
-        renderer::{
-            damage::OutputDamageTracker,
-            element::{
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                Kind,
-            },
-            gles::GlesRenderer,
-            ImportDma,
-        },
+        renderer::{damage::OutputDamageTracker, gles::GlesRenderer, ImportDma},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     desktop::utils::send_frames_surface_tree,
@@ -29,7 +21,7 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::{cursor, CalloopData, Pila};
+use crate::{cursor, render, CalloopData, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -76,9 +68,6 @@ pub fn init_winit(
         .insert_source(winit, move |event, _, data| {
             let display = &mut data.display_handle;
             let state = &mut data.state;
-            let Some(backend) = state.backend.as_mut() else {
-                return;
-            };
 
             match event {
                 WinitEvent::Resized { size, .. } => {
@@ -93,103 +82,83 @@ pub fn init_winit(
                     );
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
-                WinitEvent::Redraw => {
-                    let size = backend.window_size();
-                    let damage = Rectangle::from_size(size);
-
-                    // A destroyed cursor surface falls back to the default arrow.
-                    if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive())
-                    {
-                        state.cursor_status = CursorImageStatus::default_named();
-                        apply_cursor(backend.window(), &state.cursor_status);
-                    }
-                    let pointer_location = state
-                        .seat
-                        .get_pointer()
-                        .map(|p| p.current_location())
-                        .unwrap_or_default();
-                    let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
-                    let output_location = state
-                        .space
-                        .output_geometry(&output)
-                        .map(|geo| geo.loc)
-                        .unwrap_or_default();
-
-                    let rendered = match backend.bind() {
-                        Ok((renderer, mut framebuffer)) => {
-                            // Drawn on top of the windows. Scale 1, like render_output below.
-                            let cursor_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
-                                match &cursor {
-                                    Some((surface, location)) => render_elements_from_surface_tree(
-                                        renderer,
-                                        surface,
-                                        (*location - output_location).to_physical(1),
-                                        1.0,
-                                        1.0,
-                                        Kind::Cursor,
-                                    ),
-                                    None => Vec::new(),
-                                };
-                            smithay::desktop::space::render_output::<
-                                _,
-                                WaylandSurfaceRenderElement<GlesRenderer>,
-                                _,
-                                _,
-                            >(
-                                &output,
-                                renderer,
-                                &mut framebuffer,
-                                1.0,
-                                0,
-                                [&state.space],
-                                &cursor_elements,
-                                &mut damage_tracker,
-                                BACKGROUND,
-                            )
-                            .map_err(|err| error!(?err, "render failed"))
-                            .is_ok()
-                        }
-                        Err(err) => {
-                            error!(?err, "failed to bind backend");
-                            false
-                        }
-                    };
-                    if rendered {
-                        if let Err(err) = backend.submit(Some(&[damage])) {
-                            error!(?err, "failed to submit frame");
-                        }
-                    }
-
-                    for window in state.space.elements() {
-                        window.send_frame(
-                            &output,
-                            state.start_time.elapsed(),
-                            Some(Duration::ZERO),
-                            |_, _| Some(output.clone()),
-                        );
-                    }
-                    if let Some((surface, _)) = &cursor {
-                        send_frames_surface_tree(
-                            surface,
-                            &output,
-                            state.start_time.elapsed(),
-                            Some(Duration::ZERO),
-                            |_, _| Some(output.clone()),
-                        );
-                    }
-
-                    state.space.refresh();
-                    state.popups.cleanup();
-                    let _ = display.flush_clients();
-
-                    backend.window().request_redraw();
-                }
+                WinitEvent::Redraw => redraw(state, display, &output, &mut damage_tracker),
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),
             }
         })?;
 
     Ok(())
+}
+
+fn redraw(
+    state: &mut Pila,
+    display: &mut DisplayHandle,
+    output: &Output,
+    damage_tracker: &mut OutputDamageTracker,
+) {
+    // A destroyed cursor surface falls back to the default arrow.
+    if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
+        state.set_cursor(CursorImageStatus::default_named());
+    }
+
+    // Everything taken from `state` is collected before borrowing the backend.
+    let pointer_location = state
+        .seat
+        .get_pointer()
+        .map(|p| p.current_location())
+        .unwrap_or_default();
+    let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
+    let scene = state.scene();
+    let output_location = state
+        .space
+        .output_geometry(output)
+        .map(|geo| geo.loc)
+        .unwrap_or_default();
+
+    let Some(backend) = state.backend.as_mut() else {
+        return;
+    };
+    let damage = Rectangle::from_size(backend.window_size());
+    let rendered = match backend.bind() {
+        Ok((renderer, mut framebuffer)) => {
+            let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
+            elements.extend(render::scene_elements(renderer, &scene, output_location));
+            damage_tracker
+                .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
+                .map_err(|err| error!(?err, "render failed"))
+                .is_ok()
+        }
+        Err(err) => {
+            error!(?err, "failed to bind backend");
+            false
+        }
+    };
+    if rendered {
+        if let Err(err) = backend.submit(Some(&[damage])) {
+            error!(?err, "failed to submit frame");
+        }
+    }
+
+    let time = state.start_time.elapsed();
+    for window in state.space.elements() {
+        window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
+    }
+    if let Some((surface, _)) = &cursor {
+        send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
+    }
+
+    state.space.refresh();
+    state.popups.cleanup();
+    let _ = display.flush_clients();
+
+    if let Some(backend) = &state.backend {
+        backend.window().request_redraw();
+    }
 }
 
 /// Show the client's requested cursor on the host window. Client-drawn cursor
