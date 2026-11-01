@@ -136,9 +136,13 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
   Docker.
 - **`eglinfo` shows llvmpipe.** `/dev/dri` isn't passed through, or (NVIDIA) the container
   toolkit isn't set up.
-- **A site you need is blocked.** Add it to `allowed-domains.txt` and rebuild. CDN IPs rotate,
-  so if a previously working domain stops resolving to an allowed IP, rerun
-  `sudo /usr/local/bin/init-firewall.sh` inside the container or restart it.
+- **A site you need is blocked.** Add it to `allowed-domains.txt` and rebuild.
+- **An allowlisted CDN domain (crates.io, docs.rs) fails intermittently.** The firewall allows
+  IPs, and CDNs rotate theirs every ~60s. A background loop adds the current IPs every 30s
+  (log: `/tmp/firewall-refresh.log`), so retrying after half a minute usually works. To force
+  it, run `sudo /usr/local/bin/init-firewall.sh --refresh`, or rerun the script without
+  arguments to rebuild the firewall; both are safe while it's active (a failed rebuild keeps
+  the previous rules).
 - **Super-key shortcuts go to GNOME.** When testing your nested compositor, GNOME grabs Super.
   Use Alt-based bindings while nested.
 
