@@ -1,5 +1,6 @@
 mod compositor;
 mod layer_shell;
+pub mod protocols;
 mod xdg_activation;
 mod xdg_shell;
 

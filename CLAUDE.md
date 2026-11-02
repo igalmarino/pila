@@ -113,6 +113,10 @@ Key flows and invariants:
   fill states. A mapped Top/Overlay surface with exclusive keyboard interactivity
   (`exclusive_layer`) keeps keyboard focus: `focus_window` then only raises. Popups may
   have a layer-surface root (`unconstrain_popup`, popup `grab`).
+- **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
+  `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
+  must return is kept (`Pila::globals`). Fractional scale is always 1 nested; a backend
+  with per-output scales must update surfaces as they move between outputs.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.

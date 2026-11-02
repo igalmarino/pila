@@ -44,6 +44,7 @@ use crate::{
     config::{Action, Config},
     decoration::{self, Decoration},
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
+    handlers::protocols::{self, Globals},
     render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
     CalloopData,
 };
@@ -80,6 +81,8 @@ pub struct Pila {
     /// Its global is created by the backend, which knows the render device and formats.
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
+    /// State of the simpler protocols (`handlers/protocols.rs`).
+    pub globals: Globals,
 
     pub seat: Seat<Self>,
     /// Cursor most recently requested by the client under the pointer.
@@ -112,6 +115,7 @@ impl Pila {
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(&dh);
         let dmabuf_state = DmabufState::new();
         let popups = PopupManager::default();
+        let globals = protocols::init_globals(&dh, &primary_selection_state);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
@@ -146,6 +150,7 @@ impl Pila {
             cursor_shape_state,
             dmabuf_state,
             popups,
+            globals,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             backend: None,
