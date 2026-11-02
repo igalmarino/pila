@@ -21,17 +21,16 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::{cursor, render, CalloopData, Pila};
+use crate::{cursor, render, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
 
 pub fn init_winit(
-    event_loop: &mut EventLoop<CalloopData>,
-    data: &mut CalloopData,
+    event_loop: &mut EventLoop<'static, Pila>,
+    state: &mut Pila,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let display_handle = &mut data.display_handle;
-    let state = &mut data.state;
+    let display_handle = &state.display_handle.clone();
 
     let (mut backend, winit) = winit::init::<GlesRenderer>()?;
     init_dmabuf(&mut backend, &mut state.dmabuf_state, display_handle);
@@ -67,10 +66,7 @@ pub fn init_winit(
 
     event_loop
         .handle()
-        .insert_source(winit, move |event, _, data| {
-            let display = &mut data.display_handle;
-            let state = &mut data.state;
-
+        .insert_source(winit, move |event, _, state| {
             match event {
                 WinitEvent::Resized { size, .. } => {
                     output.change_current_state(
@@ -92,13 +88,7 @@ pub fn init_winit(
                 WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => {
                     full_redraw = full_redraw.saturating_sub(1);
-                    redraw(
-                        state,
-                        display,
-                        &output,
-                        &mut damage_tracker,
-                        full_redraw > 0,
-                    )
+                    redraw(state, &output, &mut damage_tracker, full_redraw > 0)
                 }
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),
@@ -110,7 +100,6 @@ pub fn init_winit(
 
 fn redraw(
     state: &mut Pila,
-    display: &mut DisplayHandle,
     output: &Output,
     damage_tracker: &mut OutputDamageTracker,
     full_redraw: bool,
@@ -206,7 +195,7 @@ fn redraw(
     state.space.refresh();
     layer_map_for_output(output).cleanup();
     state.popups.cleanup();
-    let _ = display.flush_clients();
+    let _ = state.display_handle.flush_clients();
 
     if let Some(backend) = &state.backend {
         backend.window().request_redraw();

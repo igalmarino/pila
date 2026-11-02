@@ -69,8 +69,9 @@ the `wayland-protocols` crate, not swapped for a vendor one.
 ## Architecture
 
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
-implements every Smithay handler trait; the calloop event loop carries `CalloopData
-{ state, display_handle }`. Window-management logic lives in `state.rs`; the keybinding
+implements every Smithay handler trait. Unlike smallvil (but like anvil), the calloop event
+loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which Smithay
+modules that schedule their own timers (e.g. idle-notify) require. Window-management logic lives in `state.rs`; the keybinding
 list in `config.rs`'s module doc comment must be kept in sync with `action_for`, and the
 `USAGE` string in `main.rs` with the CLI flags and `PILA_*` env vars.
 

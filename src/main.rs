@@ -24,18 +24,10 @@ mod state;
 mod text;
 mod winit;
 
-use smithay::reexports::{
-    calloop::EventLoop,
-    wayland_server::{Display, DisplayHandle},
-};
+use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 use crate::config::Config;
 pub use crate::state::Pila;
-
-pub struct CalloopData {
-    pub state: Pila,
-    pub display_handle: DisplayHandle,
-}
 
 const USAGE: &str = "\
 Usage: pila [-c|--command <CMD>]
@@ -84,22 +76,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env();
     tracing::info!(?config, "starting pila");
 
-    let mut event_loop: EventLoop<'static, CalloopData> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<'static, Pila> = EventLoop::try_new()?;
     let display: Display<Pila> = Display::new()?;
-    let display_handle = display.handle();
-    let state = Pila::new(&mut event_loop, display, config);
+    let mut state = Pila::new(&mut event_loop, display, config);
 
-    let mut data = CalloopData {
-        state,
-        display_handle,
-    };
+    winit::init_winit(&mut event_loop, &mut state)?;
 
-    winit::init_winit(&mut event_loop, &mut data)?;
+    let command = startup_command.unwrap_or_else(|| state.config.terminal.clone());
+    state.spawn(&command);
 
-    let command = startup_command.unwrap_or_else(|| data.state.config.terminal.clone());
-    data.state.spawn(&command);
-
-    event_loop.run(None, &mut data, |_| {})?;
+    event_loop.run(None, &mut state, |_| {})?;
 
     Ok(())
 }

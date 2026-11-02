@@ -248,7 +248,7 @@ impl SessionLockHandler for Pila {
     fn unlock(&mut self) {
         let lock = self.session_lock.lock.clone();
         self.loop_handle
-            .insert_idle(move |data| data.state.finish_unlock(lock));
+            .insert_idle(move |state| state.finish_unlock(lock));
     }
 
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {

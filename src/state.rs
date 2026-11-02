@@ -50,7 +50,6 @@ use crate::{
     handlers::protocols::{self, Globals},
     render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
     session_lock::SessionLock,
-    CalloopData,
 };
 
 /// Offset applied to each new window that would land exactly on top of another.
@@ -61,7 +60,7 @@ pub struct Pila {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
-    pub loop_handle: LoopHandle<'static, CalloopData>,
+    pub loop_handle: LoopHandle<'static, Pila>,
     pub config: Config,
 
     /// Mapped windows, in stacking order (back to front).
@@ -104,7 +103,7 @@ pub struct Pila {
 
 impl Pila {
     pub fn new(
-        event_loop: &mut EventLoop<'static, CalloopData>,
+        event_loop: &mut EventLoop<'static, Pila>,
         display: Display<Self>,
         config: Config,
     ) -> Self {
@@ -172,7 +171,7 @@ impl Pila {
 
     fn init_wayland_listener(
         display: Display<Pila>,
-        event_loop: &mut EventLoop<'static, CalloopData>,
+        event_loop: &mut EventLoop<'static, Pila>,
     ) -> OsString {
         // Picks the next free wayland-N name in $XDG_RUNTIME_DIR.
         let listening_socket =
@@ -182,8 +181,8 @@ impl Pila {
 
         let loop_handle = event_loop.handle();
         loop_handle
-            .insert_source(listening_socket, |client_stream, _, data| {
-                if let Err(err) = data
+            .insert_source(listening_socket, |client_stream, _, state| {
+                if let Err(err) = state
                     .display_handle
                     .insert_client(client_stream, Arc::new(ClientState::default()))
                 {
@@ -195,10 +194,10 @@ impl Pila {
         loop_handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
-                |_, display, data| {
+                |_, display, state| {
                     // SAFETY: the display is never dropped while the source is alive.
                     unsafe {
-                        display.get_mut().dispatch_clients(&mut data.state).unwrap();
+                        display.get_mut().dispatch_clients(state).unwrap();
                     }
                     Ok(PostAction::Continue)
                 },
