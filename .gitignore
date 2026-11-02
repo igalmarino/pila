@@ -1,2 +1,4 @@
 /target
 .claude/settings.local.json
+# Logs from test runs on the host (e.g. pila-tty.log)
+/*.log
