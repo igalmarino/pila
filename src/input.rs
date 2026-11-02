@@ -325,11 +325,7 @@ impl Pila {
                 let (maximized, fullscreen) = fill_state(&window);
                 self.set_fill_state(&window, !maximized, fullscreen);
             }
-            Decoration::TitleBar(TitleBarPart::Close) => {
-                if let Some(toplevel) = window.toplevel() {
-                    toplevel.send_close();
-                }
-            }
+            Decoration::TitleBar(TitleBarPart::Close) => crate::state::close_window(&window),
             Decoration::Border(edges) => self.begin_resize(window, edges, start_data, serial),
         }
     }

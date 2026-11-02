@@ -29,6 +29,7 @@ mod state;
 mod text;
 mod udev;
 mod winit;
+mod xwayland;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
@@ -128,8 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         BackendKind::Udev => udev::init_udev(&mut event_loop, &mut state)?,
     }
 
+    // The startup command runs once Xwayland is up, so it can be an X11 app.
     let command = startup_command.unwrap_or_else(|| state.config.terminal.clone());
-    state.spawn(&command);
+    state.start_xwayland(command);
 
     // Events queued outside a redraw (timers, deferred callbacks) must reach
     // clients too, so flush after every loop iteration.

@@ -19,6 +19,8 @@ use smithay::{
     },
 };
 
+use smithay::xwayland::XWaylandClientData;
+
 use crate::{grabs::resize_grab, state::ClientState, Pila};
 
 impl CompositorHandler for Pila {
@@ -27,7 +29,14 @@ impl CompositorHandler for Pila {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        // Xwayland is a client too, with Smithay's own client data.
+        if let Some(state) = client.get_data::<XWaylandClientData>() {
+            return &state.compositor_state;
+        }
+        &client
+            .get_data::<ClientState>()
+            .expect("client without pila's client data")
+            .compositor_state
     }
 
     fn commit(&mut self, surface: &WlSurface) {

@@ -40,7 +40,9 @@ use smithay::{
         shm::ShmState,
         socket::ListeningSocketSource,
         xdg_activation::XdgActivationState,
+        xwayland_shell::XWaylandShellState,
     },
+    xwayland::X11Wm,
 };
 use tracing::{debug, info, warn};
 
@@ -68,6 +70,14 @@ pub struct Pila {
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, Pila>,
     pub config: Config,
+
+    /// Xwayland's window manager and display number, once it's running
+    /// (`xwayland.rs`).
+    pub xwm: Option<X11Wm>,
+    pub xdisplay: Option<u32>,
+    pub xwayland_shell_state: XWaylandShellState,
+    /// The startup command, held back until Xwayland is ready.
+    pub pending_startup: Option<String>,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
@@ -138,6 +148,7 @@ impl Pila {
         let loop_handle = event_loop.handle();
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
 
         let mut seat_state = SeatState::new();
@@ -159,6 +170,10 @@ impl Pila {
             loop_signal,
             loop_handle,
             config,
+            xwm: None,
+            xdisplay: None,
+            xwayland_shell_state,
+            pending_startup: None,
             space: Space::default(),
             unmapped: Vec::new(),
             suppressed_keys: HashSet::new(),
@@ -363,7 +378,7 @@ impl Pila {
         self.space
             .elements()
             .chain(self.unmapped.iter())
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
 
@@ -468,6 +483,7 @@ impl Pila {
                     let loc = centered_location(area, geo.size, bar);
                     debug!(?loc, "moving window off a removed output");
                     self.space.map_element(window.clone(), loc, false);
+                    self.x11_window_moved(&window);
                 }
             }
             if let Some(restore) = window.user_data().get::<RestoreGeometry>() {
@@ -560,6 +576,7 @@ impl Pila {
         match window {
             Some(window) => {
                 self.space.raise_element(&window, true);
+                self.x11_window_raised(&window);
                 let target = focus_target(&window);
                 keyboard.set_focus(self, exclusive.or(target), serial);
             }
@@ -629,8 +646,8 @@ impl Pila {
     }
 
     pub fn close_focused(&mut self) {
-        if let Some(toplevel) = self.focused_window().as_ref().and_then(|w| w.toplevel()) {
-            toplevel.send_close();
+        if let Some(window) = self.focused_window() {
+            close_window(&window);
         }
     }
 
@@ -849,12 +866,16 @@ impl Pila {
     /// Run a shell command as a client of this compositor.
     pub fn spawn(&self, command: &str) {
         info!(command, "spawning");
-        match Command::new("/bin/sh")
-            .arg("-c")
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c")
             .arg(command)
-            .env("WAYLAND_DISPLAY", &self.socket_name)
-            .spawn()
-        {
+            .env("WAYLAND_DISPLAY", &self.socket_name);
+        // X11 apps go to pila's Xwayland, never the host's X server.
+        match self.xdisplay {
+            Some(display) => cmd.env("DISPLAY", format!(":{display}")),
+            None => cmd.env_remove("DISPLAY"),
+        };
+        match cmd.spawn() {
             // Reap the child so exited clients don't linger as zombies.
             Ok(mut child) => {
                 std::thread::spawn(move || {
@@ -922,6 +943,15 @@ fn set_state(
         states.set(state);
     } else {
         states.unset(state);
+    }
+}
+
+/// Ask a window to close (xdg `close`, or `WM_DELETE_WINDOW` for X11).
+pub fn close_window(window: &Window) {
+    if let Some(toplevel) = window.toplevel() {
+        toplevel.send_close();
+    } else if let Some(x11) = window.x11_surface() {
+        let _ = x11.close();
     }
 }
 
