@@ -182,6 +182,19 @@ Key flows and invariants:
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::host_pointer`); a DRM backend sends real relative motion through the same
   checks.
+- **X11** (`xwayland.rs`, `focus.rs`): pila starts Xwayland at launch and runs Smithay's
+  `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
+  waits for X (`pending_startup`). X11 windows are `Window::new_x11_window` in the same
+  `Space`, so code that handles windows must not assume `window.toplevel()` is `Some`: use
+  `wl_surface()`, `fill_state`, `close_window`, `focus_target`, and branch on
+  `x11_surface()` where X11 differs. Keyboard focus is `focus::KeyboardFocus` (Wayland
+  surface or X11 window, so Smithay sets the X input focus); compare surfaces through
+  `Pila::keyboard_focus()`. Whenever pila moves a managed X11 window it must tell X
+  (`x11_window_moved`); focusing raises it in X too. Override-redirect windows (menus,
+  tooltips) go where X puts them. X11 maximize/fullscreen go through `set_fill_state`
+  (`_NET_WM_STATE` + a direct configure); resize grabs configure X11 windows per motion.
+  Selections are bridged both ways (`SelectionHandler` in `handlers/mod.rs`, XwmHandler
+  selection methods); only a focused X11 app may read.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.
