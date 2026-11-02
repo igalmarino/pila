@@ -16,7 +16,7 @@ use smithay::{
         wayland_server::{DisplayHandle, Resource},
         winit::window::Window as WinitWindow,
     },
-    utils::{Rectangle, Transform},
+    utils::Transform,
     wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState},
 };
 use tracing::{error, info, warn};
@@ -61,6 +61,8 @@ pub fn init_winit(
     state.space.map_output(&output, (0, 0));
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
+    // Frames left to render in full: buffer ages are unreliable after a resize.
+    let mut full_redraw = 0u8;
     state.backend = Some(backend);
 
     event_loop
@@ -80,11 +82,21 @@ pub fn init_winit(
                         None,
                         None,
                     );
+                    full_redraw = 4;
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
                 // Keys held when the host takes focus away never get a release.
                 WinitEvent::Focus(false) => state.release_all_keys(),
-                WinitEvent::Redraw => redraw(state, display, &output, &mut damage_tracker),
+                WinitEvent::Redraw => {
+                    full_redraw = full_redraw.saturating_sub(1);
+                    redraw(
+                        state,
+                        display,
+                        &output,
+                        &mut damage_tracker,
+                        full_redraw > 0,
+                    )
+                }
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),
             }
@@ -98,6 +110,7 @@ fn redraw(
     display: &mut DisplayHandle,
     output: &Output,
     damage_tracker: &mut OutputDamageTracker,
+    full_redraw: bool,
 ) {
     // A destroyed cursor surface falls back to the default arrow.
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
@@ -121,23 +134,30 @@ fn redraw(
     let Some(backend) = state.backend.as_mut() else {
         return;
     };
-    let damage = Rectangle::from_size(backend.window_size());
-    let rendered = match backend.bind() {
+    // Age 0 makes the damage tracker redraw everything.
+    let age = if full_redraw {
+        0
+    } else {
+        backend.buffer_age().unwrap_or(0)
+    };
+    // Only what changed since the buffer was last drawn, or `None` if nothing did.
+    let damage = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
             let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
             elements.extend(render::scene_elements(renderer, &scene, output_location));
             damage_tracker
-                .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
+                .render_output(renderer, &mut framebuffer, age, &elements, BACKGROUND)
                 .map_err(|err| error!(?err, "render failed"))
-                .is_ok()
+                .ok()
+                .and_then(|result| result.damage.cloned())
         }
         Err(err) => {
             error!(?err, "failed to bind backend");
-            false
+            None
         }
     };
-    if rendered {
-        if let Err(err) = backend.submit(Some(&[damage])) {
+    if let Some(damage) = damage {
+        if let Err(err) = backend.submit(Some(&damage)) {
             error!(?err, "failed to submit frame");
         }
     }
