@@ -24,12 +24,13 @@ use smithay::{
             Display, DisplayHandle, Resource,
         },
     },
-    utils::{Logical, Point, Rectangle, Serial},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, Serial},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         cursor_shape::CursorShapeManagerState,
         dmabuf::DmabufState,
         output::OutputManagerState,
+        presentation::PresentationState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::SessionLockManagerState,
         shell::{
@@ -58,6 +59,8 @@ const CASCADE_STEP: i32 = 32;
 
 pub struct Pila {
     pub start_time: std::time::Instant,
+    /// The clock presentation-time timestamps use (CLOCK_MONOTONIC).
+    pub clock: Clock<Monotonic>,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
@@ -110,6 +113,7 @@ impl Pila {
         config: Config,
     ) -> Self {
         let start_time = std::time::Instant::now();
+        let clock = Clock::new();
         let dh = display.handle();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
@@ -127,6 +131,7 @@ impl Pila {
         let loop_handle = event_loop.handle();
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
+        PresentationState::new::<Self>(&dh, clock.id() as u32);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
@@ -141,6 +146,7 @@ impl Pila {
 
         Self {
             start_time,
+            clock,
             socket_name,
             display_handle: dh,
             loop_signal,
@@ -202,6 +208,8 @@ impl Pila {
                     unsafe {
                         display.get_mut().dispatch_clients(state).unwrap();
                     }
+                    // Whatever the clients asked for may change the screen.
+                    state.queue_redraw();
                     Ok(PostAction::Continue)
                 },
             )
@@ -682,6 +690,15 @@ impl Pila {
         pointer.set_grab(self, grab, serial, Focus::Clear);
         // After set_grab: clearing the focus resets the cursor to the default.
         self.set_cursor(CursorImageStatus::Named(edges.cursor_icon()));
+    }
+
+    /// Ask the backend for a redraw. pila only redraws when something may
+    /// have changed: input, client requests, or its own state changes outside
+    /// of those (e.g. a deferred unlock).
+    pub fn queue_redraw(&self) {
+        if let Some(backend) = &self.backend {
+            backend.window().request_redraw();
+        }
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

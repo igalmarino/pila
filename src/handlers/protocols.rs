@@ -5,8 +5,8 @@
 use smithay::{
     delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
     delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
-    delegate_relative_pointer, delegate_single_pixel_buffer, delegate_viewporter,
-    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
+    delegate_presentation, delegate_relative_pointer, delegate_single_pixel_buffer,
+    delegate_viewporter, delegate_xdg_foreign, delegate_xdg_toplevel_icon,
     reexports::{
         calloop::LoopHandle,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -83,6 +83,10 @@ delegate_viewporter!(Pila);
 
 // wp_single_pixel_buffer_manager_v1: one-color buffers (backgrounds, borders).
 delegate_single_pixel_buffer!(Pila);
+
+// wp_presentation: when frames reached the screen. The global is created in
+// `Pila::new` (it needs the clock); feedback is sent from `frame.rs`.
+delegate_presentation!(Pila);
 
 // wp_content_type_v1: a hint (video, game, photo); unused for now.
 delegate_content_type!(Pila);

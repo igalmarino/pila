@@ -105,8 +105,18 @@ Key flows and invariants:
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't
-  interleave title bars with windows. Then frame callbacks, `space.refresh()`,
-  `popups.cleanup()`, flush, and the next redraw (it redraws continuously).
+  interleave title bars with windows. Afterwards `frame.rs` (backend-neutral) records each
+  drawn surface's primary output from the render states, sends presentation-time feedback
+  once the frame is submitted, and sends frame callbacks; frame callback times and
+  feedback both use `Pila::clock` (CLOCK_MONOTONIC). Then `space.refresh()`,
+  `popups.cleanup()` and a flush. Buffer age (for partial repaints) needs the window's EGL
+  surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
+  and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
+- **Redraws are on demand** (`Pila::queue_redraw`): after every client dispatch (display
+  source), every winit event, and while a resize needs full frames or a lock awaits its
+  first locked frame. Nothing else redraws, so state changes outside those paths (timers,
+  `insert_idle` callbacks) must call `queue_redraw` themselves. Clients are flushed after
+  every event-loop iteration (`main.rs`), not only on redraw.
 - **Pointer grabs:** Mod+drag installs the move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
   via `Pila::set_cursor`, which must be called *after* `set_grab` (`Focus::Clear` resets the

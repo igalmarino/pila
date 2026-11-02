@@ -14,6 +14,7 @@ mod config;
 mod cursor;
 mod decoration;
 mod foreign_toplevel;
+mod frame;
 mod grabs;
 mod handlers;
 mod idle;
@@ -86,7 +87,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = startup_command.unwrap_or_else(|| state.config.terminal.clone());
     state.spawn(&command);
 
-    event_loop.run(None, &mut state, |_| {})?;
+    // Events queued outside a redraw (timers, deferred callbacks) must reach
+    // clients too, so flush after every loop iteration.
+    event_loop.run(None, &mut state, |state| {
+        let _ = state.display_handle.flush_clients();
+    })?;
 
     Ok(())
 }

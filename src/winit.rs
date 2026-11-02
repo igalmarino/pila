@@ -8,20 +8,22 @@ use smithay::{
         renderer::{damage::OutputDamageTracker, gles::GlesRenderer, ImportDma},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::{layer_map_for_output, utils::send_frames_surface_tree},
+    desktop::layer_map_for_output,
     input::pointer::CursorImageStatus,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{
         calloop::EventLoop,
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{DisplayHandle, Resource},
         winit::window::Window as WinitWindow,
     },
     utils::Transform,
     wayland::dmabuf::{DmabufFeedbackBuilder, DmabufState},
+    wayland::presentation::Refresh,
 };
 use tracing::{error, info, warn};
 
-use crate::{cursor, render, Pila};
+use crate::{cursor, frame, render, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -67,6 +69,10 @@ pub fn init_winit(
     event_loop
         .handle()
         .insert_source(winit, move |event, _, state| {
+            // Redraws happen on demand: after input or a window event here,
+            // after client requests (`Pila::queue_redraw` in the display
+            // source), and for a few frames after a resize.
+            let mut queue_redraw = true;
             match event {
                 WinitEvent::Resized { size, .. } => {
                     output.change_current_state(
@@ -88,10 +94,16 @@ pub fn init_winit(
                 WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => {
                     full_redraw = full_redraw.saturating_sub(1);
-                    redraw(state, &output, &mut damage_tracker, full_redraw > 0)
+                    redraw(state, &output, &mut damage_tracker, full_redraw > 0);
+                    // Keep going while buffers need repainting in full, or a
+                    // lock still waits for its first locked frame.
+                    queue_redraw = full_redraw > 0 || state.lock_pending();
                 }
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),
+            }
+            if queue_redraw {
+                state.queue_redraw();
             }
         })?;
 
@@ -134,8 +146,9 @@ fn redraw(
     } else {
         backend.buffer_age().unwrap_or(0)
     };
-    // Only what changed since the buffer was last drawn, or `None` if nothing did.
-    let damage = match backend.bind() {
+    // Only what changed since the buffer was last drawn (`None` if nothing
+    // did), and how each element was drawn.
+    let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
             let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
             elements.extend(render::scene_elements(renderer, &scene, output_location));
@@ -144,15 +157,23 @@ fn redraw(
             } else {
                 BACKGROUND
             };
-            damage_tracker
-                .render_output(renderer, &mut framebuffer, age, &elements, background)
-                .map_err(|err| error!(?err, "render failed"))
-                .ok()
-                .and_then(|result| result.damage.cloned())
+            match damage_tracker.render_output(
+                renderer,
+                &mut framebuffer,
+                age,
+                &elements,
+                background,
+            ) {
+                Ok(result) => (result.damage.cloned(), Some(result.states)),
+                Err(err) => {
+                    error!(?err, "render failed");
+                    (None, None)
+                }
+            }
         }
         Err(err) => {
             error!(?err, "failed to bind backend");
-            None
+            (None, None)
         }
     };
     let submitted = damage.is_some_and(|damage| {
@@ -166,41 +187,29 @@ fn redraw(
         state.confirm_lock();
     }
 
-    let time = state.start_time.elapsed();
-    if !scene.locked {
-        for window in state.space.elements() {
-            window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
-                Some(output.clone())
-            });
+    let cursor_surface = cursor.as_ref().map(|(surface, _)| surface);
+    if let Some(states) = &render_states {
+        frame::update_primary_outputs(&scene, cursor_surface, output, states);
+        if submitted {
+            // Nested, the host decides when the frame really reaches the
+            // screen; "now" at submit is the best estimate available.
+            frame::presentation_feedback(&scene, cursor_surface, output, states).presented(
+                state.clock.now(),
+                Refresh::fixed(Duration::from_secs_f64(1000.0 / REFRESH_MHZ as f64)),
+                0,
+                wp_presentation_feedback::Kind::Vsync,
+            );
         }
     }
-    for (surface, _) in &scene.lock_surfaces {
-        send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
-            Some(output.clone())
-        });
-    }
-    for entry in scene.layers() {
-        entry
-            .layer
-            .send_frame(output, time, Some(Duration::ZERO), |_, _| {
-                Some(output.clone())
-            });
-    }
-    if let Some((surface, _)) = &cursor {
-        send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
-            Some(output.clone())
-        });
-    }
+    // Frame callback times use the presentation clock too, so clients can
+    // compare them with presentation feedback.
+    frame::send_frames(&scene, cursor_surface, output, state.clock.now().into());
 
     state.space.refresh();
     state.update_idle_inhibit();
     layer_map_for_output(output).cleanup();
     state.popups.cleanup();
     let _ = state.display_handle.flush_clients();
-
-    if let Some(backend) = &state.backend {
-        backend.window().request_redraw();
-    }
 }
 
 /// Make the window's EGL surface current, so its buffer age can be queried.
