@@ -78,19 +78,23 @@ type PilaDrmOutputManager = DrmOutputManager<
     DrmDeviceFd,
 >;
 
+/// Fields drop in declaration order, which matters here: the outputs go
+/// before the DRM device, and the DRM device (which restores the previous
+/// display state when dropped) before the session that grants access to it.
 pub struct UdevData {
-    pub session: LibSeatSession,
-    loop_handle: LoopHandle<'static, Pila>,
-    libinput: Libinput,
-    pub renderer: GlesRenderer,
+    outputs: HashMap<crtc::Handle, OutputSurface>,
     drm: PilaDrmOutputManager,
     scanner: DrmScanner,
-    outputs: HashMap<crtc::Handle, OutputSurface>,
-    /// A render pass is already queued for this loop iteration.
-    redraw_scheduled: bool,
-    cursor_theme: CursorTheme,
+    pub renderer: GlesRenderer,
+    libinput: Libinput,
     /// Keyboards, for the Caps/Num/Scroll Lock LEDs.
     keyboards: Vec<libinput::Device>,
+    cursor_theme: CursorTheme,
+    /// A render pass is already queued for this loop iteration.
+    redraw_scheduled: bool,
+    loop_handle: LoopHandle<'static, Pila>,
+    /// Last: see the struct docs.
+    pub session: LibSeatSession,
 }
 
 struct OutputSurface {
@@ -216,6 +220,9 @@ pub fn init_udev(
         |mut event, _, state| {
             on_input_device(state, &mut event);
             state.process_input_event(event);
+            // Input moves the cursor and changes hover state even when no
+            // client reacts; coalesced into one render pass per iteration.
+            state.queue_redraw();
         },
     )?;
 
