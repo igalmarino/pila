@@ -36,8 +36,13 @@ RUN pacman -Syu --noconfirm --needed \
 # Non-root user. On Linux, the Dev Containers tooling rewrites this UID/GID to
 # match your host user (updateRemoteUserUID), which is what lets the container
 # connect to your host's Wayland socket.
+# The password (same as the user name) is a throwaway so screen lockers
+# (swaylock, via PAM) can be unlocked in nested tests. It grants nothing else:
+# sudoers only allows the firewall script (unless FULL_SUDO), and the user
+# isn't in wheel.
 RUN groupadd -g "${USER_GID}" "${USERNAME}" \
     && useradd -m -u "${USER_UID}" -g "${USER_GID}" -s /bin/bash "${USERNAME}" \
+    && echo "${USERNAME}:${USERNAME}" | chpasswd \
     && mkdir -p /workspace /commandhistory \
         "/home/${USERNAME}/.claude" \
         "/home/${USERNAME}/.cargo/registry" \
