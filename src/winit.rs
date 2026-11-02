@@ -23,10 +23,9 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::{cursor, frame, render, Pila};
+use crate::{backend::Backend, cursor, frame, render, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
-const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
 
 pub fn init_winit(
     event_loop: &mut EventLoop<'static, Pila>,
@@ -64,7 +63,7 @@ pub fn init_winit(
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
     // Frames left to render in full: buffer ages are unreliable after a resize.
     let mut full_redraw = 0u8;
-    state.backend = Some(backend);
+    state.backend = Some(Backend::Winit(backend));
 
     event_loop
         .handle()
@@ -136,7 +135,7 @@ fn redraw(
         .map(|geo| geo.loc)
         .unwrap_or_default();
 
-    let Some(backend) = state.backend.as_mut() else {
+    let Some(Backend::Winit(backend)) = state.backend.as_mut() else {
         return;
     };
     // Age 0 makes the damage tracker redraw everything. The frame that
@@ -152,17 +151,12 @@ fn redraw(
         Ok((renderer, mut framebuffer)) => {
             let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
             elements.extend(render::scene_elements(renderer, &scene, output_location));
-            let background = if scene.locked {
-                render::LOCKED_BACKGROUND
-            } else {
-                BACKGROUND
-            };
             match damage_tracker.render_output(
                 renderer,
                 &mut framebuffer,
                 age,
                 &elements,
-                background,
+                render::clear_color(&scene),
             ) {
                 Ok(result) => (result.damage.cloned(), Some(result.states)),
                 Err(err) => {
@@ -204,12 +198,7 @@ fn redraw(
     // Frame callback times use the presentation clock too, so clients can
     // compare them with presentation feedback.
     frame::send_frames(&scene, cursor_surface, output, state.clock.now().into());
-
-    state.space.refresh();
-    state.update_idle_inhibit();
-    layer_map_for_output(output).cleanup();
-    state.popups.cleanup();
-    let _ = state.display_handle.flush_clients();
+    state.post_render(output);
 }
 
 /// Make the window's EGL surface current, so its buffer age can be queried.

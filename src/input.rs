@@ -1,7 +1,7 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     desktop::Window,
     input::{
@@ -34,6 +34,7 @@ impl Pila {
         self.notify_activity();
         match event {
             InputEvent::Keyboard { event, .. } => self.on_keyboard::<I>(event),
+            InputEvent::PointerMotion { event, .. } => self.on_pointer_motion::<I>(event),
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 self.on_pointer_motion_absolute::<I>(event)
             }
@@ -148,9 +149,6 @@ impl Pila {
         let Some(output_geo) = self.space.output_geometry(output) else {
             return;
         };
-        let Some(pointer) = self.seat.get_pointer() else {
-            return;
-        };
 
         let location = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
 
@@ -160,6 +158,63 @@ impl Pila {
             .map(|last| location - last)
             .unwrap_or_default();
         self.host_pointer = Some(location);
+        self.pointer_motion(
+            location,
+            delta,
+            delta,
+            Event::time(&event),
+            event.time_msec(),
+        );
+    }
+
+    /// Relative motion (libinput): move by the delta, staying on the outputs.
+    fn on_pointer_motion<I: InputBackend>(&mut self, event: I::PointerMotionEvent) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let current = pointer.current_location();
+        let location = self.clamp_to_outputs(current, current + event.delta());
+        self.pointer_motion(
+            location,
+            event.delta(),
+            event.delta_unaccel(),
+            Event::time(&event),
+            event.time_msec(),
+        );
+    }
+
+    /// `to` if it's on an output, else `to` clamped to the output `from` is on.
+    fn clamp_to_outputs(
+        &self,
+        from: Point<f64, Logical>,
+        to: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        if self.space.output_under(to).next().is_some() {
+            return to;
+        }
+        let Some(geo) = self.output_geometry_at(from) else {
+            return from;
+        };
+        let max = (geo.loc + geo.size.to_point()).to_f64() - Point::from((1.0, 1.0));
+        Point::from((
+            to.x.clamp(geo.loc.x as f64, max.x),
+            to.y.clamp(geo.loc.y as f64, max.y),
+        ))
+    }
+
+    /// Move the pointer to `location` (after relative motion of `delta`),
+    /// honoring the active pointer constraint. Shared by both input paths.
+    fn pointer_motion(
+        &mut self,
+        location: Point<f64, Logical>,
+        delta: Point<f64, Logical>,
+        delta_unaccel: Point<f64, Logical>,
+        utime: u64,
+        time_msec: u32,
+    ) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
 
         // The constraint of the surface the pointer is on now (none during
         // pila's own move/resize grabs).
@@ -176,8 +231,8 @@ impl Pila {
             under_current.clone(),
             &RelativeMotionEvent {
                 delta,
-                delta_unaccel: delta,
-                utime: Event::time(&event),
+                delta_unaccel,
+                utime,
             },
         );
         match constraint {
@@ -208,7 +263,7 @@ impl Pila {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: time_msec,
             },
         );
         pointer.frame(self);

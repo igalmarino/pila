@@ -10,6 +10,7 @@
 
 #![allow(irrefutable_let_patterns)]
 
+mod backend;
 mod config;
 mod cursor;
 mod decoration;

@@ -35,8 +35,19 @@ smithay::backend::renderer::element::render_elements! {
     Memory=MemoryRenderBufferRenderElement<R>,
 }
 
+/// Behind all windows and layer surfaces.
+const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
 /// Background while the session is locked and the locker hasn't drawn yet.
-pub const LOCKED_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+const LOCKED_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
+/// The color an output is cleared to before drawing `scene`.
+pub fn clear_color(scene: &Scene) -> [f32; 4] {
+    if scene.locked {
+        LOCKED_BACKGROUND
+    } else {
+        BACKGROUND
+    }
+}
 
 /// Everything below the cursor, front to back (see `Pila::scene`).
 #[derive(Default)]

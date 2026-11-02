@@ -2,7 +2,6 @@ use std::{cell::RefCell, collections::HashSet, ffi::OsString, process::Command, 
 
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
-    backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
     desktop::{
         find_popup_root_surface, layer_map_for_output, LayerSurface, PopupManager, Space, Window,
         WindowSurfaceType,
@@ -45,6 +44,7 @@ use smithay::{
 use tracing::{debug, info, warn};
 
 use crate::{
+    backend::Backend,
     config::{Action, Config},
     decoration::{self, Decoration},
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
@@ -108,7 +108,7 @@ pub struct Pila {
     /// Nested-only: set by `init_winit`. It lives here (not in the redraw closure) so
     /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
     /// needs its own renderer handle here instead.
-    pub backend: Option<WinitGraphicsBackend<GlesRenderer>>,
+    pub backend: Option<Backend>,
 }
 
 impl Pila {
@@ -702,10 +702,20 @@ impl Pila {
     /// Ask the backend for a redraw. pila only redraws when something may
     /// have changed: input, client requests, or its own state changes outside
     /// of those (e.g. a deferred unlock).
-    pub fn queue_redraw(&self) {
-        if let Some(backend) = &self.backend {
-            backend.window().request_redraw();
+    pub fn queue_redraw(&mut self) {
+        if let Some(backend) = &mut self.backend {
+            backend.queue_redraw();
         }
+    }
+
+    /// Housekeeping after `output` was drawn, for any backend: drop dead
+    /// windows and popups, re-check idle inhibitors, and flush clients.
+    pub fn post_render(&mut self, output: &Output) {
+        self.space.refresh();
+        self.update_idle_inhibit();
+        layer_map_for_output(output).cleanup();
+        self.popups.cleanup();
+        let _ = self.display_handle.flush_clients();
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

@@ -38,14 +38,14 @@ impl SeatHandler for Pila {
         &mut self.seat_state
     }
 
-    // Nested: named shapes are passed on to the winit window for the host to
-    // draw; client cursor surfaces are rendered by pila (`cursor.rs`). A
-    // real-hardware backend must also draw named shapes itself.
+    // Stored for the renderer; the backend decides who draws what (nested,
+    // the host draws named shapes; see `Backend::cursor_changed`).
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
-        if let Some(backend) = &self.backend {
-            crate::winit::apply_cursor(backend.window(), &image);
+        if let Some(backend) = &mut self.backend {
+            backend.cursor_changed(&image);
         }
         self.cursor_status = image;
+        self.queue_redraw();
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
