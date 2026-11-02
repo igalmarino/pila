@@ -14,7 +14,9 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{
+            generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+        },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -29,6 +31,7 @@ use smithay::{
         dmabuf::DmabufState,
         output::OutputManagerState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        session_lock::SessionLockManagerState,
         shell::{
             wlr_layer::{Layer, WlrLayerShellState},
             xdg::{decoration::XdgDecorationState, XdgShellState},
@@ -46,6 +49,7 @@ use crate::{
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
     handlers::protocols::{self, Globals},
     render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
+    session_lock::SessionLock,
     CalloopData,
 };
 
@@ -57,6 +61,7 @@ pub struct Pila {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
+    pub loop_handle: LoopHandle<'static, CalloopData>,
     pub config: Config,
 
     /// Mapped windows, in stacking order (back to front).
@@ -81,6 +86,9 @@ pub struct Pila {
     /// Its global is created by the backend, which knows the render device and formats.
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
+    pub session_lock_state: SessionLockManagerState,
+    /// Whether the screen is locked, and by whom (`session_lock.rs`).
+    pub session_lock: SessionLock,
     /// State of the simpler protocols (`handlers/protocols.rs`).
     pub globals: Globals,
 
@@ -96,7 +104,7 @@ pub struct Pila {
 
 impl Pila {
     pub fn new(
-        event_loop: &mut EventLoop<CalloopData>,
+        event_loop: &mut EventLoop<'static, CalloopData>,
         display: Display<Self>,
         config: Config,
     ) -> Self {
@@ -116,6 +124,7 @@ impl Pila {
         let dmabuf_state = DmabufState::new();
         let popups = PopupManager::default();
         let globals = protocols::init_globals(&dh, &primary_selection_state);
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
@@ -127,12 +136,14 @@ impl Pila {
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
+        let loop_handle = event_loop.handle();
 
         Self {
             start_time,
             socket_name,
             display_handle: dh,
             loop_signal,
+            loop_handle,
             config,
             space: Space::default(),
             unmapped: Vec::new(),
@@ -150,6 +161,8 @@ impl Pila {
             cursor_shape_state,
             dmabuf_state,
             popups,
+            session_lock_state,
+            session_lock: SessionLock::default(),
             globals,
             seat,
             cursor_status: CursorImageStatus::default_named(),
@@ -159,7 +172,7 @@ impl Pila {
 
     fn init_wayland_listener(
         display: Display<Pila>,
-        event_loop: &mut EventLoop<CalloopData>,
+        event_loop: &mut EventLoop<'static, CalloopData>,
     ) -> OsString {
         // Picks the next free wayland-N name in $XDG_RUNTIME_DIR.
         let listening_socket =
@@ -200,11 +213,14 @@ impl Pila {
     // ---------------------------------------------------------------------
 
     /// The client surface under `pos` (with its origin), for pointer focus.
-    /// `None` over pila's own decorations.
+    /// `None` over pila's own decorations. While locked, only lock surfaces.
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        if self.is_locked() {
+            return self.lock_surface_under(pos);
+        }
         match self.under(pos)? {
             Under::Layer(_, surface, origin) | Under::Window(_, Hit::Surface(surface, origin)) => {
                 Some((surface, origin))
@@ -257,6 +273,22 @@ impl Pila {
     /// draw title bars. Collected up front so a backend can render without
     /// borrowing `self`.
     pub fn scene(&self) -> Scene {
+        if self.is_locked() {
+            let lock_surfaces = self
+                .space
+                .outputs()
+                .filter_map(|output| {
+                    let surface = self.lock_surface(output)?;
+                    let location = self.space.output_geometry(output)?.loc;
+                    Some((surface.wl_surface().clone(), location))
+                })
+                .collect();
+            return Scene {
+                locked: true,
+                lock_surfaces,
+                ..Default::default()
+            };
+        }
         let (upper, lower) = self.layer_order();
         let layers = |layers| {
             self.layer_surfaces(layers)
@@ -268,6 +300,7 @@ impl Pila {
             upper: layers(upper),
             windows: self.scene_windows(),
             lower: layers(lower),
+            ..Default::default()
         }
     }
 
@@ -429,6 +462,10 @@ impl Pila {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        if self.is_locked() {
+            self.focus_lock_surface(serial);
+            return;
+        }
         // A popup grab ignores focus changes, so close the menu first.
         self.dismiss_popup_grab();
         let exclusive = self.exclusive_layer().map(|l| l.wl_surface().clone());
@@ -573,6 +610,9 @@ impl Pila {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        if self.is_locked() {
+            return;
+        }
 
         // Dragging a maximized/fullscreen window restores it under the cursor.
         let (maximized, fullscreen) = fill_state(&window);
@@ -619,7 +659,7 @@ impl Pila {
             return;
         };
         let (maximized, fullscreen) = fill_state(&window);
-        if maximized || fullscreen {
+        if maximized || fullscreen || self.is_locked() {
             return;
         }
         let Some(location) = self.space.element_location(&window) else {

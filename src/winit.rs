@@ -84,6 +84,7 @@ pub fn init_winit(
                     );
                     layer_map_for_output(&output).arrange();
                     state.refit_maximized();
+                    state.configure_lock_surfaces();
                     full_redraw = 4;
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
@@ -127,6 +128,7 @@ fn redraw(
         .unwrap_or_default();
     let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
     let scene = state.scene();
+    let lock_pending = state.lock_pending();
     let output_location = state
         .space
         .output_geometry(output)
@@ -136,8 +138,9 @@ fn redraw(
     let Some(backend) = state.backend.as_mut() else {
         return;
     };
-    // Age 0 makes the damage tracker redraw everything.
-    let age = if full_redraw {
+    // Age 0 makes the damage tracker redraw everything. The frame that
+    // confirms a session lock must not keep anything of the unlocked screen.
+    let age = if full_redraw || lock_pending {
         0
     } else {
         backend.buffer_age().unwrap_or(0)
@@ -147,8 +150,13 @@ fn redraw(
         Ok((renderer, mut framebuffer)) => {
             let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
             elements.extend(render::scene_elements(renderer, &scene, output_location));
+            let background = if scene.locked {
+                render::LOCKED_BACKGROUND
+            } else {
+                BACKGROUND
+            };
             damage_tracker
-                .render_output(renderer, &mut framebuffer, age, &elements, BACKGROUND)
+                .render_output(renderer, &mut framebuffer, age, &elements, background)
                 .map_err(|err| error!(?err, "render failed"))
                 .ok()
                 .and_then(|result| result.damage.cloned())
@@ -158,15 +166,27 @@ fn redraw(
             None
         }
     };
-    if let Some(damage) = damage {
-        if let Err(err) = backend.submit(Some(&damage)) {
-            error!(?err, "failed to submit frame");
-        }
+    let submitted = damage.is_some_and(|damage| {
+        backend
+            .submit(Some(&damage))
+            .map_err(|err| error!(?err, "failed to submit frame"))
+            .is_ok()
+    });
+    // Single output: one locked frame on screen means everything is covered.
+    if lock_pending && submitted {
+        state.confirm_lock();
     }
 
     let time = state.start_time.elapsed();
-    for window in state.space.elements() {
-        window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
+    if !scene.locked {
+        for window in state.space.elements() {
+            window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+    }
+    for (surface, _) in &scene.lock_surfaces {
+        send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
             Some(output.clone())
         });
     }

@@ -114,7 +114,7 @@ impl Pila {
     /// Give keyboard focus to a layer surface, unless another one holds
     /// exclusive focus. Windows keep their stacking order.
     pub fn focus_layer(&mut self, layer: &LayerSurface, serial: Serial) {
-        if self.exclusive_layer().is_some_and(|l| l != *layer) {
+        if self.is_locked() || self.exclusive_layer().is_some_and(|l| l != *layer) {
             return;
         }
         let Some(keyboard) = self.seat.get_keyboard() else {

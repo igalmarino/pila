@@ -35,8 +35,16 @@ smithay::backend::renderer::element::render_elements! {
     Memory=MemoryRenderBufferRenderElement<R>,
 }
 
+/// Background while the session is locked and the locker hasn't drawn yet.
+pub const LOCKED_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
 /// Everything below the cursor, front to back (see `Pila::scene`).
+#[derive(Default)]
 pub struct Scene {
+    /// Session locked: only `lock_surfaces` are drawn, on black.
+    pub locked: bool,
+    /// While locked, each output's lock surface and its location.
+    pub lock_surfaces: Vec<(WlSurface, Point<i32, Logical>)>,
     /// Layer surfaces above the windows (Overlay, Top).
     pub upper: Vec<SceneLayer>,
     pub windows: Vec<SceneWindow>,
@@ -83,6 +91,25 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
+    if scene.locked {
+        let scale = Scale::from(SCALE);
+        return scene
+            .lock_surfaces
+            .iter()
+            .flat_map(|(surface, location)| {
+                let location: Point<i32, Physical> =
+                    (*location - output_location).to_physical_precise_round(scale);
+                render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                )
+            })
+            .collect();
+    }
     let mut elements = layer_elements(renderer, &scene.upper, output_location);
     elements.extend(window_elements(renderer, &scene.windows, output_location));
     elements.extend(layer_elements(renderer, &scene.lower, output_location));

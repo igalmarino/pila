@@ -153,6 +153,10 @@ impl XdgShellHandler for Pila {
         let Some(seat) = Seat::<Pila>::from_resource(&seat) else {
             return;
         };
+        // Nothing but the lock surface gets input while locked.
+        if self.is_locked() {
+            return;
+        }
         let kind = PopupKind::Xdg(surface);
         let Some(root) = find_popup_root_surface(&kind).ok().filter(|root| {
             self.window_for_surface(root).is_some() || self.layer_for_surface(root).is_some()

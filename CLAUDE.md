@@ -120,6 +120,15 @@ Key flows and invariants:
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.
+- **Session lock** (`session_lock.rs`, ext-session-lock): while `is_locked()`, `scene()`
+  holds only lock surfaces (on black), `surface_under` returns only lock surfaces,
+  `focus_window`/`focus_layer` keep the keyboard on a lock surface, popup and move/resize
+  grabs are refused and bindings don't run (Quit still works in debug builds). Any new
+  input or focus path must respect `is_locked()`. The lock is confirmed (`confirm_lock`)
+  only after a full locked frame is submitted. Smithay 0.7 calls `unlock()` even for a
+  rogue client's `unlock_and_destroy`, so `unlock` defers to `finish_unlock`, which only
+  unlocks once the holder's lock object is gone. A dead locker leaves the session locked;
+  a new locker may take over.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.

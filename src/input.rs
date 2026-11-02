@@ -16,6 +16,7 @@ use smithay::{
 };
 
 use crate::{
+    config::Action,
     decoration::{Decoration, TitleBarPart},
     grabs::resize_grab::ResizeEdge,
     state::{fill_state, Hit, Pila, Under},
@@ -47,7 +48,7 @@ impl Pila {
             return;
         };
 
-        let action = keyboard.input::<Option<crate::config::Action>, _>(
+        let action = keyboard.input::<Option<Action>, _>(
             self,
             keycode,
             key_state,
@@ -58,7 +59,13 @@ impl Pila {
                     KeyState::Pressed if state.config.mod_key.is_pressed(mods) => {
                         let action = handle
                             .raw_latin_sym_or_raw_current_sym()
-                            .and_then(|sym| state.config.action_for(sym, mods));
+                            .and_then(|sym| state.config.action_for(sym, mods))
+                            // While locked, everything goes to the locker;
+                            // debug builds keep Quit to escape a nested session.
+                            .filter(|action| {
+                                !state.is_locked()
+                                    || (cfg!(debug_assertions) && *action == Action::Quit)
+                            });
                         if let Some(action) = action {
                             state.suppressed_keys.insert(keycode);
                             return FilterResult::Intercept(Some(action));
@@ -147,6 +154,9 @@ impl Pila {
     /// Resize arrows over a window's resize border, the default arrow over a
     /// title bar or the background. Client surfaces set their own.
     fn update_decoration_cursor(&mut self, pos: Point<f64, Logical>) {
+        if self.is_locked() {
+            return;
+        }
         let icon = match self.under(pos) {
             Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..)) => return,
             Some(Under::Window(_, Hit::Decoration(Decoration::Border(edges)))) => {
@@ -198,7 +208,10 @@ impl Pila {
         let button = event.button_code();
         let button_state = event.state();
 
-        if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
+        if button_state == ButtonState::Pressed && self.is_locked() {
+            // Clicking an output's lock surface gives it the keyboard.
+            self.focus_lock_surface(serial);
+        } else if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
             let location = pointer.current_location();
 
             match self.under(location) {

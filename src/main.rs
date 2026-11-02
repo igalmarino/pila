@@ -19,6 +19,7 @@ mod handlers;
 mod input;
 mod layers;
 mod render;
+mod session_lock;
 mod state;
 mod text;
 mod winit;
@@ -83,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env();
     tracing::info!(?config, "starting pila");
 
-    let mut event_loop: EventLoop<CalloopData> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<'static, CalloopData> = EventLoop::try_new()?;
     let display: Display<Pila> = Display::new()?;
     let display_handle = display.handle();
     let state = Pila::new(&mut event_loop, display, config);
