@@ -13,6 +13,7 @@
 mod config;
 mod cursor;
 mod decoration;
+mod foreign_toplevel;
 mod grabs;
 mod handlers;
 mod input;

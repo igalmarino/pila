@@ -64,6 +64,7 @@ impl XdgShellHandler for Pila {
             .is_some_and(|focus| &focus == wl_surface);
 
         if let Some(window) = self.window_for_surface(wl_surface) {
+            self.remove_foreign_toplevel(&window);
             self.space.unmap_elem(&window);
         }
         if was_focused {

@@ -418,6 +418,7 @@ impl Pila {
 
         debug!(?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
         self.space.map_element(window.clone(), location, true);
+        self.announce_toplevel(&window);
         self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());
     }
 

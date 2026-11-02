@@ -4,13 +4,14 @@
 
 use smithay::{
     delegate_content_type, delegate_data_control, delegate_ext_data_control,
-    delegate_fractional_scale, delegate_pointer_gestures, delegate_relative_pointer,
-    delegate_single_pixel_buffer, delegate_viewporter, delegate_xdg_foreign,
-    delegate_xdg_toplevel_icon,
+    delegate_foreign_toplevel_list, delegate_fractional_scale, delegate_pointer_gestures,
+    delegate_relative_pointer, delegate_single_pixel_buffer, delegate_viewporter,
+    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     wayland::{
         compositor::{get_parent, with_states},
         content_type::ContentTypeState,
+        foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
         fractional_scale::{
             with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState,
         },
@@ -31,6 +32,7 @@ pub struct Globals {
     pub xdg_foreign: XdgForeignState,
     pub wlr_data_control: wlr_data_control::DataControlState,
     pub ext_data_control: ext_data_control::DataControlState,
+    pub foreign_toplevel_list: ForeignToplevelListState,
 }
 
 /// Create the globals of this module.
@@ -49,6 +51,7 @@ pub fn init_globals(dh: &DisplayHandle, primary_selection: &PrimarySelectionStat
     // other wlroots-style desktops.
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),
+        foreign_toplevel_list: ForeignToplevelListState::new::<Pila>(dh),
         wlr_data_control: wlr_data_control::DataControlState::new::<Pila, _>(
             dh,
             Some(primary_selection),
@@ -129,3 +132,11 @@ impl ext_data_control::DataControlHandler for Pila {
     }
 }
 delegate_ext_data_control!(Pila);
+
+// ext_foreign_toplevel_list_v1: taskbars list windows (`foreign_toplevel.rs`).
+impl ForeignToplevelListHandler for Pila {
+    fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
+        &mut self.globals.foreign_toplevel_list
+    }
+}
+delegate_foreign_toplevel_list!(Pila);

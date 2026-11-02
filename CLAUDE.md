@@ -117,6 +117,9 @@ Key flows and invariants:
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`). Fractional scale is always 1 nested; a backend
   with per-output scales must update surfaces as they move between outputs.
+- **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
+  window's handle is created in `place_new_window`, kept in its user data, updated on
+  commit and closed in `toplevel_destroyed`.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.
