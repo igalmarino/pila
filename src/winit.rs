@@ -4,7 +4,7 @@ use std::{os::unix::fs::MetadataExt, path::PathBuf, time::Duration};
 
 use smithay::{
     backend::{
-        egl::EGLDevice,
+        egl::{EGLDevice, EGLSurface},
         renderer::{damage::OutputDamageTracker, gles::GlesRenderer, ImportDma},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
@@ -129,7 +129,7 @@ fn redraw(
     };
     // Age 0 makes the damage tracker redraw everything. The frame that
     // confirms a session lock must not keep anything of the unlocked screen.
-    let age = if full_redraw || lock_pending {
+    let age = if full_redraw || lock_pending || !make_surface_current(backend) {
         0
     } else {
         backend.buffer_age().unwrap_or(0)
@@ -200,6 +200,28 @@ fn redraw(
 
     if let Some(backend) = &state.backend {
         backend.window().request_redraw();
+    }
+}
+
+/// Make the window's EGL surface current, so its buffer age can be queried.
+///
+/// Mesa only knows the back buffer's age once the surface has been made
+/// current for the frame; otherwise the query fails with `EGL_BAD_SURFACE`
+/// (every frame while a client animates). `WinitGraphicsBackend::bind` would
+/// do it, but it's lazy: the surface only becomes current when rendering
+/// starts, which is after the age is needed.
+fn make_surface_current(backend: &mut WinitGraphicsBackend<GlesRenderer>) -> bool {
+    let surface: *const EGLSurface = backend.egl_surface();
+    // SAFETY: `surface` points at the backend's own EGL surface, a different
+    // field than the renderer borrowed mutably here, and stays valid for the
+    // call. Changing the thread's current surface is fine: the renderer makes
+    // its context current again before every operation.
+    unsafe {
+        backend
+            .renderer()
+            .egl_context()
+            .make_current_with_surface(&*surface)
+            .is_ok()
     }
 }
 
