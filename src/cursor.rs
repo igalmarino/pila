@@ -7,9 +7,10 @@
 //! can call them while it holds a mutable borrow of the backend.
 
 use smithay::{
-    input::pointer::{CursorImageStatus, CursorImageSurfaceData},
+    backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
+    input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
-    utils::{Logical, Point},
+    utils::{Logical, Point, Transform},
     wayland::compositor::{with_states, SurfaceAttributes},
 };
 
@@ -55,4 +56,129 @@ pub fn handle_commit(status: &CursorImageStatus, surface: &WlSurface) {
             attrs.lock().unwrap().hotspot -= delta;
         }
     });
+}
+
+/// Named cursor images (`wp_cursor_shape`, pila's own move/resize cursors)
+/// from the xcursor theme, for backends that draw the cursor themselves. The
+/// nested backend doesn't need it: the host draws named shapes.
+///
+/// The theme and size come from `XCURSOR_THEME` (default `default`) and
+/// `XCURSOR_SIZE` (default 24). Only the first frame of animated cursors is
+/// used. Without a usable theme, a built-in arrow stands in for every shape.
+pub struct CursorTheme {
+    theme: xcursor::CursorTheme,
+    size: u32,
+    cache: std::collections::HashMap<CursorIcon, NamedCursor>,
+}
+
+/// A cursor image and its hotspot.
+#[derive(Clone)]
+pub struct NamedCursor {
+    pub buffer: MemoryRenderBuffer,
+    pub hotspot: Point<i32, Logical>,
+}
+
+impl CursorTheme {
+    pub fn load() -> Self {
+        let name = std::env::var("XCURSOR_THEME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "default".into());
+        let size = std::env::var("XCURSOR_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(24);
+        Self {
+            theme: xcursor::CursorTheme::load(&name),
+            size,
+            cache: Default::default(),
+        }
+    }
+
+    /// The image for `icon`, falling back to its alternative names, the
+    /// default arrow, and finally the built-in arrow.
+    pub fn get(&mut self, icon: CursorIcon) -> NamedCursor {
+        if let Some(cursor) = self.cache.get(&icon) {
+            return cursor.clone();
+        }
+        let cursor = std::iter::once(icon.name())
+            .chain(icon.alt_names().iter().copied())
+            .chain(["default", "left_ptr"])
+            .find_map(|name| self.load_image(name))
+            .unwrap_or_else(builtin_arrow);
+        self.cache.insert(icon, cursor.clone());
+        cursor
+    }
+
+    fn load_image(&self, name: &str) -> Option<NamedCursor> {
+        let path = self.theme.load_icon(name)?;
+        let data = std::fs::read(path).ok()?;
+        let images = xcursor::parser::parse_xcursor(&data)?;
+        // The nominal size closest to the one asked for; its first frame.
+        let image = images
+            .iter()
+            .min_by_key(|image| image.size.abs_diff(self.size))?;
+        // The file's byte order is little-endian ARGB32, i.e. DRM's Argb8888.
+        let buffer = MemoryRenderBuffer::from_slice(
+            &image.pixels_rgba,
+            Fourcc::Argb8888,
+            (image.width as i32, image.height as i32),
+            1,
+            Transform::Normal,
+            None,
+        );
+        Some(NamedCursor {
+            buffer,
+            hotspot: (image.xhot as i32, image.yhot as i32).into(),
+        })
+    }
+}
+
+/// A plain black-and-white arrow, for systems without a cursor theme.
+fn builtin_arrow() -> NamedCursor {
+    // `X` outline, `.` fill, ` ` transparent; the hotspot is the tip.
+    const ARROW: [&str; 17] = [
+        "X",
+        "XX",
+        "X.X",
+        "X..X",
+        "X...X",
+        "X....X",
+        "X.....X",
+        "X......X",
+        "X.......X",
+        "X........X",
+        "X.....XXXXX",
+        "X..X..X",
+        "X.X X..X",
+        "XX  X..X",
+        "X    X..X",
+        "     X..X",
+        "      XX",
+    ];
+    const W: usize = 11;
+    let mut pixels = vec![0u8; W * ARROW.len() * 4];
+    for (y, row) in ARROW.iter().enumerate() {
+        for (x, c) in row.bytes().enumerate() {
+            // Argb8888 is little-endian: B, G, R, A.
+            let bgra = match c {
+                b'X' => [0x00, 0x00, 0x00, 0xff],
+                b'.' => [0xff, 0xff, 0xff, 0xff],
+                _ => continue,
+            };
+            let i = (y * W + x) * 4;
+            pixels[i..i + 4].copy_from_slice(&bgra);
+        }
+    }
+    NamedCursor {
+        buffer: MemoryRenderBuffer::from_slice(
+            &pixels,
+            Fourcc::Argb8888,
+            (W as i32, ARROW.len() as i32),
+            1,
+            Transform::Normal,
+            None,
+        ),
+        hotspot: (0, 0).into(),
+    }
 }

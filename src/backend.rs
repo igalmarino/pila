@@ -4,11 +4,14 @@
 
 use smithay::{
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
-    input::pointer::CursorImageStatus,
+    input::{keyboard::LedState, pointer::CursorImageStatus},
 };
 
+use crate::udev::UdevData;
+
 pub enum Backend {
-    Winit(WinitGraphicsBackend<GlesRenderer>),
+    Winit(Box<WinitGraphicsBackend<GlesRenderer>>),
+    Udev(Box<UdevData>),
 }
 
 impl Backend {
@@ -16,6 +19,7 @@ impl Backend {
     pub fn renderer(&mut self) -> &mut GlesRenderer {
         match self {
             Backend::Winit(backend) => backend.renderer(),
+            Backend::Udev(data) => &mut data.renderer,
         }
     }
 
@@ -23,6 +27,7 @@ impl Backend {
     pub fn queue_redraw(&mut self) {
         match self {
             Backend::Winit(backend) => backend.window().request_redraw(),
+            Backend::Udev(data) => data.queue_redraw(),
         }
     }
 
@@ -31,6 +36,21 @@ impl Backend {
         match self {
             // The host draws named shapes; pila draws client surfaces itself.
             Backend::Winit(backend) => crate::winit::apply_cursor(backend.window(), status),
+            Backend::Udev(data) => data.cursor_changed(status),
+        }
+    }
+
+    /// Caps/Num/Scroll Lock changed. Nested, the host owns the keyboard.
+    pub fn update_leds(&mut self, leds: LedState) {
+        if let Backend::Udev(data) = self {
+            data.update_leds(leds);
+        }
+    }
+
+    /// Switch to another virtual terminal. Nested, the host owns the TTY.
+    pub fn change_vt(&mut self, vt: i32) {
+        if let Backend::Udev(data) = self {
+            data.change_vt(vt);
         }
     }
 }

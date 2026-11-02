@@ -13,6 +13,10 @@
 //! | Mod+Shift+E           | Quit pila                      |
 //! | Mod+Left drag         | Move window                    |
 //! | Mod+Right drag        | Resize window (nearest corner) |
+//! | Ctrl+Alt+F1..F12      | Switch VT (on a TTY)           |
+//!
+//! The VT switch comes from the keymap (`XF86_Switch_VT_N` keysyms), so it's
+//! handled in the keyboard filter rather than `action_for`.
 //!
 //! Alt is the default because a host desktop such as GNOME grabs Super
 //! while pila runs nested. Use `PILA_MOD=super` on bare metal.
@@ -51,6 +55,8 @@ pub enum Action {
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
+    /// Switch to virtual terminal N (Ctrl+Alt+F<N> on a TTY; not configurable).
+    ChangeVt(i32),
 }
 
 impl Config {

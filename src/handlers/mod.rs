@@ -7,7 +7,7 @@ mod xdg_shell;
 use smithay::{
     delegate_cursor_shape, delegate_data_device, delegate_output, delegate_primary_selection,
     delegate_seat,
-    input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
+    input::{keyboard::LedState, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     wayland::{
         output::OutputHandler,
@@ -46,6 +46,12 @@ impl SeatHandler for Pila {
         }
         self.cursor_status = image;
         self.queue_redraw();
+    }
+
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
+        if let Some(backend) = &mut self.backend {
+            backend.update_leds(leds);
+        }
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

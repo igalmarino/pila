@@ -751,6 +751,11 @@ impl Pila {
                 info!("quit requested");
                 self.loop_signal.stop();
             }
+            Action::ChangeVt(vt) => {
+                if let Some(backend) = &mut self.backend {
+                    backend.change_vt(vt);
+                }
+            }
         }
     }
 

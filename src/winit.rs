@@ -63,7 +63,7 @@ pub fn init_winit(
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
     // Frames left to render in full: buffer ages are unreliable after a resize.
     let mut full_redraw = 0u8;
-    state.backend = Some(Backend::Winit(backend));
+    state.backend = Some(Backend::Winit(Box::new(backend)));
 
     event_loop
         .handle()

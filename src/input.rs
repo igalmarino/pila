@@ -5,7 +5,7 @@ use smithay::{
     },
     desktop::Window,
     input::{
-        keyboard::FilterResult,
+        keyboard::{FilterResult, Keysym},
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus,
             GrabStartData as PointerGrabStartData, MotionEvent, RelativeMotionEvent,
@@ -61,6 +61,17 @@ impl Pila {
             serial,
             time,
             |state, mods, handle| {
+                // Ctrl+Alt+F<N>: the keymap turns it into XF86_Switch_VT_<N>.
+                if key_state == KeyState::Pressed {
+                    let raw = handle.modified_sym().raw();
+                    let first = Keysym::XF86_Switch_VT_1.raw();
+                    if (first..=Keysym::XF86_Switch_VT_12.raw()).contains(&raw) {
+                        state.suppressed_keys.insert(keycode);
+                        return FilterResult::Intercept(Some(Action::ChangeVt(
+                            (raw - first + 1) as i32,
+                        )));
+                    }
+                }
                 match key_state {
                     KeyState::Pressed if state.config.mod_key.is_pressed(mods) => {
                         let action = handle

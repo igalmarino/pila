@@ -14,8 +14,9 @@ on **Smithay 0.7.x**.
   the host GNOME desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose;
   the compositor creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it
   connect there.
-- The DRM/KMS + libinput backend cannot be tested in this container (no seat, no TTY).
-  That needs the host, from a TTY. Write that code, but ask the user to test it.
+- The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
+  container (no seat, no TTY); there it exits with "could not start a session". It needs
+  the host, from a TTY. Write that code, but ask the user to test it.
 - You can't see the screen. Ask the user to confirm anything visual.
 - No root and no package manager access. If a system library or tool is missing, say
   which Arch package is needed so the user can add it to `.devcontainer/Dockerfile`.
@@ -38,7 +39,8 @@ on **Smithay 0.7.x**.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
 - Runtime env: `PILA_MOD` (alt default / super / ctrl), `PILA_TERMINAL` (default `foot`),
   `PILA_LAUNCHER` (Mod+D, disabled if unset). Alt is the default because GNOME grabs Super
-  while nested.
+  while nested. On a TTY: `XCURSOR_THEME`/`XCURSOR_SIZE`, and the keymap from libxkbcommon's
+  `XKB_DEFAULT_LAYOUT`/`_VARIANT`/`_OPTIONS`.
 - Test clients available inside the nested compositor: `foot`, `weston-terminal`,
   `weston-simple-egl`, `wayland-info`, and `gtk4-widget-factory` / `gtk4-demo` (menus,
   popovers, dropdowns: the way to exercise popups and popup grabs). `foot` and GTK use
@@ -83,24 +85,29 @@ Key flows and invariants:
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
   builds, to the lock).
-- **Nested-only assumptions:** `cursor_image` in `handlers/mod.rs` stores the request in
-  `Pila::cursor_status` and forwards it to the winit window (`winit::apply_cursor`): named
-  shapes are drawn by the host; for client cursor surfaces the host cursor is hidden and
-  pila renders the surface itself (`src/cursor.rs`, backend-neutral; the winit redraw
-  passes it to `render_output` as a custom element and sends it frame callbacks). Winit
-  doesn't report the pointer leaving the window, so a drawn cursor lingers at the edge.
-  Keys held when the host takes focus away (e.g. Alt of GNOME's Alt+Tab) never get a
-  release event (Smithay's winit backend drops winit's synthetic ones), so
-  `WinitEvent::Focus(false)` calls `Pila::release_all_keys` to avoid stuck modifiers.
-  `Pila::new` hard-codes a keyboard and pointer. A DRM/libinput backend must also draw
-  named shapes itself (xcursor theme) and track input-device hotplug. `Pila::backend` holds the winit backend so `DmabufHandler`
-  (`handlers/compositor.rs`) can test-import client buffers; a DRM backend needs its own
-  renderer there and must create the linux-dmabuf global itself (see `winit::init_dmabuf`).
-  Other single-output, winit-only shortcuts: `process_input_event` handles only absolute
-  pointer motion and derives relative motion from it (libinput sends relative motion), motion is mapped onto the first output,
-  and `fullscreen_request` ignores the requested output. Smithay is built with
-  `default-features = false` and only the winit features, so a DRM backend must also add
-  features such as `backend_drm`, `backend_libinput` and `backend_session_libseat` in `Cargo.toml`.
+- **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,
+  `winit.rs`) or `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev.rs`), chosen by
+  `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY` is set. Code outside the backends
+  uses `Backend`'s methods (renderer for dmabuf imports, `queue_redraw`, `cursor_changed`,
+  LEDs, VT switch) rather than matching. Both feed the same `scene()`, `render.rs`,
+  `frame.rs` and `post_render`. `Pila::new` hard-codes a keyboard and pointer for both.
+- **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`);
+  client cursor surfaces are drawn by pila (`cursor.rs`). Winit doesn't report the pointer
+  leaving the window, so a drawn cursor lingers at the edge. Keys held when the host takes
+  focus away (e.g. GNOME's Alt+Tab) never get a release (Smithay's winit backend drops
+  winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
+  The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
+  mapped onto the single output; relative motion is derived from it.
+- **Bare metal (udev):** one GPU (the seat's primary), outputs left to right, EDID off
+  (make/model "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor
+  theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one
+  idle `render_all`; an output with a frame in flight renders at its vblank
+  (`frame_finish`), which also sends presentation feedback with the kernel's timestamp.
+  The session lock is confirmed once every output has *shown* a locked frame.
+  `PauseSession` (VT switch away) releases held keys. Libinput gets tap-to-click and
+  keyboard LEDs; relative motion goes through the same constraint path as nested
+  (`pointer_motion`) and is clamped to the outputs. Still missing: per-output scale,
+  moving windows off removed outputs, `fullscreen_request`'s output, gestures, touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's

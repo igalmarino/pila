@@ -23,7 +23,10 @@ use smithay::{
     utils::{Logical, Physical, Point, Rectangle, Scale},
 };
 
-use crate::decoration::{self, TitleBarPart};
+use crate::{
+    cursor::NamedCursor,
+    decoration::{self, TitleBarPart},
+};
 
 /// The nested output is always scale 1.
 const SCALE: f64 = 1.0;
@@ -209,4 +212,33 @@ where
     let location: Point<i32, Physical> =
         (*location - output_location).to_physical_precise_round(scale);
     render_elements_from_surface_tree(renderer, surface, location, scale, 1.0, Kind::Cursor)
+}
+
+/// Elements for a named cursor image (drawn by pila on bare metal) with its
+/// hotspot at `pointer`, relative to an output whose top-left is at
+/// `output_location`.
+pub fn named_cursor_elements<R>(
+    renderer: &mut R,
+    cursor: &NamedCursor,
+    pointer: Point<f64, Logical>,
+    output_location: Point<i32, Logical>,
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    let scale = Scale::from(SCALE);
+    let location =
+        (pointer - cursor.hotspot.to_f64() - output_location.to_f64()).to_physical(scale);
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        location,
+        &cursor.buffer,
+        None,
+        None,
+        None,
+        Kind::Cursor,
+    )
+    .map(|element| vec![PilaRenderElement::Memory(element)])
+    .unwrap_or_default()
 }
