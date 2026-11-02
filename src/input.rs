@@ -12,7 +12,9 @@ use smithay::{
         },
     },
     utils::{Logical, Point, Serial, SERIAL_COUNTER},
-    wayland::shell::wlr_layer::Layer,
+    wayland::{
+        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat, shell::wlr_layer::Layer,
+    },
 };
 
 use crate::{
@@ -47,6 +49,7 @@ impl Pila {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        let inhibited = self.shortcuts_inhibited();
 
         let action = keyboard.input::<Option<Action>, _>(
             self,
@@ -65,7 +68,10 @@ impl Pila {
                             .filter(|action| {
                                 !state.is_locked()
                                     || (cfg!(debug_assertions) && *action == Action::Quit)
-                            });
+                            })
+                            // A client inhibiting shortcuts gets them, but
+                            // never Quit.
+                            .filter(|action| !inhibited || *action == Action::Quit);
                         if let Some(action) = action {
                             state.suppressed_keys.insert(keycode);
                             return FilterResult::Intercept(Some(action));
@@ -84,6 +90,18 @@ impl Pila {
         if let Some(action) = action.flatten() {
             self.run_action(action, serial);
         }
+    }
+
+    /// Whether the surface with keyboard focus (or the window of a focused
+    /// menu) has an active keyboard-shortcuts inhibitor.
+    fn shortcuts_inhibited(&self) -> bool {
+        let Some(focus) = self.seat.get_keyboard().and_then(|k| k.current_focus()) else {
+            return false;
+        };
+        let surface = self.popup_root(&focus).unwrap_or(focus);
+        self.seat
+            .keyboard_shortcuts_inhibitor_for_surface(&surface)
+            .is_some_and(|inhibitor| inhibitor.is_active())
     }
 
     /// Release every key pila thinks is held. Nested: when pila's host window

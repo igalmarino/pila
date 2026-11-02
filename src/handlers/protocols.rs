@@ -4,9 +4,9 @@
 
 use smithay::{
     delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
-    delegate_fractional_scale, delegate_pointer_gestures, delegate_relative_pointer,
-    delegate_single_pixel_buffer, delegate_viewporter, delegate_xdg_foreign,
-    delegate_xdg_toplevel_icon,
+    delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
+    delegate_relative_pointer, delegate_single_pixel_buffer, delegate_viewporter,
+    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     wayland::{
         compositor::{get_parent, with_states},
@@ -14,6 +14,10 @@ use smithay::{
         foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
         fractional_scale::{
             with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState,
+        },
+        keyboard_shortcuts_inhibit::{
+            KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
+            KeyboardShortcutsInhibitor,
         },
         pointer_gestures::PointerGesturesState,
         relative_pointer::RelativePointerManagerState,
@@ -32,6 +36,7 @@ pub struct Globals {
     pub xdg_foreign: XdgForeignState,
     pub ext_data_control: ext_data_control::DataControlState,
     pub foreign_toplevel_list: ForeignToplevelListState,
+    pub keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState,
 }
 
 /// Create the globals of this module.
@@ -49,6 +54,7 @@ pub fn init_globals(dh: &DisplayHandle, primary_selection: &PrimarySelectionStat
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),
         foreign_toplevel_list: ForeignToplevelListState::new::<Pila>(dh),
+        keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Pila>(dh),
         // Clipboard managers and wl-clipboard; any client may use it.
         ext_data_control: ext_data_control::DataControlState::new::<Pila, _>(
             dh,
@@ -127,3 +133,18 @@ impl ForeignToplevelListHandler for Pila {
     }
 }
 delegate_foreign_toplevel_list!(Pila);
+
+// zwp_keyboard_shortcuts_inhibit_manager_v1: VMs and remote desktops get the
+// keys pila would otherwise bind. Every request is granted; it applies while
+// the surface has keyboard focus (`Pila::shortcuts_inhibited`), so clicking
+// another window always gets out, and Quit is never inhibited.
+impl KeyboardShortcutsInhibitHandler for Pila {
+    fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
+        &mut self.globals.keyboard_shortcuts_inhibit
+    }
+
+    fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
+        inhibitor.activate();
+    }
+}
+delegate_keyboard_shortcuts_inhibit!(Pila);

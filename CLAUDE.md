@@ -78,6 +78,10 @@ Key flows and invariants:
 
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`); intercepted
   keycodes go in `suppressed_keys` so their release isn't forwarded to the client either.
+  Bindings don't run while the focused surface (or its menu's window) holds an active
+  keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted), or
+  while the session is locked; Quit is the exception to the inhibitor (and, in debug
+  builds, to the lock).
 - **Nested-only assumptions:** `cursor_image` in `handlers/mod.rs` stores the request in
   `Pila::cursor_status` and forwards it to the winit window (`winit::apply_cursor`): named
   shapes are drawn by the host; for client cursor surfaces the host cursor is hidden and
