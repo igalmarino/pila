@@ -147,9 +147,27 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
 - **Super-key shortcuts go to GNOME.** When testing your nested compositor, GNOME grabs Super.
   Use Alt-based bindings while nested.
 
-## Later: testing on real hardware
+## Running pila on a TTY (real hardware)
 
-The nested winit backend covers most development. When you add the DRM/KMS + libinput backend,
-run that build on the **host** from a TTY (Ctrl+Alt+F3), since it needs a seat and direct
-device access. Cargo builds in the container land in `target/` in this folder, so you can run
-the binary from the host directly.
+The nested winit backend covers most development. The DRM/KMS + libinput backend
+(`--backend udev`, the default when no `WAYLAND_DISPLAY`/`DISPLAY` is set) runs on the
+**host** from a TTY, since it needs a seat and direct device access. Cargo builds in the
+container land in `target/` in this folder, so the host can run the binary directly.
+
+Host packages the binary needs beyond a GNOME install:
+
+```bash
+sudo pacman -S seatd    # libseat.so; the seatd daemon isn't needed, libseat uses logind
+sudo pacman -S foot     # pila's default terminal (or set PILA_TERMINAL, e.g. kgx)
+```
+
+Then, on a free TTY (Ctrl+Alt+F3), log in and from this folder:
+
+```bash
+timeout 120 ./target/debug/pila --backend udev 2> pila-tty.log
+```
+
+The `timeout` ends it even if input doesn't work; the log (stderr) lands in the repo, where
+Claude Code can read it (`*.log` is git-ignored). Ctrl+Alt+F1..F12 switch TTYs, Mod+Shift+E
+quits. Set `PILA_MOD=super` to use Super, `XKB_DEFAULT_LAYOUT` for a non-US keymap, and
+`XCURSOR_THEME`/`XCURSOR_SIZE` for the cursor.

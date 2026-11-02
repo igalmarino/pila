@@ -61,7 +61,12 @@ enum BackendKind {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    // stderr, so `pila 2> file` captures the log (stdout is the TTY or the
+    // nested session's terminal, and clients inherit it).
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .init();
 
     let mut startup_command = None;
     let mut backend = None;
