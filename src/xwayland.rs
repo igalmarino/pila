@@ -10,7 +10,7 @@
 //! The startup command waits until X is ready (or failed), so `pila -c xterm`
 //! works.
 
-use std::process::Stdio;
+use std::{os::fd::OwnedFd, process::Stdio};
 
 use smithay::{
     delegate_xwayland_shell,
@@ -19,6 +19,17 @@ use smithay::{
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::CompositorHandler,
+        selection::{
+            data_device::{
+                clear_data_device_selection, current_data_device_selection_userdata,
+                request_data_device_client_selection, set_data_device_selection,
+            },
+            primary_selection::{
+                clear_primary_selection, current_primary_selection_userdata,
+                request_primary_client_selection, set_primary_selection,
+            },
+            SelectionTarget,
+        },
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
     },
     xwayland::{
@@ -28,7 +39,7 @@ use smithay::{
 };
 use tracing::{info, warn};
 
-use crate::{state::fill_state, Pila};
+use crate::{focus::KeyboardFocus, state::fill_state, Pila};
 
 impl Pila {
     /// Start Xwayland; `then_spawn` runs once X is ready (or failed to start).
@@ -267,12 +278,91 @@ impl XwmHandler for Pila {
         self.begin_resize(window, edges.into(), start, SERIAL_COUNTER.next_serial());
     }
 
+    fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
+        self.x11_selection_access(xwm)
+    }
+
+    fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
+        self.x11_new_selection(selection, mime_types);
+    }
+
+    fn send_selection(
+        &mut self,
+        _xwm: XwmId,
+        selection: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+    ) {
+        self.x11_send_selection(selection, mime_type, fd);
+    }
+
+    fn cleared_selection(&mut self, _xwm: XwmId, selection: SelectionTarget) {
+        self.x11_cleared_selection(selection);
+    }
+
     fn move_request(&mut self, _xwm: XwmId, surface: X11Surface, _button: u32) {
         let (Some(window), Some(start)) = (self.window_for_x11(&surface), x11_grab(self, &surface))
         else {
             return;
         };
         self.begin_move(window, start, SERIAL_COUNTER.next_serial());
+    }
+}
+
+// Selections (clipboard, primary) the other way: X11 apps set and read them.
+// Only the X11 app with keyboard focus may read, like Wayland's data device.
+impl Pila {
+    fn x11_selection_access(&self, xwm: XwmId) -> bool {
+        matches!(
+            self.seat.get_keyboard().and_then(|k| k.current_focus()),
+            Some(KeyboardFocus::X11(window)) if window.xwm_id() == Some(xwm)
+        )
+    }
+
+    fn x11_new_selection(&mut self, selection: SelectionTarget, mime_types: Vec<String>) {
+        match selection {
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&self.display_handle, &self.seat, mime_types, ())
+            }
+            SelectionTarget::Primary => {
+                set_primary_selection(&self.display_handle, &self.seat, mime_types, ())
+            }
+        }
+    }
+
+    fn x11_send_selection(&mut self, selection: SelectionTarget, mime_type: String, fd: OwnedFd) {
+        let result = match selection {
+            SelectionTarget::Clipboard => {
+                request_data_device_client_selection(&self.seat, mime_type, fd)
+                    .map_err(|e| e.to_string())
+            }
+            SelectionTarget::Primary => request_primary_client_selection(&self.seat, mime_type, fd)
+                .map_err(|e| e.to_string()),
+        };
+        if let Err(err) = result {
+            warn!(
+                err,
+                ?selection,
+                "failed to send a Wayland selection to an X11 app"
+            );
+        }
+    }
+
+    fn x11_cleared_selection(&mut self, selection: SelectionTarget) {
+        // Only clear what X11 set (pila's selection user data); a Wayland
+        // client's selection stays.
+        match selection {
+            SelectionTarget::Clipboard => {
+                if current_data_device_selection_userdata(&self.seat).is_some() {
+                    clear_data_device_selection(&self.display_handle, &self.seat)
+                }
+            }
+            SelectionTarget::Primary => {
+                if current_primary_selection_userdata(&self.seat).is_some() {
+                    clear_primary_selection(&self.display_handle, &self.seat)
+                }
+            }
+        }
     }
 }
 

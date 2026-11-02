@@ -19,11 +19,15 @@ use smithay::{
             primary_selection::{
                 set_primary_focus, PrimarySelectionHandler, PrimarySelectionState,
             },
-            SelectionHandler,
+            SelectionHandler, SelectionSource, SelectionTarget,
         },
         tablet_manager::TabletSeatHandler,
     },
 };
+
+use std::os::fd::OwnedFd;
+
+use tracing::warn;
 
 use crate::{focus::KeyboardFocus, Pila};
 
@@ -79,6 +83,40 @@ delegate_cursor_shape!(Pila);
 
 impl SelectionHandler for Pila {
     type SelectionUserData = ();
+
+    // A Wayland client set (or cleared) a selection: offer it to X11 apps.
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        if let Some(xwm) = self.xwm.as_mut() {
+            if let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types())) {
+                warn!(?err, ?ty, "failed to offer the selection to X11 apps");
+            }
+        }
+    }
+
+    // A Wayland client pastes a selection owned by an X11 app.
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let Some(xwm) = self.xwm.as_mut() {
+            if let Err(err) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone()) {
+                warn!(
+                    ?err,
+                    ?ty,
+                    "failed to send an X11 selection to a Wayland client"
+                );
+            }
+        }
+    }
 }
 
 impl DataDeviceHandler for Pila {
