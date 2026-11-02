@@ -28,6 +28,7 @@ RUN pacman -Syu --noconfirm --needed \
         wayland wayland-protocols libxkbcommon libinput systemd-libs seatd \
         mesa libglvnd libdisplay-info pixman \
         foot weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
+        fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         ipset bind iproute2 \
     && (command -v iptables >/dev/null || pacman -S --noconfirm iptables) \
     && rm -rf /var/cache/pacman/pkg/*
