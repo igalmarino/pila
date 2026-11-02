@@ -11,7 +11,7 @@ What you get:
   socket and GPU (`/dev/dri`) are passed into the container
 - Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
   `gtk4-widget-factory` (menus and popovers), and desktop tools to test against (`fuzzel`,
-  `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `wlr-randr`)
+  `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`)
 - Claude Code (native install) with auth and history persisted across rebuilds
 - An egress firewall so Claude Code can only reach crates.io, GitHub, Anthropic and docs.rs
 

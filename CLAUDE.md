@@ -46,9 +46,23 @@ on **Smithay 0.7.x**.
   Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
   zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
-  (data-control), `wlr-randr`.
+  (ext-data-control).
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
+
+## Protocol policy
+
+pila implements **standard protocols only**: Wayland core and the official
+`wayland-protocols` (stable, staging, and unstable where nothing newer exists). Where both
+exist, prefer the `ext-`/staging protocol over an older unstable or vendor one (e.g.
+`ext-data-control`, not `zwlr_data_control`). Vendor protocols (`wlr-*`, KDE, GNOME,
+…) are not added, even if Smithay implements them.
+
+The single exception is **`zwlr_layer_shell_v1`**: there's no standard layer shell yet and
+panels, launchers, wallpapers and notification daemons all need it. Replace it once an
+`ext` layer shell lands in `wayland-protocols` and Smithay. Missing features with no
+standard protocol (window management for taskbars, output configuration, screencopy) wait
+for one, or go through pila's own config/IPC.
 
 ## Architecture
 

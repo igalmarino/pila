@@ -3,10 +3,10 @@
 // whose state a handler must return are stored in `Pila`.
 
 use smithay::{
-    delegate_content_type, delegate_data_control, delegate_ext_data_control,
-    delegate_foreign_toplevel_list, delegate_fractional_scale, delegate_pointer_gestures,
-    delegate_relative_pointer, delegate_single_pixel_buffer, delegate_viewporter,
-    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
+    delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
+    delegate_fractional_scale, delegate_pointer_gestures, delegate_relative_pointer,
+    delegate_single_pixel_buffer, delegate_viewporter, delegate_xdg_foreign,
+    delegate_xdg_toplevel_icon,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     wayland::{
         compositor::{get_parent, with_states},
@@ -17,7 +17,7 @@ use smithay::{
         },
         pointer_gestures::PointerGesturesState,
         relative_pointer::RelativePointerManagerState,
-        selection::{ext_data_control, primary_selection::PrimarySelectionState, wlr_data_control},
+        selection::{ext_data_control, primary_selection::PrimarySelectionState},
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
         xdg_foreign::{XdgForeignHandler, XdgForeignState},
@@ -30,7 +30,6 @@ use crate::Pila;
 /// Protocol state that handlers need to hand back to Smithay.
 pub struct Globals {
     pub xdg_foreign: XdgForeignState,
-    pub wlr_data_control: wlr_data_control::DataControlState,
     pub ext_data_control: ext_data_control::DataControlState,
     pub foreign_toplevel_list: ForeignToplevelListState,
 }
@@ -47,16 +46,10 @@ pub fn init_globals(dh: &DisplayHandle, primary_selection: &PrimarySelectionStat
     RelativePointerManagerState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
 
-    // Clipboard managers and wl-clipboard. Any client may use them, as on
-    // other wlroots-style desktops.
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),
         foreign_toplevel_list: ForeignToplevelListState::new::<Pila>(dh),
-        wlr_data_control: wlr_data_control::DataControlState::new::<Pila, _>(
-            dh,
-            Some(primary_selection),
-            |_| true,
-        ),
+        // Clipboard managers and wl-clipboard; any client may use it.
         ext_data_control: ext_data_control::DataControlState::new::<Pila, _>(
             dh,
             Some(primary_selection),
@@ -118,14 +111,8 @@ impl XdgForeignHandler for Pila {
 }
 delegate_xdg_foreign!(Pila);
 
-// zwlr_data_control_v1 / ext_data_control_v1: clipboard access without focus.
-impl wlr_data_control::DataControlHandler for Pila {
-    fn data_control_state(&self) -> &wlr_data_control::DataControlState {
-        &self.globals.wlr_data_control
-    }
-}
-delegate_data_control!(Pila);
-
+// ext_data_control_v1: clipboard access without focus. (The older
+// zwlr_data_control_v1 is deliberately not offered; see CLAUDE.md.)
 impl ext_data_control::DataControlHandler for Pila {
     fn data_control_state(&self) -> &ext_data_control::DataControlState {
         &self.globals.ext_data_control

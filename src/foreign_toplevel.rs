@@ -1,7 +1,8 @@
 //! ext-foreign-toplevel-list: lets taskbars and window switchers list the
 //! open windows (title and app id). Read-only: the protocol can't activate or
-//! close windows; that needs wlr-foreign-toplevel-management, which Smithay
-//! doesn't provide.
+//! close windows, and there's no standard protocol for that yet (pila doesn't
+//! offer wlr-foreign-toplevel-management; see the protocol policy in
+//! CLAUDE.md).
 //!
 //! A window gets its handle when it's mapped (`place_new_window`), stored in
 //! its user data. Commits update the title and app id, and destroying the
