@@ -399,10 +399,77 @@ impl Pila {
     /// The part of the output under `pos` that panels (layer surfaces with an
     /// exclusive zone) leave for windows, in global coordinates.
     pub fn usable_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
-        let output = self.output_at(pos)?;
-        let output_geo = self.space.output_geometry(&output)?;
-        let zone = layer_map_for_output(&output).non_exclusive_zone();
+        self.output_area(&self.output_at(pos)?, true)
+    }
+
+    /// All of `output`, or only the `usable` part (see `usable_geometry_at`).
+    fn output_area(&self, output: &Output, usable: bool) -> Option<Rectangle<i32, Logical>> {
+        let output_geo = self.space.output_geometry(output)?;
+        if !usable {
+            return Some(output_geo);
+        }
+        let zone = layer_map_for_output(output).non_exclusive_zone();
         Some(Rectangle::new(output_geo.loc + zone.loc, zone.size))
+    }
+
+    /// An output went away (already unmapped from the space): close its
+    /// panels so their clients can recreate them elsewhere, drop its lock
+    /// surface, and bring windows and the pointer back onto the remaining
+    /// outputs.
+    pub fn output_removed(&mut self, output: &Output) {
+        let layers: Vec<_> = layer_map_for_output(output).layers().cloned().collect();
+        for layer in layers {
+            layer.layer_surface().send_close();
+        }
+        self.drop_lock_surface(output);
+
+        if let Some(pointer) = self.seat.get_pointer() {
+            let pos = pointer.current_location();
+            if self.space.output_under(pos).next().is_none() {
+                if let Some(geo) = self.output_geometry_at(pos) {
+                    pointer.set_location((geo.loc + geo.size.downscale(2).to_point()).to_f64());
+                }
+            }
+        }
+        self.fixup_windows();
+    }
+
+    /// Move windows that aren't on any output anymore onto the pointer's
+    /// output (centered), including where they return to after maximize or
+    /// fullscreen, then refit maximized and fullscreen windows.
+    pub fn fixup_windows(&mut self) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        let on_an_output = |space: &Space<Window>, rect: Rectangle<i32, Logical>| {
+            space
+                .outputs()
+                .filter_map(|o| space.output_geometry(o))
+                .any(|geo| geo.overlaps(rect))
+        };
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for window in windows {
+            let Some(area) = self.usable_geometry_at(pointer) else {
+                return;
+            };
+            let bar = decoration::layout_offset(&window, false);
+            if let Some(geo) = self.space.element_geometry(&window) {
+                if !on_an_output(&self.space, geo) {
+                    let loc = centered_location(area, geo.size, bar);
+                    debug!(?loc, "moving window off a removed output");
+                    self.space.map_element(window.clone(), loc, false);
+                }
+            }
+            if let Some(restore) = window.user_data().get::<RestoreGeometry>() {
+                let mut saved = restore.0.borrow_mut();
+                if let Some(rect) = saved.as_mut().filter(|r| !on_an_output(&self.space, **r)) {
+                    rect.loc = centered_location(area, rect.size, bar);
+                }
+            }
+        }
+        self.refit_maximized();
     }
 
     /// Geometry of the output a window is mostly on, falling back to the
@@ -449,13 +516,7 @@ impl Pila {
         let location = if maximized || fullscreen {
             output_geo.loc + Point::from((0, bar))
         } else {
-            // Center the window and its title bar together.
-            let size = window.geometry().size;
-            let mut loc = output_geo.loc
-                + Point::from((
-                    (output_geo.size.w - size.w).max(0) / 2,
-                    (output_geo.size.h - size.h - bar).max(0) / 2 + bar,
-                ));
+            let mut loc = centered_location(output_geo, window.geometry().size, bar);
             while self
                 .space
                 .elements()
@@ -566,6 +627,18 @@ impl Pila {
     /// Set a window's maximized/fullscreen states. Entering either state from
     /// a normal window remembers its geometry; leaving both restores it.
     pub fn set_fill_state(&mut self, window: &Window, maximized: bool, fullscreen: bool) {
+        self.set_fill_state_on(window, maximized, fullscreen, None);
+    }
+
+    /// `set_fill_state`, filling `output` instead of the output the window
+    /// is on (e.g. a client asked to go fullscreen on a specific monitor).
+    pub fn set_fill_state_on(
+        &mut self,
+        window: &Window,
+        maximized: bool,
+        fullscreen: bool,
+        output: Option<&Output>,
+    ) {
         let Some(toplevel) = window.toplevel() else {
             return;
         };
@@ -578,7 +651,11 @@ impl Pila {
 
         if maximized || fullscreen {
             let usable = !fullscreen;
-            let Some(mut output_geo) = self.output_geometry_for_window(window, usable) else {
+            let output_geo = match output {
+                Some(output) => self.output_area(output, usable),
+                None => self.output_geometry_for_window(window, usable),
+            };
+            let Some(mut output_geo) = output_geo else {
                 return;
             };
             // A maximized window's title bar stays visible above it.
@@ -838,6 +915,20 @@ fn set_state(
     }
 }
 
+/// Where a window of `size` goes to be centered in `area` together with its
+/// title bar (`bar` pixels above it), staying inside `area` if it's larger.
+fn centered_location(
+    area: Rectangle<i32, Logical>,
+    size: smithay::utils::Size<i32, Logical>,
+    bar: i32,
+) -> Point<i32, Logical> {
+    area.loc
+        + Point::from((
+            (area.size.w - size.w).max(0) / 2,
+            (area.size.h - size.h - bar).max(0) / 2 + bar,
+        ))
+}
+
 /// Whether a surface has a buffer attached, i.e. is mapped.
 pub fn has_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
@@ -851,4 +942,25 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_location_centers_window_and_title_bar() {
+        let area = Rectangle::new((100, 50).into(), (1000, 800).into());
+        // 600x400 window with a 30px bar: 430 tall in total.
+        let loc = centered_location(area, (600, 400).into(), 30);
+        assert_eq!(loc, Point::from((100 + 200, 50 + 185 + 30)));
+    }
+
+    #[test]
+    fn centered_location_keeps_oversized_windows_in_the_area() {
+        let area = Rectangle::new((1920, 0).into(), (1280, 720).into());
+        let loc = centered_location(area, (2000, 1000).into(), 30);
+        // Top-left corner (below the bar) instead of off the area.
+        assert_eq!(loc, Point::from((1920, 30)));
+    }
 }

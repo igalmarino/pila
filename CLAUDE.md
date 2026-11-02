@@ -106,8 +106,11 @@ Key flows and invariants:
   The session lock is confirmed once every output has *shown* a locked frame.
   `PauseSession` (VT switch away) releases held keys. Libinput gets tap-to-click and
   keyboard LEDs; relative motion goes through the same constraint path as nested
-  (`pointer_motion`) and is clamped to the outputs. Still missing: per-output scale,
-  moving windows off removed outputs, `fullscreen_request`'s output, gestures, touch.
+  (`pointer_motion`) and is clamped to the outputs. A removed output goes through
+  `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
+  pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
+  `fullscreen_request` honors the requested output for mapped windows
+  (`set_fill_state_on`). Still missing: per-output scale, gestures, touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's

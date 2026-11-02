@@ -131,6 +131,17 @@ impl Pila {
         }
     }
 
+    /// Forget the lock surface of an output that went away. The session stays
+    /// locked; the remaining outputs keep theirs.
+    pub fn drop_lock_surface(&mut self, output: &Output) {
+        self.session_lock
+            .surfaces
+            .retain(|(o, surface)| o != output && surface.alive());
+        if self.is_locked() {
+            self.focus_lock_surface(SERIAL_COUNTER.next_serial());
+        }
+    }
+
     /// Size each lock surface to its output. Call when outputs change.
     pub fn configure_lock_surfaces(&self) {
         for (output, surface) in &self.session_lock.surfaces {

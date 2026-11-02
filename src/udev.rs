@@ -457,9 +457,7 @@ fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
     info!(name = surface.output.name(), "output disconnected");
     state.display_handle.remove_global::<Pila>(surface.global);
     state.space.unmap_output(&surface.output);
-    // Windows that were only on it stay where they are until a later
-    // milestone moves them (multi-output handling).
-    state.refit_maximized();
+    state.output_removed(&surface.output);
     state.queue_redraw();
 }
 

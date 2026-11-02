@@ -26,6 +26,8 @@ use smithay::{
 };
 use tracing::{debug, warn};
 
+use smithay::output::Output;
+
 use crate::{
     state::{fill_state, has_buffer},
     Pila,
@@ -137,10 +139,19 @@ impl XdgShellHandler for Pila {
     fn fullscreen_request(
         &mut self,
         surface: ToplevelSurface,
-        _output: Option<wl_output::WlOutput>,
+        output: Option<wl_output::WlOutput>,
     ) {
-        // Single output for now; the requested output is ignored.
-        self.update_fill(&surface, |maximized, _| (maximized, true));
+        // The output the client asked for, if any; else the window's own.
+        // Not honored before the window is mapped: it then goes fullscreen
+        // on the pointer's output (`place_new_window`).
+        let output = output.as_ref().and_then(Output::from_resource);
+        match self.window_for_surface(surface.wl_surface()) {
+            Some(window) => {
+                let (maximized, _) = fill_state(&window);
+                self.set_fill_state_on(&window, maximized, true, output.as_ref());
+            }
+            None => self.update_fill(&surface, |maximized, _| (maximized, true)),
+        }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
