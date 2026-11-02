@@ -60,9 +60,11 @@ exist, prefer the `ext-`/staging protocol over an older unstable or vendor one (
 
 The single exception is **`zwlr_layer_shell_v1`**: there's no standard layer shell yet and
 panels, launchers, wallpapers and notification daemons all need it. Replace it once an
-`ext` layer shell lands in `wayland-protocols` and Smithay. Missing features with no
-standard protocol (window management for taskbars, output configuration, screencopy) wait
-for one, or go through pila's own config/IPC.
+`ext` layer shell lands in `wayland-protocols` and Smithay. Features with no standard
+protocol (window management for taskbars, output configuration) wait for one, or go
+through pila's own config/IPC. A standard protocol that Smithay doesn't implement (e.g.
+`ext-image-copy-capture` for screen capture) is implemented in pila on the bindings from
+the `wayland-protocols` crate, not swapped for a vendor one.
 
 ## Architecture
 
