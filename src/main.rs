@@ -16,6 +16,7 @@ mod decoration;
 mod foreign_toplevel;
 mod grabs;
 mod handlers;
+mod idle;
 mod input;
 mod layers;
 mod render;

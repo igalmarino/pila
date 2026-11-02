@@ -7,7 +7,10 @@ use smithay::{
     delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
     delegate_relative_pointer, delegate_single_pixel_buffer, delegate_viewporter,
     delegate_xdg_foreign, delegate_xdg_toplevel_icon,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    reexports::{
+        calloop::LoopHandle,
+        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+    },
     wayland::{
         compositor::{get_parent, with_states},
         content_type::ContentTypeState,
@@ -15,6 +18,8 @@ use smithay::{
         fractional_scale::{
             with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState,
         },
+        idle_inhibit::IdleInhibitManagerState,
+        idle_notify::IdleNotifierState,
         keyboard_shortcuts_inhibit::{
             KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
             KeyboardShortcutsInhibitor,
@@ -37,10 +42,15 @@ pub struct Globals {
     pub ext_data_control: ext_data_control::DataControlState,
     pub foreign_toplevel_list: ForeignToplevelListState,
     pub keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState,
+    pub idle_notifier: IdleNotifierState<Pila>,
 }
 
 /// Create the globals of this module.
-pub fn init_globals(dh: &DisplayHandle, primary_selection: &PrimarySelectionState) -> Globals {
+pub fn init_globals(
+    dh: &DisplayHandle,
+    loop_handle: &LoopHandle<'static, Pila>,
+    primary_selection: &PrimarySelectionState,
+) -> Globals {
     // Stateless as far as pila is concerned: the global lives on after the
     // state is dropped.
     ViewporterState::new::<Pila>(dh);
@@ -50,11 +60,14 @@ pub fn init_globals(dh: &DisplayHandle, primary_selection: &PrimarySelectionStat
     PointerGesturesState::new::<Pila>(dh);
     RelativePointerManagerState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
+    // Its handler is in `idle.rs`.
+    IdleInhibitManagerState::new::<Pila>(dh);
 
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),
         foreign_toplevel_list: ForeignToplevelListState::new::<Pila>(dh),
         keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Pila>(dh),
+        idle_notifier: IdleNotifierState::new(dh, loop_handle.clone()),
         // Clipboard managers and wl-clipboard; any client may use it.
         ext_data_control: ext_data_control::DataControlState::new::<Pila, _>(
             dh,

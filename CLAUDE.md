@@ -150,6 +150,11 @@ Key flows and invariants:
   rogue client's `unlock_and_destroy`, so `unlock` defers to `finish_unlock`, which only
   unlocks once the holder's lock object is gone. A dead locker leaves the session locked;
   a new locker may take over.
+- **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event calls
+  `notify_activity`; Smithay runs the notification timers on `loop_handle`. Idle inhibitors
+  only count while their surface is part of a mapped window or layer surface and the
+  session isn't locked; `update_idle_inhibit` re-checks after every frame. A new input path
+  must go through `process_input_event` (or call `notify_activity`) to count as activity.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.

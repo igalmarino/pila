@@ -193,6 +193,7 @@ fn redraw(
     }
 
     state.space.refresh();
+    state.update_idle_inhibit();
     layer_map_for_output(output).cleanup();
     state.popups.cleanup();
     let _ = state.display_handle.flush_clients();

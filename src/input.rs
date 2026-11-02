@@ -30,6 +30,7 @@ const BTN_RIGHT: u32 = 0x111;
 
 impl Pila {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        self.notify_activity();
         match event {
             InputEvent::Keyboard { event, .. } => self.on_keyboard::<I>(event),
             InputEvent::PointerMotionAbsolute { event, .. } => {

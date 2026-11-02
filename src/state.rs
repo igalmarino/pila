@@ -48,6 +48,7 @@ use crate::{
     decoration::{self, Decoration},
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
     handlers::protocols::{self, Globals},
+    idle::IdleInhibitors,
     render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
     session_lock::SessionLock,
 };
@@ -90,6 +91,7 @@ pub struct Pila {
     pub session_lock: SessionLock,
     /// State of the simpler protocols (`handlers/protocols.rs`).
     pub globals: Globals,
+    pub idle_inhibitors: IdleInhibitors,
 
     pub seat: Seat<Self>,
     /// Cursor most recently requested by the client under the pointer.
@@ -122,7 +124,8 @@ impl Pila {
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(&dh);
         let dmabuf_state = DmabufState::new();
         let popups = PopupManager::default();
-        let globals = protocols::init_globals(&dh, &primary_selection_state);
+        let loop_handle = event_loop.handle();
+        let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
 
         let mut seat_state = SeatState::new();
@@ -135,7 +138,6 @@ impl Pila {
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
-        let loop_handle = event_loop.handle();
 
         Self {
             start_time,
@@ -163,6 +165,7 @@ impl Pila {
             session_lock_state,
             session_lock: SessionLock::default(),
             globals,
+            idle_inhibitors: IdleInhibitors::default(),
             seat,
             cursor_status: CursorImageStatus::default_named(),
             backend: None,
