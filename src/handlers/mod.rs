@@ -25,12 +25,12 @@ use smithay::{
     },
 };
 
-use crate::Pila;
+use crate::{focus::KeyboardFocus, Pila};
 
 // wl_seat
 
 impl SeatHandler for Pila {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = KeyboardFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -54,9 +54,10 @@ impl SeatHandler for Pila {
         }
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
+        let focused = focused.and_then(KeyboardFocus::surface);
         // A pointer constraint only holds while its window has keyboard focus.
-        self.release_constraint_for_focus(focused);
+        self.release_constraint_for_focus(focused.as_ref());
         // Clipboard and primary selection offers follow keyboard focus.
         let dh = &self.display_handle;
         let client = focused.and_then(|s| dh.get_client(s.id()).ok());

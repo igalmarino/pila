@@ -77,6 +77,7 @@ impl Pila {
             .is_some_and(|enter| serial.is_no_older_than(&enter));
         let focused_client = keyboard
             .current_focus()
+            .and_then(|focus| focus.surface())
             .and_then(|focus| self.display_handle.get_client(focus.id()).ok())
             .map(|client| client.id());
         Seat::from_resource(seat).as_ref() == Some(&self.seat)

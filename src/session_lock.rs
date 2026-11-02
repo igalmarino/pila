@@ -113,8 +113,8 @@ impl Pila {
             })
             .map(|s| s.wl_surface().clone());
         if let Some(keyboard) = self.seat.get_keyboard() {
-            if keyboard.current_focus() != surface {
-                keyboard.set_focus(self, surface, serial);
+            if self.keyboard_focus() != surface {
+                keyboard.set_focus(self, surface.map(Into::into), serial);
             }
         }
     }

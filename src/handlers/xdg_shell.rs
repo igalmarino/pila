@@ -59,11 +59,7 @@ impl XdgShellHandler for Pila {
         self.unmapped
             .retain(|w| w.toplevel().is_some_and(|t| t.wl_surface() != wl_surface));
 
-        let was_focused = self
-            .seat
-            .get_keyboard()
-            .and_then(|k| k.current_focus())
-            .is_some_and(|focus| &focus == wl_surface);
+        let was_focused = self.keyboard_focus().as_ref() == Some(wl_surface);
 
         if let Some(window) = self.window_for_surface(wl_surface) {
             self.remove_foreign_toplevel(&window);
@@ -174,7 +170,7 @@ impl XdgShellHandler for Pila {
         }) else {
             return;
         };
-        let mut grab = match self.popups.grab_popup(root, kind, &seat, serial) {
+        let mut grab = match self.popups.grab_popup(root.into(), kind, &seat, serial) {
             Ok(grab) => grab,
             Err(err) => {
                 debug!(?err, "popup grab denied");

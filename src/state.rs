@@ -30,6 +30,7 @@ use smithay::{
         dmabuf::DmabufState,
         output::OutputManagerState,
         presentation::PresentationState,
+        seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::SessionLockManagerState,
         shell::{
@@ -47,6 +48,7 @@ use crate::{
     backend::Backend,
     config::{Action, Config},
     decoration::{self, Decoration},
+    focus::KeyboardFocus,
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
     handlers::protocols::{self, Globals},
     idle::IdleInhibitors,
@@ -368,12 +370,18 @@ impl Pila {
     /// The window with keyboard focus. While a menu is open the focus is on
     /// the popup, so this resolves it to the popup's parent window.
     pub fn focused_window(&self) -> Option<Window> {
-        let focus = self.seat.get_keyboard()?.current_focus()?;
+        let focus = self.keyboard_focus()?;
         let focus = self.popup_root(&focus).unwrap_or(focus);
         self.space
             .elements()
-            .find(|w| w.toplevel().is_some_and(|t| *t.wl_surface() == focus))
+            .find(|w| w.wl_surface().is_some_and(|s| *s == focus))
             .cloned()
+    }
+
+    /// The surface with keyboard focus (an X11 window's Wayland surface for
+    /// X11 focus), if any.
+    pub fn keyboard_focus(&self) -> Option<WlSurface> {
+        self.seat.get_keyboard()?.current_focus()?.surface()
     }
 
     /// The toplevel surface a popup belongs to, if `surface` is a popup.
@@ -546,12 +554,14 @@ impl Pila {
         }
         // A popup grab ignores focus changes, so close the menu first.
         self.dismiss_popup_grab();
-        let exclusive = self.exclusive_layer().map(|l| l.wl_surface().clone());
+        let exclusive = self
+            .exclusive_layer()
+            .map(|l| KeyboardFocus::from(l.wl_surface().clone()));
         match window {
             Some(window) => {
                 self.space.raise_element(&window, true);
-                let surface = window.toplevel().map(|t| t.wl_surface().clone());
-                keyboard.set_focus(self, exclusive.or(surface), serial);
+                let target = focus_target(&window);
+                keyboard.set_focus(self, exclusive.or(target), serial);
             }
             None => {
                 for w in self.space.elements() {
@@ -579,7 +589,7 @@ impl Pila {
             return;
         }
         // A dead focus (its window was just destroyed) has no popups left to close.
-        if let Some(focus) = keyboard.current_focus().filter(|f| f.is_alive()) {
+        if let Some(focus) = self.keyboard_focus().filter(|f| f.is_alive()) {
             let root = self.popup_root(&focus).unwrap_or(focus);
             for (popup, _) in PopupManager::popups_for_surface(&root) {
                 let _ = PopupManager::dismiss_popup(&root, &popup);
@@ -913,6 +923,17 @@ fn set_state(
     } else {
         states.unset(state);
     }
+}
+
+/// What to give keyboard focus to for `window`: its xdg toplevel surface, or
+/// the X11 window (so Smithay also sets the X input focus).
+fn focus_target(window: &Window) -> Option<KeyboardFocus> {
+    if let Some(x11) = window.x11_surface() {
+        return Some(x11.clone().into());
+    }
+    window
+        .toplevel()
+        .map(|toplevel| toplevel.wl_surface().clone().into())
 }
 
 /// Where a window of `size` goes to be centered in `area` together with its

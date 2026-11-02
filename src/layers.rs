@@ -105,7 +105,7 @@ impl Pila {
 
     /// Whether keyboard focus is on `surface` or one of its popups.
     pub fn has_keyboard_focus(&self, surface: &WlSurface) -> bool {
-        let Some(focus) = self.seat.get_keyboard().and_then(|k| k.current_focus()) else {
+        let Some(focus) = self.keyboard_focus() else {
             return false;
         };
         self.popup_root(&focus).unwrap_or(focus) == *surface
@@ -121,7 +121,7 @@ impl Pila {
             return;
         };
         self.dismiss_popup_grab();
-        keyboard.set_focus(self, Some(layer.wl_surface().clone()), serial);
+        keyboard.set_focus(self, Some(layer.wl_surface().clone().into()), serial);
     }
 
     /// Called on every `wl_surface.commit`: lays out the surface's output,

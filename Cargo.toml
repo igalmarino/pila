@@ -30,4 +30,6 @@ features = [
     "backend_libinput",
     "backend_udev",
     "backend_session_libseat",
+    # X11 apps (`xwayland.rs`)
+    "xwayland",
 ]

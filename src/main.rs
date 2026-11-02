@@ -14,6 +14,7 @@ mod backend;
 mod config;
 mod cursor;
 mod decoration;
+mod focus;
 mod foreign_toplevel;
 mod frame;
 mod grabs;
