@@ -48,7 +48,7 @@ on **Smithay 0.7.x**.
   Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
   zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
-  (ext-data-control).
+  (ext-data-control). X11 (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 
