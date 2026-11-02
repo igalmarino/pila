@@ -1,13 +1,18 @@
 use std::{cell::RefCell, collections::HashSet, ffi::OsString, process::Command, sync::Arc};
 
 use smithay::{
+    backend::renderer::utils::with_renderer_surface_state,
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
-    desktop::{find_popup_root_surface, PopupManager, Space, Window, WindowSurfaceType},
+    desktop::{
+        find_popup_root_surface, layer_map_for_output, LayerSurface, PopupManager, Space, Window,
+        WindowSurfaceType,
+    },
     input::{
         keyboard::Keycode,
         pointer::{CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData},
         Seat, SeatHandler, SeatState,
     },
+    output::Output,
     reexports::{
         calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
         wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -24,7 +29,10 @@ use smithay::{
         dmabuf::DmabufState,
         output::OutputManagerState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
-        shell::xdg::{decoration::XdgDecorationState, XdgShellState},
+        shell::{
+            wlr_layer::{Layer, WlrLayerShellState},
+            xdg::{decoration::XdgDecorationState, XdgShellState},
+        },
         shm::ShmState,
         socket::ListeningSocketSource,
         xdg_activation::XdgActivationState,
@@ -36,7 +44,7 @@ use crate::{
     config::{Action, Config},
     decoration::{self, Decoration},
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
-    render::{SceneTitleBar, SceneWindow},
+    render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
     CalloopData,
 };
 
@@ -60,6 +68,7 @@ pub struct Pila {
     // Smithay protocol state
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Pila>,
@@ -93,6 +102,7 @@ impl Pila {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -125,6 +135,7 @@ impl Pila {
             suppressed_keys: HashSet::new(),
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             shm_state,
             output_manager_state,
             seat_state,
@@ -189,15 +200,34 @@ impl Pila {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        match self.element_under(pos)? {
-            (_, Hit::Surface(surface, origin)) => Some((surface, origin)),
-            (_, Hit::Decoration(_)) => None,
+        match self.under(pos)? {
+            Under::Layer(_, surface, origin) | Under::Window(_, Hit::Surface(surface, origin)) => {
+                Some((surface, origin))
+            }
+            Under::Window(_, Hit::Decoration(_)) => None,
         }
+    }
+
+    /// What's under `pos`, in stacking order: layer surfaces above the
+    /// windows, the windows, then layer surfaces below them.
+    pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
+        let (upper, lower) = self.layer_order();
+        let layer = |layers| {
+            self.layer_surface_under(layers, pos)
+                .map(|(layer, surface, origin)| Under::Layer(layer, surface, origin))
+        };
+        layer(upper)
+            .or_else(|| {
+                self.window_under(pos)
+                    .map(|(window, hit)| Under::Window(window, hit))
+            })
+            .or_else(|| layer(lower))
     }
 
     /// The topmost window under `pos` and what part of it was hit. Per window,
     /// front to back: title bar, client surfaces (incl. popups), resize border.
-    pub fn element_under(&self, pos: Point<f64, Logical>) -> Option<(Window, Hit)> {
+    /// Ignores layer surfaces; use `under` for anything input-related.
+    fn window_under(&self, pos: Point<f64, Logical>) -> Option<(Window, Hit)> {
         self.space.elements().rev().find_map(|window| {
             let loc = self.space.element_location(window)?;
             if let Some(bar) = decoration::title_bar_rect(window, loc) {
@@ -218,17 +248,35 @@ impl Pila {
         })
     }
 
-    /// Mapped windows front to back, with what's needed to draw their title
-    /// bars. Collected up front so a backend can render without borrowing `self`.
-    pub fn scene(&self) -> Vec<SceneWindow> {
+    /// Layer surfaces and mapped windows front to back, with what's needed to
+    /// draw title bars. Collected up front so a backend can render without
+    /// borrowing `self`.
+    pub fn scene(&self) -> Scene {
+        let (upper, lower) = self.layer_order();
+        let layers = |layers| {
+            self.layer_surfaces(layers)
+                .into_iter()
+                .map(|(layer, location)| SceneLayer { layer, location })
+                .collect()
+        };
+        Scene {
+            upper: layers(upper),
+            windows: self.scene_windows(),
+            lower: layers(lower),
+        }
+    }
+
+    fn scene_windows(&self) -> Vec<SceneWindow> {
         let focused = self.focused_window();
         let pointer = self
             .seat
             .get_pointer()
             .map(|p| p.current_location())
             .unwrap_or_default();
-        let hovered = match self.element_under(pointer) {
-            Some((window, Hit::Decoration(Decoration::TitleBar(part)))) => Some((window, part)),
+        let hovered = match self.under(pointer) {
+            Some(Under::Window(window, Hit::Decoration(Decoration::TitleBar(part)))) => {
+                Some((window, part))
+            }
             _ => None,
         };
         self.space
@@ -274,28 +322,50 @@ impl Pila {
     }
 
     /// The toplevel surface a popup belongs to, if `surface` is a popup.
-    fn popup_root(&self, surface: &WlSurface) -> Option<WlSurface> {
+    pub fn popup_root(&self, surface: &WlSurface) -> Option<WlSurface> {
         let popup = self.popups.find_popup(surface)?;
         find_popup_root_surface(&popup).ok()
     }
 
-    /// Geometry of the output under `pos`, or the first output.
-    pub fn output_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
-        let output = self
-            .space
+    /// The output under `pos`, or the first output.
+    pub fn output_at(&self, pos: Point<f64, Logical>) -> Option<Output> {
+        self.space
             .output_under(pos)
             .next()
-            .or_else(|| self.space.outputs().next())?;
-        self.space.output_geometry(output)
+            .or_else(|| self.space.outputs().next())
+            .cloned()
     }
 
-    /// Geometry of the output a window is mostly on, falling back to the pointer's output.
-    fn output_geometry_for_window(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+    /// Geometry of the output under `pos`, or the first output.
+    pub fn output_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        self.space.output_geometry(&self.output_at(pos)?)
+    }
+
+    /// The part of the output under `pos` that panels (layer surfaces with an
+    /// exclusive zone) leave for windows, in global coordinates.
+    pub fn usable_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        let output = self.output_at(pos)?;
+        let output_geo = self.space.output_geometry(&output)?;
+        let zone = layer_map_for_output(&output).non_exclusive_zone();
+        Some(Rectangle::new(output_geo.loc + zone.loc, zone.size))
+    }
+
+    /// Geometry of the output a window is mostly on, falling back to the
+    /// pointer's output: all of it, or only the `usable` part.
+    fn output_geometry_for_window(
+        &self,
+        window: &Window,
+        usable: bool,
+    ) -> Option<Rectangle<i32, Logical>> {
         let pos = match self.space.element_geometry(window) {
             Some(geo) => (geo.loc + geo.size.downscale(2).to_point()).to_f64(),
             None => self.seat.get_pointer()?.current_location(),
         };
-        self.output_geometry_at(pos)
+        if usable {
+            self.usable_geometry_at(pos)
+        } else {
+            self.output_geometry_at(pos)
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -311,11 +381,14 @@ impl Pila {
             .get_pointer()
             .map(|p| p.current_location())
             .unwrap_or_default();
-        let output_geo = self
-            .output_geometry_at(pointer_location)
-            .unwrap_or_else(|| Rectangle::from_size((800, 600).into()));
-
         let (maximized, fullscreen) = fill_state(&window);
+        let output_geo = if fullscreen {
+            self.output_geometry_at(pointer_location)
+        } else {
+            self.usable_geometry_at(pointer_location)
+        }
+        .unwrap_or_else(|| Rectangle::from_size((800, 600).into()));
+
         // Room for the title bar above the window, if pila draws one.
         let bar = decoration::layout_offset(&window, fullscreen);
         let location = if maximized || fullscreen {
@@ -343,24 +416,27 @@ impl Pila {
         self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());
     }
 
-    /// Give keyboard focus to `window` and raise it, or clear focus.
+    /// Give keyboard focus to `window` and raise it, or clear focus. While a
+    /// layer surface holds exclusive focus (`exclusive_layer`), the window is
+    /// only raised and the keyboard stays with the layer surface.
     pub fn focus_window(&mut self, window: Option<Window>, serial: Serial) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
         // A popup grab ignores focus changes, so close the menu first.
         self.dismiss_popup_grab();
+        let exclusive = self.exclusive_layer().map(|l| l.wl_surface().clone());
         match window {
             Some(window) => {
                 self.space.raise_element(&window, true);
                 let surface = window.toplevel().map(|t| t.wl_surface().clone());
-                keyboard.set_focus(self, surface, serial);
+                keyboard.set_focus(self, exclusive.or(surface), serial);
             }
             None => {
                 for w in self.space.elements() {
                     w.set_activated(false);
                 }
-                keyboard.set_focus(self, None, serial);
+                keyboard.set_focus(self, exclusive, serial);
             }
         }
         for w in self.space.elements() {
@@ -373,7 +449,7 @@ impl Pila {
     /// If a menu holds a popup grab, dismiss its popups and release the
     /// keyboard grab. The pointer grab ends itself once the client destroys
     /// the dismissed popups.
-    fn dismiss_popup_grab(&mut self) {
+    pub fn dismiss_popup_grab(&mut self) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -389,6 +465,27 @@ impl Pila {
             }
         }
         keyboard.unset_grab(self);
+    }
+
+    /// Focus the topmost window, e.g. after the focused surface went away.
+    pub fn focus_top_window(&mut self, serial: Serial) {
+        let top = self.space.elements().next_back().cloned();
+        self.focus_window(top, serial);
+    }
+
+    /// Fit maximized windows to the usable area again after it changed (a
+    /// panel appeared, resized or went away, or the output was resized).
+    pub fn refit_maximized(&mut self) {
+        let windows: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|w| fill_state(w) != (false, false))
+            .cloned()
+            .collect();
+        for window in windows {
+            let (maximized, fullscreen) = fill_state(&window);
+            self.set_fill_state(&window, maximized, fullscreen);
+        }
     }
 
     /// Raise the bottom-most window: repeated presses walk through all windows.
@@ -420,7 +517,8 @@ impl Pila {
         let restore = &window.user_data().get::<RestoreGeometry>().unwrap().0;
 
         if maximized || fullscreen {
-            let Some(mut output_geo) = self.output_geometry_for_window(window) else {
+            let usable = !fullscreen;
+            let Some(mut output_geo) = self.output_geometry_for_window(window, usable) else {
                 return;
             };
             // A maximized window's title bar stays visible above it.
@@ -594,8 +692,25 @@ impl Pila {
     }
 }
 
-/// What's under a point: a client surface (with its origin in global
-/// coordinates), or a part of a window that pila draws or handles itself.
+/// What's under a point: a layer surface (with the surface hit and its origin
+/// in global coordinates), or a window and the part of it that was hit.
+pub enum Under {
+    Layer(LayerSurface, WlSurface, Point<f64, Logical>),
+    Window(Window, Hit),
+}
+
+impl Under {
+    /// The layer it's on, for a layer surface.
+    pub fn layer(&self) -> Option<Layer> {
+        match self {
+            Under::Layer(layer, ..) => Some(layer.layer()),
+            Under::Window(..) => None,
+        }
+    }
+}
+
+/// What part of a window is under a point: a client surface (with its origin
+/// in global coordinates), or a part that pila draws or handles itself.
 pub enum Hit {
     Surface(WlSurface, Point<f64, Logical>),
     Decoration(Decoration),
@@ -634,6 +749,11 @@ fn set_state(
     } else {
         states.unset(state);
     }
+}
+
+/// Whether a surface has a buffer attached, i.e. is mapped.
+pub fn has_buffer(surface: &WlSurface) -> bool {
+    with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }
 
 #[derive(Default)]

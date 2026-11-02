@@ -1,9 +1,8 @@
 use smithay::{
-    backend::renderer::utils::with_renderer_surface_state,
     delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
-        find_popup_root_surface, get_popup_toplevel_coords, PopupKeyboardGrab, PopupKind,
-        PopupPointerGrab, PopupUngrabStrategy, Window,
+        find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
+        PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window,
     },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
@@ -27,7 +26,10 @@ use smithay::{
 };
 use tracing::{debug, warn};
 
-use crate::{state::fill_state, Pila};
+use crate::{
+    state::{fill_state, has_buffer},
+    Pila,
+};
 
 impl XdgShellHandler for Pila {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -41,7 +43,7 @@ impl XdgShellHandler for Pila {
             .get_pointer()
             .map(|p| p.current_location())
             .unwrap_or_default();
-        if let Some(output_geo) = self.output_geometry_at(pointer_location) {
+        if let Some(output_geo) = self.usable_geometry_at(pointer_location) {
             surface.with_pending_state(|state| {
                 state.bounds = Some(output_geo.size);
             });
@@ -151,10 +153,9 @@ impl XdgShellHandler for Pila {
             return;
         };
         let kind = PopupKind::Xdg(surface);
-        let Some(root) = find_popup_root_surface(&kind)
-            .ok()
-            .filter(|root| self.window_for_surface(root).is_some())
-        else {
+        let Some(root) = find_popup_root_surface(&kind).ok().filter(|root| {
+            self.window_for_surface(root).is_some() || self.layer_for_surface(root).is_some()
+        }) else {
             return;
         };
         let mut grab = match self.popups.grab_popup(root, kind, &seat, serial) {
@@ -288,31 +289,40 @@ impl Pila {
         }
     }
 
-    fn unconstrain_popup(&self, popup: &PopupSurface) {
+    /// Keep a popup inside its parent's output. The parent is a window or a
+    /// layer surface.
+    pub fn unconstrain_popup(&self, popup: &PopupSurface) {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self.window_for_surface(&root) else {
-            return;
-        };
-        let Some(window_geo) = self.space.element_geometry(&window) else {
-            return;
-        };
-        let Some(output_geo) = self.output_geometry_at(window_geo.loc.to_f64()) else {
+        // Where the root's geometry origin is, and the output it's on.
+        let (parent_loc, output_geo) = if let Some(window) = self.window_for_surface(&root) {
+            let Some(window_geo) = self.space.element_geometry(&window) else {
+                return;
+            };
+            let Some(output_geo) = self.output_geometry_at(window_geo.loc.to_f64()) else {
+                return;
+            };
+            (window_geo.loc, output_geo)
+        } else if let Some((output, layer)) = self.layer_for_surface(&root) {
+            let Some(output_geo) = self.space.output_geometry(&output) else {
+                return;
+            };
+            let Some(layer_geo) = layer_map_for_output(&output).layer_geometry(&layer) else {
+                return;
+            };
+            (output_geo.loc + layer_geo.loc, output_geo)
+        } else {
             return;
         };
 
         // The positioner's target rectangle is relative to the parent's geometry.
         let mut target = output_geo;
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= window_geo.loc;
+        target.loc -= parent_loc;
 
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
     }
-}
-
-fn has_buffer(surface: &WlSurface) -> bool {
-    with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }

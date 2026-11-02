@@ -8,7 +8,7 @@ use smithay::{
         renderer::{damage::OutputDamageTracker, gles::GlesRenderer, ImportDma},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::utils::send_frames_surface_tree,
+    desktop::{layer_map_for_output, utils::send_frames_surface_tree},
     input::pointer::CursorImageStatus,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::{
@@ -82,6 +82,8 @@ pub fn init_winit(
                         None,
                         None,
                     );
+                    layer_map_for_output(&output).arrange();
+                    state.refit_maximized();
                     full_redraw = 4;
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
@@ -168,6 +170,13 @@ fn redraw(
             Some(output.clone())
         });
     }
+    for entry in scene.layers() {
+        entry
+            .layer
+            .send_frame(output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+    }
     if let Some((surface, _)) = &cursor {
         send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
             Some(output.clone())
@@ -175,6 +184,7 @@ fn redraw(
     }
 
     state.space.refresh();
+    layer_map_for_output(output).cleanup();
     state.popups.cleanup();
     let _ = display.flush_clients();
 

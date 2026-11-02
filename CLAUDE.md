@@ -43,6 +43,10 @@ on **Smithay 0.7.x**.
   `weston-simple-egl`, `wayland-info`, and `gtk4-widget-factory` / `gtk4-demo` (menus,
   popovers, dropdowns: the way to exercise popups and popup grabs). `foot` and GTK use
   cursor-shape (named cursors); `weston-terminal` draws its own cursor surfaces.
+  Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
+  zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
+  `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
+  (data-control), `wlr-randr`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 
@@ -99,6 +103,16 @@ Key flows and invariants:
   use `window_for_surface`, which searches both.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises and sets keyboard focus, then flushes pending configures.
+- **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
+  output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
+  Background; a fullscreen window on top also covers Top (`layer_order`). All pointer
+  hit testing goes through `Pila::under` (layers and windows in that order; `window_under`
+  is windows only), and `Pila::scene` renders the same order. Placement, maximize and
+  toplevel bounds use `usable_geometry_at` (the output minus exclusive zones); fullscreen
+  uses the whole output. When the zone or output size changes, `refit_maximized` re-applies
+  fill states. A mapped Top/Overlay surface with exclusive keyboard interactivity
+  (`exclusive_layer`) keeps keyboard focus: `focus_window` then only raises. Popups may
+  have a layer-surface root (`unconstrain_popup`, popup `grab`).
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.
@@ -106,8 +120,8 @@ Key flows and invariants:
   (`handlers/xdg_shell.rs`); clients that don't bind xdg-decoration (GTK, weston) draw
   their own. A decorated window's `Space` location is still its geometry origin; the title
   bar (`TITLE_BAR_HEIGHT`) sits above it and an invisible resize border surrounds both.
-  Hit testing goes through `Pila::element_under`, which returns a `Hit` (client surface or
-  `Decoration`) front to back; `surface_under` (pointer focus) ignores decorations. Layout
+  Hit testing goes through `Pila::under`, which for a window returns a `Hit` (client
+  surface or `Decoration`) front to back; `surface_under` (pointer focus) ignores decorations. Layout
   (placement, maximize) uses the *pending* decoration mode via `layout_offset`; drawing and
   hit testing use the *committed* state (`has_title_bar`). Bar textures (buttons, title)
   are per-window `MemoryRenderBuffer`s cached by a key and re-rendered only when it changes;

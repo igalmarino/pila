@@ -12,12 +12,13 @@ use smithay::{
         },
     },
     utils::{Logical, Point, Serial, SERIAL_COUNTER},
+    wayland::shell::wlr_layer::Layer,
 };
 
 use crate::{
     decoration::{Decoration, TitleBarPart},
     grabs::resize_grab::ResizeEdge,
-    state::{fill_state, Hit, Pila},
+    state::{fill_state, Hit, Pila, Under},
 };
 
 // Linux input event codes (linux/input-event-codes.h).
@@ -146,9 +147,11 @@ impl Pila {
     /// Resize arrows over a window's resize border, the default arrow over a
     /// title bar or the background. Client surfaces set their own.
     fn update_decoration_cursor(&mut self, pos: Point<f64, Logical>) {
-        let icon = match self.element_under(pos) {
-            Some((_, Hit::Surface(..))) => return,
-            Some((_, Hit::Decoration(Decoration::Border(edges)))) => edges.cursor_icon(),
+        let icon = match self.under(pos) {
+            Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..)) => return,
+            Some(Under::Window(_, Hit::Decoration(Decoration::Border(edges)))) => {
+                edges.cursor_icon()
+            }
             _ => CursorIcon::Default,
         };
         let status = CursorImageStatus::Named(icon);
@@ -198,8 +201,19 @@ impl Pila {
         if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
             let location = pointer.current_location();
 
-            match self.element_under(location) {
-                Some((window, hit)) => {
+            match self.under(location) {
+                // Panels and launchers: focus the ones that take keyboard
+                // input. Clicking the wallpaper is like clicking the empty
+                // background.
+                Some(Under::Layer(layer, ..)) if layer.can_receive_keyboard_focus() => {
+                    self.focus_layer(&layer, serial)
+                }
+                Some(under @ Under::Layer(..)) => {
+                    if under.layer() == Some(Layer::Background) {
+                        self.focus_window(None, serial);
+                    }
+                }
+                Some(Under::Window(window, hit)) => {
                     // Click to focus and raise.
                     self.focus_window(Some(window.clone()), serial);
 

@@ -16,6 +16,7 @@ mod decoration;
 mod grabs;
 mod handlers;
 mod input;
+mod layers;
 mod render;
 mod state;
 mod text;

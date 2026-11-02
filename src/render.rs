@@ -1,5 +1,6 @@
 //! Building a frame's render elements, front to back: the client cursor
-//! surface, then each window (with its popups) followed by its title bar.
+//! surface, layer surfaces above the windows, each window (with its popups)
+//! followed by its title bar, then layer surfaces below the windows.
 //!
 //! Smithay's `render_output` draws the whole `Space` at once, which can't
 //! interleave title bars with windows in stacking order, so pila builds the
@@ -17,7 +18,7 @@ use smithay::{
         },
         ImportAll, ImportMem, Renderer,
     },
-    desktop::Window,
+    desktop::{LayerSurface, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Physical, Point, Rectangle, Scale},
 };
@@ -32,6 +33,28 @@ smithay::backend::renderer::element::render_elements! {
     Surface=WaylandSurfaceRenderElement<R>,
     Solid=SolidColorRenderElement,
     Memory=MemoryRenderBufferRenderElement<R>,
+}
+
+/// Everything below the cursor, front to back (see `Pila::scene`).
+pub struct Scene {
+    /// Layer surfaces above the windows (Overlay, Top).
+    pub upper: Vec<SceneLayer>,
+    pub windows: Vec<SceneWindow>,
+    /// Layer surfaces below the windows (Bottom, Background; also Top while
+    /// a fullscreen window is on top).
+    pub lower: Vec<SceneLayer>,
+}
+
+impl Scene {
+    pub fn layers(&self) -> impl Iterator<Item = &SceneLayer> {
+        self.upper.iter().chain(&self.lower)
+    }
+}
+
+/// A layer surface and where it's drawn, in space coordinates.
+pub struct SceneLayer {
+    pub layer: LayerSurface,
+    pub location: Point<i32, Logical>,
 }
 
 /// A mapped window as it should be drawn this frame.
@@ -49,11 +72,52 @@ pub struct SceneTitleBar {
     pub hover: Option<TitleBarPart>,
 }
 
-/// Elements for the windows in `scene` (front to back), relative to an output
-/// whose top-left is at `output_location`.
+/// Elements for `scene` (front to back), relative to an output whose top-left
+/// is at `output_location`.
 pub fn scene_elements<R>(
     renderer: &mut R,
-    scene: &[SceneWindow],
+    scene: &Scene,
+    output_location: Point<i32, Logical>,
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    let mut elements = layer_elements(renderer, &scene.upper, output_location);
+    elements.extend(window_elements(renderer, &scene.windows, output_location));
+    elements.extend(layer_elements(renderer, &scene.lower, output_location));
+    elements
+}
+
+fn layer_elements<R>(
+    renderer: &mut R,
+    layers: &[SceneLayer],
+    output_location: Point<i32, Logical>,
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    let scale = Scale::from(SCALE);
+    layers
+        .iter()
+        .flat_map(|entry| {
+            let location: Point<i32, Physical> =
+                (entry.location - output_location).to_physical_precise_round(scale);
+            AsRenderElements::<R>::render_elements::<PilaRenderElement<R>>(
+                &entry.layer,
+                renderer,
+                location,
+                scale,
+                1.0,
+            )
+        })
+        .collect()
+}
+
+fn window_elements<R>(
+    renderer: &mut R,
+    windows: &[SceneWindow],
     output_location: Point<i32, Logical>,
 ) -> Vec<PilaRenderElement<R>>
 where
@@ -62,7 +126,7 @@ where
 {
     let scale = Scale::from(SCALE);
     let mut elements = Vec::new();
-    for entry in scene {
+    for entry in windows {
         let location: Point<i32, Physical> =
             (entry.render_location - output_location).to_physical_precise_round(scale);
         elements.extend(

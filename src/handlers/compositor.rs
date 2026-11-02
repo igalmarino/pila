@@ -44,6 +44,7 @@ impl CompositorHandler for Pila {
         }
 
         self.handle_xdg_commit(surface);
+        self.handle_layer_commit(surface);
         resize_grab::handle_commit(&mut self.space, surface);
         crate::cursor::handle_commit(&self.cursor_status, surface);
     }
