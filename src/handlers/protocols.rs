@@ -24,6 +24,7 @@ use smithay::{
             KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
             KeyboardShortcutsInhibitor,
         },
+        pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
         relative_pointer::RelativePointerManagerState,
         selection::{ext_data_control, primary_selection::PrimarySelectionState},
@@ -59,6 +60,8 @@ pub fn init_globals(
     FractionalScaleManagerState::new::<Pila>(dh);
     PointerGesturesState::new::<Pila>(dh);
     RelativePointerManagerState::new::<Pila>(dh);
+    // Its handler is in `pointer_constraints.rs`.
+    PointerConstraintsState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
     // Its handler is in `idle.rs`.
     IdleInhibitManagerState::new::<Pila>(dh);

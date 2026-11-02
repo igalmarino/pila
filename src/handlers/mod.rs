@@ -49,6 +49,8 @@ impl SeatHandler for Pila {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // A pointer constraint only holds while its window has keyboard focus.
+        self.release_constraint_for_focus(focused);
         // Clipboard and primary selection offers follow keyboard focus.
         let dh = &self.display_handle;
         let client = focused.and_then(|s| dh.get_client(s.id()).ok());

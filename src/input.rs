@@ -8,7 +8,7 @@ use smithay::{
         keyboard::FilterResult,
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus,
-            GrabStartData as PointerGrabStartData, MotionEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, RelativeMotionEvent,
         },
     },
     utils::{Logical, Point, Serial, SERIAL_COUNTER},
@@ -21,6 +21,7 @@ use crate::{
     config::Action,
     decoration::{Decoration, TitleBarPart},
     grabs::resize_grab::ResizeEdge,
+    pointer_constraints::Constraint,
     state::{fill_state, Hit, Pila, Under},
 };
 
@@ -152,10 +153,58 @@ impl Pila {
         };
 
         let location = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+
+        // Nested: relative motion is how far the host pointer moved.
+        let delta = self
+            .host_pointer
+            .map(|last| location - last)
+            .unwrap_or_default();
+        self.host_pointer = Some(location);
+
+        // The constraint of the surface the pointer is on now (none during
+        // pila's own move/resize grabs).
+        let current = pointer.current_location();
+        let under_current = self.surface_under(current);
+        let constraint = match &under_current {
+            Some((surface, origin)) if !pointer.is_grabbed() => {
+                self.active_constraint(surface, *origin, current)
+            }
+            _ => Constraint::None,
+        };
+        pointer.relative_motion(
+            self,
+            under_current.clone(),
+            &RelativeMotionEvent {
+                delta,
+                delta_unaccel: delta,
+                utime: Event::time(&event),
+            },
+        );
+        match constraint {
+            // Locked: only relative motion; pila's pointer stays put.
+            Constraint::Locked => {
+                pointer.frame(self);
+                return;
+            }
+            // Confined: drop motion that would leave the surface or region.
+            Constraint::Confined(region) => {
+                let (surface, origin) = under_current.as_ref().expect("constraint without surface");
+                let stays = self
+                    .surface_under(location)
+                    .is_some_and(|(under, _)| under == *surface)
+                    && region.is_none_or(|r| r.contains((location - *origin).to_i32_round()));
+                if !stays {
+                    pointer.frame(self);
+                    return;
+                }
+            }
+            Constraint::None => {}
+        }
+
         let under = self.surface_under(location);
         pointer.motion(
             self,
-            under,
+            under.clone(),
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -164,9 +213,12 @@ impl Pila {
         );
         pointer.frame(self);
 
-        // Over pila's own decorations no client sets the cursor, so pila does.
         if !pointer.is_grabbed() {
+            // Over pila's own decorations no client sets the cursor, so pila does.
             self.update_decoration_cursor(location);
+            if let Some((surface, origin)) = &under {
+                self.maybe_activate_constraint(surface, *origin, location);
+            }
         }
     }
 

@@ -20,6 +20,7 @@ mod handlers;
 mod idle;
 mod input;
 mod layers;
+mod pointer_constraints;
 mod render;
 mod session_lock;
 mod state;

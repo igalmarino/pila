@@ -97,7 +97,7 @@ Key flows and invariants:
   (`handlers/compositor.rs`) can test-import client buffers; a DRM backend needs its own
   renderer there and must create the linux-dmabuf global itself (see `winit::init_dmabuf`).
   Other single-output, winit-only shortcuts: `process_input_event` handles only absolute
-  pointer motion (libinput sends relative motion), motion is mapped onto the first output,
+  pointer motion and derives relative motion from it (libinput sends relative motion), motion is mapped onto the first output,
   and `fullscreen_request` ignores the requested output. Smithay is built with
   `default-features = false` and only the winit features, so a DRM backend must also add
   features such as `backend_drm`, `backend_libinput` and `backend_session_libseat` in `Cargo.toml`.
@@ -165,6 +165,13 @@ Key flows and invariants:
   only count while their surface is part of a mapped window or layer surface and the
   session isn't locked; `update_idle_inhibit` re-checks after every frame. A new input path
   must go through `process_input_event` (or call `notify_activity`) to count as activity.
+- **Pointer constraints** (`pointer_constraints.rs`): a lock/confine activates only while
+  the pointer is over its surface (inside its region) and that window has keyboard focus;
+  `SeatHandler::focus_changed` releases it (`release_constraint_for_focus`), which makes
+  Mod+Tab / clicking elsewhere / locking the escape. The motion path checks the active
+  constraint before moving the pointer. Nested, relative motion is derived from the host
+  pointer (`Pila::host_pointer`); a DRM backend sends real relative motion through the same
+  checks.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.

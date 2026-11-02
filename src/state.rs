@@ -95,6 +95,11 @@ pub struct Pila {
     /// State of the simpler protocols (`handlers/protocols.rs`).
     pub globals: Globals,
     pub idle_inhibitors: IdleInhibitors,
+    /// The surface whose pointer constraint pila activated, if any.
+    pub constrained: Option<WlSurface>,
+    /// Nested-only: the last absolute pointer position from the host, to
+    /// derive relative motion (it differs from pila's pointer while locked).
+    pub host_pointer: Option<Point<f64, Logical>>,
 
     pub seat: Seat<Self>,
     /// Cursor most recently requested by the client under the pointer.
@@ -172,6 +177,8 @@ impl Pila {
             session_lock: SessionLock::default(),
             globals,
             idle_inhibitors: IdleInhibitors::default(),
+            constrained: None,
+            host_pointer: None,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             backend: None,
