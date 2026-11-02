@@ -15,19 +15,20 @@ use std::process::Stdio;
 use smithay::{
     delegate_xwayland_shell,
     desktop::Window,
+    input::pointer::GrabStartData as PointerGrabStartData,
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::CompositorHandler,
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
     },
     xwayland::{
-        xwm::{Reorder, ResizeEdge as X11ResizeEdge, XwmId},
+        xwm::{Reorder, ResizeEdge as X11ResizeEdge, WmWindowProperty, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
 use tracing::{info, warn};
 
-use crate::Pila;
+use crate::{state::fill_state, Pila};
 
 impl Pila {
     /// Start Xwayland; `then_spawn` runs once X is ready (or failed to start).
@@ -139,9 +140,15 @@ impl XwmHandler for Pila {
         }
         let window = Window::new_x11_window(surface);
         // Placed like a Wayland window (centered on the pointer's output,
-        // focused), then X is told where it ended up.
+        // focused), then X is told where it ended up. A window that asked to
+        // be maximized or fullscreen before mapping gets that size now.
         self.place_new_window(window.clone());
-        self.x11_window_moved(&window);
+        let (maximized, fullscreen) = fill_state(&window);
+        if maximized || fullscreen {
+            self.set_fill_state(&window, maximized, fullscreen);
+        } else {
+            self.x11_window_moved(&window);
+        }
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -216,19 +223,84 @@ impl XwmHandler for Pila {
         }
     }
 
+    fn property_notify(&mut self, _xwm: XwmId, surface: X11Surface, property: WmWindowProperty) {
+        // The title bar and taskbars show the title; decorations may change.
+        if matches!(
+            property,
+            WmWindowProperty::Title | WmWindowProperty::Class | WmWindowProperty::MotifHints
+        ) {
+            if let Some(window) = self.window_for_x11(&surface) {
+                self.update_foreign_toplevel_x11(&window);
+            }
+            self.queue_redraw();
+        }
+    }
+
+    fn maximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        self.x11_fill_request(&surface, |_, fullscreen| (true, fullscreen));
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        self.x11_fill_request(&surface, |_, fullscreen| (false, fullscreen));
+    }
+
+    fn fullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        self.x11_fill_request(&surface, |maximized, _| (maximized, true));
+    }
+
+    fn unfullscreen_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        self.x11_fill_request(&surface, |maximized, _| (maximized, false));
+    }
+
     fn resize_request(
         &mut self,
         _xwm: XwmId,
-        _surface: X11Surface,
+        surface: X11Surface,
         _button: u32,
-        _edges: X11ResizeEdge,
+        edges: X11ResizeEdge,
     ) {
-        // Client-side resize handles: not supported yet. Mod+Right drag and
-        // pila's resize border work.
+        // `_NET_WM_MOVERESIZE` from the client's own frame or handles.
+        let (Some(window), Some(start)) = (self.window_for_x11(&surface), x11_grab(self, &surface))
+        else {
+            return;
+        };
+        self.begin_resize(window, edges.into(), start, SERIAL_COUNTER.next_serial());
     }
 
-    fn move_request(&mut self, _xwm: XwmId, _surface: X11Surface, _button: u32) {
-        // Client-side move (e.g. a custom title bar): not supported yet.
-        // Mod+Left drag and pila's title bar work.
+    fn move_request(&mut self, _xwm: XwmId, surface: X11Surface, _button: u32) {
+        let (Some(window), Some(start)) = (self.window_for_x11(&surface), x11_grab(self, &surface))
+        else {
+            return;
+        };
+        self.begin_move(window, start, SERIAL_COUNTER.next_serial());
     }
+}
+
+impl Pila {
+    /// Maximize/fullscreen requests from X11 clients. Before mapping, only the
+    /// flags are set; `map_window_request` applies them.
+    fn x11_fill_request(
+        &mut self,
+        surface: &X11Surface,
+        f: impl FnOnce(bool, bool) -> (bool, bool),
+    ) {
+        let (maximized, fullscreen) = f(surface.is_maximized(), surface.is_fullscreen());
+        match self.window_for_x11(surface) {
+            Some(window) => self.set_fill_state(&window, maximized, fullscreen),
+            None => {
+                let _ = surface.set_maximized(maximized);
+                let _ = surface.set_fullscreen(fullscreen);
+            }
+        }
+    }
+}
+
+/// The pointer grab a client-initiated X11 move/resize starts from: the
+/// button must still be held (an implicit grab) on that window's surface,
+/// like `check_grab` for xdg windows.
+fn x11_grab(state: &Pila, surface: &X11Surface) -> Option<PointerGrabStartData<Pila>> {
+    let pointer = state.seat.get_pointer()?;
+    let start = pointer.grab_start_data()?;
+    let (focus, _) = start.focus.as_ref()?;
+    (Some(focus) == surface.wl_surface().as_ref() && !state.is_locked()).then_some(start)
 }

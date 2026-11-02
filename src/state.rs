@@ -666,9 +666,11 @@ impl Pila {
         fullscreen: bool,
         output: Option<&Output>,
     ) {
-        let Some(toplevel) = window.toplevel() else {
+        let toplevel = window.toplevel();
+        let x11 = window.x11_surface();
+        if toplevel.is_none() && x11.is_none() {
             return;
-        };
+        }
         let mapped_loc = self.space.element_location(window);
         let (was_maximized, was_fullscreen) = fill_state(window);
         window
@@ -692,34 +694,62 @@ impl Pila {
             if let (Some(loc), false) = (mapped_loc, was_maximized || was_fullscreen) {
                 *restore.borrow_mut() = Some(Rectangle::new(loc, window.geometry().size));
             }
-            toplevel.with_pending_state(|state| {
-                set_state(&mut state.states, xdg_toplevel::State::Maximized, maximized);
-                set_state(
-                    &mut state.states,
-                    xdg_toplevel::State::Fullscreen,
-                    fullscreen,
-                );
-                state.size = Some(output_geo.size);
-            });
+            if let Some(toplevel) = toplevel {
+                toplevel.with_pending_state(|state| {
+                    set_state(&mut state.states, xdg_toplevel::State::Maximized, maximized);
+                    set_state(
+                        &mut state.states,
+                        xdg_toplevel::State::Fullscreen,
+                        fullscreen,
+                    );
+                    state.size = Some(output_geo.size);
+                });
+            }
+            if let Some(x11) = x11 {
+                // X applies the new geometry directly (no configure/ack cycle).
+                let _ = x11.set_maximized(maximized);
+                let _ = x11.set_fullscreen(fullscreen);
+                let _ = x11.configure(output_geo);
+            }
             if mapped_loc.is_some() {
                 self.space.map_element(window.clone(), output_geo.loc, true);
             }
         } else {
             let saved = restore.borrow_mut().take();
-            toplevel.with_pending_state(|state| {
-                state.states.unset(xdg_toplevel::State::Maximized);
-                state.states.unset(xdg_toplevel::State::Fullscreen);
-                // None lets the client pick its own size.
-                state.size = saved.map(|r| r.size);
-            });
+            if let Some(toplevel) = toplevel {
+                toplevel.with_pending_state(|state| {
+                    state.states.unset(xdg_toplevel::State::Maximized);
+                    state.states.unset(xdg_toplevel::State::Fullscreen);
+                    // None lets the client pick its own size.
+                    state.size = saved.map(|r| r.size);
+                });
+            }
+            // X11 windows need a size: the saved one, or (if the window
+            // started out filled) two thirds of its output, centered.
+            let saved = match (saved, x11) {
+                (None, Some(_)) => self.output_geometry_for_window(window, true).map(|area| {
+                    let size = (area.size.w * 2 / 3, area.size.h * 2 / 3).into();
+                    let bar = decoration::layout_offset(window, false);
+                    Rectangle::new(centered_location(area, size, bar), size)
+                }),
+                (saved, _) => saved,
+            };
+            if let Some(x11) = x11 {
+                let _ = x11.set_maximized(false);
+                let _ = x11.set_fullscreen(false);
+                if let Some(saved) = saved {
+                    let _ = x11.configure(saved);
+                }
+            }
             if let (Some(saved), Some(_)) = (saved, mapped_loc) {
                 self.space.map_element(window.clone(), saved.loc, true);
             }
         }
 
-        if toplevel.is_initial_configure_sent() {
+        if let Some(toplevel) = toplevel.filter(|t| t.is_initial_configure_sent()) {
             toplevel.send_pending_configure();
         }
+        self.queue_redraw();
     }
 
     pub fn begin_move(
@@ -754,6 +784,7 @@ impl Pila {
                 start_data.location.y as i32 - y_offset,
             ));
             self.space.map_element(window.clone(), loc, true);
+            self.x11_window_moved(&window);
         }
 
         let Some(initial_window_location) = self.space.element_location(&window) else {
@@ -786,15 +817,16 @@ impl Pila {
         let Some(location) = self.space.element_location(&window) else {
             return;
         };
-        let Some(toplevel) = window.toplevel() else {
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Resizing);
+            });
+            toplevel.send_pending_configure();
+        } else if window.x11_surface().is_none() {
             return;
-        };
+        }
 
         let size = window.geometry().size;
-        toplevel.with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Resizing);
-        });
-        toplevel.send_pending_configure();
 
         let grab =
             ResizeSurfaceGrab::start(start_data, window, edges, Rectangle::new(location, size));
@@ -924,6 +956,9 @@ fn restore_geometry(window: &Window) -> Option<Rectangle<i32, Logical>> {
 
 /// (maximized, fullscreen) as last requested by the compositor.
 pub fn fill_state(window: &Window) -> (bool, bool) {
+    if let Some(x11) = window.x11_surface() {
+        return (x11.is_maximized(), x11.is_fullscreen());
+    }
     window.toplevel().map_or((false, false), |toplevel| {
         toplevel.with_pending_state(|state| {
             (

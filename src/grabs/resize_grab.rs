@@ -1,5 +1,6 @@
 // Based on Smithay's smallvil example (MIT).
 use crate::Pila;
+use smithay::xwayland::xwm::ResizeEdge as X11ResizeEdge;
 use smithay::{
     desktop::{Space, Window},
     input::pointer::{
@@ -58,6 +59,21 @@ impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     }
 }
 
+impl From<X11ResizeEdge> for ResizeEdge {
+    fn from(edge: X11ResizeEdge) -> Self {
+        match edge {
+            X11ResizeEdge::Top => Self::TOP,
+            X11ResizeEdge::Bottom => Self::BOTTOM,
+            X11ResizeEdge::Left => Self::LEFT,
+            X11ResizeEdge::Right => Self::RIGHT,
+            X11ResizeEdge::TopLeft => Self::TOP_LEFT,
+            X11ResizeEdge::TopRight => Self::TOP_RIGHT,
+            X11ResizeEdge::BottomLeft => Self::BOTTOM_LEFT,
+            X11ResizeEdge::BottomRight => Self::BOTTOM_RIGHT,
+        }
+    }
+}
+
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<Pila>,
     window: Window,
@@ -77,12 +93,16 @@ impl ResizeSurfaceGrab {
     ) -> Self {
         let initial_rect = initial_window_rect;
 
-        ResizeSurfaceState::with(window.toplevel().unwrap().wl_surface(), |state| {
-            *state = ResizeSurfaceState::Resizing {
-                edges,
-                initial_rect,
-            };
-        });
+        // xdg windows apply the size on their next commit (`handle_commit`
+        // moves them for top/left edges); X11 windows are configured directly.
+        if let Some(toplevel) = window.toplevel() {
+            ResizeSurfaceState::with(toplevel.wl_surface(), |state| {
+                *state = ResizeSurfaceState::Resizing {
+                    edges,
+                    initial_rect,
+                };
+            });
+        }
 
         Self {
             start_data,
@@ -126,12 +146,18 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
             new_window_height = (self.initial_rect.size.h as f64 + delta.y) as i32;
         }
 
-        let (min_size, max_size) =
-            compositor::with_states(self.window.toplevel().unwrap().wl_surface(), |states| {
+        let (min_size, max_size) = match (self.window.toplevel(), self.window.x11_surface()) {
+            (Some(toplevel), _) => compositor::with_states(toplevel.wl_surface(), |states| {
                 let mut guard = states.cached_state.get::<SurfaceCachedState>();
                 let data = guard.current();
                 (data.min_size, data.max_size)
-            });
+            }),
+            (None, Some(x11)) => (
+                x11.min_size().unwrap_or_default(),
+                x11.max_size().unwrap_or_default(),
+            ),
+            (None, None) => return,
+        };
 
         let min_width = min_size.w.max(1);
         let min_height = min_size.h.max(1);
@@ -152,13 +178,24 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
             new_window_height.max(min_height).min(max_height),
         ));
 
-        let xdg = self.window.toplevel().unwrap();
-        xdg.with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Resizing);
-            state.size = Some(self.last_window_size);
-        });
-
-        xdg.send_pending_configure();
+        if let Some(xdg) = self.window.toplevel() {
+            xdg.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Resizing);
+                state.size = Some(self.last_window_size);
+            });
+            xdg.send_pending_configure();
+        } else if let Some(x11) = self.window.x11_surface() {
+            // Keep the opposite edge in place when resizing from top/left.
+            let mut loc = self.initial_rect.loc;
+            if self.edges.intersects(ResizeEdge::LEFT) {
+                loc.x += self.initial_rect.size.w - self.last_window_size.w;
+            }
+            if self.edges.intersects(ResizeEdge::TOP) {
+                loc.y += self.initial_rect.size.h - self.last_window_size.h;
+            }
+            let _ = x11.configure(Rectangle::new(loc, self.last_window_size));
+            data.space.map_element(self.window.clone(), loc, true);
+        }
     }
 
     fn relative_motion(
@@ -185,7 +222,10 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
             // No more buttons are pressed, release the grab.
             handle.unset_grab(self, data, event.serial, event.time, true);
 
-            let xdg = self.window.toplevel().unwrap();
+            // X11 windows already have their final geometry.
+            let Some(xdg) = self.window.toplevel() else {
+                return;
+            };
             xdg.with_pending_state(|state| {
                 state.states.unset(xdg_toplevel::State::Resizing);
                 state.size = Some(self.last_window_size);

@@ -77,6 +77,11 @@ pub enum Decoration {
 /// Whether pila has chosen server-side decorations for this window. For
 /// layout; may be ahead of what the client has acked.
 pub fn is_ssd(window: &Window) -> bool {
+    // X11 windows get pila's decorations unless they draw their own
+    // (Motif hints) or are menus/tooltips.
+    if let Some(x11) = window.x11_surface() {
+        return !x11.is_decorated() && !x11.is_override_redirect();
+    }
     window.toplevel().is_some_and(|t| {
         t.with_pending_state(|state| state.decoration_mode == Some(DecorationMode::ServerSide))
     })
@@ -85,6 +90,9 @@ pub fn is_ssd(window: &Window) -> bool {
 /// Whether a title bar is drawn: the client acked server-side decorations
 /// and isn't fullscreen.
 pub fn has_title_bar(window: &Window) -> bool {
+    if let Some(x11) = window.x11_surface() {
+        return is_ssd(window) && !x11.is_fullscreen();
+    }
     window.toplevel().is_some_and(|t| {
         let state = t.current_state();
         state.decoration_mode == Some(DecorationMode::ServerSide)
@@ -135,12 +143,7 @@ pub fn border_edges(
     pos: Point<f64, Logical>,
 ) -> Option<ResizeEdge> {
     let bar = title_bar_rect(window, loc)?;
-    let maximized = window.toplevel().is_some_and(|t| {
-        t.current_state()
-            .states
-            .contains(xdg_toplevel::State::Maximized)
-    });
-    if maximized {
+    if is_maximized(window) {
         return None;
     }
     // The window plus its title bar.
@@ -243,8 +246,25 @@ fn title_x(bar_x: i32, bar_width: i32, text_width: i32) -> i32 {
     centered.min(rightmost).max(bar_x + TITLE_PADDING)
 }
 
-/// The window's title as set by the client (`xdg_toplevel.set_title`).
+/// Whether the window is drawn maximized (its committed xdg state, or X11's
+/// `_NET_WM_STATE`).
+fn is_maximized(window: &Window) -> bool {
+    if let Some(x11) = window.x11_surface() {
+        return x11.is_maximized();
+    }
+    window.toplevel().is_some_and(|t| {
+        t.current_state()
+            .states
+            .contains(xdg_toplevel::State::Maximized)
+    })
+}
+
+/// The window's title as set by the client (`xdg_toplevel.set_title`, or
+/// the X11 window's `_NET_WM_NAME`/`WM_NAME`).
 fn window_title(window: &Window) -> Option<String> {
+    if let Some(x11) = window.x11_surface() {
+        return Some(x11.title()).filter(|t| !t.is_empty());
+    }
     let toplevel = window.toplevel()?;
     with_states(toplevel.wl_surface(), |states| {
         states
@@ -286,11 +306,7 @@ where
         title,
     } = &mut *buffers;
 
-    let maximized = window.toplevel().is_some_and(|t| {
-        t.current_state()
-            .states
-            .contains(xdg_toplevel::State::Maximized)
-    });
+    let maximized = is_maximized(window);
     let look = |part| match (hover == Some(part), focused) {
         (true, _) => Look::Hover,
         (false, true) => Look::Focused,

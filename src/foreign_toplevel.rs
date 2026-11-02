@@ -21,6 +21,10 @@ use crate::Pila;
 
 /// The window's (title, app id), empty if unset.
 fn title_and_app_id(window: &Window) -> (String, String) {
+    // X11: the title, and WM_CLASS's class as the app id.
+    if let Some(x11) = window.x11_surface() {
+        return (x11.title(), x11.class());
+    }
     let Some(toplevel) = window.toplevel() else {
         return Default::default();
     };
@@ -37,6 +41,20 @@ fn title_and_app_id(window: &Window) -> (String, String) {
             })
             .unwrap_or_default()
     })
+}
+
+/// Send the window's title and app id to listeners if they changed.
+fn update(window: &Window) {
+    let Some(handle) = handle(window) else {
+        return;
+    };
+    let (title, app_id) = title_and_app_id(window);
+    if handle.title() == title && handle.app_id() == app_id {
+        return;
+    }
+    handle.send_title(&title);
+    handle.send_app_id(&app_id);
+    handle.send_done();
 }
 
 fn handle(window: &Window) -> Option<&ForeignToplevelHandle> {
@@ -59,23 +77,18 @@ impl Pila {
 
     /// Send title and app id changes. Called on every commit.
     pub fn update_foreign_toplevel(&self, surface: &WlSurface) {
-        let Some(window) = self
+        let window = self
             .space
             .elements()
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
-        else {
-            return;
-        };
-        let Some(handle) = handle(window) else {
-            return;
-        };
-        let (title, app_id) = title_and_app_id(window);
-        if handle.title() == title && handle.app_id() == app_id {
-            return;
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
+        if let Some(window) = window {
+            update(window);
         }
-        handle.send_title(&title);
-        handle.send_app_id(&app_id);
-        handle.send_done();
+    }
+
+    /// Send an X11 window's title and class (after a property change).
+    pub fn update_foreign_toplevel_x11(&self, window: &Window) {
+        update(window);
     }
 
     /// Unlist a window whose toplevel was destroyed.
