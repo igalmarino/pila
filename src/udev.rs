@@ -519,10 +519,15 @@ pub fn init_udev(
                     if let Err(err) = data.libinput.resume() {
                         error!(?err, "failed to resume libinput");
                     }
-                    if let Err(err) = data.drm.activate(false) {
+                    // Take master first: resetting the device needs it.
+                    data.take_master();
+                    // Start from a clean device: another compositor on the
+                    // seat may have left the connectors on other CRTCs than
+                    // pila's, and moving them over piecemeal fails
+                    // (EINVAL). Disabling everything costs one modeset.
+                    if let Err(err) = data.drm.activate(true) {
                         error!(?err, "failed to resume the DRM device");
                     }
-                    data.take_master();
                     data.recovering = false;
                     let crtcs: Vec<_> = data.outputs.keys().copied().collect();
                     for crtc in crtcs {
