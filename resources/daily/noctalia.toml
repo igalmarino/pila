@@ -23,9 +23,14 @@ timeout = 300
 action  = "lock"
 enabled = true
 
+# Noctalia's own screen_off action runs `wlr-randr --off` on compositors it
+# doesn't know, which fails; wlopm (Arch: wlopm) goes through
+# wlr-output-power-management instead.
 [idle.behavior.screen-off]
 timeout = 360
-action  = "screen_off"
+action  = "command"
+command = "wlopm --off '*'"
+resume_command = "wlopm --on '*'"
 enabled = true
 
 [lockscreen]

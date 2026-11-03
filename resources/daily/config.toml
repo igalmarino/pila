@@ -5,7 +5,7 @@
 # noctalia.toml to ~/.config/noctalia/config.toml, without overwriting),
 # then edit to taste.
 #
-# Uses, from the Arch repos: noctalia ghostty.
+# Uses, from the Arch repos: noctalia ghostty wlopm.
 
 mod = "super"
 terminal = "ghostty"
