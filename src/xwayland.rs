@@ -37,7 +37,7 @@ use smithay::{
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
     },
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{focus::KeyboardFocus, state::fill_state, Pila};
 
@@ -326,10 +326,13 @@ impl XwmHandler for Pila {
 // Only the X11 app with keyboard focus may read, like Wayland's data device.
 impl Pila {
     fn x11_selection_access(&self, xwm: XwmId) -> bool {
-        matches!(
-            self.seat.get_keyboard().and_then(|k| k.current_focus()),
+        let focus = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        let allowed = matches!(
+            &focus,
             Some(KeyboardFocus::X11(window)) if window.xwm_id() == Some(xwm)
-        )
+        );
+        debug!(allowed, ?focus, "X11 app asks to read a selection");
+        allowed
     }
 
     fn x11_new_selection(&mut self, selection: SelectionTarget, mime_types: Vec<String>) {
