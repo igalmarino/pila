@@ -120,8 +120,9 @@ Key flows and invariants:
   idle `render_all`; an output with a frame in flight renders at its vblank
   (`frame_finish`), which also sends presentation feedback with the kernel's timestamp.
   The session lock is confirmed once every output has *shown* a locked frame.
-  `PauseSession` (VT switch away) releases held keys. Libinput gets tap-to-click and
-  keyboard LEDs; relative motion goes through the same constraint path as nested
+  `PauseSession` (VT switch away) releases held keys. Libinput devices get keyboard
+  LEDs and the `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a
+  touchpad is a device that can tap) when added; relative motion goes through the same constraint path as nested
   (`pointer_motion`) and is clamped to the outputs. A removed output goes through
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).

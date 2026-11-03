@@ -261,6 +261,77 @@ impl Default for KeyboardConfig {
     }
 }
 
+/// Pointer acceleration (`accel-profile`): libinput's adaptive curve, or a
+/// constant factor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelProfile {
+    Adaptive,
+    Flat,
+}
+
+/// How a clickpad decides which button a click is (`click-method`): by
+/// where it's pressed, or by how many fingers are down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClickMethod {
+    ButtonAreas,
+    Clickfinger,
+}
+
+/// `[input.touchpad]` / `[input.mouse]`: libinput settings for one kind of
+/// device, on a TTY (nested, the host handles input). `None` leaves
+/// libinput's default; options a device doesn't support are skipped.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct PointerConfig {
+    /// Tap to click (touchpads; pila's default is on).
+    pub tap: Option<bool>,
+    pub natural_scroll: Option<bool>,
+    /// -1 (slowest) to 1 (fastest).
+    pub accel_speed: Option<f64>,
+    pub accel_profile: Option<AccelProfile>,
+    /// Ignore the touchpad briefly while typing.
+    pub disable_while_typing: Option<bool>,
+    pub click_method: Option<ClickMethod>,
+    /// Pressing left and right together is a middle click.
+    pub middle_emulation: Option<bool>,
+}
+
+impl PointerConfig {
+    fn validate(self, section: &str) -> Result<Self, String> {
+        if let Some(speed) = self.accel_speed {
+            if !(-1.0..=1.0).contains(&speed) {
+                return Err(format!(
+                    "[input.{section}] accel-speed {speed} is outside -1..1"
+                ));
+            }
+        }
+        Ok(self)
+    }
+}
+
+/// `[input]`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct InputConfig {
+    pub touchpad: PointerConfig,
+    pub mouse: PointerConfig,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            // Tap-to-click was always on; keep it unless the file says no.
+            touchpad: PointerConfig {
+                tap: Some(true),
+                ..Default::default()
+            },
+            mouse: PointerConfig::default(),
+        }
+    }
+}
+
 /// `[[output]]`: settings for one monitor, matched by connector name
 /// (`eDP-1`, `DP-1`, `HDMI-A-1`, ...; `winit` is the nested window).
 #[derive(Debug, Clone, PartialEq)]
@@ -386,6 +457,15 @@ struct ConfigFile {
     keyboard: KeyboardConfig,
     bindings: BTreeMap<String, String>,
     output: Vec<OutputFile>,
+    input: InputFile,
+}
+
+/// `[input]` as written: unset sections keep `InputConfig`'s defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct InputFile {
+    touchpad: Option<PointerConfig>,
+    mouse: Option<PointerConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -398,6 +478,7 @@ pub struct Config {
     pub keyboard: KeyboardConfig,
     pub bindings: Vec<(KeyCombo, Action)>,
     pub outputs: Vec<OutputConfig>,
+    pub input: InputConfig,
 }
 
 impl Default for Config {
@@ -479,6 +560,23 @@ impl Config {
             .map(OutputFile::validate)
             .collect::<Result<Vec<_>, _>>()?;
 
+        let defaults = InputConfig::default();
+        let input = InputConfig {
+            touchpad: match file.input.touchpad {
+                // An unset `tap` keeps pila's default (on).
+                Some(touchpad) => PointerConfig {
+                    tap: touchpad.tap.or(defaults.touchpad.tap),
+                    ..touchpad
+                }
+                .validate("touchpad")?,
+                None => defaults.touchpad,
+            },
+            mouse: match file.input.mouse {
+                Some(mouse) => mouse.validate("mouse")?,
+                None => defaults.mouse,
+            },
+        };
+
         Ok(Self {
             mod_key,
             terminal,
@@ -487,6 +585,7 @@ impl Config {
             keyboard: file.keyboard,
             bindings,
             outputs,
+            input,
         })
     }
 
@@ -688,6 +787,38 @@ mod tests {
     }
 
     #[test]
+    fn input_settings_keep_defaults_for_what_is_unset() {
+        let config = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(config.input.touchpad.tap, Some(true));
+        assert_eq!(config.input.touchpad.natural_scroll, None);
+        assert_eq!(config.input.mouse, PointerConfig::default());
+
+        let config = Config::from_toml(
+            r#"
+            [input.touchpad]
+            natural-scroll = true
+            accel-speed = 0.3
+            click-method = "clickfinger"
+            disable-while-typing = true
+            [input.mouse]
+            accel-profile = "flat"
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        let touchpad = &config.input.touchpad;
+        assert_eq!(touchpad.tap, Some(true));
+        assert_eq!(touchpad.natural_scroll, Some(true));
+        assert_eq!(touchpad.accel_speed, Some(0.3));
+        assert_eq!(touchpad.click_method, Some(ClickMethod::Clickfinger));
+        assert_eq!(touchpad.disable_while_typing, Some(true));
+        assert_eq!(config.input.mouse.accel_profile, Some(AccelProfile::Flat));
+
+        let no_tap = Config::from_toml("[input.touchpad]\ntap = false", &no_env).unwrap();
+        assert_eq!(no_tap.input.touchpad.tap, Some(false));
+    }
+
+    #[test]
     fn modes_pick_size_then_refresh() {
         let modes = [
             ((2560, 1440), 59_951),
@@ -706,6 +837,21 @@ mod tests {
     }
 
     #[test]
+    fn shipped_configs_are_valid() {
+        for (name, text) in [
+            ("config.example.toml", include_str!("../config.example.toml")),
+            (
+                "resources/daily/config.toml",
+                include_str!("../resources/daily/config.toml"),
+            ),
+        ] {
+            if let Err(err) = Config::from_toml(text, &no_env) {
+                panic!("{name}: {err}");
+            }
+        }
+    }
+
+    #[test]
     fn mistakes_are_reported() {
         let err = |text| Config::from_toml(text, &no_env).unwrap_err();
         assert!(err(r#"mod = "hyper""#).contains("unknown modifier"));
@@ -715,5 +861,8 @@ mod tests {
         assert!(err("[[output]]\nname = \"DP-1\"\nscale = 0").contains("outside"));
         assert!(err("[[output]]\nname = \"DP-1\"\nmode = \"big\"").contains("bad mode"));
         assert!(err("[[output]]\nscale = 2").contains("no name"));
+        assert!(err("[input.mouse]\naccel-speed = 2.0").contains("outside"));
+        assert!(err("[input.touchpad]\nclick-method = \"tap\"").contains("unknown variant"));
+        assert!(err("[input.touchpad]\nnatural = true").contains("unknown field"));
     }
 }

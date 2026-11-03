@@ -33,6 +33,23 @@ model = ""
 repeat-delay = 200      # ms before a held key repeats
 repeat-rate = 25        # repeats per second
 
+# Touchpad and mouse (libinput, on a TTY; nested, the host handles input).
+# Unset options keep libinput's defaults, except tap, which pila turns on.
+[input.touchpad]
+tap = true
+# natural-scroll = true           # content follows the fingers
+# accel-speed = 0.0               # -1 (slowest) to 1 (fastest)
+# accel-profile = "adaptive"      # or "flat"
+# disable-while-typing = true
+# click-method = "clickfinger"    # 1/2/3 fingers = left/right/middle; or "button-areas"
+# middle-emulation = false        # left + right together = middle
+
+[input.mouse]
+# natural-scroll = false
+# accel-speed = 0.0
+# accel-profile = "flat"
+# middle-emulation = false
+
 # Key bindings: add new ones, replace defaults, or remove them with "none".
 # Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
 # xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).

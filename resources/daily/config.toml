@@ -27,6 +27,12 @@ autostart = [
 layout = "us"
 variant = "altgr-intl"
 
+# Like GNOME's defaults: content follows the fingers, no taps while typing.
+[input.touchpad]
+tap = true
+natural-scroll = true
+disable-while-typing = true
+
 [bindings]
 "Mod+L" = "spawn swaylock -f -c 1f2126"
 # Screenshots: the whole screen to a file, or a region to the clipboard.

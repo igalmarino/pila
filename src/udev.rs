@@ -51,6 +51,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     backend::Backend,
+    config::{AccelProfile, ClickMethod, PointerConfig},
     cursor::{self, CursorTheme},
     frame,
     render::{self, PilaRenderElement},
@@ -311,11 +312,12 @@ pub fn init_udev(
 }
 
 /// Device setup before an input event is processed: keyboards for LEDs,
-/// tap-to-click on touchpads.
+/// `[input]` settings on touchpads and mice.
 fn on_input_device(state: &mut Pila, event: &mut InputEvent<LibinputInputBackend>) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
+    let input = &state.config.input;
     match event {
         InputEvent::DeviceAdded { device } => {
             if device.has_capability(libinput::DeviceCapability::Keyboard) {
@@ -324,14 +326,80 @@ fn on_input_device(state: &mut Pila, event: &mut InputEvent<LibinputInputBackend
                 }
                 data.keyboards.push(device.clone());
             }
+            // Touchpads are the devices that can tap.
             if device.config_tap_finger_count() > 0 {
-                let _ = device.config_tap_set_enabled(true);
+                configure_pointer(device, &input.touchpad);
+            } else if device.has_capability(libinput::DeviceCapability::Pointer) {
+                configure_pointer(device, &input.mouse);
             }
         }
         InputEvent::DeviceRemoved { device } => {
             data.keyboards.retain(|keyboard| keyboard != device);
         }
         _ => {}
+    }
+}
+
+/// Apply `[input.touchpad]` or `[input.mouse]` to a device. Settings it
+/// doesn't support are skipped (and logged at debug level).
+fn configure_pointer(device: &mut libinput::Device, config: &PointerConfig) {
+    let name = device.name().to_string();
+    let mut applied = Vec::new();
+    let mut check = |what: &'static str, result: libinput::DeviceConfigResult| match result {
+        Ok(()) => applied.push(what),
+        Err(err) => debug!(device = name, what, ?err, "input setting not supported"),
+    };
+    if let Some(tap) = config.tap {
+        if device.config_tap_finger_count() > 0 {
+            check("tap", device.config_tap_set_enabled(tap));
+        }
+    }
+    if let Some(natural) = config.natural_scroll {
+        if device.config_scroll_has_natural_scroll() {
+            check(
+                "natural-scroll",
+                device.config_scroll_set_natural_scroll_enabled(natural),
+            );
+        }
+    }
+    if device.config_accel_is_available() {
+        if let Some(speed) = config.accel_speed {
+            check("accel-speed", device.config_accel_set_speed(speed));
+        }
+        if let Some(profile) = config.accel_profile {
+            let profile = match profile {
+                AccelProfile::Adaptive => libinput::AccelProfile::Adaptive,
+                AccelProfile::Flat => libinput::AccelProfile::Flat,
+            };
+            if device.config_accel_profiles().contains(&profile) {
+                check("accel-profile", device.config_accel_set_profile(profile));
+            }
+        }
+    }
+    if let Some(dwt) = config.disable_while_typing {
+        if device.config_dwt_is_available() {
+            check("disable-while-typing", device.config_dwt_set_enabled(dwt));
+        }
+    }
+    if let Some(method) = config.click_method {
+        let method = match method {
+            ClickMethod::ButtonAreas => libinput::ClickMethod::ButtonAreas,
+            ClickMethod::Clickfinger => libinput::ClickMethod::Clickfinger,
+        };
+        if device.config_click_methods().contains(&method) {
+            check("click-method", device.config_click_set_method(method));
+        }
+    }
+    if let Some(middle) = config.middle_emulation {
+        if device.config_middle_emulation_is_available() {
+            check(
+                "middle-emulation",
+                device.config_middle_emulation_set_enabled(middle),
+            );
+        }
+    }
+    if !applied.is_empty() {
+        info!(device = name, settings = ?applied, "configured pointer device");
     }
 }
 
