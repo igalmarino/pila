@@ -69,7 +69,8 @@ Environment (overrides the config file):
 
 The config file is reloaded when it changes (all but autostart).
 
-Programs pila starts get XDG_CURRENT_DESKTOP=pila. For screen sharing on a
+Programs pila starts get XDG_CURRENT_DESKTOP=pila, and commands run by
+bindings PILA_OUTPUT, the name of the output under the pointer. For screen sharing on a
 TTY, run pila under its own D-Bus session (dbus-run-session pila), with
 resources/xdg/xdg-desktop-portal/pila-portals.conf installed and
 resources/xdg/xdg-desktop-portal-wlr/pila in ~/.config/xdg-desktop-portal-wlr/

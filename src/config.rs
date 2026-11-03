@@ -18,6 +18,8 @@
 //! | Mod+Shift+arrows      | Move the window                |
 //! | Mod+Ctrl+arrows       | Resize (Right/Down grow, Left/Up shrink) |
 //! | Mod+C                 | Center the window              |
+//! | Mod+Shift+S           | Screenshot of a region (slurp) to the clipboard |
+//! | Mod+Ctrl+S            | Screenshot of the screen under the pointer to ~/Pictures |
 //! | Mod+Shift+Q           | Close focused window           |
 //! | Mod+Shift+E           | Quit pila                      |
 //! | Mod+Left drag         | Move window                    |
@@ -80,6 +82,12 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Ctrl+Down", "grow-height"),
     ("Mod+Ctrl+Up", "shrink-height"),
     ("Mod+C", "center"),
+    ("Mod+Shift+S", "spawn grim -g \"$(slurp)\" - | wl-copy"),
+    (
+        "Mod+Ctrl+S",
+        "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" \
+         ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png",
+    ),
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
 ];
@@ -986,6 +994,19 @@ mod tests {
         assert_eq!(spec("2560x1440").pick(&modes, Some(2)), Some(1));
         assert_eq!(spec("1920x1080").pick(&modes, None), Some(2));
         assert_eq!(spec("800x600").pick(&modes, None), None);
+    }
+
+    #[test]
+    fn screenshots_are_bound_by_default() {
+        let config = Config::from_toml("", &no_env).unwrap();
+        let alt_shift = mods(false, true, true, false);
+        let alt_ctrl = mods(true, true, false, false);
+        let spawned = |action: Option<Action>| match action {
+            Some(Action::Spawn(command)) => command,
+            other => panic!("not a spawn: {other:?}"),
+        };
+        assert!(spawned(config.action_for(Keysym::s, &alt_shift)).contains("wl-copy"));
+        assert!(spawned(config.action_for(Keysym::s, &alt_ctrl)).contains("$PILA_OUTPUT"));
     }
 
     #[test]

@@ -86,7 +86,9 @@ invalid, pila keeps running with the previous one and shows the error in a notif
 
 A few defaults (Mod is Alt unless `mod` says otherwise): Mod+Return opens a terminal,
 Mod+Tab switches windows, Mod+Left/Right snap, Mod+Up/Down maximize and restore, Mod+M
-maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+Shift+Q closes, Mod+Shift+E quits.
+maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+Shift+S and Mod+Ctrl+S take
+screenshots (a region to the clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes,
+Mod+Shift+E quits.
 
 ## Development environment
 

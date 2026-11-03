@@ -1127,6 +1127,13 @@ impl Pila {
         let mut cmd = Command::new("/bin/sh");
         cmd.arg("-c").arg(command);
         self.session_env(&mut cmd);
+        // The output under the pointer, for commands that act on "this
+        // screen" (e.g. `grim -o "$PILA_OUTPUT"`).
+        let pointer = self.seat.get_pointer().map(|p| p.current_location());
+        match pointer.and_then(|pos| self.output_at(pos)) {
+            Some(output) => cmd.env("PILA_OUTPUT", output.name()),
+            None => cmd.env_remove("PILA_OUTPUT"),
+        };
         match cmd.spawn() {
             // Reap the child so exited clients don't linger as zombies.
             Ok(mut child) => {

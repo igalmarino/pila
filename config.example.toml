@@ -55,6 +55,8 @@ tap = true
 # Key bindings: add new ones, replace defaults, or remove them with "none".
 # Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
 # xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).
+# Commands get PILA_OUTPUT, the name of the screen under the pointer (e.g.
+# "spawn grim -o \"$PILA_OUTPUT\" ~/shot.png" captures just that screen).
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
 # the previous window; hold the modifiers and repeat for older ones),
 # cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
@@ -80,6 +82,9 @@ tap = true
 #   "Mod+Ctrl+Right" = "grow-width"   "Mod+Ctrl+Left" = "shrink-width"
 #   "Mod+Ctrl+Down"  = "grow-height"  "Mod+Ctrl+Up"   = "shrink-height"
 #   "Mod+C"       = "center"
+#   "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"   (a region to the clipboard)
+#   "Mod+Ctrl+S"  = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
+#                   (the screen under the pointer to a file; both need grim and slurp)
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
 [bindings]

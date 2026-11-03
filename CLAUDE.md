@@ -238,7 +238,8 @@ Key flows and invariants:
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
-  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`.
+  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
+  `spawn` adds `PILA_OUTPUT`, the output under the pointer.
   Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
   which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
