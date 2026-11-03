@@ -1,0 +1,50 @@
+# A day-to-day pila session on a laptop with an external monitor. Install it
+# with scripts/install-config (copies it to ~/.config/pila/config.toml and the
+# waybar and fuzzel configs next to it, without overwriting), then edit to taste.
+#
+# Uses, from the Arch repos: waybar swaybg mako swayidle swaylock fuzzel foot
+# grim slurp wl-clipboard brightnessctl ttf-nerd-fonts-symbols (waybar's
+# icons; wpctl comes with wireplumber).
+
+mod = "super"
+terminal = "foot"
+launcher = "fuzzel --config ~/.config/pila/fuzzel.ini"
+
+autostart = [
+    # A plain color; for a picture: swaybg -i ~/Pictures/wallpaper.jpg -m fill
+    "swaybg -c '#1f2126'",
+    "waybar -c ~/.config/pila/waybar.jsonc -s ~/.config/pila/waybar.css",
+    "mako",
+    # Lock after 5 minutes idle and before suspending.
+    "swayidle -w timeout 300 'swaylock -f -c 1f2126' before-sleep 'swaylock -f -c 1f2126'",
+    # Apps that keep passwords in the keyring (Chromium, VS Code, git's
+    # libsecret helper) need it on pila's session bus:
+    # "gnome-keyring-daemon --start --components=secrets",
+    "foot",
+]
+
+[keyboard]
+layout = "us"
+variant = "altgr-intl"
+
+[bindings]
+"Mod+L" = "spawn swaylock -f -c 1f2126"
+# Screenshots: the whole screen to a file, or a region to the clipboard.
+"Print" = "spawn grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
+"Shift+Print" = "spawn grim -g \"$(slurp)\" - | wl-copy"
+"XF86AudioRaiseVolume" = "spawn wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
+"XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+"XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+"XF86MonBrightnessUp" = "spawn brightnessctl set 5%+"
+"XF86MonBrightnessDown" = "spawn brightnessctl set 5%-"
+
+# The laptop panel at 125 %, the external monitor at 100 % to its right
+# (1536 = 1920 / 1.25). Without the monitor, the panel is the only output.
+[[output]]
+name = "eDP-1"
+scale = 1.25
+
+[[output]]
+name = "DP-1"
+position = [1536, 0]

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run pila on bare metal from a TTY on the host (Ctrl+Alt+F3, log in, run
-# this). The binary is the one built in the dev container (scripts/dev cargo
-# build); the log goes to pila-tty.log in the project root.
+# this). The binary is the one built in the dev container
+# (scripts/dev cargo build --release); the log goes to pila-tty.log in the
+# project root, and the previous run's to pila-tty.log.old.
 #
 # pila gets its own D-Bus session bus (dbus-run-session), so the portals it
 # starts for screen sharing (xdg-desktop-portal + xdg-desktop-portal-wlr) don't
@@ -9,28 +10,37 @@
 # resources/xdg/xdg-desktop-portal/pila-portals.conf through XDG_CONFIG_DIRS;
 # xdg-desktop-portal-wlr's settings are copied to ~/.config if missing.
 #
-#   scripts/tty                 use scripts/tty-test.toml
-#   scripts/tty <config.toml>   use another config
+#   scripts/tty                        release build, ~/.config/pila/config.toml
+#   scripts/tty <config.toml>          another config (e.g. scripts/tty-test.toml)
+#   scripts/tty --debug [config.toml]  the debug build (scripts/dev cargo build)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-bin=target/debug/pila
-config="${1:-scripts/tty-test.toml}"
+bin=target/release/pila
+build="scripts/dev cargo build --release"
+if [ "${1:-}" = "--debug" ]; then
+    bin=target/debug/pila
+    build="scripts/dev cargo build"
+    shift
+fi
+config_args=()
+if [ $# -gt 0 ]; then
+    if [ ! -f "$1" ]; then
+        echo "config $1 not found" >&2
+        exit 1
+    fi
+    config_args=(--config "$1")
+fi
 
 if [ ! -x "$bin" ]; then
-    echo "$bin not found; build it first: scripts/dev cargo build" >&2
-    exit 1
-fi
-if [ ! -f "$config" ]; then
-    echo "config $config not found" >&2
+    echo "$bin not found; build it first: $build" >&2
     exit 1
 fi
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     echo "This looks like a graphical session; run it from a TTY (e.g. Ctrl+Alt+F3)." >&2
     exit 1
 fi
-
 if ! command -v dbus-run-session >/dev/null; then
     echo "dbus-run-session not found (Arch package: dbus)" >&2
     exit 1
@@ -46,5 +56,8 @@ if [ ! -e "$xdpw_config" ]; then
     echo "Installed $xdpw_config (screen sharing picks a screen with slurp)."
 fi
 
-echo "Starting pila with $config; log in pila-tty.log. Quit with Mod+Shift+E."
-exec dbus-run-session -- "$bin" --backend udev --config "$config" 2>pila-tty.log
+# Keep the last run's log: after a crash, it's the one that matters.
+[ -f pila-tty.log ] && mv -f pila-tty.log pila-tty.log.old
+
+echo "Starting $bin ${config_args[*]:-}; log in pila-tty.log. Quit with Mod+Shift+E."
+exec dbus-run-session -- "$bin" --backend udev "${config_args[@]}" 2>pila-tty.log

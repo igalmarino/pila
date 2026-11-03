@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Install the day-to-day pila config (resources/daily) on the host:
+# ~/.config/pila/config.toml, waybar.jsonc, waybar.css and fuzzel.ini.
+#
+#   scripts/install-config           create missing files, keep existing ones
+#   scripts/install-config --force   replace them too (the old one is kept as .bak)
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+force=false
+[ "${1:-}" = "--force" ] && force=true
+
+dir="${XDG_CONFIG_HOME:-$HOME/.config}/pila"
+mkdir -p "$dir" "$HOME/Pictures"
+for file in config.toml waybar.jsonc waybar.css fuzzel.ini; do
+    target="$dir/$file"
+    if [ -e "$target" ] && cmp -s "resources/daily/$file" "$target"; then
+        echo "same    $target"
+    elif [ -e "$target" ] && ! $force; then
+        echo "kept    $target (differs; diff it with resources/daily/$file, or use --force)"
+    else
+        [ -e "$target" ] && cp "$target" "$target.bak" && echo "backup  $target.bak"
+        cp "resources/daily/$file" "$target"
+        echo "wrote   $target"
+    fi
+done

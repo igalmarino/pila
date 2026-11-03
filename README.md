@@ -168,15 +168,33 @@ Host packages the binary needs beyond a GNOME install:
 ```bash
 sudo pacman -S seatd    # libseat.so; the seatd daemon isn't needed, libseat uses logind
 sudo pacman -S foot     # pila's default terminal (or set PILA_TERMINAL, e.g. kgx)
+sudo pacman -S xdg-desktop-portal-wlr   # screen sharing (brings grim and slurp)
 ```
 
-Then, on a free TTY (Ctrl+Alt+F3), log in and from this folder:
+Build the release binary in the container (`scripts/dev cargo build --release`), then on a
+free TTY (Ctrl+Alt+F3) log in and from this folder run:
 
 ```bash
-timeout 120 ./target/debug/pila --backend udev 2> pila-tty.log
+scripts/tty                        # ~/.config/pila/config.toml
+scripts/tty scripts/tty-test.toml  # or another config; --debug for the debug build
 ```
 
-The `timeout` ends it even if input doesn't work; the log (stderr) lands in the repo, where
-Claude Code can read it (`*.log` is git-ignored). Ctrl+Alt+F1..F12 switch TTYs, Mod+Shift+E
-quits. Set `PILA_MOD=super` to use Super, `XKB_DEFAULT_LAYOUT` for a non-US keymap, and
-`XCURSOR_THEME`/`XCURSOR_SIZE` for the cursor.
+It runs pila under its own D-Bus session bus, so its portals (screen sharing) don't clash
+with a GNOME session left running on another VT, which stays a fallback if pila crashes.
+The log (stderr, portals included) lands in `pila-tty.log` in the repo, the previous run's in
+`pila-tty.log.old`, where Claude Code can read them (`*.log*` is git-ignored).
+Ctrl+Alt+F1..F12 switch TTYs, Mod+Shift+E quits.
+
+### Day to day
+
+`resources/daily` holds a session config: Super as Mod, `us` `altgr-intl`, a minimal waybar, swaybg,
+mako, swayidle + swaylock, media and brightness keys, screenshots, and the laptop and monitor
+layout. Install it with `scripts/install-config` (it never overwrites) and the tools with:
+
+```bash
+sudo pacman -S waybar swaybg mako swayidle swaylock fuzzel wl-clipboard brightnessctl \
+    ttf-nerd-fonts-symbols
+```
+
+The dev container works from inside pila too: `scripts/dev` links the Wayland socket of the
+session it runs in (`scripts/link-wayland`), so nested pila opens inside the running pila.
