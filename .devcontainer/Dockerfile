@@ -47,6 +47,7 @@ RUN groupadd -g "${USER_GID}" "${USERNAME}" \
     && echo "${USERNAME}:${USERNAME}" | chpasswd \
     && mkdir -p /workspace /commandhistory \
         "/home/${USERNAME}/.claude" \
+        "/home/${USERNAME}/.config/gh" \
         "/home/${USERNAME}/.cargo/registry" \
         "/home/${USERNAME}/.local/bin" \
     && touch /commandhistory/.bash_history \
