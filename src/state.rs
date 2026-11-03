@@ -94,6 +94,8 @@ pub struct Pila {
     pub focus_history: Vec<Window>,
     /// Screen capture sessions (`capture.rs`).
     pub captures: Vec<crate::capture::Session>,
+    /// Where captures may use dma-bufs (set by the backend).
+    pub capture_dmabuf: Option<crate::capture::DmabufTarget>,
     pub switch: Option<Switch>,
 
     /// Mapped windows, in stacking order (back to front).
@@ -139,6 +141,17 @@ pub struct Pila {
     /// needs its own renderer handle here instead.
     pub backend: Option<Backend>,
 }
+
+/// `XDG_CURRENT_DESKTOP` for everything pila starts; xdg-desktop-portal
+/// picks its backends from `pila-portals.conf` by it.
+const DESKTOP_NAME: &str = "pila";
+/// What `export_environment` hands the session bus.
+const SESSION_ENV: [&str; 4] = [
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_TYPE",
+];
 
 impl Pila {
     pub fn new(
@@ -213,6 +226,7 @@ impl Pila {
             snap_preview_buffer: SolidColorBuffer::default(),
             focus_history: Vec::new(),
             captures: Vec::new(),
+            capture_dmabuf: None,
             switch: None,
             xwayland_token: None,
             space: Space::default(),
@@ -1019,6 +1033,61 @@ impl Pila {
         }
     }
 
+    /// The startup programs: once Xwayland is ready (or failed), so they
+    /// get its `DISPLAY`, and after the session bus knows pila's
+    /// environment (for portals).
+    pub fn start_session(&self, commands: &[String]) {
+        self.export_environment();
+        self.spawn_all(commands);
+    }
+
+    /// Give the D-Bus session bus pila's `WAYLAND_DISPLAY`, `DISPLAY` and
+    /// desktop name, so services it activates (xdg-desktop-portal and its
+    /// wlr backend, for screen sharing) talk to pila.
+    ///
+    /// Only on bare metal, and only when the bus is pila's own (started with
+    /// `dbus-run-session`, as `scripts/tty` does): the systemd user bus is
+    /// shared with any other session of the user (e.g. GNOME on another VT),
+    /// whose portals this would break. Nested, apps use the host's portals.
+    fn export_environment(&self) {
+        if !matches!(self.backend, Some(Backend::Udev(_))) {
+            return;
+        }
+        let Some(bus) = std::env::var_os("DBUS_SESSION_BUS_ADDRESS") else {
+            info!("no D-Bus session bus; screen sharing through portals won't work");
+            return;
+        };
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default();
+        let shared = format!("unix:path={}/bus", runtime.to_string_lossy());
+        if bus.to_string_lossy() == shared {
+            info!(
+                "the D-Bus session bus is shared with other sessions; not exporting pila's \
+                 environment to it (start pila with dbus-run-session for screen sharing)"
+            );
+            return;
+        }
+        let mut cmd = Command::new("dbus-update-activation-environment");
+        cmd.args(SESSION_ENV);
+        self.session_env(&mut cmd);
+        match cmd.status() {
+            Ok(status) if status.success() => info!("exported the environment to the session bus"),
+            Ok(status) => warn!(?status, "dbus-update-activation-environment failed"),
+            Err(err) => warn!(?err, "can't run dbus-update-activation-environment"),
+        }
+    }
+
+    /// The environment of everything pila starts.
+    fn session_env(&self, cmd: &mut Command) {
+        cmd.env("WAYLAND_DISPLAY", &self.socket_name)
+            .env("XDG_CURRENT_DESKTOP", DESKTOP_NAME)
+            .env("XDG_SESSION_TYPE", "wayland");
+        // X11 apps go to pila's Xwayland, never the host's X server.
+        match self.xdisplay {
+            Some(display) => cmd.env("DISPLAY", format!(":{display}")),
+            None => cmd.env_remove("DISPLAY"),
+        };
+    }
+
     pub fn spawn_all(&self, commands: &[String]) {
         for command in commands {
             self.spawn(command);
@@ -1029,14 +1098,8 @@ impl Pila {
     pub fn spawn(&self, command: &str) {
         info!(command, "spawning");
         let mut cmd = Command::new("/bin/sh");
-        cmd.arg("-c")
-            .arg(command)
-            .env("WAYLAND_DISPLAY", &self.socket_name);
-        // X11 apps go to pila's Xwayland, never the host's X server.
-        match self.xdisplay {
-            Some(display) => cmd.env("DISPLAY", format!(":{display}")),
-            None => cmd.env_remove("DISPLAY"),
-        };
+        cmd.arg("-c").arg(command);
+        self.session_env(&mut cmd);
         match cmd.spawn() {
             // Reap the child so exited clients don't linger as zombies.
             Ok(mut child) => {

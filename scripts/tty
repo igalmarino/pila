@@ -3,6 +3,12 @@
 # this). The binary is the one built in the dev container (scripts/dev cargo
 # build); the log goes to pila-tty.log in the project root.
 #
+# pila gets its own D-Bus session bus (dbus-run-session), so the portals it
+# starts for screen sharing (xdg-desktop-portal + xdg-desktop-portal-wlr) don't
+# clash with those of a GNOME session on another VT. They find
+# resources/xdg/xdg-desktop-portal/pila-portals.conf through XDG_CONFIG_DIRS;
+# xdg-desktop-portal-wlr's settings are copied to ~/.config if missing.
+#
 #   scripts/tty                 use scripts/tty-test.toml
 #   scripts/tty <config.toml>   use another config
 set -euo pipefail
@@ -25,5 +31,20 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     exit 1
 fi
 
+if ! command -v dbus-run-session >/dev/null; then
+    echo "dbus-run-session not found (Arch package: dbus)" >&2
+    exit 1
+fi
+
+export XDG_CONFIG_DIRS="$PWD/resources/xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+
+# xdg-desktop-portal-wlr only looks in ~/.config (or /etc/xdg) for its config.
+xdpw_config="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal-wlr/pila"
+if [ ! -e "$xdpw_config" ]; then
+    mkdir -p "$(dirname "$xdpw_config")"
+    cp resources/xdg/xdg-desktop-portal-wlr/pila "$xdpw_config"
+    echo "Installed $xdpw_config (screen sharing picks a screen with slurp)."
+fi
+
 echo "Starting pila with $config; log in pila-tty.log. Quit with Mod+Shift+E."
-exec "$bin" --backend udev --config "$config" 2>pila-tty.log
+exec dbus-run-session -- "$bin" --backend udev --config "$config" 2>pila-tty.log

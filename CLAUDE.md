@@ -194,12 +194,23 @@ Key flows and invariants:
 - **Screen capture** (`capture.rs`, ext-image-capture-source + ext-image-copy-capture, on
   the `wayland-protocols` bindings): sources are an output or a window (by its
   foreign-toplevel identifier). Sessions live in `Pila::captures`; frames are rendered
-  offscreen from `scene()` (window sources: only the window, no title bar) and read back
-  into shm buffers (no dma-buf yet; GL reads rows bottom-up, so they're reversed). A
+  from `scene()` (window sources: only the window, no title bar) straight into the
+  client's dma-buf (device and modifiers from `Pila::capture_dmabuf`, set by the backend),
+  or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A
   session's first frame is copied at once (idle), later ones in `post_render` only when
   the session's own damage tracker sees a change. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
+- **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
+  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`.
+  Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
+  which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
+  (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
+  `~/.config/xdg-desktop-portal-wlr/` (xdpw ignores `XDG_CONFIG_DIRS`). On a TTY, before the
+  startup programs, pila exports that environment to the D-Bus session bus
+  (`export_environment`), but only to a bus of its own (`scripts/tty` uses
+  `dbus-run-session`): the systemd user bus is shared with e.g. a GNOME session on another
+  VT, whose portals it would break. Nested, apps use the host's portals.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

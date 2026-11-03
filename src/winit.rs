@@ -35,6 +35,9 @@ pub fn init_winit(
 
     let (mut backend, winit) = winit::init::<GlesRenderer>()?;
     init_dmabuf(&mut backend, &mut state.dmabuf_state, display_handle);
+    if let Ok((_, dev)) = main_device(&mut backend) {
+        state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(dev, backend.renderer()));
+    }
 
     let mode = Mode {
         size: backend.window_size(),

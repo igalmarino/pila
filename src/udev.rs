@@ -189,6 +189,10 @@ pub fn init_udev(
     let context = EGLContext::new(&display)?;
     // SAFETY: the context was just created for this renderer only.
     let renderer = unsafe { GlesRenderer::new(context)? };
+    state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(
+        render_node.dev_id(),
+        &renderer,
+    ));
 
     let allocator = GbmAllocator::new(
         gbm.clone(),

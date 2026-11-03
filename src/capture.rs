@@ -21,17 +21,23 @@
 //! and window captures wait. With `paint_cursors`, the cursor is included
 //! (nested, only client-drawn cursors: the host draws named ones).
 //!
-//! Only shm buffers for now (no dma-buf); cursor sessions are created
-//! stopped. Any client may capture, as with other compositors.
+//! Buffers may be shm (read back from an offscreen texture, rows reversed:
+//! GL reads bottom-up) or dma-buf on the renderer's device (rendered into
+//! directly; what xdg-desktop-portal-wlr uses for PipeWire). Cursor
+//! sessions are created stopped. Any client may capture, as with other
+//! compositors.
 
 use std::{sync::Mutex, time::Duration};
 
 use smithay::{
     backend::{
-        allocator::Fourcc,
+        allocator::{Buffer as _, Fourcc},
         renderer::{
-            buffer_type, damage::OutputDamageTracker, element::AsRenderElements,
-            gles::GlesRenderer, Bind, BufferType, ExportMem, Offscreen, TextureMapping,
+            buffer_type,
+            damage::OutputDamageTracker,
+            element::AsRenderElements,
+            gles::{GlesRenderer, GlesTexture},
+            Bind, BufferType, ExportMem, Offscreen, TextureMapping,
         },
     },
     desktop::Window,
@@ -70,7 +76,11 @@ use smithay::{
         },
     },
     utils::{Physical, Point, Rectangle, Scale, Size, Transform},
-    wayland::{foreign_toplevel_list::ForeignToplevelHandle, shm::with_buffer_contents_mut},
+    wayland::{
+        dmabuf::get_dmabuf,
+        foreign_toplevel_list::ForeignToplevelHandle,
+        shm::{with_buffer_contents, with_buffer_contents_mut},
+    },
 };
 use tracing::{debug, warn};
 
@@ -88,6 +98,36 @@ const SHM_FORMATS: [wl_shm::Format; 4] = [
     wl_shm::Format::Abgr8888,
     wl_shm::Format::Xbgr8888,
 ];
+
+/// The dma-buf formats offered: what clients (PipeWire consumers) expect.
+const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Xrgb8888];
+
+/// Where and how clients may allocate dma-bufs for captures: the renderer's
+/// DRM device and the modifiers it can render to, per format. Set by the
+/// backend (`Pila::capture_dmabuf`); without it only shm is offered.
+pub struct DmabufTarget {
+    device: u64,
+    formats: Vec<(Fourcc, Vec<u64>)>,
+}
+
+impl DmabufTarget {
+    pub fn new(device: u64, renderer: &GlesRenderer) -> Self {
+        let render_formats = renderer.egl_context().dmabuf_render_formats();
+        let formats = DMABUF_FORMATS
+            .iter()
+            .map(|&code| {
+                let modifiers = render_formats
+                    .iter()
+                    .filter(|f| f.code == code)
+                    .map(|f| u64::from(f.modifier))
+                    .collect::<Vec<_>>();
+                (code, modifiers)
+            })
+            .filter(|(_, modifiers)| !modifiers.is_empty())
+            .collect();
+        Self { device, formats }
+    }
+}
 
 /// Behind a captured window's (possibly translucent) surfaces.
 const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
@@ -159,11 +199,23 @@ impl Session {
     }
 
     /// Advertise the buffer constraints for `geometry`.
-    fn send_constraints(&mut self, geometry: (Size<i32, Physical>, Scale<f64>)) {
+    fn send_constraints(
+        &mut self,
+        geometry: (Size<i32, Physical>, Scale<f64>),
+        dmabuf: Option<&DmabufTarget>,
+    ) {
         let size = geometry.0;
         self.resource.buffer_size(size.w as u32, size.h as u32);
         for format in SHM_FORMATS {
             self.resource.shm_format(format);
+        }
+        if let Some(dmabuf) = dmabuf.filter(|d| !d.formats.is_empty()) {
+            self.resource
+                .dmabuf_device(dmabuf.device.to_ne_bytes().to_vec());
+            for (code, modifiers) in &dmabuf.formats {
+                let modifiers = modifiers.iter().flat_map(|m| m.to_ne_bytes()).collect();
+                self.resource.dmabuf_format(*code as u32, modifiers);
+            }
         }
         self.resource.done();
         self.geometry = Some(geometry);
@@ -233,7 +285,7 @@ impl Pila {
             return;
         };
         if session.geometry != Some(geometry) {
-            session.send_constraints(geometry);
+            session.send_constraints(geometry, self.capture_dmabuf.as_ref());
             session.fail(FailureReason::BufferConstraints);
             return;
         }
@@ -343,7 +395,7 @@ impl Pila {
             vec![Rectangle::from_size(size)]
         };
 
-        match copy_to_shm(renderer, &buffer, size, scale, &elements, clear) {
+        match copy_frame(renderer, &buffer, size, scale, &elements, clear) {
             Ok(()) => {}
             Err(CopyError::Constraints) => {
                 debug!("capture: buffer doesn't match the constraints");
@@ -386,6 +438,56 @@ enum CopyError {
     Render(String),
 }
 
+/// Copy `elements` into the client's `buffer`: rendered straight into a
+/// dma-buf, or offscreen and read back into shm.
+fn copy_frame(
+    renderer: &mut GlesRenderer,
+    buffer: &WlBuffer,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    elements: &[PilaRenderElement<GlesRenderer>],
+    clear: [f32; 4],
+) -> Result<(), CopyError> {
+    match buffer_type(buffer) {
+        Some(BufferType::Shm) => copy_to_shm(renderer, buffer, size, scale, elements, clear),
+        Some(BufferType::Dma) => render_to_dmabuf(renderer, buffer, size, scale, elements, clear),
+        _ => Err(CopyError::Constraints),
+    }
+}
+
+fn render_error(err: &dyn std::fmt::Debug) -> CopyError {
+    CopyError::Render(format!("{err:?}"))
+}
+
+/// Render `elements` into the client's dma-buf: no copy through the CPU.
+fn render_to_dmabuf(
+    renderer: &mut GlesRenderer,
+    buffer: &WlBuffer,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    elements: &[PilaRenderElement<GlesRenderer>],
+    clear: [f32; 4],
+) -> Result<(), CopyError> {
+    let mut dmabuf = get_dmabuf(buffer)
+        .map_err(|_| CopyError::Constraints)?
+        .clone();
+    let buffer_size = dmabuf.size();
+    if (buffer_size.w, buffer_size.h) != (size.w, size.h)
+        || !DMABUF_FORMATS.contains(&dmabuf.format().code)
+    {
+        return Err(CopyError::Constraints);
+    }
+    let mut target = renderer.bind(&mut dmabuf).map_err(|e| render_error(&e))?;
+    // Drawn like a DRM output's buffer: top row first, so `Normal`.
+    let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
+    let result = tracker
+        .render_output(renderer, &mut target, 0, elements, clear)
+        .map_err(|e| render_error(&e))?;
+    // The client reads it as soon as it gets `ready`.
+    result.sync.wait().map_err(|e| render_error(&e))?;
+    Ok(())
+}
+
 /// Render `elements` offscreen and copy the pixels into the shm `buffer`.
 fn copy_to_shm(
     renderer: &mut GlesRenderer,
@@ -395,51 +497,53 @@ fn copy_to_shm(
     elements: &[PilaRenderElement<GlesRenderer>],
     clear: [f32; 4],
 ) -> Result<(), CopyError> {
-    if !matches!(buffer_type(buffer), Some(BufferType::Shm)) {
-        return Err(CopyError::Constraints);
-    }
-    let render = |err: &dyn std::fmt::Debug| CopyError::Render(format!("{err:?}"));
     let (w, h) = (size.w, size.h);
+    let format = with_buffer_contents(buffer, |_, _, data| {
+        (data.width == w && data.height == h && data.stride >= w * 4).then_some(data.format)
+    })
+    .ok()
+    .flatten()
+    .ok_or(CopyError::Constraints)?;
+    // The client's byte order (ARGB is B, G, R, A in memory), read back
+    // directly where GL can; otherwise read RGBA and swap per pixel.
+    let wanted = match format {
+        wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => Fourcc::Argb8888,
+        wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => Fourcc::Abgr8888,
+        _ => return Err(CopyError::Constraints),
+    };
 
-    let mut texture = Offscreen::<smithay::backend::renderer::gles::GlesTexture>::create_buffer(
-        renderer,
-        Fourcc::Abgr8888,
-        (w, h).into(),
-    )
-    .map_err(|e| render(&e))?;
-    let mut target = renderer.bind(&mut texture).map_err(|e| render(&e))?;
+    let mut texture =
+        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, (w, h).into())
+            .map_err(|e| render_error(&e))?;
+    let mut target = renderer.bind(&mut texture).map_err(|e| render_error(&e))?;
     let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
     let result = tracker
         .render_output(renderer, &mut target, 0, elements, clear)
-        .map_err(|e| render(&e))?;
-    result.sync.wait().map_err(|e| render(&e))?;
-    let mapping = renderer
-        .copy_framebuffer(
-            &target,
-            Rectangle::from_size((w, h).into()),
-            Fourcc::Abgr8888,
-        )
-        .map_err(|e| render(&e))?;
+        .map_err(|e| render_error(&e))?;
+    result.sync.wait().map_err(|e| render_error(&e))?;
+    let region = Rectangle::from_size((w, h).into());
+    let (mapping, swap_rb) = match renderer.copy_framebuffer(&target, region, wanted) {
+        Ok(mapping) => (mapping, false),
+        Err(_) => (
+            renderer
+                .copy_framebuffer(&target, region, Fourcc::Abgr8888)
+                .map_err(|e| render_error(&e))?,
+            wanted != Fourcc::Abgr8888,
+        ),
+    };
     // glReadPixels returns rows bottom-up: an offscreen texture drawn with
     // `Transform::Normal` reads back upside down unless the mapping says
     // it's already flipped.
     let bottom_up = !mapping.flipped();
-    let pixels = renderer.map_texture(&mapping).map_err(|e| render(&e))?;
+    let pixels = renderer
+        .map_texture(&mapping)
+        .map_err(|e| render_error(&e))?;
 
     let row = (w * 4) as usize;
     if pixels.len() < row * h as usize {
         return Err(CopyError::Render("short read-back".into()));
     }
     with_buffer_contents_mut(buffer, |ptr, len, data| {
-        if data.width != w || data.height != h || data.stride < w * 4 {
-            return Err(CopyError::Constraints);
-        }
-        // Byte order in memory of each format (all little-endian words).
-        let swap_rb = match data.format {
-            wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => true,
-            wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => false,
-            _ => return Err(CopyError::Constraints),
-        };
         let end = data.offset as usize + data.stride as usize * (h as usize - 1) + row;
         if end > len {
             return Err(CopyError::Constraints);
@@ -618,7 +722,9 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     stopped: false,
                 };
                 match state.capture_geometry(&session.target) {
-                    Some(geometry) => session.send_constraints(geometry),
+                    Some(geometry) => {
+                        session.send_constraints(geometry, state.capture_dmabuf.as_ref())
+                    }
                     None => session.stop(),
                 }
                 debug!(target = ?session.target, paint_cursors = session.paint_cursors, "capture session");

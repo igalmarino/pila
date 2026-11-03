@@ -60,7 +60,12 @@ Environment (overrides the config file):
   PILA_LAUNCHER  Command for Mod+D (unset: binding disabled)
   XCURSOR_THEME  Cursor theme on a TTY (default: default)
   XCURSOR_SIZE   Cursor size on a TTY (default: 24)
-  RUST_LOG       Log filter (default: info)";
+  RUST_LOG       Log filter (default: info)
+
+Programs pila starts get XDG_CURRENT_DESKTOP=pila. For screen sharing on a
+TTY, run pila under its own D-Bus session (dbus-run-session pila) with
+resources/xdg/xdg-desktop-portal/pila-portals.conf installed (scripts/tty
+does both).";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendKind {
