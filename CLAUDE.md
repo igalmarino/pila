@@ -151,6 +151,12 @@ Key flows and invariants:
   use `window_for_surface`, which searches both.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises and sets keyboard focus, then flushes pending configures.
+- **Window switching** (`switcher.rs`): `focus_window` moves the window to the front of
+  `Pila::focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::switch`,
+  a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;
+  the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
+  released (checked after every key in `on_keyboard`), on a click, and in
+  `release_all_keys`. Unmapped windows are dropped with `forget_focus_history`.
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
   Background; a fullscreen window on top also covers Top (`layer_order`). All pointer

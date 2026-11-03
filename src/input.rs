@@ -106,6 +106,13 @@ impl Pila {
         if let Some(action) = action.flatten() {
             self.run_action(action, serial);
         }
+        // Mod+Tab ends once Ctrl/Alt/Super are all released.
+        if self.switch.is_some() {
+            let mods = keyboard.modifier_state();
+            if !(mods.ctrl || mods.alt || mods.logo) {
+                self.end_switch();
+            }
+        }
     }
 
     /// Whether the surface with keyboard focus (or the window of a focused
@@ -150,6 +157,7 @@ impl Pila {
             );
         }
         self.suppressed_keys.clear();
+        self.end_switch();
     }
 
     fn on_pointer_motion_absolute<I: InputBackend>(
@@ -342,6 +350,10 @@ impl Pila {
         let serial = SERIAL_COUNTER.next_serial();
         let button = event.button_code();
         let button_state = event.state();
+        // A click picks the window itself; a Mod+Tab in progress is over.
+        if button_state == ButtonState::Pressed {
+            self.end_switch();
+        }
 
         if button_state == ButtonState::Pressed && self.is_locked() {
             // Clicking an output's lock surface gives it the keyboard.

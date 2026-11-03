@@ -57,6 +57,7 @@ use crate::{
     idle::IdleInhibitors,
     render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
     session_lock::SessionLock,
+    switcher::Switch,
 };
 
 /// Offset applied to each new window that would land exactly on top of another.
@@ -81,6 +82,11 @@ pub struct Pila {
     pub pending_startup: Vec<String>,
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
+
+    /// Windows most recently focused first, and the Mod+Tab in progress
+    /// (`switcher.rs`).
+    pub focus_history: Vec<Window>,
+    pub switch: Option<Switch>,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
@@ -193,6 +199,8 @@ impl Pila {
             xdisplay: None,
             xwayland_shell_state,
             pending_startup: Vec::new(),
+            focus_history: Vec::new(),
+            switch: None,
             xwayland_token: None,
             space: Space::default(),
             unmapped: Vec::new(),
@@ -595,6 +603,7 @@ impl Pila {
             .map(|l| KeyboardFocus::from(l.wl_surface().clone()));
         match window {
             Some(window) => {
+                self.touch_focus_history(&window);
                 self.space.raise_element(&window, true);
                 self.x11_window_raised(&window);
                 let target = focus_target(&window);
@@ -654,15 +663,6 @@ impl Pila {
             let (maximized, fullscreen) = fill_state(&window);
             self.set_fill_state(&window, maximized, fullscreen);
         }
-    }
-
-    /// Raise the bottom-most window: repeated presses walk through all windows.
-    pub fn cycle_focus(&mut self, serial: Serial) {
-        if self.space.elements().len() < 2 {
-            return;
-        }
-        let bottom = self.space.elements().next().cloned();
-        self.focus_window(bottom, serial);
     }
 
     pub fn close_focused(&mut self) {
@@ -896,7 +896,8 @@ impl Pila {
                 }
             }
             Action::CloseFocused => self.close_focused(),
-            Action::CycleFocus => self.cycle_focus(serial),
+            Action::CycleFocus => self.cycle_focus(true, serial),
+            Action::CycleFocusBack => self.cycle_focus(false, serial),
             Action::ToggleMaximize => {
                 if let Some(window) = self.focused_window() {
                     let (maximized, fullscreen) = fill_state(&window);

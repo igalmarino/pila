@@ -26,6 +26,7 @@ mod pointer_constraints;
 mod render;
 mod session_lock;
 mod state;
+mod switcher;
 mod text;
 mod udev;
 mod winit;

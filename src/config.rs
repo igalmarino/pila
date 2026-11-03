@@ -8,7 +8,8 @@
 //! |-----------------------|--------------------------------|
 //! | Mod+Return            | Open terminal                  |
 //! | Mod+D                 | Run launcher (if configured)   |
-//! | Mod+Tab / Mod+J       | Focus and raise next window    |
+//! | Mod+Tab / Mod+J       | Switch to previous window (hold Mod and repeat: older ones) |
+//! | Mod+Shift+Tab         | Same, the other way round      |
 //! | Mod+M                 | Toggle maximize                |
 //! | Mod+F                 | Toggle fullscreen              |
 //! | Mod+Shift+Q           | Close focused window           |
@@ -43,6 +44,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+D", "launcher"),
     ("Mod+Tab", "cycle-focus"),
     ("Mod+J", "cycle-focus"),
+    ("Mod+Shift+Tab", "cycle-focus-back"),
     ("Mod+M", "maximize"),
     ("Mod+F", "fullscreen"),
     ("Mod+Shift+Q", "close"),
@@ -147,7 +149,9 @@ pub enum Action {
     Terminal,
     Launcher,
     CloseFocused,
+    /// Mod+Tab: by recent use (`switcher.rs`); `CycleFocusBack` the other way.
     CycleFocus,
+    CycleFocusBack,
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
@@ -168,13 +172,14 @@ impl Action {
             "launcher" => Action::Launcher,
             "close" => Action::CloseFocused,
             "cycle-focus" => Action::CycleFocus,
+            "cycle-focus-back" => Action::CycleFocusBack,
             "maximize" => Action::ToggleMaximize,
             "fullscreen" => Action::ToggleFullscreen,
             "quit" => Action::Quit,
             other => {
                 return Err(format!(
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
-                     cycle-focus, maximize, fullscreen, quit or none)"
+                     cycle-focus, cycle-focus-back, maximize, fullscreen, quit or none)"
                 ))
             }
         }))

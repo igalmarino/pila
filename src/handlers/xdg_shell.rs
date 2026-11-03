@@ -63,6 +63,7 @@ impl XdgShellHandler for Pila {
 
         if let Some(window) = self.window_for_surface(wl_surface) {
             self.remove_foreign_toplevel(&window);
+            self.forget_focus_history(&window);
             self.space.unmap_elem(&window);
         }
         if was_focused {
