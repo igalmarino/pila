@@ -198,3 +198,9 @@ sudo pacman -S waybar swaybg mako swayidle swaylock fuzzel wl-clipboard brightne
 
 The dev container works from inside pila too: `scripts/dev` links the Wayland socket of the
 session it runs in (`scripts/link-wayland`), so nested pila opens inside the running pila.
+
+## License
+
+pila is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. See [LICENSE](LICENSE).
