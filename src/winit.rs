@@ -141,15 +141,13 @@ fn redraw(
     let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
     let scene = state.scene();
     let lock_pending = state.lock_pending();
-    let output_location = state
-        .space
-        .output_geometry(output)
-        .map(|geo| geo.loc)
-        .unwrap_or_default();
+    let output_geo = state.space.output_geometry(output).unwrap_or_default();
+    let output_location = output_geo.loc;
 
     let scale = crate::scale::output_scale(output);
 
-    let Some(Backend::Winit(backend)) = state.backend.as_mut() else {
+    let Pila { backend, blur, .. } = state;
+    let Some(Backend::Winit(backend)) = backend.as_mut() else {
         return;
     };
     // Age 0 makes the damage tracker redraw everything. The frame that
@@ -163,6 +161,14 @@ fn redraw(
     // did), and how each element was drawn.
     let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
+            blur.prepare(
+                renderer,
+                &scene,
+                &output.name(),
+                output_location,
+                output_geo.size,
+                scale,
+            );
             let mut elements =
                 render::cursor_elements(renderer, cursor.as_ref(), output_location, scale);
             elements.extend(render::scene_elements(
@@ -170,6 +176,7 @@ fn redraw(
                 &scene,
                 output_location,
                 scale,
+                &mut |i| blur.element(i, scale),
             ));
             match damage_tracker.render_output(
                 renderer,

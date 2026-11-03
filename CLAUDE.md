@@ -287,6 +287,16 @@ Key flows and invariants:
   (`disable_output`) clears its CRTC, removes its global and runs `output_removed`; the
   `OutputSurface` stays so the head is still listed; `enable_output` is the reverse (also
   used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`.
+- **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
+  surface state (`BlurRegion`, committed by Smithay); `Pila::scene` evaluates it per
+  layer surface into `SceneLayer::blur` (upper layers only for now). Before an output's
+  elements are built, both backends (and captures) call `BlurCache::prepare`: for each
+  blurred layer it renders what's behind the region (`render::elements_behind_layer`)
+  into an offscreen texture through a per-region damage tracker, and only when that
+  changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
+  `Transform::Normal` throughout, textures with linear filtering and clamped edges);
+  `BlurCache::element` gives `render::scene_elements` the result (a `Texture` variant of
+  `PilaRenderElement`) to draw right behind that layer. A shader failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.

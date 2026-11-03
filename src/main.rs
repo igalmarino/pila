@@ -13,6 +13,7 @@
 
 mod backend;
 mod bell;
+mod blur;
 mod capture;
 mod config;
 mod config_reload;

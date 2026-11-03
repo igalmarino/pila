@@ -1123,7 +1123,8 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     let lock_pending = state.lock_pending();
     let scale = crate::scale::output_scale(&output);
 
-    let Some(Backend::Udev(data)) = &mut state.backend else {
+    let Pila { backend, blur, .. } = state;
+    let Some(Backend::Udev(data)) = backend else {
         return;
     };
     let UdevData {
@@ -1135,6 +1136,15 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     let surface = outputs.get_mut(&crtc).expect("checked above");
     let drm_output = surface.drm_output.as_mut().expect("checked above");
     surface.redraw_needed = false;
+
+    blur.prepare(
+        renderer,
+        &scene,
+        &output.name(),
+        output_geo.loc,
+        output_geo.size,
+        scale,
+    );
 
     let mut elements = Vec::new();
     if pointer_here {
@@ -1160,6 +1170,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         &scene,
         output_geo.loc,
         scale,
+        &mut |i| blur.element(i, scale),
     ));
 
     let rendered = drm_output.render_frame(

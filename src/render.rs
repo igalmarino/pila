@@ -14,9 +14,10 @@ use smithay::{
             memory::MemoryRenderBufferRenderElement,
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            texture::TextureRenderElement,
             AsRenderElements, Kind,
         },
-        ImportAll, ImportMem, Renderer,
+        ImportAll, ImportMem, Renderer, RendererSuper,
     },
     desktop::{LayerSurface, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -33,7 +34,12 @@ smithay::backend::renderer::element::render_elements! {
     Surface=WaylandSurfaceRenderElement<R>,
     Solid=SolidColorRenderElement,
     Memory=MemoryRenderBufferRenderElement<R>,
+    Texture=TextureRenderElement<<R as RendererSuper>::TextureId>,
 }
+
+/// The blurred backdrop to draw behind the upper layer surface at an index
+/// of `Scene::upper`, if it has one (`blur.rs`).
+pub type Backdrop<'a, R> = &'a mut dyn FnMut(usize) -> Option<PilaRenderElement<R>>;
 
 /// Behind all windows and layer surfaces.
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -77,6 +83,8 @@ impl Scene {
 pub struct SceneLayer {
     pub layer: LayerSurface,
     pub location: Point<i32, Logical>,
+    /// Where the screen behind it is blurred (surface-local; `blur.rs`).
+    pub blur: Vec<Rectangle<i32, Logical>>,
 }
 
 /// A mapped window as it should be drawn this frame.
@@ -103,6 +111,40 @@ pub fn scene_elements<R>(
     scene: &Scene,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_, R>,
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    scene_elements_from(renderer, scene, output_location, scale, backdrop, 0)
+}
+
+/// What's behind the upper layer surface at `index`: the upper layers below
+/// it and everything else, relative to `origin`.
+pub fn elements_behind_layer<R>(
+    renderer: &mut R,
+    scene: &Scene,
+    index: usize,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+    backdrop: Backdrop<'_, R>,
+) -> Vec<PilaRenderElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + 'static,
+{
+    scene_elements_from(renderer, scene, origin, scale, backdrop, index + 1)
+}
+
+/// `scene_elements` starting from the upper layer at `first_upper`.
+fn scene_elements_from<R>(
+    renderer: &mut R,
+    scene: &Scene,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+    backdrop: Backdrop<'_, R>,
+    first_upper: usize,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -126,7 +168,17 @@ where
             })
             .collect();
     }
-    let mut elements = layer_elements(renderer, &scene.upper, output_location, scale);
+    let mut elements = Vec::new();
+    for (i, entry) in scene.upper.iter().enumerate().skip(first_upper) {
+        elements.extend(layer_elements(
+            renderer,
+            std::slice::from_ref(entry),
+            output_location,
+            scale,
+        ));
+        // Right behind the surface (elements go front to back).
+        elements.extend(backdrop(i));
+    }
     if let Some((buffer, rect)) = &scene.snap_preview {
         let loc: Point<i32, Physical> =
             (rect.loc - output_location).to_physical_precise_round(scale);

@@ -233,11 +233,13 @@ impl Pila {
         let scale = output_scale(&output);
         let clear = render::clear_color(&scene);
 
-        let Some(backend) = self.backend.as_mut() else {
+        let Pila { backend, blur, .. } = self;
+        let Some(backend) = backend.as_mut() else {
             frame.failed();
             return true;
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
+        blur.prepare(renderer, &scene, &output.name(), geo.loc, geo.size, scale);
         let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
         if overlay_cursor {
             elements.extend(render::cursor_elements(
@@ -253,7 +255,13 @@ impl Pila {
                 ));
             }
         }
-        elements.extend(render::scene_elements(renderer, &scene, origin, scale));
+        elements.extend(render::scene_elements(
+            renderer,
+            &scene,
+            origin,
+            scale,
+            &mut |i| blur.element(i, scale),
+        ));
 
         let mut damage = Vec::new();
         if with_damage {

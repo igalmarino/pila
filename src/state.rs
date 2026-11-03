@@ -121,6 +121,8 @@ pub struct Pila {
     pub gamma_controls: crate::gamma_control::GammaControls,
     /// Clients watching or setting outputs' power (`output_power.rs`).
     pub output_powers: crate::output_power::OutputPowers,
+    /// Blurred backdrops of layer surfaces (`blur.rs`).
+    pub blur: crate::blur::BlurCache,
     /// Display tools' view of the monitors (`output_management.rs`), and
     /// what they set, over `[[output]]`, by output name.
     pub output_management: crate::output_management::OutputManagement,
@@ -275,6 +277,7 @@ impl Pila {
             gamma_controls: Default::default(),
             output_powers: Default::default(),
             output_management: Default::default(),
+            blur: Default::default(),
             output_overrides: HashMap::new(),
             switch: None,
             swipe: None,
@@ -432,7 +435,11 @@ impl Pila {
         let layers = |layers| {
             self.layer_surfaces(layers)
                 .into_iter()
-                .map(|(layer, location)| SceneLayer { layer, location })
+                .map(|(layer, location)| SceneLayer {
+                    blur: crate::blur::blur_rects(&layer),
+                    layer,
+                    location,
+                })
                 .collect()
         };
         Scene {

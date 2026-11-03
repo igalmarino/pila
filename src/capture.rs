@@ -342,10 +342,22 @@ impl Pila {
             None => render::clear_color(&scene),
         };
 
-        let Some(backend) = self.backend.as_mut() else {
+        let output_for_blur = match &session.target {
+            Target::Output(output) => output
+                .upgrade()
+                .and_then(|o| self.space.output_geometry(&o).map(|geo| (o.name(), geo))),
+            _ => None,
+        };
+        let Pila { backend, blur, .. } = self;
+        let Some(backend) = backend.as_mut() else {
             return;
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
+        // Blurred backdrops are part of the screen; prepare them for this
+        // output as the backends do.
+        if let Some((name, geo)) = &output_for_blur {
+            blur.prepare(renderer, &scene, name, geo.loc, geo.size, scale);
+        }
 
         let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
         if session.paint_cursors {
@@ -371,7 +383,13 @@ impl Pila {
                     PilaRenderElement<GlesRenderer>,
                 >(window, renderer, loc, scale, 1.0));
             }
-            None => elements.extend(render::scene_elements(renderer, &scene, origin, scale)),
+            None => elements.extend(render::scene_elements(
+                renderer,
+                &scene,
+                origin,
+                scale,
+                &mut |i| blur.element(i, scale),
+            )),
         }
 
         // Changes since the last copied frame; later frames wait for one.
