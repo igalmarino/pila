@@ -1,0 +1,11 @@
+# Test config for running pila on the host from a TTY (scripts/tty).
+# The laptop panel at 125 %, the external monitor at 100 % to its right.
+mod = "super"
+
+[[output]]
+name = "eDP-1"
+scale = 1.25
+
+[[output]]
+name = "DP-1"
+position = [1536, 0]   # 1920 / 1.25: right of the scaled laptop panel
