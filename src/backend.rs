@@ -5,6 +5,7 @@
 use smithay::{
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
     input::{keyboard::LedState, pointer::CursorImageStatus},
+    output::Output,
 };
 
 use crate::{cursor::CursorTheme, udev::UdevData};
@@ -63,6 +64,40 @@ impl Backend {
     pub fn change_vt(&mut self, vt: i32) {
         if let Backend::Udev(data) = self {
             data.change_vt(vt);
+        }
+    }
+
+    /// The length of each of `output`'s gamma ramps, if it has any.
+    /// Nested, the host owns the display.
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        match self {
+            Backend::Winit(_) => None,
+            Backend::Udev(data) => data.gamma_size(output),
+        }
+    }
+
+    /// Whether `output`'s display is on; `None` nested (the host owns it).
+    pub fn output_power(&self, output: &Output) -> Option<bool> {
+        match self {
+            Backend::Winit(_) => None,
+            Backend::Udev(data) => data.output_power(output),
+        }
+    }
+
+    /// Turn `output`'s display off or on. `false` if it couldn't be done.
+    pub fn set_output_power(&mut self, output: &Output, on: bool) -> bool {
+        match self {
+            Backend::Winit(_) => false,
+            Backend::Udev(data) => data.set_output_power(output, on),
+        }
+    }
+
+    /// Set `output`'s gamma ramps (red, green, blue, each `gamma_size` long,
+    /// concatenated), or `None` for linear. `false` if it couldn't be set.
+    pub fn set_gamma(&mut self, output: &Output, ramp: Option<&[u16]>) -> bool {
+        match self {
+            Backend::Winit(_) => false,
+            Backend::Udev(data) => data.set_gamma(output, ramp),
         }
     }
 }

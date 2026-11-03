@@ -416,6 +416,39 @@ pub struct OutputConfig {
     /// Rotation (counter-clockwise, as in wl_output) and flipping, for a
     /// monitor mounted sideways (TTY only).
     pub transform: Option<Transform>,
+    /// `false` leaves the monitor off: no `wl_output`, no windows (TTY only).
+    pub enabled: Option<bool>,
+    /// Variable refresh rate, where the monitor supports it (TTY only).
+    pub adaptive_sync: Option<bool>,
+}
+
+impl OutputConfig {
+    /// A section with nothing set: the defaults.
+    pub fn named(name: &str) -> Self {
+        OutputConfig {
+            name: name.to_string(),
+            mode: None,
+            scale: None,
+            position: None,
+            transform: None,
+            enabled: None,
+            adaptive_sync: None,
+        }
+    }
+
+    /// This section with `over`'s set fields on top (what a client set
+    /// through wlr-output-management over what the file says).
+    pub fn overridden_by(&self, over: &OutputConfig) -> OutputConfig {
+        OutputConfig {
+            name: self.name.clone(),
+            mode: over.mode.or(self.mode),
+            scale: over.scale.or(self.scale),
+            position: over.position.or(self.position),
+            transform: over.transform.or(self.transform),
+            enabled: over.enabled.or(self.enabled),
+            adaptive_sync: over.adaptive_sync.or(self.adaptive_sync),
+        }
+    }
 }
 
 /// `transform` in `[[output]]`: wl_output's names.
@@ -504,6 +537,9 @@ struct OutputFile {
     scale: Option<f64>,
     position: Option<[i32; 2]>,
     transform: Option<String>,
+    enabled: Option<bool>,
+    #[serde(rename = "adaptive-sync")]
+    adaptive_sync: Option<bool>,
 }
 
 impl OutputFile {
@@ -540,6 +576,8 @@ impl OutputFile {
             scale,
             position: self.position.map(|[x, y]| (x, y)),
             transform,
+            enabled: self.enabled,
+            adaptive_sync: self.adaptive_sync,
         })
     }
 }
@@ -923,6 +961,30 @@ mod tests {
         );
         assert!(config.output("HDMI-A-1").is_none());
         assert_eq!(dp.transform, None);
+        assert_eq!(dp.enabled, None);
+        assert_eq!(dp.adaptive_sync, None);
+    }
+
+    #[test]
+    fn outputs_can_be_disabled_and_overridden() {
+        let config = Config::from_toml(
+            "[[output]]\nname = \"DP-1\"\nenabled = false\nadaptive-sync = true\nscale = 2",
+            &no_env,
+        )
+        .unwrap();
+        let dp = config.output("DP-1").unwrap();
+        assert_eq!(dp.enabled, Some(false));
+        assert_eq!(dp.adaptive_sync, Some(true));
+        let over = OutputConfig {
+            enabled: Some(true),
+            position: Some((10, 20)),
+            ..OutputConfig::named("DP-1")
+        };
+        let effective = dp.overridden_by(&over);
+        assert_eq!(effective.enabled, Some(true));
+        assert_eq!(effective.position, Some((10, 20)));
+        assert_eq!(effective.scale, Some(2.0));
+        assert_eq!(effective.adaptive_sync, Some(true));
     }
 
     #[test]

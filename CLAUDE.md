@@ -264,6 +264,15 @@ Key flows and invariants:
   per manager, destroyed ones `closed` (`remove_foreign_toplevel`). Requests map onto
   `focus_window`/`restore_window`, `minimize_window`/`show_window`, `set_fill_state(_on)`
   and `close_window`, and are ignored while locked.
+- **Gamma** (`gamma_control.rs`, wlr-gamma-control): one control per output, ramps set
+  through `Backend::set_gamma` (udev: the legacy `set_gamma` ioctl on the CRTC; remembered
+  in `OutputSurface.gamma` and re-applied after `ActivateSession`, a mode change and a
+  power on; nested: fails). Destroying the control restores linear.
+- **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
+  `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on =
+  `initialize_output` again with the stored connector and mode (`UdevData::set_output_power`).
+  Code using `drm_output` must handle `None`; a powered-off output stays mapped and counts
+  as showing the lock screen. Nested: fails.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.

@@ -102,7 +102,12 @@ pub struct UdevData {
 
 struct OutputSurface {
     output: Output,
-    drm_output: PilaDrmOutput,
+    /// The CRTC's surface: `None` while the output is powered off
+    /// (`set_output_power`), which clears the CRTC.
+    drm_output: Option<PilaDrmOutput>,
+    connector: connector::Handle,
+    /// The mode in use, to set the CRTC up again.
+    mode: DrmMode,
     global: GlobalId,
     /// A frame was queued and its vblank hasn't arrived yet.
     frame_pending: bool,
@@ -112,6 +117,9 @@ struct OutputSurface {
     lock_frame: LockFrame,
     /// The connector's modes, for `[[output]]` mode changes on reload.
     modes: Vec<DrmMode>,
+    /// The gamma ramps a client set (`gamma_control.rs`), re-applied
+    /// whenever the CRTC is set up again.
+    gamma: Option<Vec<u16>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -150,6 +158,128 @@ impl UdevData {
         for device in &mut self.pointers {
             if let Some(config) = pointer_config(device, input) {
                 configure_pointer(device, config);
+            }
+        }
+    }
+
+    fn crtc_of(&self, output: &Output) -> Option<crtc::Handle> {
+        self.outputs
+            .iter()
+            .find(|(_, s)| &s.output == output)
+            .map(|(crtc, _)| *crtc)
+    }
+
+    /// The length of the output's gamma ramps (0 = no gamma support).
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        let crtc = self.crtc_of(output)?;
+        self.drm
+            .device()
+            .get_crtc(crtc)
+            .ok()
+            .map(|info| info.gamma_length())
+            .filter(|n| *n > 0)
+    }
+
+    /// Set the output's gamma ramps (`None`: linear) and remember them.
+    pub fn set_gamma(&mut self, output: &Output, ramp: Option<&[u16]>) -> bool {
+        let Some(crtc) = self.crtc_of(output) else {
+            return false;
+        };
+        let Some(size) = self.gamma_size(output) else {
+            return false;
+        };
+        let linear;
+        let ramp = match ramp {
+            Some(ramp) if ramp.len() == size as usize * 3 => ramp,
+            Some(_) => return false,
+            None => {
+                let one: Vec<u16> = (0..size)
+                    .map(|i| (u64::from(i) * 0xffff / u64::from(size - 1).max(1)) as u16)
+                    .collect();
+                linear = [one.clone(), one.clone(), one].concat();
+                &linear
+            }
+        };
+        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+            return false;
+        }
+        if let Some(surface) = self.outputs.get_mut(&crtc) {
+            surface.gamma = ramp_if_set(ramp, size);
+        }
+        true
+    }
+
+    /// Whether the output is powered on; `None` for an unknown output.
+    pub fn output_power(&self, output: &Output) -> Option<bool> {
+        let crtc = self.crtc_of(output)?;
+        Some(self.outputs[&crtc].drm_output.is_some())
+    }
+
+    /// Turn an output's display off (its CRTC is cleared, so the monitor
+    /// goes to sleep) or back on (the CRTC is set up again with the same
+    /// mode). The output stays mapped: windows and the pointer keep their
+    /// places. `false` if it couldn't be done.
+    pub fn set_output_power(&mut self, output: &Output, on: bool) -> bool {
+        let Some(crtc) = self.crtc_of(output) else {
+            return false;
+        };
+        let UdevData {
+            outputs,
+            drm,
+            renderer,
+            ..
+        } = self;
+        let surface = outputs.get_mut(&crtc).expect("found above");
+        let name = surface.output.name();
+        if on == surface.drm_output.is_some() {
+            return true;
+        }
+        let elements = DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default();
+        if !on {
+            surface.drm_output = None;
+            surface.frame_pending = false;
+            surface.lock_frame = LockFrame::None;
+            if let Err(err) = drm.try_to_restore_modifiers(renderer, &elements) {
+                debug!(?err, "couldn't restore modifiers after powering off");
+            }
+            info!(name, "output powered off");
+            return true;
+        }
+        let planes = drm.device().planes(&crtc).ok();
+        match drm.initialize_output(
+            crtc,
+            surface.mode,
+            &[surface.connector],
+            &surface.output,
+            planes,
+            renderer,
+            &elements,
+        ) {
+            Ok(drm_output) => {
+                surface.drm_output = Some(drm_output);
+                surface.frame_pending = false;
+                surface.redraw_needed = true;
+                info!(name, "output powered on");
+            }
+            Err(err) => {
+                warn!(name, ?err, "failed to power the output on");
+                return false;
+            }
+        }
+        self.reapply_gamma(crtc);
+        self.queue_redraw();
+        true
+    }
+
+    /// Put the remembered gamma ramps back after the CRTC was set up again
+    /// (VT switch back, mode change, power on).
+    fn reapply_gamma(&self, crtc: crtc::Handle) {
+        let Some(surface) = self.outputs.get(&crtc) else {
+            return;
+        };
+        if let (Some(ramp), Some(size)) = (&surface.gamma, self.gamma_size(&surface.output)) {
+            if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+                warn!(name = surface.output.name(), "failed to re-apply gamma");
             }
         }
     }
@@ -270,8 +400,11 @@ pub fn init_udev(
                     if let Err(err) = data.drm.activate(false) {
                         error!(?err, "failed to resume the DRM device");
                     }
-                    for surface in data.outputs.values_mut() {
-                        surface.frame_pending = false;
+                    let crtcs: Vec<_> = data.outputs.keys().copied().collect();
+                    for crtc in crtcs {
+                        data.outputs.get_mut(&crtc).expect("listed").frame_pending = false;
+                        // Another VT may have changed the LUTs.
+                        data.reapply_gamma(crtc);
                     }
                 }
                 state.queue_redraw();
@@ -437,6 +570,29 @@ fn configure_pointer(device: &mut libinput::Device, config: &PointerConfig) {
     info!(device = name, ?config, "configured pointer device");
 }
 
+/// Set a CRTC's gamma ramps through the legacy ioctl, which atomic drivers
+/// serve too.
+fn apply_gamma(device: &DrmDevice, crtc: crtc::Handle, ramp: &[u16], size: u32) -> bool {
+    let n = size as usize;
+    match device.set_gamma(crtc, &ramp[..n], &ramp[n..2 * n], &ramp[2 * n..3 * n]) {
+        Ok(()) => true,
+        Err(err) => {
+            warn!(?err, "set_gamma failed");
+            false
+        }
+    }
+}
+
+/// The ramp to remember: none if it's the linear one.
+fn ramp_if_set(ramp: &[u16], size: u32) -> Option<Vec<u16>> {
+    let n = size as usize;
+    let linear = (0..3 * n).all(|i| {
+        let j = (i % n) as u64;
+        ramp[i] as u64 == j * 0xffff / u64::from(size - 1).max(1)
+    });
+    (!linear).then(|| ramp.to_vec())
+}
+
 /// The mode `config` asks for among a connector's `modes`, else its
 /// preferred mode, else its first.
 fn pick_mode(name: &str, modes: &[DrmMode], config: Option<&OutputConfig>) -> Option<DrmMode> {
@@ -488,6 +644,7 @@ pub fn apply_output_config(state: &mut Pila) {
     order.sort_by_key(|(_, x)| *x);
 
     let mut placed: Vec<(Output, Point<i32, Logical>)> = Vec::new();
+    let mut remodeled: Vec<crtc::Handle> = Vec::new();
     let mut right_edge = 0;
     for (crtc, _) in order {
         let surface = outputs.get_mut(&crtc).expect("listed above");
@@ -496,17 +653,24 @@ pub fn apply_output_config(state: &mut Pila) {
         if let Some(mode) = pick_mode(&name, &surface.modes, config) {
             let wl_mode = WlMode::from(mode);
             if surface.output.current_mode() != Some(wl_mode) {
-                match drm.use_mode(
-                    &crtc,
-                    mode,
-                    renderer,
-                    &DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default(),
-                ) {
+                // Powered off: the mode is set when the CRTC comes back.
+                let result = match surface.drm_output {
+                    Some(_) => drm.use_mode(
+                        &crtc,
+                        mode,
+                        renderer,
+                        &DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default(),
+                    ),
+                    None => Ok(()),
+                };
+                match result {
                     Ok(()) => {
+                        surface.mode = mode;
                         surface
                             .output
                             .change_current_state(Some(wl_mode), None, None, None);
                         info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
+                        remodeled.push(crtc);
                     }
                     Err(err) => warn!(name, ?err, "failed to change the output mode"),
                 }
@@ -545,6 +709,9 @@ pub fn apply_output_config(state: &mut Pila) {
         right_edge = right_edge.max(loc.x + width);
         surface.redraw_needed = true;
         placed.push((surface.output.clone(), loc));
+    }
+    for crtc in remodeled {
+        data.reapply_gamma(crtc);
     }
     for (output, loc) in placed {
         state.space.map_output(&output, loc);
@@ -670,12 +837,15 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         crtc,
         OutputSurface {
             output: output.clone(),
-            drm_output,
+            drm_output: Some(drm_output),
+            connector: connector.handle(),
+            mode: drm_mode,
             global,
             frame_pending: false,
             redraw_needed: true,
             lock_frame: LockFrame::None,
             modes,
+            gamma: None,
         },
     );
 
@@ -735,7 +905,11 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     let Some(surface) = data.outputs.get(&crtc) else {
         return;
     };
-    if surface.frame_pending || !surface.redraw_needed || !data.session.is_active() {
+    if surface.frame_pending
+        || !surface.redraw_needed
+        || surface.drm_output.is_none()
+        || !data.session.is_active()
+    {
         return;
     }
     let output = surface.output.clone();
@@ -773,6 +947,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         ..
     } = &mut **data;
     let surface = outputs.get_mut(&crtc).expect("checked above");
+    let drm_output = surface.drm_output.as_mut().expect("checked above");
     surface.redraw_needed = false;
 
     let mut elements = Vec::new();
@@ -801,7 +976,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         scale,
     ));
 
-    let rendered = surface.drm_output.render_frame(
+    let rendered = drm_output.render_frame(
         renderer,
         &elements,
         render::clear_color(&scene),
@@ -818,7 +993,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
                     &output,
                     &result.states,
                 );
-                match surface.drm_output.queue_frame(Some(feedback)) {
+                match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
                         if scene.locked {
@@ -880,7 +1055,12 @@ fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmE
         ),
         None => (now, wp_presentation_feedback::Kind::Vsync),
     };
-    match surface.drm_output.frame_submitted() {
+    // Powered off meanwhile: the vblank belongs to the frame that was
+    // dropped with the surface.
+    let Some(drm_output) = &mut surface.drm_output else {
+        return;
+    };
+    match drm_output.frame_submitted() {
         Ok(Some(Some(mut feedback))) => {
             feedback.presented(time, Refresh::fixed(frame_duration), seq, flags);
         }
@@ -899,9 +1079,11 @@ fn maybe_confirm_lock(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
+    // A powered-off output shows nothing, locked or not.
     if data
         .outputs
         .values()
+        .filter(|surface| surface.drm_output.is_some())
         .all(|surface| surface.lock_frame == LockFrame::Shown)
     {
         state.confirm_lock();

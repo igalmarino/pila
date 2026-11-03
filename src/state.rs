@@ -117,6 +117,10 @@ pub struct Pila {
     pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
+    /// The client controlling each output's gamma (`gamma_control.rs`).
+    pub gamma_controls: crate::gamma_control::GammaControls,
+    /// Clients watching or setting outputs' power (`output_power.rs`).
+    pub output_powers: crate::output_power::OutputPowers,
     pub switch: Option<Switch>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
@@ -214,6 +218,8 @@ impl Pila {
         crate::capture::init_globals(&dh);
         crate::screencopy::init_global(&dh);
         crate::toplevel_management::init_global(&dh);
+        crate::gamma_control::init_global(&dh);
+        crate::output_power::init_global(&dh);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
@@ -261,6 +267,8 @@ impl Pila {
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
             toplevel_management: Default::default(),
+            gamma_controls: Default::default(),
+            output_powers: Default::default(),
             switch: None,
             swipe: None,
             xwayland_token: None,
@@ -537,6 +545,8 @@ impl Pila {
     pub fn output_removed(&mut self, output: &Output) {
         self.stop_captures_of(output);
         self.fail_screencopies_of(output);
+        self.gamma_output_removed(output);
+        self.output_power_removed(output);
         let layers: Vec<_> = layer_map_for_output(output).layers().cloned().collect();
         for layer in layers {
             layer.layer_surface().send_close();
