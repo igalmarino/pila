@@ -133,11 +133,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = startup_command.unwrap_or_else(|| state.config.terminal.clone());
     state.start_xwayland(command);
 
+    // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs.
+    let signals = calloop::signals::Signals::new(&[
+        calloop::signals::Signal::SIGINT,
+        calloop::signals::Signal::SIGTERM,
+    ])?;
+    event_loop
+        .handle()
+        .insert_source(signals, |event, _, state: &mut Pila| {
+            tracing::info!(signal = ?event.signal(), "quitting");
+            state.loop_signal.stop();
+        })?;
+
     // Events queued outside a redraw (timers, deferred callbacks) must reach
     // clients too, so flush after every loop iteration.
     event_loop.run(None, &mut state, |state| {
         let _ = state.display_handle.flush_clients();
     })?;
+
+    state.stop_xwayland();
 
     Ok(())
 }

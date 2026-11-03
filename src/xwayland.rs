@@ -88,11 +88,24 @@ impl Pila {
                 }
             });
         match inserted {
-            Ok(_) => self.pending_startup = Some(then_spawn),
+            Ok(token) => {
+                self.xwayland_token = Some(token);
+                self.pending_startup = Some(then_spawn);
+            }
             Err(err) => {
                 warn!(?err, "failed to watch Xwayland");
                 self.spawn(&then_spawn);
             }
+        }
+    }
+
+    /// Stop Xwayland on exit: dropping its event source kills the X server
+    /// and removes its lock and socket files. (Left to the event loop's own
+    /// drop, it doesn't happen.)
+    pub fn stop_xwayland(&mut self) {
+        self.xwm = None;
+        if let Some(token) = self.xwayland_token.take() {
+            self.loop_handle.remove(token);
         }
     }
 

@@ -15,6 +15,7 @@ use smithay::{
     reexports::{
         calloop::{
             generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+            RegistrationToken,
         },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
@@ -78,6 +79,8 @@ pub struct Pila {
     pub xwayland_shell_state: XWaylandShellState,
     /// The startup command, held back until Xwayland is ready.
     pub pending_startup: Option<String>,
+    /// Xwayland's event source, removed on exit (`stop_xwayland`).
+    pub xwayland_token: Option<RegistrationToken>,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
@@ -174,6 +177,7 @@ impl Pila {
             xdisplay: None,
             xwayland_shell_state,
             pending_startup: None,
+            xwayland_token: None,
             space: Space::default(),
             unmapped: Vec::new(),
             suppressed_keys: HashSet::new(),
