@@ -26,8 +26,11 @@ an external monitor) and develops it from inside itself.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
-  (ext-data-control), screenshots (grim) and screen sharing (xdg-desktop-portal-wlr, for
-  browsers and OBS), a visual system bell.
+  (ext-data-control), screenshots (grim, screencopy) and screen sharing
+  (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
+  (foreign-toplevel-management), night light (gamma control), screen off and monitor
+  settings (output power and management), blur behind panels (background-effect), a
+  visual system bell. Enough for a full shell such as Noctalia.
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize
   (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
@@ -89,11 +92,9 @@ sudo pacman -S noctalia wl-clipboard      # for resources/daily
 `altgr-intl` keyboard, touchpad settings like GNOME's, media, brightness and screenshot
 keys, a laptop-plus-monitor layout, and [Noctalia](https://noctalia.dev) as the desktop
 shell (bar, launcher, notifications, wallpaper, lock screen and idle, OSDs, clipboard
-history), with a Noctalia settings file adapted to pila: its features that need `wlr-*`
-protocols (night light, screen off on idle, monitor settings, region screenshots, blurred
-lock screen) stay off, and screenshots go through grim. `scripts/install-config` copies
-both files to `~/.config/`, keeping existing ones (`--force` replaces them, saving a
-`.bak`).
+history, night light, screen off on idle, screenshots, monitor settings), with a Noctalia
+settings file adapted to pila (no workspaces widget). `scripts/install-config` copies both
+files to `~/.config/`, keeping existing ones (`--force` replaces them, saving a `.bak`).
 
 ## Configuring pila
 
