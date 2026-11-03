@@ -19,6 +19,7 @@ mod decoration;
 mod focus;
 mod foreign_toplevel;
 mod frame;
+mod gestures;
 mod grabs;
 mod handlers;
 mod idle;

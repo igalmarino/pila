@@ -134,7 +134,9 @@ Key flows and invariants:
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
   `fullscreen_request` honors the requested output for mapped windows
-  (`set_fill_state_on`). Still missing: output rotation, gestures, touch.
+  (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are forwarded to the
+  pointer focus through pointer-gestures (`gestures.rs`); pila binds none itself. Still
+  missing: output rotation, touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's

@@ -91,8 +91,9 @@ delegate_presentation!(Pila);
 // wp_content_type_v1: a hint (video, game, photo); unused for now.
 delegate_content_type!(Pila);
 
-// wp_pointer_gestures_v1, zwp_relative_pointer_v1: the seat forwards these;
-// the nested backend produces neither yet, libinput will.
+// zwp_pointer_gestures_v1, zwp_relative_pointer_v1: the seat forwards these
+// (gestures from libinput via `gestures.rs`); the nested backend gets
+// neither from the host.
 delegate_pointer_gestures!(Pila);
 delegate_relative_pointer!(Pila);
 
