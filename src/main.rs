@@ -37,16 +37,19 @@ use crate::config::Config;
 pub use crate::state::Pila;
 
 const USAGE: &str = "\
-Usage: pila [-c|--command <CMD>] [--backend winit|udev]
+Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev]
 
 Options:
-  -c, --command <CMD>   Shell command to run at startup (default: the terminal)
+  -c, --command <CMD>   Shell command to run at startup, instead of the
+                        config's autostart (default: the terminal)
+  --config <FILE>       Config file (default: $XDG_CONFIG_HOME/pila/config.toml
+                        or ~/.config/pila/config.toml; see config.example.toml)
   --backend <BACKEND>   winit: a window in another Wayland/X11 session;
                         udev: DRM/KMS on a TTY. Default: winit if
                         WAYLAND_DISPLAY or DISPLAY is set, else udev
   -h, --help            Show this help
 
-Environment:
+Environment (overrides the config file):
   PILA_MOD       Modifier for bindings: alt (default), super, ctrl
   PILA_TERMINAL  Terminal for Mod+Return and startup (default: foot)
   PILA_LAUNCHER  Command for Mod+D (unset: binding disabled)
@@ -71,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let mut startup_command = None;
+    let mut config_path = None;
     let mut backend = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -79,6 +83,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(cmd) => startup_command = Some(cmd),
                 None => {
                     eprintln!("{arg} needs a command\n\n{USAGE}");
+                    std::process::exit(2);
+                }
+            },
+            "--config" => match args.next() {
+                Some(path) => config_path = Some(std::path::PathBuf::from(path)),
+                None => {
+                    eprintln!("--config needs a file\n\n{USAGE}");
                     std::process::exit(2);
                 }
             },
@@ -117,8 +128,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let config = Config::from_env();
-    tracing::info!(?config, ?backend, "starting pila");
+    let config = Config::load(config_path.as_deref());
+    tracing::info!(
+        mod_key = ?config.mod_key,
+        terminal = config.terminal,
+        launcher = ?config.launcher,
+        autostart = ?config.autostart,
+        bindings = config.bindings.len(),
+        ?backend,
+        "starting pila"
+    );
 
     let mut event_loop: EventLoop<'static, Pila> = EventLoop::try_new()?;
     let display: Display<Pila> = Display::new()?;
@@ -129,9 +148,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         BackendKind::Udev => udev::init_udev(&mut event_loop, &mut state)?,
     }
 
-    // The startup command runs once Xwayland is up, so it can be an X11 app.
-    let command = startup_command.unwrap_or_else(|| state.config.terminal.clone());
-    state.start_xwayland(command);
+    // `-c`, else the config's autostart, else a terminal. They run once
+    // Xwayland is up, so they can be X11 apps.
+    let startup = match startup_command {
+        Some(command) => vec![command],
+        None if !state.config.autostart.is_empty() => state.config.autostart.clone(),
+        None => vec![state.config.terminal.clone()],
+    };
+    state.start_xwayland(startup);
 
     // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs.
     let signals = calloop::signals::Signals::new(&[

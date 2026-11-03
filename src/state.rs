@@ -7,7 +7,7 @@ use smithay::{
         WindowSurfaceType,
     },
     input::{
-        keyboard::Keycode,
+        keyboard::{Keycode, XkbConfig},
         pointer::{CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData},
         Seat, SeatHandler, SeatState,
     },
@@ -77,8 +77,8 @@ pub struct Pila {
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
     pub xwayland_shell_state: XWaylandShellState,
-    /// The startup command, held back until Xwayland is ready.
-    pub pending_startup: Option<String>,
+    /// The startup commands, held back until Xwayland is ready.
+    pub pending_startup: Vec<String>,
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
 
@@ -156,10 +156,26 @@ impl Pila {
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
-        // Nested: the host always gives us a keyboard and pointer.
-        // A real-hardware backend should track hotplug instead.
-        seat.add_keyboard(Default::default(), 200, 25)
-            .expect("failed to initialize keyboard");
+        // pila always has a keyboard and pointer, whatever devices exist.
+        // A keymap xkbcommon can't build (e.g. a typo in the layout) falls
+        // back to the default one rather than leaving pila without keyboard.
+        let kb = &config.keyboard;
+        let xkb = XkbConfig {
+            rules: "",
+            model: &kb.model,
+            layout: &kb.layout,
+            variant: &kb.variant,
+            options: kb.options.clone(),
+        };
+        if let Err(err) = seat.add_keyboard(xkb, kb.repeat_delay, kb.repeat_rate) {
+            warn!(
+                ?err,
+                ?kb,
+                "invalid keyboard config; using the default keymap"
+            );
+            seat.add_keyboard(XkbConfig::default(), kb.repeat_delay, kb.repeat_rate)
+                .expect("failed to initialize keyboard");
+        }
         seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
@@ -176,7 +192,7 @@ impl Pila {
             xwm: None,
             xdisplay: None,
             xwayland_shell_state,
-            pending_startup: None,
+            pending_startup: Vec::new(),
             xwayland_token: None,
             space: Space::default(),
             unmapped: Vec::new(),
@@ -873,6 +889,12 @@ impl Pila {
     pub fn run_action(&mut self, action: Action, serial: Serial) {
         match action {
             Action::Spawn(command) => self.spawn(&command),
+            Action::Terminal => self.spawn(&self.config.terminal.clone()),
+            Action::Launcher => {
+                if let Some(launcher) = self.config.launcher.clone() {
+                    self.spawn(&launcher);
+                }
+            }
             Action::CloseFocused => self.close_focused(),
             Action::CycleFocus => self.cycle_focus(serial),
             Action::ToggleMaximize => {
@@ -896,6 +918,12 @@ impl Pila {
                     backend.change_vt(vt);
                 }
             }
+        }
+    }
+
+    pub fn spawn_all(&self, commands: &[String]) {
+        for command in commands {
+            self.spawn(command);
         }
     }
 

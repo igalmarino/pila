@@ -147,6 +147,15 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
 - **Super-key shortcuts go to GNOME.** When testing your nested compositor, GNOME grabs Super.
   Use Alt-based bindings while nested.
 
+## Configuring pila
+
+pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the
+file given with `--config`). [`config.example.toml`](config.example.toml) documents every
+option: the modifier key, terminal and launcher, programs to start with pila (`autostart`),
+keyboard layout and repeat, and key bindings (including media keys). A missing file means
+the defaults; an invalid one is reported in the log and pila starts with the defaults.
+`PILA_MOD`, `PILA_TERMINAL` and `PILA_LAUNCHER` override the file.
+
 ## Running pila on a TTY (real hardware)
 
 The nested winit backend covers most development. The DRM/KMS + libinput backend

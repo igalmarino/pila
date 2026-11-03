@@ -1,0 +1,56 @@
+# pila configuration. Copy to ~/.config/pila/config.toml (or
+# $XDG_CONFIG_HOME/pila/config.toml, or pass --config FILE) and edit.
+# Every setting is optional; what's shown here are the defaults or examples.
+# PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
+# An invalid file is reported in the log and pila starts with the defaults.
+
+# The modifier in "Mod+..." bindings and for Mod+drag: alt, super or ctrl.
+# Alt is the default because a host desktop grabs Super when pila runs nested;
+# on a TTY, super is the usual choice.
+mod = "alt"
+
+# Mod+Return, and what starts when there's no autostart.
+terminal = "foot"
+
+# Mod+D. Without one, Mod+D does nothing.
+# launcher = "fuzzel"
+
+# Commands run at startup instead of the terminal (pila -c overrides them).
+# They start once Xwayland is ready, so X11 apps work too.
+# autostart = [
+#     "swaybg -c 333355",
+#     "waybar",
+#     "mako",
+#     "foot",
+# ]
+
+# Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
+[keyboard]
+layout = ""             # e.g. "us,es"
+variant = ""            # e.g. ",dvorak"
+model = ""
+# options = "grp:alt_shift_toggle,caps:escape"
+repeat-delay = 200      # ms before a held key repeats
+repeat-rate = 25        # repeats per second
+
+# Key bindings: add new ones, replace defaults, or remove them with "none".
+# Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
+# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).
+# Actions: spawn <command>, terminal, launcher, close, cycle-focus,
+# maximize, fullscreen, quit, none.
+#
+# The defaults:
+#   "Mod+Return"  = "terminal"
+#   "Mod+D"       = "launcher"
+#   "Mod+Tab"     = "cycle-focus"
+#   "Mod+J"       = "cycle-focus"
+#   "Mod+M"       = "maximize"
+#   "Mod+F"       = "fullscreen"
+#   "Mod+Shift+Q" = "close"
+#   "Mod+Shift+E" = "quit"
+[bindings]
+# "Mod+Shift+Return" = "spawn foot -e htop"
+# "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+# "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+# "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+# "Mod+J" = "none"

@@ -42,8 +42,9 @@ use tracing::{debug, info, warn};
 use crate::{focus::KeyboardFocus, state::fill_state, Pila};
 
 impl Pila {
-    /// Start Xwayland; `then_spawn` runs once X is ready (or failed to start).
-    pub fn start_xwayland(&mut self, then_spawn: String) {
+    /// Start Xwayland; the `startup` commands run once X is ready (or failed
+    /// to start).
+    pub fn start_xwayland(&mut self, startup: Vec<String>) {
         let spawned = XWayland::spawn(
             &self.display_handle,
             None,
@@ -57,7 +58,7 @@ impl Pila {
             Ok(spawned) => spawned,
             Err(err) => {
                 warn!(?err, "failed to start Xwayland; X11 apps won't run");
-                self.spawn(&then_spawn);
+                self.spawn_all(&startup);
                 return;
             }
         };
@@ -83,18 +84,17 @@ impl Pila {
                     }
                     XWaylandEvent::Error => warn!("Xwayland failed to start; X11 apps won't run"),
                 }
-                if let Some(command) = state.pending_startup.take() {
-                    state.spawn(&command);
-                }
+                let startup = std::mem::take(&mut state.pending_startup);
+                state.spawn_all(&startup);
             });
         match inserted {
             Ok(token) => {
                 self.xwayland_token = Some(token);
-                self.pending_startup = Some(then_spawn);
+                self.pending_startup = startup;
             }
             Err(err) => {
                 warn!(?err, "failed to watch Xwayland");
-                self.spawn(&then_spawn);
+                self.spawn_all(&startup);
             }
         }
     }

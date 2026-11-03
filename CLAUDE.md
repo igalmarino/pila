@@ -37,7 +37,8 @@ on **Smithay 0.7.x**.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
-- Runtime env: `PILA_MOD` (alt default / super / ctrl), `PILA_TERMINAL` (default `foot`),
+- Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`).
+  Env overrides: `PILA_MOD` (alt default / super / ctrl), `PILA_TERMINAL` (default `foot`),
   `PILA_LAUNCHER` (Mod+D, disabled if unset). Alt is the default because GNOME grabs Super
   while nested. On a TTY: `XCURSOR_THEME`/`XCURSOR_SIZE`, and the keymap from libxkbcommon's
   `XKB_DEFAULT_LAYOUT`/`_VARIANT`/`_OPTIONS`.
@@ -73,14 +74,20 @@ the `wayland-protocols` crate, not swapped for a vendor one.
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
 implements every Smithay handler trait. Unlike smallvil (but like anvil), the calloop event
 loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which Smithay
-modules that schedule their own timers (e.g. idle-notify) require. Window-management logic lives in `state.rs`; the keybinding
-list in `config.rs`'s module doc comment must be kept in sync with `action_for`, and the
-`USAGE` string in `main.rs` with the CLI flags and `PILA_*` env vars.
+modules that schedule their own timers (e.g. idle-notify) require. Window-management logic lives in `state.rs`. Configuration is `config.rs`: a TOML file
+(`~/.config/pila/config.toml` or `--config`, documented in `config.example.toml`) parsed
+by `Config::from_toml` (pure, unit-tested; `PILA_*` env vars override it), loaded once at
+startup by `Config::load`, which falls back to defaults on errors. Keep three things in
+sync: `DEFAULT_BINDINGS`, the binding table in `config.rs`'s module doc and the defaults
+listed in `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags
+and env vars.
 
 Key flows and invariants:
 
-- **Keybindings** are intercepted in the keyboard filter closure (`input.rs`); intercepted
-  keycodes go in `suppressed_keys` so their release isn't forwarded to the client either.
+- **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
+  up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
+  ignored; keys without Mod, e.g. media keys, can be bound); intercepted keycodes go in
+  `suppressed_keys` so their release isn't forwarded to the client either.
   Bindings don't run while the focused surface (or its menu's window) holds an active
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug

@@ -73,7 +73,9 @@ impl Pila {
                     }
                 }
                 match key_state {
-                    KeyState::Pressed if state.config.mod_key.is_pressed(mods) => {
+                    // Any key can be bound (media keys need no Mod), so
+                    // every press is looked up.
+                    KeyState::Pressed => {
                         let action = handle
                             .raw_latin_sym_or_raw_current_sym()
                             .and_then(|sym| state.config.action_for(sym, mods))

@@ -11,6 +11,9 @@ bitflags = "2"
 # SIGINT/SIGTERM).
 calloop = { version = "0.14", features = ["signals"] }
 cosmic-text = "0.19"
+# The config file (`config.rs`).
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 # Connector scanning for the DRM backend; same source as the copy in Smithay
 # v0.7.0's tree. Its EDID support (`display-info`) is off: it binds
 # libdisplay-info 0.1/0.2 and Arch ships 0.3, so monitors show as "Unknown".
