@@ -22,6 +22,7 @@ mod handlers;
 mod idle;
 mod input;
 mod layers;
+mod minimize;
 mod pointer_constraints;
 mod render;
 mod session_lock;

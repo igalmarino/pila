@@ -83,6 +83,8 @@ pub struct Pila {
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
 
+    /// Minimized windows, out of the `Space` (`minimize.rs`).
+    pub minimized: Vec<Window>,
     /// Windows most recently focused first, and the Mod+Tab in progress
     /// (`switcher.rs`).
     pub focus_history: Vec<Window>,
@@ -199,6 +201,7 @@ impl Pila {
             xdisplay: None,
             xwayland_shell_state,
             pending_startup: Vec::new(),
+            minimized: Vec::new(),
             focus_history: Vec::new(),
             switch: None,
             xwayland_token: None,
@@ -406,6 +409,7 @@ impl Pila {
         self.space
             .elements()
             .chain(self.unmapped.iter())
+            .chain(self.minimized.iter())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
@@ -898,6 +902,11 @@ impl Pila {
             Action::CloseFocused => self.close_focused(),
             Action::CycleFocus => self.cycle_focus(true, serial),
             Action::CycleFocusBack => self.cycle_focus(false, serial),
+            Action::Minimize => {
+                if let Some(window) = self.focused_window() {
+                    self.minimize_window(&window);
+                }
+            }
             Action::ToggleMaximize => {
                 if let Some(window) = self.focused_window() {
                     let (maximized, fullscreen) = fill_state(&window);

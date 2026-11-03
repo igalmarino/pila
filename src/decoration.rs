@@ -40,6 +40,8 @@ pub const TITLE_BAR_HEIGHT: i32 = 28;
 /// Width of each button cell (clickable and hover-highlighted), at the right
 /// end of the bar. Cells are the full bar height.
 const BUTTON_WIDTH: i32 = 36;
+/// Minimize, maximize and close, from left to right at the bar's right end.
+const BUTTONS: i32 = 3;
 /// Space between the bar's left end and the title, and between the title and
 /// the buttons.
 const TITLE_PADDING: i32 = 10;
@@ -63,6 +65,7 @@ const CLOSE_HOVER_ICON: [f32; 3] = [1.0, 1.0, 1.0];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleBarPart {
     Drag,
+    Minimize,
     Maximize,
     Close,
 }
@@ -130,6 +133,8 @@ pub fn title_bar_part(bar: Rectangle<i32, Logical>, pos: Point<f64, Logical>) ->
         TitleBarPart::Close
     } else if from_right <= 2.0 * BUTTON_WIDTH as f64 {
         TitleBarPart::Maximize
+    } else if from_right <= 3.0 * BUTTON_WIDTH as f64 {
+        TitleBarPart::Minimize
     } else {
         TitleBarPart::Drag
     }
@@ -197,6 +202,7 @@ fn band_edges(p: f64, start: f64, len: f64, low: ResizeEdge, high: ResizeEdge) -
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Icon {
     Close,
+    Minimize,
     Maximize,
     /// Shown on the maximize button of a maximized window.
     Restore,
@@ -223,6 +229,7 @@ struct ButtonTexture {
 #[derive(Default)]
 struct TitleBarBuffers {
     bar: SolidColorBuffer,
+    minimize: Option<ButtonTexture>,
     maximize: Option<ButtonTexture>,
     close: Option<ButtonTexture>,
     title: Option<TitleTexture>,
@@ -242,7 +249,7 @@ struct TitleTexture {
 /// and never left of the padding.
 fn title_x(bar_x: i32, bar_width: i32, text_width: i32) -> i32 {
     let centered = bar_x + (bar_width - text_width) / 2;
-    let rightmost = bar_x + bar_width - 2 * BUTTON_WIDTH - TITLE_PADDING - text_width;
+    let rightmost = bar_x + bar_width - BUTTONS * BUTTON_WIDTH - TITLE_PADDING - text_width;
     centered.min(rightmost).max(bar_x + TITLE_PADDING)
 }
 
@@ -301,6 +308,7 @@ where
         .borrow_mut();
     let TitleBarBuffers {
         bar,
+        minimize,
         maximize,
         close,
         title,
@@ -314,6 +322,7 @@ where
     };
     let close_loc = Point::from((rect.loc.x + rect.size.w - BUTTON_WIDTH, rect.loc.y));
     let maximize_loc = close_loc - Point::from((BUTTON_WIDTH, 0));
+    let minimize_loc = maximize_loc - Point::from((BUTTON_WIDTH, 0));
     let maximize_icon = if maximized {
         Icon::Restore
     } else {
@@ -338,7 +347,7 @@ where
 
     // The title: at most the space between the left padding and the buttons,
     // centered on the bar where it fits (see `title_x`).
-    let title_width = rect.size.w - 2 * BUTTON_WIDTH - 2 * TITLE_PADDING;
+    let title_width = rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING;
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
             let key = (text, title_width, focused);
@@ -379,6 +388,12 @@ where
             maximize_icon,
             TitleBarPart::Maximize,
             maximize_loc,
+        ),
+        (
+            minimize,
+            Icon::Minimize,
+            TitleBarPart::Minimize,
+            minimize_loc,
         ),
     ] {
         let key = (icon, look(part));
@@ -460,6 +475,11 @@ fn glyph_coverage(icon: Icon, p: (f64, f64), (cx, cy): (f64, f64)) -> f64 {
             stroke(d1.min(d2), 1.4)
         }
         Icon::Maximize => stroke(box_sdf(p, (cx, cy), 4.5).abs(), 1.0),
+        // A line along the bottom of where the maximize square sits.
+        Icon::Minimize => stroke(
+            segment_distance(p, (cx - 4.5, cy + 4.5), (cx + 4.5, cy + 4.5)),
+            1.0,
+        ),
         Icon::Restore => {
             // A front square, and the part of a back square (up and right)
             // that isn't hidden behind it. Together they span the same 10px
@@ -517,6 +537,10 @@ mod tests {
         );
         assert_eq!(
             title_bar_part(bar(), (right - 2.0 * BUTTON_WIDTH as f64 - 1.0, y).into()),
+            TitleBarPart::Minimize
+        );
+        assert_eq!(
+            title_bar_part(bar(), (right - 3.0 * BUTTON_WIDTH as f64 - 1.0, y).into()),
             TitleBarPart::Drag
         );
         assert_eq!(title_bar_part(bar(), (101.0, y).into()), TitleBarPart::Drag);
@@ -547,14 +571,14 @@ mod tests {
 
     #[test]
     fn titles_center_on_the_bar_but_clear_the_buttons() {
-        let buttons = 2 * BUTTON_WIDTH;
+        let buttons = BUTTONS * BUTTON_WIDTH;
         // Short title on a wide bar: centered on the whole bar.
         assert_eq!(title_x(100, 600, 80), 100 + (600 - 80) / 2);
         // Wider title: centering would overlap the buttons, so it slides left
         // until it ends TITLE_PADDING before them.
-        let x = title_x(100, 300, 180);
-        assert_eq!(x + 180, 100 + 300 - buttons - TITLE_PADDING);
-        assert!(x < 100 + (300 - 180) / 2);
+        let x = title_x(100, 300, 140);
+        assert_eq!(x + 140, 100 + 300 - buttons - TITLE_PADDING);
+        assert!(x < 100 + (300 - 140) / 2);
         // A title filling all the space starts at the left padding.
         let full = 300 - buttons - 2 * TITLE_PADDING;
         assert_eq!(title_x(100, 300, full), 100 + TITLE_PADDING);

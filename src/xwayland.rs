@@ -110,9 +110,11 @@ impl Pila {
     }
 
     /// The mapped window for an X11 surface.
+    /// The managed window (mapped or minimized) for an X11 surface.
     pub fn window_for_x11(&self, surface: &X11Surface) -> Option<Window> {
         self.space
             .elements()
+            .chain(self.minimized.iter())
             .find(|w| w.x11_surface() == Some(surface))
             .cloned()
     }
@@ -192,6 +194,7 @@ impl XwmHandler for Pila {
         if let Some(window) = self.window_for_x11(&surface) {
             self.remove_foreign_toplevel(&window);
             self.forget_focus_history(&window);
+            self.forget_minimized(&window);
             self.space.unmap_elem(&window);
         }
         if !surface.is_override_redirect() {
@@ -258,6 +261,21 @@ impl XwmHandler for Pila {
                 self.update_foreign_toplevel_x11(&window);
             }
             self.queue_redraw();
+        }
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(window) = self.window_for_x11(&surface) {
+            self.minimize_window(&window);
+        }
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, surface: X11Surface) {
+        if let Some(window) = self
+            .window_for_x11(&surface)
+            .filter(|w| self.is_minimized(w))
+        {
+            self.restore_window(&window);
         }
     }
 

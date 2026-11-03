@@ -64,6 +64,7 @@ impl XdgShellHandler for Pila {
         if let Some(window) = self.window_for_surface(wl_surface) {
             self.remove_foreign_toplevel(&window);
             self.forget_focus_history(&window);
+            self.forget_minimized(&window);
             self.space.unmap_elem(&window);
         }
         if was_focused {
@@ -123,6 +124,12 @@ impl XdgShellHandler for Pila {
             return;
         };
         self.begin_resize(window, edges.into(), start_data, serial);
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.minimize_window(&window);
+        }
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {

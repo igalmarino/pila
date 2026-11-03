@@ -157,6 +157,12 @@ Key flows and invariants:
   the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
   released (checked after every key in `on_keyboard`), on a click, and in
   `release_all_keys`. Unmapped windows are dropped with `forget_focus_history`.
+- **Minimize** (`minimize.rs`): a minimized window is unmapped from the `Space` and kept
+  in `Pila::minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
+  `window_for_surface`/`window_for_x11` search it too, and destroyed windows are removed
+  (`forget_minimized`). It comes back only through Mod+Tab: the switch order includes
+  minimized windows; a minimized pick is shown (`show_window`) while selected, hidden
+  again (`hide_window`) when the switch moves on, and stays when the switch ends.
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
   Background; a fullscreen window on top also covers Top (`layer_order`). All pointer

@@ -21,6 +21,8 @@ pub struct Switch {
     /// Snapshot of the candidates, most recent first.
     order: Vec<Window>,
     index: usize,
+    /// The current pick was minimized and is only shown while selected.
+    shown_minimized: Option<Window>,
 }
 
 /// Whether `window` belongs in the switcher: X11 menus and tooltips don't.
@@ -52,10 +54,11 @@ impl Pila {
         self.focus_history.insert(0, window.clone());
     }
 
-    /// Mapped switchable windows, most recently focused first; windows never
-    /// focused follow in stacking order (top first).
+    /// Switchable windows (mapped or minimized), most recently focused first;
+    /// windows never focused follow in stacking order (top first).
     fn switch_order(&mut self) -> Vec<Window> {
-        let mapped: Vec<Window> = self.space.elements().rev().cloned().collect();
+        let mut mapped: Vec<Window> = self.space.elements().rev().cloned().collect();
+        mapped.extend(self.minimized.iter().cloned());
         self.focus_history.retain(|w| mapped.contains(w));
         let mut order = self.focus_history.clone();
         let never_focused: Vec<Window> = mapped
@@ -80,7 +83,11 @@ impl Pila {
                 let index = focused
                     .and_then(|f| order.iter().position(|w| *w == f))
                     .unwrap_or(0);
-                Switch { order, index }
+                Switch {
+                    order,
+                    index,
+                    shown_minimized: None,
+                }
             }
         };
         // Skip windows that went away since the snapshot.
@@ -88,8 +95,16 @@ impl Pila {
         if switch.order.is_empty() {
             return;
         }
+        // A minimized window passed over goes back to being minimized.
+        if let Some(previous) = switch.shown_minimized.take() {
+            self.hide_window(&previous);
+        }
         switch.index = step(switch.index, switch.order.len(), forward);
         let window = switch.order[switch.index].clone();
+        if self.is_minimized(&window) {
+            self.show_window(&window);
+            switch.shown_minimized = Some(window.clone());
+        }
         // `focus_window` must not reorder the history mid-switch.
         self.switch = Some(switch);
         self.focus_window(Some(window), serial);

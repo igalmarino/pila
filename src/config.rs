@@ -11,6 +11,7 @@
 //! | Mod+Tab / Mod+J       | Switch to previous window (hold Mod and repeat: older ones) |
 //! | Mod+Shift+Tab         | Same, the other way round      |
 //! | Mod+M                 | Toggle maximize                |
+//! | Mod+N                 | Minimize (Mod+Tab brings it back) |
 //! | Mod+F                 | Toggle fullscreen              |
 //! | Mod+Shift+Q           | Close focused window           |
 //! | Mod+Shift+E           | Quit pila                      |
@@ -46,6 +47,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+J", "cycle-focus"),
     ("Mod+Shift+Tab", "cycle-focus-back"),
     ("Mod+M", "maximize"),
+    ("Mod+N", "minimize"),
     ("Mod+F", "fullscreen"),
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
@@ -152,6 +154,7 @@ pub enum Action {
     /// Mod+Tab: by recent use (`switcher.rs`); `CycleFocusBack` the other way.
     CycleFocus,
     CycleFocusBack,
+    Minimize,
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
@@ -173,13 +176,14 @@ impl Action {
             "close" => Action::CloseFocused,
             "cycle-focus" => Action::CycleFocus,
             "cycle-focus-back" => Action::CycleFocusBack,
+            "minimize" => Action::Minimize,
             "maximize" => Action::ToggleMaximize,
             "fullscreen" => Action::ToggleFullscreen,
             "quit" => Action::Quit,
             other => {
                 return Err(format!(
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
-                     cycle-focus, cycle-focus-back, maximize, fullscreen, quit or none)"
+                     cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, quit or none)"
                 ))
             }
         }))

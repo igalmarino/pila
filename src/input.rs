@@ -336,6 +336,7 @@ impl Pila {
                 self.set_fill_state(&window, !maximized, fullscreen);
             }
             Decoration::TitleBar(TitleBarPart::Close) => crate::state::close_window(&window),
+            Decoration::TitleBar(TitleBarPart::Minimize) => self.minimize_window(&window),
             Decoration::Border(edges) => self.begin_resize(window, edges, start_data, serial),
         }
     }

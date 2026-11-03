@@ -38,7 +38,8 @@ repeat-rate = 25        # repeats per second
 # xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
 # the previous window; hold the modifiers and repeat for older ones),
-# cycle-focus-back, maximize, fullscreen, quit, none.
+# cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
+# fullscreen, quit, none.
 #
 # The defaults:
 #   "Mod+Return"  = "terminal"
@@ -47,6 +48,7 @@ repeat-rate = 25        # repeats per second
 #   "Mod+J"       = "cycle-focus"
 #   "Mod+Shift+Tab" = "cycle-focus-back"
 #   "Mod+M"       = "maximize"
+#   "Mod+N"       = "minimize"
 #   "Mod+F"       = "fullscreen"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
