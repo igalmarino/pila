@@ -1,4 +1,11 @@
-use std::{cell::RefCell, collections::HashSet, ffi::OsString, process::Command, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    ffi::OsString,
+    os::fd::AsFd,
+    process::{Command, Stdio},
+    sync::Arc,
+};
 
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
@@ -1076,8 +1083,14 @@ impl Pila {
         }
     }
 
-    /// The environment of everything pila starts.
+    /// The environment of everything pila starts. Its output goes to pila's
+    /// log (stderr) instead of the terminal pila was started from (on a TTY,
+    /// the console), and it doesn't read that terminal.
     fn session_env(&self, cmd: &mut Command) {
+        cmd.stdin(Stdio::null());
+        if let Ok(stderr) = std::io::stderr().as_fd().try_clone_to_owned() {
+            cmd.stdout(Stdio::from(stderr));
+        }
         cmd.env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_CURRENT_DESKTOP", DESKTOP_NAME)
             .env("XDG_SESSION_TYPE", "wayland");
