@@ -38,8 +38,11 @@ disable-while-typing = true
 "Alt+Tab" = "cycle-focus"
 "Alt+Shift+Tab" = "cycle-focus-back"
 "Mod+L" = "spawn swaylock -f -c 1f2126"
-# Screenshots (Mod+Shift+S / Mod+Ctrl+S by default) on Print too: the screen
-# under the pointer to a file, or a region to the clipboard.
+# Screenshots: a region to the clipboard, or the screen under the pointer
+# ($PILA_OUTPUT) to a file. Mod+Shift+S and Mod+Ctrl+S are pila's defaults too,
+# repeated here so they're easy to change; Print for keyboards that have it.
+"Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"
+"Mod+Ctrl+S" = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 "Print" = "spawn grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 "Shift+Print" = "spawn grim -g \"$(slurp)\" - | wl-copy"
 "XF86AudioRaiseVolume" = "spawn wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
