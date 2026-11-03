@@ -13,7 +13,10 @@ launcher = "fuzzel --config ~/.config/pila/fuzzel.ini"
 autostart = [
     # A plain color; for a picture: swaybg -i ~/Pictures/wallpaper.jpg -m fill
     "swaybg -c '#1f2126'",
-    "waybar -c ~/.config/pila/waybar.jsonc -s ~/.config/pila/waybar.css",
+    # waybar 0.15.0 prints the battery status to stdout on every update (a
+    # stray puts in its battery module, gone in the next release), thousands
+    # of lines in pila's log; drop them until then.
+    "waybar -c ~/.config/pila/waybar.jsonc -s ~/.config/pila/waybar.css | grep --line-buffered -vxE 'Plugged|Charging|Discharging|Full|Not charging'",
     "mako",
     # Lock after 5 minutes idle and before suspending.
     "swayidle -w timeout 300 'swaylock -f -c 1f2126' before-sleep 'swaylock -f -c 1f2126'",
