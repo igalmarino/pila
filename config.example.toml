@@ -108,8 +108,8 @@ tap = true
 
 # Monitors, matched by connector name (shown in the log as "output connected",
 # e.g. eDP-1, DP-1, HDMI-A-1). Without an entry, a monitor uses its preferred
-# mode at scale 1, right of the others. Nested, the only output is "winit",
-# and only its scale applies.
+# mode at scale 1, unrotated, right of the others. Nested, the only output is
+# "winit", and only its scale applies.
 # [[output]]
 # name = "eDP-1"
 # scale = 1.25              # may be fractional (in 1/120 steps); default 1
@@ -118,3 +118,6 @@ tap = true
 # name = "DP-1"
 # mode = "2560x1440@143.9"  # WIDTHxHEIGHT[@HZ]; the closest refresh is used
 # position = [1536, 0]      # top-left in logical pixels (size / scale)
+# transform = "90"          # rotated a quarter turn counter-clockwise (a monitor
+#                           # standing on its side): normal, 90, 180, 270, or
+#                           # flipped, flipped-90, flipped-180, flipped-270

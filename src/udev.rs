@@ -43,7 +43,7 @@ use smithay::{
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::backend::GlobalId,
     },
-    utils::{DeviceFd, IsAlive, Logical, Point},
+    utils::{DeviceFd, IsAlive, Logical, Point, Transform},
     wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
@@ -513,9 +513,15 @@ pub fn apply_output_config(state: &mut Pila) {
             }
         }
         let scale = config.and_then(|c| c.scale).unwrap_or(1.0);
-        surface
-            .output
-            .change_current_state(None, None, Some(OutputScale::Fractional(scale)), None);
+        let transform = config
+            .and_then(|c| c.transform)
+            .unwrap_or(Transform::Normal);
+        surface.output.change_current_state(
+            None,
+            Some(transform),
+            Some(OutputScale::Fractional(scale)),
+            None,
+        );
         let loc: Point<i32, Logical> = config
             .and_then(|c| c.position)
             .unwrap_or((right_edge, 0))
@@ -523,10 +529,18 @@ pub fn apply_output_config(state: &mut Pila) {
         surface
             .output
             .change_current_state(None, None, None, Some(loc));
+        // Rotated a quarter turn, width and height swap.
         let width = surface
             .output
             .current_mode()
-            .map(|m| m.size.to_f64().to_logical(scale).to_i32_round::<i32>().w)
+            .map(|m| {
+                transform
+                    .transform_size(m.size)
+                    .to_f64()
+                    .to_logical(scale)
+                    .to_i32_round::<i32>()
+                    .w
+            })
             .unwrap_or(0);
         right_edge = right_edge.max(loc.x + width);
         surface.redraw_needed = true;
@@ -576,6 +590,10 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         return;
     };
     let scale = output_config.as_ref().and_then(|c| c.scale).unwrap_or(1.0);
+    let transform = output_config
+        .as_ref()
+        .and_then(|c| c.transform)
+        .unwrap_or(Transform::Normal);
 
     // Where the config puts it, else right of the outputs already there.
     let (x, y) = output_config
@@ -615,7 +633,7 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
     output.set_preferred(wl_mode);
     output.change_current_state(
         Some(wl_mode),
-        None,
+        Some(transform),
         Some(OutputScale::Fractional(scale)),
         Some((x, y).into()),
     );

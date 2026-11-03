@@ -56,8 +56,10 @@ pub fn init_winit(
     let _global = output.create_global::<Pila>(display_handle);
     // Nested there's one output; only `scale` of its `[[output]]` applies.
     let output_config = state.config.output("winit");
-    if output_config.is_some_and(|c| c.mode.is_some() || c.position.is_some()) {
-        warn!("the nested output's size follows the window; mode and position are ignored");
+    if output_config
+        .is_some_and(|c| c.mode.is_some() || c.position.is_some() || c.transform.is_some())
+    {
+        warn!("nested, only the output's scale applies; mode, position and transform are ignored");
     }
     let scale = output_config.and_then(|c| c.scale).unwrap_or(1.0);
     output.change_current_state(

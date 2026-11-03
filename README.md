@@ -19,8 +19,8 @@ an external monitor) and develops it from inside itself.
   maximize and fullscreen; snapping to screen halves by keyboard or by dragging to an edge;
   moving, resizing and centering from the keyboard; minimize; switching by recent use
   (Mod+Tab).
-- **Monitors:** several at once, hotplugged, each with its own mode, position and
-  (fractional) scale.
+- **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
+  and (fractional) scale.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
@@ -32,7 +32,7 @@ an external monitor) and develops it from inside itself.
   any key bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 
-Not there yet: output rotation, touchscreens, input methods (IME), several GPUs.
+Not there yet: touchscreens, input methods (IME), several GPUs.
 
 ## Running pila
 
@@ -76,7 +76,7 @@ pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`,
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
 pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
-and each monitor's mode, scale and position. A missing file means the defaults; an invalid
+and each monitor's mode, scale, rotation and position. A missing file means the defaults; an invalid
 one is reported in the log and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.
 

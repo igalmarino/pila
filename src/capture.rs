@@ -241,7 +241,12 @@ impl Pila {
                 let output = output.upgrade()?;
                 // Not mapped any more: unplugged.
                 self.space.output_geometry(&output)?;
-                Some((output.current_mode()?.size, output_scale(&output)))
+                // In the output's orientation: a monitor turned a quarter is
+                // captured upright, taller than wide.
+                let size = output
+                    .current_transform()
+                    .transform_size(output.current_mode()?.size);
+                Some((size, output_scale(&output)))
             }
             Target::Toplevel(identifier) => {
                 let window = self.window_for_identifier(identifier)?;

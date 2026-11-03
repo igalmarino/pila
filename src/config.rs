@@ -48,7 +48,10 @@ use std::{
 };
 
 use serde::Deserialize;
-use smithay::input::keyboard::{xkb, Keysym, ModifiersState};
+use smithay::{
+    input::keyboard::{xkb, Keysym, ModifiersState},
+    utils::Transform,
+};
 use tracing::{info, warn};
 
 use crate::snap::KEYBOARD_STEP;
@@ -402,6 +405,29 @@ pub struct OutputConfig {
     /// Top-left corner in the global logical space (TTY only). Outputs
     /// without one go right of the others.
     pub position: Option<(i32, i32)>,
+    /// Rotation (counter-clockwise, as in wl_output) and flipping, for a
+    /// monitor mounted sideways (TTY only).
+    pub transform: Option<Transform>,
+}
+
+/// `transform` in `[[output]]`: wl_output's names.
+fn parse_transform(text: &str) -> Result<Transform, String> {
+    Ok(match text {
+        "normal" => Transform::Normal,
+        "90" => Transform::_90,
+        "180" => Transform::_180,
+        "270" => Transform::_270,
+        "flipped" => Transform::Flipped,
+        "flipped-90" => Transform::Flipped90,
+        "flipped-180" => Transform::Flipped180,
+        "flipped-270" => Transform::Flipped270,
+        other => {
+            return Err(format!(
+                "unknown transform {other:?} (normal, 90, 180, 270, flipped, flipped-90, \
+                 flipped-180 or flipped-270)"
+            ))
+        }
+    })
 }
 
 /// A video mode: `"2560x1440"` or `"2560x1440@59.95"` (refresh in Hz).
@@ -469,6 +495,7 @@ struct OutputFile {
     mode: Option<String>,
     scale: Option<f64>,
     position: Option<[i32; 2]>,
+    transform: Option<String>,
 }
 
 impl OutputFile {
@@ -493,11 +520,18 @@ impl OutputFile {
             ),
             None => None,
         };
+        let transform = match &self.transform {
+            Some(text) => Some(
+                parse_transform(text).map_err(|err| format!("output {:?}: {err}", self.name))?,
+            ),
+            None => None,
+        };
         Ok(OutputConfig {
             name: self.name,
             mode,
             scale,
             position: self.position.map(|[x, y]| (x, y)),
+            transform,
         })
     }
 }
@@ -880,6 +914,28 @@ mod tests {
             })
         );
         assert!(config.output("HDMI-A-1").is_none());
+        assert_eq!(dp.transform, None);
+    }
+
+    #[test]
+    fn outputs_can_be_rotated() {
+        let config = Config::from_toml(
+            "[[output]]\nname = \"DP-1\"\ntransform = \"90\"\n\
+             [[output]]\nname = \"HDMI-A-1\"\ntransform = \"flipped-270\"",
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(
+            config.output("DP-1").unwrap().transform,
+            Some(Transform::_90)
+        );
+        assert_eq!(
+            config.output("HDMI-A-1").unwrap().transform,
+            Some(Transform::Flipped270)
+        );
+        let err = Config::from_toml("[[output]]\nname = \"DP-1\"\ntransform = \"45\"", &no_env)
+            .unwrap_err();
+        assert!(err.contains("unknown transform"));
     }
 
     #[test]

@@ -108,13 +108,12 @@ Key flows and invariants:
   `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
   re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
   (`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
-  `use_mode`, scale, position; nested only scale). Anything that reads `self.config` when
-  used (bindings, Mod, terminal) needs nothing; `autostart` isn't re-run. A new setting
-  must either be read when used or be re-applied there. Keep in sync: `DEFAULT_BINDINGS`
-  and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc and the defaults listed
-  in `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags and
-  env vars.
-
+  `use_mode`, scale, transform, position; nested only scale). Anything that reads
+  `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
+  re-run. A new setting must either be read when used or be re-applied there. Keep in
+  sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc
+  and the defaults listed in `config.example.toml`; and the `USAGE` string in `main.rs`
+  with the CLI flags and env vars.
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
   up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
   ignored; keys without Mod, e.g. media keys, can be bound); intercepted keycodes go in
@@ -137,9 +136,9 @@ Key flows and invariants:
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
 - **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
-  `[[output]]` config (mode, scale, position) or else left to right, EDID off (make/model
-  "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor theme
-  (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one idle
+  `[[output]]` config (mode, scale, position, transform) or else left to right, EDID off
+  (make/model "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor
+  theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
   which also sends presentation feedback with the kernel's timestamp. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
@@ -150,12 +149,14 @@ Key flows and invariants:
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
   `fullscreen_request` honors the requested output for mapped windows
-  (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are
-  forwarded to the pointer focus through pointer-gestures (`gestures.rs`), except swipes
-  with a finger count that `[gestures]` binds: those are kept whole from begin to end
-  (`Pila::swipe`, direction fixed after a small move, action after a threshold, window
-  switching stepping per further stretch and ending on lift), unless locked or shortcuts
-  are inhibited. Still missing: output rotation, touch.
+  (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are forwarded to the
+  pointer focus through pointer-gestures (`gestures.rs`), except swipes with a finger
+  count that `[gestures]` binds: those are kept whole from begin to end (`Pila::swipe`,
+  direction fixed after a small move, action after a threshold, window switching stepping
+  per further stretch and ending on lift), unless locked or shortcuts are inhibited.
+  Output transforms (rotation) are the `Output`'s: Smithay rotates the rendered frame and
+  the `Space` swaps a turned output's logical size, so pila only sets it (and sizes output
+  captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
