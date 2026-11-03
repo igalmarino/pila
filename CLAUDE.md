@@ -30,12 +30,13 @@ on **Smithay 0.7.x**.
 
 ## Commands
 
-- Build: `cargo build`
+- Build: `cargo build`; `cargo build --release` for what `scripts/tty` runs.
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt`
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
-  logic only (e.g. title bar/border hit math in `decoration.rs`); anything needing a
-  `Window` or a client is tested nested.
+  logic only (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
+  `shipped_configs_are_valid` for `config.example.toml` and `resources/daily`); anything
+  needing a `Window` or a client is tested nested.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
@@ -51,7 +52,8 @@ on **Smithay 0.7.x**.
   Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
   zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
-  (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
+  (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
+  Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
@@ -62,6 +64,8 @@ on **Smithay 0.7.x**.
 - The user develops from inside pila on a TTY: this container is then connected to that
   pila, so restarting it ends the Claude session, and `cargo run` opens a nested window
   inside it. Changes that need a pila restart are tested by the user.
+- Git: small commits straight to `main`, after the user has checked anything visual or
+  hardware-related; push to GitHub (`origin`, public, GPL-3.0-or-later) only when asked.
 
 ## Language
 
@@ -89,23 +93,27 @@ the `wayland-protocols` crate, not swapped for a vendor one.
 
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
 implements every Smithay handler trait. Unlike smallvil (but like anvil), the calloop event
-loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which Smithay
-modules that schedule their own timers (e.g. idle-notify) require. Window-management logic lives in `state.rs`. Configuration is `config.rs`: a TOML file
-(`~/.config/pila/config.toml` or `--config`, documented in `config.example.toml`) parsed
-by `Config::from_toml` (pure, unit-tested; `PILA_*` env vars override it), loaded at
-startup by `Config::load`, which falls back to defaults on errors, and reloaded when the
-file changes (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
-`Config::read`; an invalid file keeps the running config and notifies). `apply_config`
-re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
-(`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
-`use_mode`, scale, position; nested only scale). Anything that reads `self.config` when
-used (bindings, Mod, terminal) needs nothing; `autostart` isn't re-run. A new setting
-must either be read when used or be re-applied there. Keep three things in
-sync: `DEFAULT_BINDINGS`, the binding table in `config.rs`'s module doc and the defaults
-listed in `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags
-and env vars.
+loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which
+Smithay modules that schedule their own timers (e.g. idle-notify) require. Core window
+management lives in `state.rs`; each feature beyond it has its own module (named in the
+flows below).
 
 Key flows and invariants:
+
+- **Configuration** (`config.rs`): a TOML file (`~/.config/pila/config.toml` or
+  `--config`, documented in `config.example.toml`) parsed by `Config::from_toml` (pure,
+  unit-tested; `PILA_*` env vars override it), loaded at startup by `Config::load`, which
+  falls back to defaults on errors, and reloaded when the file changes
+  (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
+  `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
+  re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
+  (`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
+  `use_mode`, scale, position; nested only scale). Anything that reads `self.config` when
+  used (bindings, Mod, terminal) needs nothing; `autostart` isn't re-run. A new setting
+  must either be read when used or be re-applied there. Keep in sync: `DEFAULT_BINDINGS`,
+  the binding table in `config.rs`'s module doc and the defaults listed in
+  `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags and env
+  vars.
 
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
   up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
@@ -129,16 +137,16 @@ Key flows and invariants:
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
 - **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
-  `[[output]]` config (mode, scale, position) or else left to right, EDID off
-  (make/model "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor
-  theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one
-  idle `render_all`; an output with a frame in flight renders at its vblank
-  (`frame_finish`), which also sends presentation feedback with the kernel's timestamp.
-  The session lock is confirmed once every output has *shown* a locked frame.
-  `PauseSession` (VT switch away) releases held keys. Libinput devices get keyboard
-  LEDs and the `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a
-  touchpad is a device that can tap) when added; relative motion goes through the same constraint path as nested
-  (`pointer_motion`) and is clamped to the outputs. A removed output goes through
+  `[[output]]` config (mode, scale, position) or else left to right, EDID off (make/model
+  "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor theme
+  (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one idle
+  `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
+  which also sends presentation feedback with the kernel's timestamp. The session lock is
+  confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
+  releases held keys. Libinput devices get keyboard LEDs and the
+  `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a touchpad is a device
+  that can tap) when added; relative motion goes through the same constraint path as
+  nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
   `fullscreen_request` honors the requested output for mapped windows
@@ -170,7 +178,6 @@ Key flows and invariants:
   `PopupKeyboardGrab`/`PopupPointerGrab`; they are the only keyboard grabs pila takes.
   A popup grab ignores focus changes, so `focus_window` dismisses it first
   (`dismiss_popup_grab`), and `focused_window` resolves a focused popup to its window.
-
 - **Window lifecycle:** `new_toplevel` pushes the window onto `Pila::unmapped` (not the
   space). `handle_xdg_commit` sends the initial configure, then on the first commit with a
   buffer moves it into `space` via `place_new_window` (centered on the pointer's output,
@@ -290,13 +297,14 @@ Key flows and invariants:
   their own. A decorated window's `Space` location is still its geometry origin; the title
   bar (`TITLE_BAR_HEIGHT`) sits above it and an invisible resize border surrounds both.
   Hit testing goes through `Pila::under`, which for a window returns a `Hit` (client
-  surface or `Decoration`) front to back; `surface_under` (pointer focus) ignores decorations. Layout
-  (placement, maximize) uses the *pending* decoration mode via `layout_offset`; drawing and
-  hit testing use the *committed* state (`has_title_bar`). Bar textures (buttons, title)
-  are per-window `MemoryRenderBuffer`s cached by a key and re-rendered only when it changes;
-  they can't be shared between windows (element ids must be unique per frame). Titles come
-  from `text.rs` (cosmic-text): fonts load on a background thread at startup, and until
-  then `render_title` returns `None` and bars draw without text.
+  surface or `Decoration`) front to back; `surface_under` (pointer focus) ignores
+  decorations. Layout (placement, maximize) uses the *pending* decoration mode via
+  `layout_offset`; drawing and hit testing use the *committed* state (`has_title_bar`).
+  Bar textures (buttons, title) are per-window `MemoryRenderBuffer`s cached by a key and
+  re-rendered only when it changes; they can't be shared between windows (element ids must
+  be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
+  background thread at startup, and until then `render_title` returns `None` and bars draw
+  without text.
 - **Resize** uses per-surface `ResizeSurfaceState` in the surface data map;
   `resize_grab::handle_commit` (called from `CompositorHandler::commit`) repositions the
   window when resizing from the top/left edges once the client commits the new size.
