@@ -11,8 +11,10 @@ on **Smithay 0.7.x**.
 
 - You run inside a dev container (Arch Linux base). The host is Arch Linux + GNOME (Wayland).
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
-  the host GNOME desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose;
-  the compositor creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it
+  the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
+  (`/run/host-wayland/wayland-0`, a hard link `scripts/link-wayland` makes to the socket of
+  whichever session the container was entered from: GNOME, or pila itself on a TTY); the
+  compositor creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it
   connect there.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
