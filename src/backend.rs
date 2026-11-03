@@ -7,7 +7,7 @@ use smithay::{
     input::{keyboard::LedState, pointer::CursorImageStatus},
 };
 
-use crate::udev::UdevData;
+use crate::{cursor::CursorTheme, udev::UdevData};
 
 pub enum Backend {
     Winit(Box<WinitGraphicsBackend<GlesRenderer>>),
@@ -20,6 +20,18 @@ impl Backend {
         match self {
             Backend::Winit(backend) => backend.renderer(),
             Backend::Udev(data) => &mut data.renderer,
+        }
+    }
+
+    /// The renderer, and the cursor theme where pila draws named cursors
+    /// itself (bare metal), for rendering outside the backend's own loop.
+    pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, Option<&mut CursorTheme>) {
+        match self {
+            Backend::Winit(backend) => (backend.renderer(), None),
+            Backend::Udev(data) => {
+                let (renderer, theme) = data.renderer_and_cursor_theme();
+                (renderer, Some(theme))
+            }
         }
     }
 

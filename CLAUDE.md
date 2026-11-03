@@ -49,7 +49,7 @@ on **Smithay 0.7.x**.
   Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
   zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
-  (ext-data-control). X11 (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
+  (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 
@@ -191,6 +191,15 @@ Key flows and invariants:
   `preferred_buffer_scale` (wl_compositor v6) for their surface's primary output after
   every frame (`update_surface_scales` from `post_render`), and before their first
   configure (`send_initial_scale`). Xwayland stays at scale 1 (upscaled).
+- **Screen capture** (`capture.rs`, ext-image-capture-source + ext-image-copy-capture, on
+  the `wayland-protocols` bindings): sources are an output or a window (by its
+  foreign-toplevel identifier). Sessions live in `Pila::captures`; frames are rendered
+  offscreen from `scene()` (window sources: only the window, no title bar) and read back
+  into shm buffers (no dma-buf yet; GL reads rows bottom-up, so they're reversed). A
+  session's first frame is copied at once (idle), later ones in `post_render` only when
+  the session's own damage tracker sees a change. Size changes re-send constraints and
+  fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
+  window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

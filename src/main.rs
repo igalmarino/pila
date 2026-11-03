@@ -11,6 +11,7 @@
 #![allow(irrefutable_let_patterns)]
 
 mod backend;
+mod capture;
 mod config;
 mod cursor;
 mod decoration;

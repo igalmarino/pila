@@ -92,6 +92,8 @@ pub struct Pila {
     /// Windows most recently focused first, and the Mod+Tab in progress
     /// (`switcher.rs`).
     pub focus_history: Vec<Window>,
+    /// Screen capture sessions (`capture.rs`).
+    pub captures: Vec<crate::capture::Session>,
     pub switch: Option<Switch>,
 
     /// Mapped windows, in stacking order (back to front).
@@ -162,6 +164,7 @@ impl Pila {
         let popups = PopupManager::default();
         let loop_handle = event_loop.handle();
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
+        crate::capture::init_globals(&dh);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
@@ -209,6 +212,7 @@ impl Pila {
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
             focus_history: Vec::new(),
+            captures: Vec::new(),
             switch: None,
             xwayland_token: None,
             space: Space::default(),
@@ -481,6 +485,7 @@ impl Pila {
     /// surface, and bring windows and the pointer back onto the remaining
     /// outputs.
     pub fn output_removed(&mut self, output: &Output) {
+        self.stop_captures_of(output);
         let layers: Vec<_> = layer_map_for_output(output).layers().cloned().collect();
         for layer in layers {
             layer.layer_surface().send_close();
@@ -923,6 +928,7 @@ impl Pila {
     /// windows and popups, re-check idle inhibitors, and flush clients.
     pub fn post_render(&mut self, output: &Output) {
         self.update_surface_scales(output);
+        self.process_captures();
         self.space.refresh();
         self.update_idle_inhibit();
         layer_map_for_output(output).cleanup();

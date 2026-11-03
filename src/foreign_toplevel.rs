@@ -61,6 +61,12 @@ fn handle(window: &Window) -> Option<&ForeignToplevelHandle> {
     window.user_data().get::<ForeignToplevelHandle>()
 }
 
+/// The window's foreign-toplevel identifier (screen capture names windows
+/// by it), once it has been mapped.
+pub fn identifier(window: &Window) -> Option<String> {
+    handle(window).map(ForeignToplevelHandle::identifier)
+}
+
 impl Pila {
     /// List a newly mapped window.
     pub fn announce_toplevel(&mut self, window: &Window) {

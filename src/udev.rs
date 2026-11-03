@@ -140,6 +140,10 @@ impl UdevData {
         }
     }
 
+    pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, &mut CursorTheme) {
+        (&mut self.renderer, &mut self.cursor_theme)
+    }
+
     pub fn cursor_changed(&mut self, _status: &CursorImageStatus) {
         // Drawn by pila in `render_output`; the redraw is queued by the caller.
     }
