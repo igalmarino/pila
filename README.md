@@ -5,9 +5,11 @@ Windows float and overlap, with server-side title bars, like a classic desktop; 
 launchers, wallpapers and lock screens come from the usual Wayland tools (waybar, fuzzel,
 swaybg, swaylock, ...).
 
-pila implements **standard protocols only**: Wayland core and the official
-`wayland-protocols`. The single exception is `zwlr_layer_shell_v1`, which every panel and
-launcher needs and has no standard replacement yet.
+pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
+The wlroots protocols that panels and shells still need and that have no standard
+replacement yet (layer shell, screencopy, foreign toplevel management, gamma control,
+output management and power management, virtual keyboard) are supported too, each to be
+replaced when an `ext-` version lands.
 
 pila is young but usable day to day: its author runs it as their desktop (one AMD laptop with
 an external monitor) and develops it from inside itself.

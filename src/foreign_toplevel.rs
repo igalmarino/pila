@@ -1,8 +1,7 @@
 //! ext-foreign-toplevel-list: lets taskbars and window switchers list the
-//! open windows (title and app id). Read-only: the protocol can't activate or
-//! close windows, and there's no standard protocol for that yet (pila doesn't
-//! offer wlr-foreign-toplevel-management; see the protocol policy in
-//! CLAUDE.md).
+//! open windows (title and app id). Read-only: activating, minimizing and
+//! closing go through wlr-foreign-toplevel-management (`toplevel_management.rs`),
+//! which identifies windows by the identifier of their handle here.
 //!
 //! A window gets its handle when it's mapped (`place_new_window`), stored in
 //! its user data. Commits update the title and app id, and destroying the

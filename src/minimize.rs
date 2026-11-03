@@ -1,8 +1,8 @@
 //! Minimized windows: taken out of the `Space` (not drawn, no input) and kept
-//! in `Pila::minimized`, with where they were. There's no standard protocol
-//! for a taskbar to restore them, so Mod+Tab is the way back: minimized
-//! windows stay in its recent-use order (`switcher.rs`), show while selected,
-//! and are restored when the switch ends on them.
+//! in `Pila::minimized`, with where they were. They come back through Mod+Tab
+//! (minimized windows stay in its recent-use order, `switcher.rs`, show while
+//! selected, and are restored when the switch ends on them) or through a
+//! taskbar using wlr-foreign-toplevel-management (`toplevel_management.rs`).
 
 use std::cell::Cell;
 

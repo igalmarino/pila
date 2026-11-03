@@ -6,7 +6,8 @@ use smithay::{
     delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
     delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
     delegate_presentation, delegate_relative_pointer, delegate_single_pixel_buffer,
-    delegate_viewporter, delegate_xdg_foreign, delegate_xdg_toplevel_icon,
+    delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_foreign,
+    delegate_xdg_toplevel_icon,
     reexports::{
         calloop::LoopHandle,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -27,6 +28,7 @@ use smithay::{
         selection::{ext_data_control, primary_selection::PrimarySelectionState},
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
+        virtual_keyboard::VirtualKeyboardManagerState,
         xdg_foreign::{XdgForeignHandler, XdgForeignState},
         xdg_toplevel_icon::{XdgToplevelIconHandler, XdgToplevelIconManager},
     },
@@ -57,6 +59,11 @@ pub fn init_globals(
     FractionalScaleManagerState::new::<Pila>(dh);
     PointerGesturesState::new::<Pila>(dh);
     RelativePointerManagerState::new::<Pila>(dh);
+    // virtual-keyboard (wlroots): tools like wtype, and shells pasting from a
+    // clipboard history, type into the focused client. Smithay feeds the keys
+    // straight to the focused wl_keyboard, so they bypass pila's bindings,
+    // `suppressed_keys` and idle activity, as on wlroots.
+    VirtualKeyboardManagerState::new::<Pila, _>(dh, |_| true);
     // Its handler is in `pointer_constraints.rs`.
     PointerConstraintsState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
@@ -82,6 +89,7 @@ pub fn init_globals(
 // wp_viewporter: clients (video players, browsers) crop and scale buffers;
 // the renderer applies it.
 delegate_viewporter!(Pila);
+delegate_virtual_keyboard_manager!(Pila);
 
 // wp_single_pixel_buffer_manager_v1: one-color buffers (backgrounds, borders).
 delegate_single_pixel_buffer!(Pila);

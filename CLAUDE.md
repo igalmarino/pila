@@ -84,19 +84,21 @@ isn't.
 
 ## Protocol policy
 
-pila implements **standard protocols only**: Wayland core and the official
-`wayland-protocols` (stable, staging, and unstable where nothing newer exists). Where both
-exist, prefer the `ext-`/staging protocol over an older unstable or vendor one (e.g.
-`ext-data-control`, not `zwlr_data_control`). Vendor protocols (`wlr-*`, KDE, GNOME,
-…) are not added, even if Smithay implements them.
+pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`
+(stable, staging, and unstable where nothing newer exists). Where both exist, prefer the
+`ext-`/staging protocol over an older unstable or vendor one (e.g. `ext-data-control`, not
+`zwlr_data_control`). A standard protocol that Smithay doesn't implement (e.g.
+`ext-image-copy-capture`) is implemented in pila on the bindings from the
+`wayland-protocols` crate, not swapped for a vendor one.
 
-The single exception is **`zwlr_layer_shell_v1`**: there's no standard layer shell yet and
-panels, launchers, wallpapers and notification daemons all need it. Replace it once an
-`ext` layer shell lands in `wayland-protocols` and Smithay. Features with no standard
-protocol (window management for taskbars, output configuration) wait for one, or go
-through pila's own config/IPC. A standard protocol that Smithay doesn't implement (e.g.
-`ext-image-copy-capture` for screen capture) is implemented in pila on the bindings from
-the `wayland-protocols` crate, not swapped for a vendor one.
+A **wlroots protocol** is accepted when there's no standard equivalent yet and a desktop
+tool the user runs needs it; each is replaced as soon as an `ext-` version lands in
+`wayland-protocols` and Smithay. The accepted ones (all needed by panels/shells such as
+Noctalia): `wlr-layer-shell`, `wlr-screencopy`, `wlr-foreign-toplevel-management`,
+`wlr-gamma-control`, `wlr-output-management`, `wlr-output-power-management` and
+`virtual-keyboard-unstable-v1`. Other vendor protocols (KDE, GNOME, Hyprland, …) are not
+added, even if Smithay implements them. Features with no protocol at all go through
+pila's own config/IPC.
 
 ## Architecture
 
