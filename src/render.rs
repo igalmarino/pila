@@ -86,6 +86,8 @@ pub struct SceneWindow {
     /// geometry offset), in space coordinates.
     pub render_location: Point<i32, Logical>,
     pub title_bar: Option<SceneTitleBar>,
+    /// The bell's flash over the window and its title bar (`bell.rs`).
+    pub flash: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
 }
 
 pub struct SceneTitleBar {
@@ -185,6 +187,14 @@ where
 {
     let mut elements = Vec::new();
     for entry in windows {
+        // In front of this window only (elements go front to back).
+        if let Some((buffer, rect)) = &entry.flash {
+            let loc: Point<i32, Physical> =
+                (rect.loc - output_location).to_physical_precise_round(scale);
+            elements.push(PilaRenderElement::Solid(
+                SolidColorRenderElement::from_buffer(buffer, loc, scale, 1.0, Kind::Unspecified),
+            ));
+        }
         let location: Point<i32, Physical> =
             (entry.render_location - output_location).to_physical_precise_round(scale);
         elements.extend(

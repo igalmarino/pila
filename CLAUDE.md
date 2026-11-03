@@ -195,6 +195,11 @@ Key flows and invariants:
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`).
+- **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
+  window for a subsurface or popup; the focused window when the client names none) gets a
+  short `BellFlash` in its user data, which `scene()` turns into a solid element drawn just
+  in front of that window and its title bar (`SceneWindow::flash`); a timer redraws when it
+  ends. Ignored while locked.
 - **Output scale** (`scale.rs`): per output from `[[output]]` (`Config::output`; nested
   the output is `winit`, scale only), may be fractional. Every coordinate pila handles is
   logical; `render.rs` gets the scale per output (`scale::output_scale`). pila's own

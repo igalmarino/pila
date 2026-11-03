@@ -443,6 +443,7 @@ impl Pila {
                     window: window.clone(),
                     render_location: loc - window.geometry().loc,
                     title_bar,
+                    flash: crate::bell::flash(window, loc),
                 })
             })
             .collect()

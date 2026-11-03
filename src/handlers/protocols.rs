@@ -62,6 +62,8 @@ pub fn init_globals(
     XdgToplevelIconManager::new::<Pila>(dh);
     // Its handler is in `idle.rs`.
     IdleInhibitManagerState::new::<Pila>(dh);
+    // Its handler is in `bell.rs`.
+    crate::bell::init_global(dh);
 
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),

@@ -11,6 +11,7 @@
 #![allow(irrefutable_let_patterns)]
 
 mod backend;
+mod bell;
 mod capture;
 mod config;
 mod config_reload;
