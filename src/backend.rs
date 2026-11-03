@@ -8,7 +8,7 @@ use smithay::{
     output::Output,
 };
 
-use crate::{cursor::CursorTheme, udev::UdevData};
+use crate::{cursor::CursorTheme, output_management::HeadInfo, udev::UdevData};
 
 pub enum Backend {
     Winit(Box<WinitGraphicsBackend<GlesRenderer>>),
@@ -64,6 +64,15 @@ impl Backend {
     pub fn change_vt(&mut self, vt: i32) {
         if let Backend::Udev(data) = self {
             data.change_vt(vt);
+        }
+    }
+
+    /// The monitors for wlr-output-management; `None` nested, where the
+    /// window is the one head and `Pila::output_heads` describes it.
+    pub fn output_heads(&self) -> Option<Vec<HeadInfo>> {
+        match self {
+            Backend::Winit(_) => None,
+            Backend::Udev(data) => Some(data.output_heads()),
         }
     }
 

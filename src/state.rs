@@ -121,6 +121,10 @@ pub struct Pila {
     pub gamma_controls: crate::gamma_control::GammaControls,
     /// Clients watching or setting outputs' power (`output_power.rs`).
     pub output_powers: crate::output_power::OutputPowers,
+    /// Display tools' view of the monitors (`output_management.rs`), and
+    /// what they set, over `[[output]]`, by output name.
+    pub output_management: crate::output_management::OutputManagement,
+    pub output_overrides: HashMap<String, crate::config::OutputConfig>,
     pub switch: Option<Switch>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
@@ -220,6 +224,7 @@ impl Pila {
         crate::toplevel_management::init_global(&dh);
         crate::gamma_control::init_global(&dh);
         crate::output_power::init_global(&dh);
+        crate::output_management::init_global(&dh);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
@@ -269,6 +274,8 @@ impl Pila {
             toplevel_management: Default::default(),
             gamma_controls: Default::default(),
             output_powers: Default::default(),
+            output_management: Default::default(),
+            output_overrides: HashMap::new(),
             switch: None,
             swipe: None,
             xwayland_token: None,

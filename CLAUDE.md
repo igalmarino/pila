@@ -118,8 +118,10 @@ Key flows and invariants:
   (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
   `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
   re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
-  (`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
-  `use_mode`, scale, transform, position; nested only scale). Anything that reads
+  (`UdevData::apply_input_config`), `[[output]]` (`Pila::apply_outputs` →
+  `udev::apply_output_config`: enabled, mode via `use_mode`, scale, transform, position,
+  adaptive sync; nested only scale) with wlr-output-management's runtime overrides on
+  top (`Pila::output_overrides`; an edited section drops its monitor's). Anything that reads
   `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
   re-run. A new setting must either be read when used or be re-applied there. Keep in
   sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc
@@ -273,6 +275,18 @@ Key flows and invariants:
   `initialize_output` again with the stored connector and mode (`UdevData::set_output_power`).
   Code using `drm_output` must handle `None`; a powered-off output stays mapped and counts
   as showing the lock screen. Nested: fails.
+- **Output management** (`output_management.rs`, wlr-output-management v4): heads are
+  `HeadInfo` snapshots (`Backend::output_heads`; nested: the window, transform `Normal`,
+  only its scale may change). `refresh_output_heads` diffs against the last snapshot,
+  sends the changes and `done` with a new serial, which cancels configurations in
+  progress; it runs after connect/disconnect, `apply_outputs` and a nested resize. A
+  configuration is checked against the snapshot (`check_output_configuration`: known
+  modes only, ≥ 1 head enabled, scale 0.5..8) and applied as `[[output]]`-style overrides
+  in `Pila::output_overrides`, which `udev::effective_output_config` layers over the file
+  for `connector_connected` and `apply_output_config`. Disabling a head
+  (`disable_output`) clears its CRTC, removes its global and runs `output_removed`; the
+  `OutputSurface` stays so the head is still listed; `enable_output` is the reverse (also
+  used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.

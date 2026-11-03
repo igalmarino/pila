@@ -97,6 +97,7 @@ pub fn init_winit(
                     layer_map_for_output(&output).arrange();
                     state.refit_maximized();
                     state.configure_lock_surfaces();
+                    state.refresh_output_heads();
                     full_redraw = 4;
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),

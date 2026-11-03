@@ -29,6 +29,7 @@ mod idle;
 mod input;
 mod layers;
 mod minimize;
+mod output_management;
 mod output_power;
 mod pointer_constraints;
 mod render;

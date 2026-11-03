@@ -124,18 +124,30 @@ impl Pila {
             }
         }
         if old.outputs != self.config.outputs {
-            match self.backend {
-                Some(Backend::Udev(_)) => crate::udev::apply_output_config(self),
-                Some(Backend::Winit(_)) => self.apply_nested_scale(),
-                None => {}
-            }
-            for output in self.space.outputs().cloned().collect::<Vec<_>>() {
-                layer_map_for_output(&output).arrange();
-            }
-            self.fixup_windows();
-            self.refit_maximized();
-            self.configure_lock_surfaces();
+            // An edited [[output]] section takes over from what a display
+            // tool set for that monitor; untouched sections don't.
+            self.output_overrides
+                .retain(|name, _| old.output(name) == self.config.output(name));
+            self.apply_outputs();
         }
+        self.queue_redraw();
+    }
+
+    /// Re-apply the outputs' settings (`[[output]]` with the runtime
+    /// overrides on top) and fit everything to the result.
+    pub(crate) fn apply_outputs(&mut self) {
+        match self.backend {
+            Some(Backend::Udev(_)) => crate::udev::apply_output_config(self),
+            Some(Backend::Winit(_)) => self.apply_nested_scale(),
+            None => {}
+        }
+        for output in self.space.outputs().cloned().collect::<Vec<_>>() {
+            layer_map_for_output(&output).arrange();
+        }
+        self.fixup_windows();
+        self.refit_maximized();
+        self.configure_lock_surfaces();
+        self.refresh_output_heads();
         self.queue_redraw();
     }
 
@@ -160,10 +172,12 @@ impl Pila {
 
     /// Nested: only the scale of the `winit` output applies.
     fn apply_nested_scale(&mut self) {
+        let file = self.config.output("winit").and_then(|c| c.scale);
         let scale = self
-            .config
-            .output("winit")
+            .output_overrides
+            .get("winit")
             .and_then(|c| c.scale)
+            .or(file)
             .unwrap_or(1.0);
         for output in self.space.outputs() {
             output.change_current_state(None, None, Some(Scale::Fractional(scale)), None);
