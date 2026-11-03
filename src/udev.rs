@@ -37,8 +37,14 @@ use smithay::{
     input::{keyboard::LedState, pointer::CursorImageStatus},
     output::{Mode as WlMode, Output, PhysicalProperties, Scale as OutputScale},
     reexports::{
-        calloop::{EventLoop, LoopHandle},
-        drm::control::{connector, crtc, Device as _, Mode as DrmMode, ModeTypeFlags},
+        calloop::{
+            timer::{TimeoutAction, Timer},
+            EventLoop, LoopHandle,
+        },
+        drm::{
+            control::{connector, crtc, Device as _, Mode as DrmMode, ModeTypeFlags},
+            Device as _,
+        },
         input::{self as libinput, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -59,6 +65,9 @@ use crate::{
     render::{self, PilaRenderElement},
     Pila,
 };
+
+/// How long to wait before trying to draw again after a DRM-level failure.
+const RECOVERY_DELAY: Duration = Duration::from_millis(100);
 
 /// 8-bit formats only: widely supported, and what clients expect.
 const COLOR_FORMATS: [Fourcc; 4] = [
@@ -97,6 +106,10 @@ pub struct UdevData {
     cursor_theme: CursorTheme,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
+    /// A frame failed at the DRM level (typically: not DRM master yet after
+    /// a VT switch); rendering waits for `recover` instead of retrying on
+    /// every event.
+    recovering: bool,
     loop_handle: LoopHandle<'static, Pila>,
     /// Last: see the struct docs.
     pub session: LibSeatSession,
@@ -144,6 +157,37 @@ impl UdevData {
             self.redraw_scheduled = true;
             self.loop_handle.insert_idle(render_all);
         }
+    }
+
+    /// Take DRM master (again). logind grants it to the active session's
+    /// fd, but after a switch between two compositors on one seat it has
+    /// been seen missing; the kernel lets a process that was master once
+    /// take it back without privileges.
+    fn take_master(&self) {
+        if let Err(err) = self.drm.device().acquire_master_lock() {
+            debug!(?err, "couldn't take DRM master");
+        }
+    }
+
+    /// A frame failed at the DRM level: try again shortly, once, instead of
+    /// on every client event until it works.
+    fn schedule_recovery(&mut self) {
+        if self.recovering {
+            return;
+        }
+        self.recovering = true;
+        let timer = Timer::from_duration(RECOVERY_DELAY);
+        let _ = self.loop_handle.insert_source(timer, |_, _, state| {
+            if let Some(Backend::Udev(data)) = &mut state.backend {
+                data.recovering = false;
+                data.take_master();
+                for surface in data.outputs.values_mut() {
+                    surface.redraw_needed = true;
+                }
+            }
+            state.queue_redraw();
+            TimeoutAction::Drop
+        });
     }
 
     pub fn update_leds(&mut self, leds: LedState) {
@@ -452,6 +496,8 @@ pub fn init_udev(
                     if let Err(err) = data.drm.activate(false) {
                         error!(?err, "failed to resume the DRM device");
                     }
+                    data.take_master();
+                    data.recovering = false;
                     let crtcs: Vec<_> = data.outputs.keys().copied().collect();
                     for crtc in crtcs {
                         data.outputs.get_mut(&crtc).expect("listed").frame_pending = false;
@@ -494,6 +540,7 @@ pub fn init_udev(
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
         redraw_scheduled: false,
+        recovering: false,
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
@@ -1095,6 +1142,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         || !surface.redraw_needed
         || surface.drm_output.is_none()
         || !data.session.is_active()
+        || data.recovering
     {
         return;
     }
@@ -1180,6 +1228,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         FrameFlags::DEFAULT,
     );
     let cursor_wl_surface = cursor_surface.as_ref().map(|(s, _)| s);
+    let mut recover = false;
     match rendered {
         Ok(result) => {
             frame::update_primary_outputs(&scene, cursor_wl_surface, &output, &result.states);
@@ -1197,17 +1246,28 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
                             surface.lock_frame = LockFrame::Queued;
                         }
                     }
-                    Err(err) => warn!(?err, "failed to queue frame"),
+                    Err(err) => {
+                        warn!(?err, "failed to queue frame");
+                        surface.redraw_needed = true;
+                        recover = true;
+                    }
                 }
             } else if scene.locked {
                 // Nothing changed: the screen already shows the locked scene.
                 surface.lock_frame = LockFrame::Shown;
             }
         }
-        Err(err) => warn!(?err, "failed to render frame"),
+        Err(err) => {
+            warn!(?err, "failed to render frame");
+            surface.redraw_needed = true;
+            recover = true;
+        }
     }
     if !scene.locked {
         surface.lock_frame = LockFrame::None;
+    }
+    if recover {
+        data.schedule_recovery();
     }
 
     if lock_pending {
