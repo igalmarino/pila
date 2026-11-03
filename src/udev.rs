@@ -1166,6 +1166,11 @@ fn render_all(state: &mut Pila) {
     for crtc in crtcs {
         render_output(state, crtc);
     }
+    // With every output powered off nothing is drawn, so nothing above
+    // checks the lock: a locker (swaylock -f waits for it) would wait forever.
+    if state.lock_pending() {
+        maybe_confirm_lock(state);
+    }
 }
 
 /// Draw one output, unless it has a frame in flight (then it's drawn at the
