@@ -163,13 +163,11 @@ work through Mesa with no extra setup. NVIDIA with the proprietary driver needs 
 `nvidia-container-toolkit` package and `--gpus=all` added to `runArgs` in
 `.devcontainer/devcontainer.json`.
 
-#### Editor: pick one
+#### The Dev Containers CLI
 
-**VS Code.** Install `visual-studio-code-bin` from the AUR, then the *Dev Containers*
-extension (`ms-vscode-remote.remote-containers`). The `code` package in the official repos is
-the open-source build and **can't** install Microsoft's Dev Containers extension.
-
-**Terminal only.** Install the Dev Containers CLI and use the `scripts/dev` helper:
+Everything on the host comes from Arch's official repositories (no AUR). The container is
+driven from a terminal with the `scripts/dev` helper, which needs the Dev Containers CLI
+(an npm package, not an Arch one):
 
 ```bash
 sudo pacman -S nodejs npm
@@ -177,14 +175,14 @@ npm config set prefix ~/.local     # avoid sudo for global installs; ~/.local/bi
 npm install -g @devcontainers/cli
 ```
 
+Any editor works on the checkout as usual; the `code` package from the official repos is the
+open-source build of VS Code and can't install Microsoft's *Dev Containers* extension, so
+the container itself is started and used from the terminal.
+
 ### 2. Start the container
 
 Always launch from inside your desktop session (pila, or GNOME), so `WAYLAND_DISPLAY` and
 `XDG_RUNTIME_DIR` are set on the host.
-
-**VS Code:** open this folder, then *Dev Containers: Reopen in Container*.
-
-**Terminal:**
 
 ```bash
 scripts/dev up        # first build takes a few minutes
@@ -253,8 +251,7 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
 
 - **`Cannot connect to Wayland display` / socket missing.** The host compositor restarted
   (you logged out and back in, or restarted pila), so its socket is new. Run any
-  `scripts/dev` command from the session to link it again (`scripts/link-wayland`); with VS
-  Code, reopen the folder in the container.
+  `scripts/dev` command from the session to link it again (`scripts/link-wayland`).
 - **Nested pila opens on the wrong desktop.** The container uses the session `scripts/dev`
   last ran from. Run `scripts/dev` in a terminal of the session you want.
 - **`Permission denied` on the socket.** Your host UID isn't the one the container user got.
