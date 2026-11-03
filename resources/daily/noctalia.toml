@@ -9,6 +9,8 @@
 start  = ["launcher", "wallpaper"]
 center = ["clock"]
 end    = ["media", "tray", "notifications", "clipboard", "network", "bluetooth", "volume", "brightness", "battery", "control-center", "session"]
+# A translucent bar over the blurred screen behind it (ext-background-effect).
+background_opacity = 0.6
 compositor_blur = true
 
 [wallpaper]
