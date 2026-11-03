@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashSet, ffi::OsString, process::Command, sync::Arc};
 
 use smithay::{
-    backend::renderer::utils::with_renderer_surface_state,
+    backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
     desktop::{
         find_popup_root_surface, layer_map_for_output, LayerSurface, PopupManager, Space, Window,
         WindowSurfaceType,
@@ -83,6 +83,10 @@ pub struct Pila {
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
 
+    /// Where a dragged window would snap to, shown above the windows
+    /// (`snap.rs`), and the buffer it's drawn with.
+    pub snap_preview: Option<Rectangle<i32, Logical>>,
+    pub snap_preview_buffer: SolidColorBuffer,
     /// Minimized windows, out of the `Space` (`minimize.rs`).
     pub minimized: Vec<Window>,
     /// Windows most recently focused first, and the Mod+Tab in progress
@@ -202,6 +206,8 @@ impl Pila {
             xwayland_shell_state,
             pending_startup: Vec::new(),
             minimized: Vec::new(),
+            snap_preview: None,
+            snap_preview_buffer: SolidColorBuffer::default(),
             focus_history: Vec::new(),
             switch: None,
             xwayland_token: None,
@@ -363,6 +369,9 @@ impl Pila {
         };
         Scene {
             upper: layers(upper),
+            snap_preview: self
+                .snap_preview
+                .map(|rect| (self.snap_preview_buffer.clone(), rect)),
             windows: self.scene_windows(),
             lower: layers(lower),
             ..Default::default()
@@ -530,6 +539,29 @@ impl Pila {
 
     /// Geometry of the output a window is mostly on, falling back to the
     /// pointer's output: all of it, or only the `usable` part.
+    /// The usable area (minus panels) of the output a window is mostly on.
+    pub fn usable_area_for(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        self.output_geometry_for_window(window, true)
+    }
+
+    /// Drop maximized/fullscreen without restoring the old geometry (the
+    /// caller places the window itself, e.g. snapping it).
+    pub fn clear_fill_state(&mut self, window: &Window) {
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+                state.states.unset(xdg_toplevel::State::Fullscreen);
+            });
+        }
+        if let Some(x11) = window.x11_surface() {
+            let _ = x11.set_maximized(false);
+            let _ = x11.set_fullscreen(false);
+        }
+        if let Some(restore) = window.user_data().get::<RestoreGeometry>() {
+            restore.0.borrow_mut().take();
+        }
+    }
+
     fn output_geometry_for_window(
         &self,
         window: &Window,
@@ -709,6 +741,7 @@ impl Pila {
                 None => self.output_geometry_for_window(window, usable),
             };
             let Some(mut output_geo) = output_geo else {
+                debug!("no output to fill");
                 return;
             };
             // A maximized window's title bar stays visible above it.
@@ -717,6 +750,10 @@ impl Pila {
             output_geo.size.h -= bar;
             if let (Some(loc), false) = (mapped_loc, was_maximized || was_fullscreen) {
                 *restore.borrow_mut() = Some(Rectangle::new(loc, window.geometry().size));
+            }
+            // A snapped window returns to where it was before snapping.
+            if let Some(before) = self.forget_snap(window) {
+                *restore.borrow_mut() = Some(before);
             }
             if let Some(toplevel) = toplevel {
                 toplevel.with_pending_state(|state| {
@@ -809,6 +846,16 @@ impl Pila {
             ));
             self.space.map_element(window.clone(), loc, true);
             self.x11_window_moved(&window);
+        } else if crate::snap::snapped_side(&window).is_some() {
+            // Same for a snapped window: back to its old size under the cursor.
+            let width = self
+                .window_rect(&window)
+                .map(|r| r.size.w)
+                .unwrap_or(window.geometry().size.w);
+            let before_w = crate::snap::snapped_before_width(&window).unwrap_or(width);
+            let x = start_data.location.x as i32 - before_w / 2;
+            let y = self.space.element_location(&window).map_or(0, |l| l.y);
+            self.unsnap_window(&window, Some((x, y).into()));
         }
 
         let Some(initial_window_location) = self.space.element_location(&window) else {
@@ -818,6 +865,8 @@ impl Pila {
             start_data,
             window,
             initial_window_location,
+            snap: None,
+            moved: false,
         };
         pointer.set_grab(self, grab, serial, Focus::Clear);
         // After set_grab: clearing the focus resets the cursor to the default.
@@ -838,6 +887,8 @@ impl Pila {
         if maximized || fullscreen || self.is_locked() {
             return;
         }
+        // A resized window isn't snapped anymore.
+        self.forget_snap(&window);
         let Some(location) = self.space.element_location(&window) else {
             return;
         };
@@ -905,6 +956,36 @@ impl Pila {
             Action::Minimize => {
                 if let Some(window) = self.focused_window() {
                     self.minimize_window(&window);
+                }
+            }
+            Action::SnapLeft | Action::SnapRight => {
+                if let Some(window) = self.focused_window() {
+                    let side = if action == Action::SnapLeft {
+                        crate::snap::Side::Left
+                    } else {
+                        crate::snap::Side::Right
+                    };
+                    self.snap_window(&window, side);
+                }
+            }
+            Action::Restore => {
+                if let Some(window) = self.focused_window() {
+                    self.restore_window_size(&window);
+                }
+            }
+            Action::MoveWindow(x, y) => {
+                if let Some(window) = self.focused_window() {
+                    self.move_window_by(&window, (x, y).into());
+                }
+            }
+            Action::ResizeWindow(w, h) => {
+                if let Some(window) = self.focused_window() {
+                    self.resize_window_by(&window, (w, h).into());
+                }
+            }
+            Action::Center => {
+                if let Some(window) = self.focused_window() {
+                    self.center_window(&window);
                 }
             }
             Action::ToggleMaximize => {
@@ -989,7 +1070,17 @@ pub enum Hit {
 #[derive(Default)]
 struct RestoreGeometry(RefCell<Option<Rectangle<i32, Logical>>>);
 
-fn restore_geometry(window: &Window) -> Option<Rectangle<i32, Logical>> {
+/// Set where a window returns to when it leaves maximized/fullscreen.
+pub fn set_restore_geometry(window: &Window, rect: Rectangle<i32, Logical>) {
+    window
+        .user_data()
+        .insert_if_missing(RestoreGeometry::default);
+    if let Some(restore) = window.user_data().get::<RestoreGeometry>() {
+        *restore.0.borrow_mut() = Some(rect);
+    }
+}
+
+pub fn restore_geometry(window: &Window) -> Option<Rectangle<i32, Logical>> {
     window
         .user_data()
         .get::<RestoreGeometry>()
@@ -1045,7 +1136,7 @@ fn focus_target(window: &Window) -> Option<KeyboardFocus> {
 
 /// Where a window of `size` goes to be centered in `area` together with its
 /// title bar (`bar` pixels above it), staying inside `area` if it's larger.
-fn centered_location(
+pub fn centered_location(
     area: Rectangle<i32, Logical>,
     size: smithay::utils::Size<i32, Logical>,
     bar: i32,

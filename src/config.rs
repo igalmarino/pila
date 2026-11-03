@@ -13,6 +13,11 @@
 //! | Mod+M                 | Toggle maximize                |
 //! | Mod+N                 | Minimize (Mod+Tab brings it back) |
 //! | Mod+F                 | Toggle fullscreen              |
+//! | Mod+Left / Mod+Right  | Snap to the left / right half (again: restore) |
+//! | Mod+Up / Mod+Down     | Maximize / restore             |
+//! | Mod+Shift+arrows      | Move the window                |
+//! | Mod+Ctrl+arrows       | Resize (Right/Down grow, Left/Up shrink) |
+//! | Mod+C                 | Center the window              |
 //! | Mod+Shift+Q           | Close focused window           |
 //! | Mod+Shift+E           | Quit pila                      |
 //! | Mod+Left drag         | Move window                    |
@@ -38,6 +43,8 @@ use serde::Deserialize;
 use smithay::input::keyboard::{xkb, Keysym, ModifiersState};
 use tracing::{info, warn};
 
+use crate::snap::KEYBOARD_STEP;
+
 /// The default bindings, as config strings (so they and the user's go
 /// through the same parser).
 const DEFAULT_BINDINGS: &[(&str, &str)] = &[
@@ -49,6 +56,19 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+M", "maximize"),
     ("Mod+N", "minimize"),
     ("Mod+F", "fullscreen"),
+    ("Mod+Left", "snap-left"),
+    ("Mod+Right", "snap-right"),
+    ("Mod+Up", "maximize"),
+    ("Mod+Down", "restore"),
+    ("Mod+Shift+Left", "move-left"),
+    ("Mod+Shift+Right", "move-right"),
+    ("Mod+Shift+Up", "move-up"),
+    ("Mod+Shift+Down", "move-down"),
+    ("Mod+Ctrl+Right", "grow-width"),
+    ("Mod+Ctrl+Left", "shrink-width"),
+    ("Mod+Ctrl+Down", "grow-height"),
+    ("Mod+Ctrl+Up", "shrink-height"),
+    ("Mod+C", "center"),
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
 ];
@@ -155,6 +175,15 @@ pub enum Action {
     CycleFocus,
     CycleFocusBack,
     Minimize,
+    /// Snap to the left/right half of the output (`snap.rs`).
+    SnapLeft,
+    SnapRight,
+    /// Undo a snap or a maximize.
+    Restore,
+    /// Move by (x, y) / resize by (w, h) logical pixels.
+    MoveWindow(i32, i32),
+    ResizeWindow(i32, i32),
+    Center,
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
@@ -177,13 +206,27 @@ impl Action {
             "cycle-focus" => Action::CycleFocus,
             "cycle-focus-back" => Action::CycleFocusBack,
             "minimize" => Action::Minimize,
+            "snap-left" => Action::SnapLeft,
+            "snap-right" => Action::SnapRight,
+            "restore" => Action::Restore,
+            "move-left" => Action::MoveWindow(-KEYBOARD_STEP, 0),
+            "move-right" => Action::MoveWindow(KEYBOARD_STEP, 0),
+            "move-up" => Action::MoveWindow(0, -KEYBOARD_STEP),
+            "move-down" => Action::MoveWindow(0, KEYBOARD_STEP),
+            "grow-width" => Action::ResizeWindow(KEYBOARD_STEP, 0),
+            "shrink-width" => Action::ResizeWindow(-KEYBOARD_STEP, 0),
+            "grow-height" => Action::ResizeWindow(0, KEYBOARD_STEP),
+            "shrink-height" => Action::ResizeWindow(0, -KEYBOARD_STEP),
+            "center" => Action::Center,
             "maximize" => Action::ToggleMaximize,
             "fullscreen" => Action::ToggleFullscreen,
             "quit" => Action::Quit,
             other => {
                 return Err(format!(
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
-                     cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, quit or none)"
+                     cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, snap-left, \
+                     snap-right, restore, move-left/right/up/down, grow-width, shrink-width, \
+                     grow-height, shrink-height, center, quit or none)"
                 ))
             }
         }))

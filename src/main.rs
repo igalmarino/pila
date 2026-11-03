@@ -26,6 +26,7 @@ mod minimize;
 mod pointer_constraints;
 mod render;
 mod session_lock;
+mod snap;
 mod state;
 mod switcher;
 mod text;

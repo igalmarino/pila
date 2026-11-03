@@ -12,7 +12,7 @@ use smithay::{
     backend::renderer::{
         element::{
             memory::MemoryRenderBufferRenderElement,
-            solid::SolidColorRenderElement,
+            solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             AsRenderElements, Kind,
         },
@@ -61,6 +61,9 @@ pub struct Scene {
     pub lock_surfaces: Vec<(WlSurface, Point<i32, Logical>)>,
     /// Layer surfaces above the windows (Overlay, Top).
     pub upper: Vec<SceneLayer>,
+    /// Where a dragged window would snap to (`snap.rs`): drawn just above
+    /// the windows.
+    pub snap_preview: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
     pub windows: Vec<SceneWindow>,
     /// Layer surfaces below the windows (Bottom, Background; also Top while
     /// a fullscreen window is on top).
@@ -125,6 +128,14 @@ where
             .collect();
     }
     let mut elements = layer_elements(renderer, &scene.upper, output_location);
+    if let Some((buffer, rect)) = &scene.snap_preview {
+        let scale = Scale::from(SCALE);
+        let loc: Point<i32, Physical> =
+            (rect.loc - output_location).to_physical_precise_round(scale);
+        elements.push(PilaRenderElement::Solid(
+            SolidColorRenderElement::from_buffer(buffer, loc, scale, 1.0, Kind::Unspecified),
+        ));
+    }
     elements.extend(window_elements(renderer, &scene.windows, output_location));
     elements.extend(layer_elements(renderer, &scene.lower, output_location));
     elements

@@ -214,6 +214,15 @@ Key flows and invariants:
   (`_NET_WM_STATE` + a direct configure); resize grabs configure X11 windows per motion.
   Selections are bridged both ways (`SelectionHandler` in `handlers/mod.rs`, XwmHandler
   selection methods); only a focused X11 app may read.
+- **Snapping and keyboard moves** (`snap.rs`): a snapped window fills half of its output's
+  usable area, gets xdg `Tiled*` states, and keeps its pre-snap rect in `SnapState`.
+  Snapping is floating geometry, not a fill state: maximizing a snapped window
+  (`set_fill_state_on`) or resizing it (`begin_resize`, keyboard resizes) calls
+  `forget_snap`, and maximizing keeps the pre-snap rect as the restore geometry.
+  `MoveSurfaceGrab` previews the edge snap target (`Pila::snap_preview`, a solid element
+  drawn just above the windows) and applies it on release; dragging a snapped or filled
+  window first restores its old size under the cursor (`begin_move`). Keyboard
+  move/resize/center go through `apply_rect`, which also configures X11 windows.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit.

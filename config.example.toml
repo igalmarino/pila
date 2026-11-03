@@ -39,7 +39,10 @@ repeat-rate = 25        # repeats per second
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
 # the previous window; hold the modifiers and repeat for older ones),
 # cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
-# fullscreen, quit, none.
+# fullscreen, snap-left, snap-right, restore, move-left/right/up/down,
+# grow-width, shrink-width, grow-height, shrink-height, center, quit, none.
+# Dragging a window to the left/right edge of a screen snaps it to that half;
+# the top edge maximizes it.
 #
 # The defaults:
 #   "Mod+Return"  = "terminal"
@@ -50,6 +53,14 @@ repeat-rate = 25        # repeats per second
 #   "Mod+M"       = "maximize"
 #   "Mod+N"       = "minimize"
 #   "Mod+F"       = "fullscreen"
+#   "Mod+Left"    = "snap-left"       (again: restore)
+#   "Mod+Right"   = "snap-right"
+#   "Mod+Up"      = "maximize"
+#   "Mod+Down"    = "restore"         (undo a snap or maximize)
+#   "Mod+Shift+Left/Right/Up/Down" = "move-left/right/up/down"   (40 px)
+#   "Mod+Ctrl+Right" = "grow-width"   "Mod+Ctrl+Left" = "shrink-width"
+#   "Mod+Ctrl+Down"  = "grow-height"  "Mod+Ctrl+Up"   = "shrink-height"
+#   "Mod+C"       = "center"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
 [bindings]
