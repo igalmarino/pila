@@ -53,6 +53,12 @@ on **Smithay 0.7.x**.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 
+## Language
+
+Everything in the repository is in English: code, identifiers, comments, docs, log
+messages, test names, config examples and commit messages, even when the conversation
+isn't.
+
 ## Protocol policy
 
 pila implements **standard protocols only**: Wayland core and the official
