@@ -1,25 +1,18 @@
-# A day-to-day pila session on a laptop with an external monitor. Install it
-# with scripts/install-config (copies it to ~/.config/pila/config.toml and the
-# waybar and fuzzel configs next to it, without overwriting), then edit to taste.
+# A day-to-day pila session on a laptop with an external monitor, with
+# Noctalia as the desktop shell (bar, launcher, notifications, wallpaper,
+# lock screen, idle, OSDs, clipboard history). Install it with
+# scripts/install-config (copies it to ~/.config/pila/config.toml and
+# noctalia.toml to ~/.config/noctalia/settings.toml, without overwriting),
+# then edit to taste.
 #
-# Uses, from the Arch repos: waybar swaybg mako swayidle swaylock fuzzel ghostty
-# grim slurp wl-clipboard brightnessctl ttf-nerd-fonts-symbols (waybar's
-# icons; wpctl comes with wireplumber).
+# Uses, from the Arch repos: noctalia ghostty grim slurp wl-clipboard.
 
 mod = "super"
 terminal = "ghostty"
-launcher = "fuzzel --config ~/.config/pila/fuzzel.ini"
+launcher = "noctalia msg panel-toggle launcher"
 
 autostart = [
-    # A plain color; for a picture: swaybg -i ~/Pictures/wallpaper.jpg -m fill
-    "swaybg -c '#1f2126'",
-    # waybar 0.15.0 prints the battery status to stdout on every update (a
-    # stray puts in its battery module, gone in the next release), thousands
-    # of lines in pila's log; drop them until then.
-    "waybar -c ~/.config/pila/waybar.jsonc -s ~/.config/pila/waybar.css | grep --line-buffered -vxE 'Plugged|Charging|Discharging|Full|Not charging'",
-    "mako",
-    # Lock after 5 minutes idle and before suspending.
-    "swayidle -w timeout 300 'swaylock -f -c 1f2126' before-sleep 'swaylock -f -c 1f2126'",
+    "noctalia",
     # In a login session (scripts/install) GDM's PAM setup starts and unlocks
     # the keyring that Chromium, VS Code and git's libsecret helper use. When
     # pila is started by hand (scripts/tty), start it here instead:
@@ -40,20 +33,26 @@ disable-while-typing = true
 # Switch windows with Alt+Tab too (Mod is Super here, so Super+Tab also works).
 "Alt+Tab" = "cycle-focus"
 "Alt+Shift+Tab" = "cycle-focus-back"
-"Mod+L" = "spawn swaylock -f -c 1f2126"
+"Mod+L" = "spawn noctalia msg session lock"
+"Mod+C" = "spawn noctalia msg panel-toggle control-center"
+"Mod+V" = "spawn noctalia msg panel-toggle clipboard"
 # Screenshots: a region to the clipboard, or the screen under the pointer
 # ($PILA_OUTPUT) to a file. Mod+Shift+S and Mod+Ctrl+S are pila's defaults too,
 # repeated here so they're easy to change; Print for keyboards that have it.
+# Noctalia's own region and fullscreen screenshots need wlr-screencopy, which
+# pila doesn't implement; its window screenshot (noctalia msg
+# screenshot-window) works, through ext-image-copy-capture.
 "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"
 "Mod+Ctrl+S" = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 "Print" = "spawn grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 "Shift+Print" = "spawn grim -g \"$(slurp)\" - | wl-copy"
-"XF86AudioRaiseVolume" = "spawn wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
-"XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
-"XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
-"XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
-"XF86MonBrightnessUp" = "spawn brightnessctl set 5%+"
-"XF86MonBrightnessDown" = "spawn brightnessctl set 5%-"
+# Volume and brightness through Noctalia, which shows an OSD.
+"XF86AudioRaiseVolume" = "spawn noctalia msg volume-up"
+"XF86AudioLowerVolume" = "spawn noctalia msg volume-down"
+"XF86AudioMute" = "spawn noctalia msg volume-mute"
+"XF86AudioMicMute" = "spawn noctalia msg mic-mute"
+"XF86MonBrightnessUp" = "spawn noctalia msg brightness-up"
+"XF86MonBrightnessDown" = "spawn noctalia msg brightness-down"
 
 # The laptop panel at 125 %, the external monitor at 100 % to its right
 # (1536 = 1920 / 1.25). Without the monitor, the panel is the only output.

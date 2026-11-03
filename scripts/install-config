@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install the day-to-day pila config (resources/daily) on the host:
-# ~/.config/pila/config.toml, waybar.jsonc, waybar.css and fuzzel.ini.
+# Install the day-to-day session config (resources/daily) on the host:
+# ~/.config/pila/config.toml and ~/.config/noctalia/settings.toml.
 #
 #   scripts/install-config           create missing files, keep existing ones
 #   scripts/install-config --force   replace them too (the old one is kept as .bak)
@@ -11,17 +11,24 @@ cd "$(dirname "$0")/.."
 force=false
 [ "${1:-}" = "--force" ] && force=true
 
-dir="${XDG_CONFIG_HOME:-$HOME/.config}/pila"
-mkdir -p "$dir" "$HOME/Pictures"
-for file in config.toml waybar.jsonc waybar.css fuzzel.ini; do
-    target="$dir/$file"
-    if [ -e "$target" ] && cmp -s "resources/daily/$file" "$target"; then
+config="${XDG_CONFIG_HOME:-$HOME/.config}"
+mkdir -p "$HOME/Pictures"
+# source in resources/daily : target under ~/.config
+files=(
+    "config.toml:pila/config.toml"
+    "noctalia.toml:noctalia/settings.toml"
+)
+for entry in "${files[@]}"; do
+    source="resources/daily/${entry%%:*}"
+    target="$config/${entry#*:}"
+    mkdir -p "$(dirname "$target")"
+    if [ -e "$target" ] && cmp -s "$source" "$target"; then
         echo "same    $target"
     elif [ -e "$target" ] && ! $force; then
-        echo "kept    $target (differs; diff it with resources/daily/$file, or use --force)"
+        echo "kept    $target (differs; diff it with $source, or use --force)"
     else
         [ -e "$target" ] && cp "$target" "$target.bak" && echo "backup  $target.bak"
-        cp "resources/daily/$file" "$target"
+        cp "$source" "$target"
         echo "wrote   $target"
     fi
 done

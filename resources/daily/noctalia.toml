@@ -1,0 +1,34 @@
+# Noctalia settings for a pila session; scripts/install-config copies this to
+# ~/.config/noctalia/settings.toml (Noctalia merges it over its defaults; the
+# full list of options is in its example.toml). pila implements the standard
+# Wayland protocols only, so a few Noctalia features stay off:
+#
+# - no workspaces widget: pila has no workspaces (and no ext-workspace);
+# - no night light (wlr-gamma-control), no screen-off idle action (it runs
+#   wlr-randr), no monitor settings (wlr-output-management), no blurred lock
+#   screen and no region/fullscreen screenshots (wlr-screencopy): take those
+#   with grim, bound in pila's config.toml;
+# - compositor blur behind the bar (ext-background-effect) isn't rendered;
+# - the taskbar and dock list windows (ext-foreign-toplevel-list) but can't
+#   focus or close them (that needs wlr-foreign-toplevel-management).
+
+[bar.main]
+start  = ["launcher", "wallpaper"]
+center = ["clock"]
+end    = ["media", "tray", "notifications", "clipboard", "network", "bluetooth", "volume", "brightness", "battery", "control-center", "session"]
+
+[wallpaper]
+enabled    = true
+fill_color = "#1f2126"   # until a picture is picked (bar widget, or panel-toggle wallpaper)
+
+# Lock after 5 minutes idle.
+[idle.behavior.lock]
+timeout = 300
+action  = "lock"
+enabled = true
+
+[idle.behavior.screen-off]
+enabled = false   # would run wlr-randr, which needs wlr-output-management
+
+[lockscreen]
+blurred_desktop = false   # needs wlr-screencopy

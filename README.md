@@ -78,17 +78,20 @@ Host packages for a full session (Arch):
 sudo pacman -S foot                     # the default terminal (or set `terminal`)
 sudo pacman -S xdg-desktop-portal-wlr xdg-desktop-portal-gtk   # screen sharing (brings
                                         # grim and slurp) and the file chooser
-sudo pacman -S waybar swaybg mako swayidle swaylock fuzzel wl-clipboard brightnessctl \
-    ttf-nerd-fonts-symbols              # for resources/daily
+sudo pacman -S noctalia wl-clipboard      # for resources/daily
 ```
 
 ### A day-to-day session
 
 `resources/daily` holds a complete session config: Super as Mod (and Alt+Tab too), a `us`
-`altgr-intl` keyboard, touchpad settings like GNOME's, swaybg, mako, swayidle + swaylock,
-media, brightness and screenshot keys, a laptop-plus-monitor layout, and a minimal icon-only
-waybar with a matching fuzzel theme. `scripts/install-config` copies it to `~/.config/pila/`,
-keeping existing files (`--force` replaces them, saving a `.bak`).
+`altgr-intl` keyboard, touchpad settings like GNOME's, media, brightness and screenshot
+keys, a laptop-plus-monitor layout, and [Noctalia](https://noctalia.dev) as the desktop
+shell (bar, launcher, notifications, wallpaper, lock screen and idle, OSDs, clipboard
+history), with a Noctalia settings file adapted to pila: its features that need `wlr-*`
+protocols (night light, screen off on idle, monitor settings, region screenshots, blurred
+lock screen) stay off, and screenshots go through grim. `scripts/install-config` copies
+both files to `~/.config/`, keeping existing ones (`--force` replaces them, saving a
+`.bak`).
 
 ## Configuring pila
 
