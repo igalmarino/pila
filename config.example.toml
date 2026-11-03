@@ -89,6 +89,23 @@ tap = true
 # "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
 # "Mod+J" = "none"
 
+# Touchpad swipes pila handles itself (on a TTY), as "swipe-<fingers>-<way>"
+# with 3 to 5 fingers and left, right, up or down (the way the fingers move).
+# Values are the same actions as [bindings]. pila keeps every swipe with a
+# finger count used here from the apps; other gestures (pinch, unused finger
+# counts) reach them. Window switching steps once more for every further
+# stretch of the same swipe and ends when the fingers lift.
+#
+# The defaults:
+#   "swipe-3-left"  = "cycle-focus"
+#   "swipe-3-right" = "cycle-focus-back"
+#   "swipe-3-up"    = "maximize"
+#   "swipe-3-down"  = "restore"
+[gestures]
+# "swipe-3-down" = "minimize"
+# "swipe-4-left" = "snap-left"
+# "swipe-4-right" = "snap-right"
+
 # Monitors, matched by connector name (shown in the log as "output connected",
 # e.g. eDP-1, DP-1, HDMI-A-1). Without an entry, a monitor uses its preferred
 # mode at scale 1, right of the others. Nested, the only output is "winit",

@@ -108,6 +108,8 @@ pub struct Pila {
     /// Where captures may use dma-bufs (set by the backend).
     pub capture_dmabuf: Option<crate::capture::DmabufTarget>,
     pub switch: Option<Switch>,
+    /// A touchpad swipe pila is handling itself (`gestures.rs`).
+    pub swipe: Option<crate::gestures::Swipe>,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
@@ -245,6 +247,7 @@ impl Pila {
             config_reload_pending: false,
             capture_dmabuf: None,
             switch: None,
+            swipe: None,
             xwayland_token: None,
             space: Space::default(),
             unmapped: Vec::new(),

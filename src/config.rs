@@ -24,6 +24,14 @@
 //! | Mod+Right drag        | Resize window (nearest corner) |
 //! | Ctrl+Alt+F1..F12      | Switch VT (on a TTY)           |
 //!
+//! Default touchpad gestures (`[gestures]`, on a TTY; `gestures.rs`):
+//!
+//! | Gesture               | Action                         |
+//! |-----------------------|--------------------------------|
+//! | 3 fingers left / right | Switch windows, like Mod+Tab / Mod+Shift+Tab |
+//! | 3 fingers up          | Toggle maximize                |
+//! | 3 fingers down        | Restore (undo a snap or maximize) |
+//!
 //! `[bindings]` in the config adds to or replaces the keyboard bindings above
 //! (`"Mod+Shift+Return" = "spawn foot -e htop"`, `"Mod+J" = "none"`); the
 //! modifiers of a binding must match the pressed ones exactly. The VT switch
@@ -72,6 +80,55 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
 ];
+
+/// The default touchpad gestures (`gestures.rs`), as config strings.
+const DEFAULT_GESTURES: &[(&str, &str)] = &[
+    ("swipe-3-left", "cycle-focus"),
+    ("swipe-3-right", "cycle-focus-back"),
+    ("swipe-3-up", "maximize"),
+    ("swipe-3-down", "restore"),
+];
+
+/// Which way a swipe went (the way the fingers moved).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwipeDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// A touchpad swipe pila handles itself, e.g. `swipe-3-left`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gesture {
+    pub fingers: u32,
+    pub direction: SwipeDirection,
+}
+
+impl Gesture {
+    fn parse(text: &str) -> Result<Self, String> {
+        let bad = || {
+            format!(
+                "unknown gesture {text:?} (swipe-<fingers>-<left|right|up|down>, 3 to 5 fingers)"
+            )
+        };
+        let rest = text.trim().strip_prefix("swipe-").ok_or_else(bad)?;
+        let (fingers, direction) = rest.split_once('-').ok_or_else(bad)?;
+        let fingers: u32 = fingers.parse().map_err(|_| bad())?;
+        // Two-finger swipes are scrolling; libinput doesn't report them.
+        if !(3..=5).contains(&fingers) {
+            return Err(bad());
+        }
+        let direction = match direction {
+            "left" => SwipeDirection::Left,
+            "right" => SwipeDirection::Right,
+            "up" => SwipeDirection::Up,
+            "down" => SwipeDirection::Down,
+            _ => return Err(bad()),
+        };
+        Ok(Self { fingers, direction })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModKey {
@@ -456,6 +513,7 @@ struct ConfigFile {
     autostart: Vec<String>,
     keyboard: KeyboardConfig,
     bindings: BTreeMap<String, String>,
+    gestures: BTreeMap<String, String>,
     output: Vec<OutputFile>,
     input: InputFile,
 }
@@ -477,6 +535,8 @@ pub struct Config {
     pub autostart: Vec<String>,
     pub keyboard: KeyboardConfig,
     pub bindings: Vec<(KeyCombo, Action)>,
+    /// Touchpad swipes pila handles (the others reach the clients).
+    pub gestures: Vec<(Gesture, Action)>,
     pub outputs: Vec<OutputConfig>,
     pub input: InputConfig,
 }
@@ -561,6 +621,20 @@ impl Config {
             }
         }
 
+        // Same for gestures.
+        let mut gestures: Vec<(Gesture, Action)> = Vec::new();
+        let defaults = DEFAULT_GESTURES.iter().map(|&(g, a)| (g, a));
+        let user = file.gestures.iter().map(|(g, a)| (g.as_str(), a.as_str()));
+        for (gesture, action) in defaults.chain(user) {
+            let gesture = Gesture::parse(gesture)?;
+            let action =
+                Action::parse(action).map_err(|err| format!("gesture {gesture:?}: {err}"))?;
+            gestures.retain(|(g, _)| *g != gesture);
+            if let Some(action) = action {
+                gestures.push((gesture, action));
+            }
+        }
+
         let outputs = file
             .output
             .into_iter()
@@ -591,6 +665,7 @@ impl Config {
             autostart: file.autostart,
             keyboard: file.keyboard,
             bindings,
+            gestures,
             outputs,
             input,
         })
@@ -599,6 +674,20 @@ impl Config {
     /// The `[[output]]` settings for the output called `name`, if any.
     pub fn output(&self, name: &str) -> Option<&OutputConfig> {
         self.outputs.iter().find(|o| o.name == name)
+    }
+
+    /// The action for a swipe, if pila handles it.
+    pub fn gesture_action(&self, gesture: Gesture) -> Option<Action> {
+        self.gestures
+            .iter()
+            .find(|(g, _)| *g == gesture)
+            .map(|(_, action)| action.clone())
+    }
+
+    /// Whether pila handles any swipe with this many fingers (then it keeps
+    /// the whole gesture from the clients).
+    pub fn handles_swipes(&self, fingers: u32) -> bool {
+        self.gestures.iter().any(|(g, _)| g.fingers == fingers)
     }
 
     /// The action bound to `sym` with exactly the pressed modifiers.
@@ -841,6 +930,44 @@ mod tests {
         assert_eq!(spec("2560x1440").pick(&modes, Some(2)), Some(1));
         assert_eq!(spec("1920x1080").pick(&modes, None), Some(2));
         assert_eq!(spec("800x600").pick(&modes, None), None);
+    }
+
+    #[test]
+    fn gestures_have_defaults_and_can_be_changed() {
+        let swipe = |fingers, direction| Gesture { fingers, direction };
+        let config = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(
+            config.gesture_action(swipe(3, SwipeDirection::Left)),
+            Some(Action::CycleFocus)
+        );
+        assert!(config.handles_swipes(3));
+        assert!(!config.handles_swipes(4));
+
+        let config = Config::from_toml(
+            r#"
+            [gestures]
+            "swipe-3-down" = "minimize"
+            "swipe-3-up" = "none"
+            "swipe-4-left" = "snap-left"
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(
+            config.gesture_action(swipe(3, SwipeDirection::Down)),
+            Some(Action::Minimize)
+        );
+        assert_eq!(config.gesture_action(swipe(3, SwipeDirection::Up)), None);
+        assert_eq!(
+            config.gesture_action(swipe(4, SwipeDirection::Left)),
+            Some(Action::SnapLeft)
+        );
+        assert!(config.handles_swipes(4));
+
+        let err = |text| Config::from_toml(text, &no_env).unwrap_err();
+        assert!(err(r#"gestures = { "swipe-2-left" = "close" }"#).contains("unknown gesture"));
+        assert!(err(r#"gestures = { "pinch-3-in" = "close" }"#).contains("unknown gesture"));
+        assert!(err(r#"gestures = { "swipe-3-left" = "fly" }"#).contains("unknown action"));
     }
 
     #[test]

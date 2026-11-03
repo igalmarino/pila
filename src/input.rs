@@ -130,7 +130,7 @@ impl Pila {
 
     /// Whether the surface with keyboard focus (or the window of a focused
     /// menu) has an active keyboard-shortcuts inhibitor.
-    fn shortcuts_inhibited(&self) -> bool {
+    pub(crate) fn shortcuts_inhibited(&self) -> bool {
         let Some(focus) = self.keyboard_focus() else {
             return false;
         };

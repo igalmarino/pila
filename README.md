@@ -27,8 +27,9 @@ an external monitor) and develops it from inside itself.
   (ext-data-control), screenshots (grim) and screen sharing (xdg-desktop-portal-wlr, for
   browsers and OBS), a visual system bell.
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
-  speed, disable while typing, ...), touchpad gestures for apps, pointer lock and
-  confinement for games, any key bindable (media keys included).
+  speed, disable while typing, ...), three-finger swipes to switch windows and maximize
+  (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
+  any key bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 
 Not there yet: output rotation, touchscreens, input methods (IME), several GPUs.

@@ -110,10 +110,10 @@ Key flows and invariants:
   (`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
   `use_mode`, scale, position; nested only scale). Anything that reads `self.config` when
   used (bindings, Mod, terminal) needs nothing; `autostart` isn't re-run. A new setting
-  must either be read when used or be re-applied there. Keep in sync: `DEFAULT_BINDINGS`,
-  the binding table in `config.rs`'s module doc and the defaults listed in
-  `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags and env
-  vars.
+  must either be read when used or be re-applied there. Keep in sync: `DEFAULT_BINDINGS`
+  and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc and the defaults listed
+  in `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags and
+  env vars.
 
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
   up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
@@ -150,9 +150,12 @@ Key flows and invariants:
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
   `fullscreen_request` honors the requested output for mapped windows
-  (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are forwarded to the
-  pointer focus through pointer-gestures (`gestures.rs`); pila binds none itself. Still
-  missing: output rotation, touch.
+  (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are
+  forwarded to the pointer focus through pointer-gestures (`gestures.rs`), except swipes
+  with a finger count that `[gestures]` binds: those are kept whole from begin to end
+  (`Pila::swipe`, direction fixed after a small move, action after a threshold, window
+  switching stepping per further stretch and ending on lift), unless locked or shortcuts
+  are inhibited. Still missing: output rotation, touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
