@@ -40,6 +40,8 @@ mod udev;
 mod winit;
 mod xwayland;
 
+use std::io::IsTerminal;
+
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 use crate::config::Config;
@@ -88,10 +90,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     // stderr, so `pila 2> file` captures the log (stdout is the TTY or the
-    // nested session's terminal, and clients inherit it).
+    // nested session's terminal, and clients inherit it). Colors only on a
+    // terminal: a log file or the journal (a login session) gets plain text.
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
 
     let mut startup_command = None;
