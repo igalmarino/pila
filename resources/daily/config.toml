@@ -2,12 +2,12 @@
 # with scripts/install-config (copies it to ~/.config/pila/config.toml and the
 # waybar and fuzzel configs next to it, without overwriting), then edit to taste.
 #
-# Uses, from the Arch repos: waybar swaybg mako swayidle swaylock fuzzel foot
+# Uses, from the Arch repos: waybar swaybg mako swayidle swaylock fuzzel ghostty
 # grim slurp wl-clipboard brightnessctl ttf-nerd-fonts-symbols (waybar's
 # icons; wpctl comes with wireplumber).
 
 mod = "super"
-terminal = "foot"
+terminal = "ghostty"
 launcher = "fuzzel --config ~/.config/pila/fuzzel.ini"
 
 autostart = [
@@ -24,7 +24,6 @@ autostart = [
     # the keyring that Chromium, VS Code and git's libsecret helper use. When
     # pila is started by hand (scripts/tty), start it here instead:
     # "gnome-keyring-daemon --start --components=secrets",
-    "foot",
 ]
 
 [keyboard]
