@@ -242,10 +242,7 @@ impl UdevData {
             Some(ramp) if ramp.len() == size as usize * 3 => ramp,
             Some(_) => return false,
             None => {
-                let one: Vec<u16> = (0..size)
-                    .map(|i| (u64::from(i) * 0xffff / u64::from(size - 1).max(1)) as u16)
-                    .collect();
-                linear = [one.clone(), one.clone(), one].concat();
+                linear = linear_ramp(size);
                 &linear
             }
         };
@@ -254,6 +251,11 @@ impl UdevData {
         }
         if let Some(surface) = self.outputs.get_mut(&crtc) {
             surface.gamma = ramp_if_set(ramp, size);
+            info!(
+                name = surface.output.name(),
+                custom = surface.gamma.is_some(),
+                "gamma set"
+            );
         }
         true
     }
@@ -367,15 +369,39 @@ impl UdevData {
         heads
     }
 
-    /// Put the remembered gamma ramps back after the CRTC was set up again
-    /// (VT switch back, mode change, power on).
+    /// Put the output's gamma back after the CRTC was set up again or
+    /// another compositor had the device (VT switch back, mode change,
+    /// power on): the remembered ramps, or linear when no client set any
+    /// (whoever had the CRTC may have left theirs).
     fn reapply_gamma(&self, crtc: crtc::Handle) {
         let Some(surface) = self.outputs.get(&crtc) else {
             return;
         };
-        if let (Some(ramp), Some(size)) = (&surface.gamma, self.gamma_size(&surface.output)) {
-            if !apply_gamma(self.drm.device(), crtc, ramp, size) {
-                warn!(name = surface.output.name(), "failed to re-apply gamma");
+        let Some(size) = self.gamma_size(&surface.output) else {
+            return;
+        };
+        let linear;
+        let ramp = match &surface.gamma {
+            Some(ramp) => ramp,
+            None => {
+                linear = linear_ramp(size);
+                &linear
+            }
+        };
+        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+            warn!(name = surface.output.name(), "failed to re-apply gamma");
+        }
+    }
+
+    /// Linear gamma on every output: on exit, so the next compositor on
+    /// the seat doesn't inherit a client's ramps.
+    pub fn reset_gamma(&mut self) {
+        let crtcs: Vec<_> = self.outputs.keys().copied().collect();
+        for crtc in crtcs {
+            if let Some(surface) = self.outputs.get_mut(&crtc) {
+                if surface.gamma.take().is_some() {
+                    self.reapply_gamma(crtc);
+                }
             }
         }
     }
@@ -680,6 +706,14 @@ fn apply_gamma(device: &DrmDevice, crtc: crtc::Handle, ramp: &[u16], size: u32) 
             false
         }
     }
+}
+
+/// Identity ramps (red, green, blue) of `size` entries each.
+fn linear_ramp(size: u32) -> Vec<u16> {
+    let one: Vec<u16> = (0..size)
+        .map(|i| (u64::from(i) * 0xffff / u64::from(size - 1).max(1)) as u16)
+        .collect();
+    [one.clone(), one.clone(), one].concat()
 }
 
 /// The ramp to remember: none if it's the linear one.

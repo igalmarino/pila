@@ -56,8 +56,15 @@ impl Pila {
             return;
         };
         self.gamma_controls.remove(&output);
-        if let Some(backend) = &mut self.backend {
-            backend.set_gamma(&output, None);
+        let reset = self
+            .backend
+            .as_mut()
+            .is_some_and(|b| b.set_gamma(&output, None));
+        if !reset {
+            warn!(
+                output = output.name(),
+                "couldn't reset gamma after its control went away"
+            );
         }
     }
 

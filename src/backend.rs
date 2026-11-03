@@ -101,6 +101,13 @@ impl Backend {
         }
     }
 
+    /// Linear gamma everywhere, for exit.
+    pub fn reset_gamma(&mut self) {
+        if let Backend::Udev(data) = self {
+            data.reset_gamma();
+        }
+    }
+
     /// Set `output`'s gamma ramps (red, green, blue, each `gamma_size` long,
     /// concatenated), or `None` for linear. `false` if it couldn't be set.
     pub fn set_gamma(&mut self, output: &Output, ramp: Option<&[u16]>) -> bool {

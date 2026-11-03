@@ -210,6 +210,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     state.stop_xwayland();
+    // Leave the monitors as found: no night-light ramps for the next
+    // compositor on this seat.
+    if let Some(backend) = &mut state.backend {
+        backend.reset_gamma();
+    }
 
     Ok(())
 }
