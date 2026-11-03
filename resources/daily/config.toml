@@ -2,7 +2,7 @@
 # Noctalia as the desktop shell (bar, launcher, notifications, wallpaper,
 # lock screen, idle, OSDs, clipboard history). Install it with
 # scripts/install-config (copies it to ~/.config/pila/config.toml and
-# noctalia.toml to ~/.config/noctalia/settings.toml, without overwriting),
+# noctalia.toml to ~/.config/noctalia/config.toml, without overwriting),
 # then edit to taste.
 #
 # Uses, from the Arch repos: noctalia ghostty.

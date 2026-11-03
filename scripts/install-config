@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the day-to-day session config (resources/daily) on the host:
-# ~/.config/pila/config.toml and ~/.config/noctalia/settings.toml.
+# ~/.config/pila/config.toml and ~/.config/noctalia/config.toml.
 #
 #   scripts/install-config           create missing files, keep existing ones
 #   scripts/install-config --force   replace them too (the old one is kept as .bak)
@@ -16,7 +16,7 @@ mkdir -p "$HOME/Pictures"
 # source in resources/daily : target under ~/.config
 files=(
     "config.toml:pila/config.toml"
-    "noctalia.toml:noctalia/settings.toml"
+    "noctalia.toml:noctalia/config.toml"
 )
 for entry in "${files[@]}"; do
     source="resources/daily/${entry%%:*}"

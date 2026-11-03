@@ -1,6 +1,7 @@
 # Noctalia settings for a pila session; scripts/install-config copies this to
-# ~/.config/noctalia/settings.toml (Noctalia merges it over its defaults; the
-# full list of options is in its example.toml). pila has no workspaces (and
+# ~/.config/noctalia/config.toml (Noctalia merges every *.toml there over its
+# defaults, and what its GUI changes goes to ~/.local/state/noctalia/
+# settings.toml; the full list of options is in its example.toml). pila has no workspaces (and
 # no ext-workspace), so the workspaces widget is left out of the bar;
 # everything else Noctalia does on wlroots compositors works here too.
 
