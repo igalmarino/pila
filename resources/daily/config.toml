@@ -34,6 +34,9 @@ natural-scroll = true
 disable-while-typing = true
 
 [bindings]
+# Switch windows with Alt+Tab too (Mod is Super here, so Super+Tab also works).
+"Alt+Tab" = "cycle-focus"
+"Alt+Shift+Tab" = "cycle-focus-back"
 "Mod+L" = "spawn swaylock -f -c 1f2126"
 # Screenshots: the whole screen to a file, or a region to the clipboard.
 "Print" = "spawn grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"

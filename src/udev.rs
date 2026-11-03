@@ -37,13 +37,13 @@ use smithay::{
     output::{Mode as WlMode, Output, PhysicalProperties, Scale as OutputScale},
     reexports::{
         calloop::{EventLoop, LoopHandle},
-        drm::control::{connector, crtc, Device as _, ModeTypeFlags},
+        drm::control::{connector, crtc, Device as _, Mode as DrmMode, ModeTypeFlags},
         input::{self as libinput, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::backend::GlobalId,
     },
-    utils::{DeviceFd, IsAlive},
+    utils::{DeviceFd, IsAlive, Logical, Point},
     wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
@@ -51,7 +51,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     backend::Backend,
-    config::{AccelProfile, ClickMethod, PointerConfig},
+    config::{AccelProfile, ClickMethod, InputConfig, OutputConfig, PointerConfig},
     cursor::{self, CursorTheme},
     frame,
     render::{self, PilaRenderElement},
@@ -90,6 +90,8 @@ pub struct UdevData {
     libinput: Libinput,
     /// Keyboards, for the Caps/Num/Scroll Lock LEDs.
     keyboards: Vec<libinput::Device>,
+    /// Touchpads and mice, to re-apply `[input]` when the config changes.
+    pointers: Vec<libinput::Device>,
     cursor_theme: CursorTheme,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
@@ -108,6 +110,8 @@ struct OutputSurface {
     redraw_needed: bool,
     /// Progress of the frame that confirms a session lock.
     lock_frame: LockFrame,
+    /// The connector's modes, for `[[output]]` mode changes on reload.
+    modes: Vec<DrmMode>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -138,6 +142,15 @@ impl UdevData {
     pub fn change_vt(&mut self, vt: i32) {
         if let Err(err) = self.session.change_vt(vt) {
             warn!(vt, ?err, "failed to switch VT");
+        }
+    }
+
+    /// Re-apply `[input]` to the connected touchpads and mice.
+    pub fn apply_input_config(&mut self, input: &InputConfig) {
+        for device in &mut self.pointers {
+            if let Some(config) = pointer_config(device, input) {
+                configure_pointer(device, config);
+            }
         }
     }
 
@@ -298,6 +311,7 @@ pub fn init_udev(
         redraw_scheduled: false,
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
+        pointers: Vec::new(),
     })));
 
     scan_connectors(state);
@@ -326,80 +340,200 @@ fn on_input_device(state: &mut Pila, event: &mut InputEvent<LibinputInputBackend
                 }
                 data.keyboards.push(device.clone());
             }
-            // Touchpads are the devices that can tap.
-            if device.config_tap_finger_count() > 0 {
-                configure_pointer(device, &input.touchpad);
-            } else if device.has_capability(libinput::DeviceCapability::Pointer) {
-                configure_pointer(device, &input.mouse);
+            if let Some(config) = pointer_config(device, input) {
+                configure_pointer(device, config);
+                data.pointers.push(device.clone());
             }
         }
         InputEvent::DeviceRemoved { device } => {
             data.keyboards.retain(|keyboard| keyboard != device);
+            data.pointers.retain(|pointer| pointer != device);
         }
         _ => {}
     }
 }
 
-/// Apply `[input.touchpad]` or `[input.mouse]` to a device. Settings it
-/// doesn't support are skipped (and logged at debug level).
+/// The `[input]` section for a device: touchpads are the devices that can
+/// tap; other pointing devices are mice. `None` for anything else.
+fn pointer_config<'a>(
+    device: &libinput::Device,
+    input: &'a InputConfig,
+) -> Option<&'a PointerConfig> {
+    if device.config_tap_finger_count() > 0 {
+        Some(&input.touchpad)
+    } else if device.has_capability(libinput::DeviceCapability::Pointer) {
+        Some(&input.mouse)
+    } else {
+        None
+    }
+}
+
+/// Apply `[input.touchpad]` or `[input.mouse]` to a device. Unset options
+/// get libinput's default for the device (so removing one from the config
+/// undoes it on reload); options the device doesn't support are skipped.
 fn configure_pointer(device: &mut libinput::Device, config: &PointerConfig) {
     let name = device.name().to_string();
-    let mut applied = Vec::new();
-    let mut check = |what: &'static str, result: libinput::DeviceConfigResult| match result {
-        Ok(()) => applied.push(what),
-        Err(err) => debug!(device = name, what, ?err, "input setting not supported"),
+    let mut failed = Vec::new();
+    let mut check = |what: &'static str, result: libinput::DeviceConfigResult| {
+        if let Err(err) = result {
+            failed.push((what, err));
+        }
     };
-    if let Some(tap) = config.tap {
-        if device.config_tap_finger_count() > 0 {
-            check("tap", device.config_tap_set_enabled(tap));
-        }
+    if device.config_tap_finger_count() > 0 {
+        let tap = config
+            .tap
+            .unwrap_or_else(|| device.config_tap_default_enabled());
+        check("tap", device.config_tap_set_enabled(tap));
     }
-    if let Some(natural) = config.natural_scroll {
-        if device.config_scroll_has_natural_scroll() {
-            check(
-                "natural-scroll",
-                device.config_scroll_set_natural_scroll_enabled(natural),
-            );
-        }
+    if device.config_scroll_has_natural_scroll() {
+        let natural = config
+            .natural_scroll
+            .unwrap_or_else(|| device.config_scroll_default_natural_scroll_enabled());
+        check(
+            "natural-scroll",
+            device.config_scroll_set_natural_scroll_enabled(natural),
+        );
     }
     if device.config_accel_is_available() {
-        if let Some(speed) = config.accel_speed {
-            check("accel-speed", device.config_accel_set_speed(speed));
-        }
-        if let Some(profile) = config.accel_profile {
-            let profile = match profile {
-                AccelProfile::Adaptive => libinput::AccelProfile::Adaptive,
-                AccelProfile::Flat => libinput::AccelProfile::Flat,
-            };
-            if device.config_accel_profiles().contains(&profile) {
-                check("accel-profile", device.config_accel_set_profile(profile));
-            }
-        }
-    }
-    if let Some(dwt) = config.disable_while_typing {
-        if device.config_dwt_is_available() {
-            check("disable-while-typing", device.config_dwt_set_enabled(dwt));
-        }
-    }
-    if let Some(method) = config.click_method {
-        let method = match method {
-            ClickMethod::ButtonAreas => libinput::ClickMethod::ButtonAreas,
-            ClickMethod::Clickfinger => libinput::ClickMethod::Clickfinger,
+        let speed = config
+            .accel_speed
+            .unwrap_or_else(|| device.config_accel_default_speed());
+        check("accel-speed", device.config_accel_set_speed(speed));
+        let profile = match config.accel_profile {
+            Some(AccelProfile::Adaptive) => Some(libinput::AccelProfile::Adaptive),
+            Some(AccelProfile::Flat) => Some(libinput::AccelProfile::Flat),
+            None => device.config_accel_default_profile(),
         };
-        if device.config_click_methods().contains(&method) {
-            check("click-method", device.config_click_set_method(method));
+        if let Some(profile) = profile.filter(|p| device.config_accel_profiles().contains(p)) {
+            check("accel-profile", device.config_accel_set_profile(profile));
         }
     }
-    if let Some(middle) = config.middle_emulation {
-        if device.config_middle_emulation_is_available() {
-            check(
-                "middle-emulation",
-                device.config_middle_emulation_set_enabled(middle),
+    if device.config_dwt_is_available() {
+        let dwt = config
+            .disable_while_typing
+            .unwrap_or_else(|| device.config_dwt_default_enabled());
+        check("disable-while-typing", device.config_dwt_set_enabled(dwt));
+    }
+    let method = match config.click_method {
+        Some(ClickMethod::ButtonAreas) => Some(libinput::ClickMethod::ButtonAreas),
+        Some(ClickMethod::Clickfinger) => Some(libinput::ClickMethod::Clickfinger),
+        None => device.config_click_default_method(),
+    };
+    if let Some(method) = method.filter(|m| device.config_click_methods().contains(m)) {
+        check("click-method", device.config_click_set_method(method));
+    }
+    if device.config_middle_emulation_is_available() {
+        let middle = config
+            .middle_emulation
+            .unwrap_or_else(|| device.config_middle_emulation_default_enabled());
+        check(
+            "middle-emulation",
+            device.config_middle_emulation_set_enabled(middle),
+        );
+    }
+    for (what, err) in &failed {
+        debug!(device = name, what, ?err, "input setting not applied");
+    }
+    info!(device = name, ?config, "configured pointer device");
+}
+
+/// The mode `config` asks for among a connector's `modes`, else its
+/// preferred mode, else its first.
+fn pick_mode(name: &str, modes: &[DrmMode], config: Option<&OutputConfig>) -> Option<DrmMode> {
+    let preferred = modes
+        .iter()
+        .position(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED));
+    let configured = config.and_then(|c| c.mode).and_then(|spec| {
+        let sizes: Vec<_> = modes
+            .iter()
+            .map(|&mode| {
+                let wl = WlMode::from(mode);
+                ((wl.size.w, wl.size.h), wl.refresh)
+            })
+            .collect();
+        let picked = spec.pick(&sizes, preferred);
+        if picked.is_none() {
+            warn!(
+                name,
+                ?spec,
+                "the monitor has no such mode; using its preferred one"
             );
         }
+        picked
+    });
+    configured
+        .or(preferred)
+        .and_then(|i| modes.get(i))
+        .or_else(|| modes.first())
+        .copied()
+}
+
+/// Re-apply `[[output]]` (mode, scale, position) to the connected outputs
+/// after the config changed. Outputs keep their left-to-right order; those
+/// without a position go right of the ones placed before them.
+pub fn apply_output_config(state: &mut Pila) {
+    let Some(Backend::Udev(data)) = &mut state.backend else {
+        return;
+    };
+    let UdevData {
+        outputs,
+        drm,
+        renderer,
+        ..
+    } = &mut **data;
+    let mut order: Vec<(crtc::Handle, i32)> = outputs
+        .iter()
+        .map(|(crtc, s)| (*crtc, s.output.current_location().x))
+        .collect();
+    order.sort_by_key(|(_, x)| *x);
+
+    let mut placed: Vec<(Output, Point<i32, Logical>)> = Vec::new();
+    let mut right_edge = 0;
+    for (crtc, _) in order {
+        let surface = outputs.get_mut(&crtc).expect("listed above");
+        let name = surface.output.name();
+        let config = state.config.output(&name);
+        if let Some(mode) = pick_mode(&name, &surface.modes, config) {
+            let wl_mode = WlMode::from(mode);
+            if surface.output.current_mode() != Some(wl_mode) {
+                match drm.use_mode(
+                    &crtc,
+                    mode,
+                    renderer,
+                    &DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default(),
+                ) {
+                    Ok(()) => {
+                        surface
+                            .output
+                            .change_current_state(Some(wl_mode), None, None, None);
+                        info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
+                    }
+                    Err(err) => warn!(name, ?err, "failed to change the output mode"),
+                }
+            }
+        }
+        let scale = config.and_then(|c| c.scale).unwrap_or(1.0);
+        surface
+            .output
+            .change_current_state(None, None, Some(OutputScale::Fractional(scale)), None);
+        let loc: Point<i32, Logical> = config
+            .and_then(|c| c.position)
+            .unwrap_or((right_edge, 0))
+            .into();
+        surface
+            .output
+            .change_current_state(None, None, None, Some(loc));
+        let width = surface
+            .output
+            .current_mode()
+            .map(|m| m.size.to_f64().to_logical(scale).to_i32_round::<i32>().w)
+            .unwrap_or(0);
+        right_edge = right_edge.max(loc.x + width);
+        surface.redraw_needed = true;
+        placed.push((surface.output.clone(), loc));
     }
-    if !applied.is_empty() {
-        info!(device = name, settings = ?applied, "configured pointer device");
+    for (output, loc) in placed {
+        state.space.map_output(&output, loc);
     }
 }
 
@@ -436,37 +570,8 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         connector.interface_id()
     );
     let output_config = state.config.output(&name).cloned();
-    let modes = connector.modes();
-    let preferred = modes
-        .iter()
-        .position(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED));
-    let configured = output_config
-        .as_ref()
-        .and_then(|c| c.mode)
-        .and_then(|spec| {
-            let sizes: Vec<_> = modes
-                .iter()
-                .map(|&mode| {
-                    let wl = WlMode::from(mode);
-                    ((wl.size.w, wl.size.h), wl.refresh)
-                })
-                .collect();
-            let picked = spec.pick(&sizes, preferred);
-            if picked.is_none() {
-                warn!(
-                    name,
-                    ?spec,
-                    "the monitor has no such mode; using its preferred one"
-                );
-            }
-            picked
-        });
-    let Some(drm_mode) = configured
-        .or(preferred)
-        .and_then(|i| modes.get(i))
-        .or_else(|| modes.first())
-        .copied()
-    else {
+    let modes = connector.modes().to_vec();
+    let Some(drm_mode) = pick_mode(&name, &modes, output_config.as_ref()) else {
         warn!(name, "connector has no modes");
         return;
     };
@@ -552,6 +657,7 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
             frame_pending: false,
             redraw_needed: true,
             lock_frame: LockFrame::None,
+            modes,
         },
     );
 

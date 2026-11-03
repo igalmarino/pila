@@ -84,8 +84,15 @@ implements every Smithay handler trait. Unlike smallvil (but like anvil), the ca
 loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which Smithay
 modules that schedule their own timers (e.g. idle-notify) require. Window-management logic lives in `state.rs`. Configuration is `config.rs`: a TOML file
 (`~/.config/pila/config.toml` or `--config`, documented in `config.example.toml`) parsed
-by `Config::from_toml` (pure, unit-tested; `PILA_*` env vars override it), loaded once at
-startup by `Config::load`, which falls back to defaults on errors. Keep three things in
+by `Config::from_toml` (pure, unit-tested; `PILA_*` env vars override it), loaded at
+startup by `Config::load`, which falls back to defaults on errors, and reloaded when the
+file changes (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
+`Config::read`; an invalid file keeps the running config and notifies). `apply_config`
+re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
+(`UdevData::apply_input_config`), `[[output]]` (`udev::apply_output_config`: mode via
+`use_mode`, scale, position; nested only scale). Anything that reads `self.config` when
+used (bindings, Mod, terminal) needs nothing; `autostart` isn't re-run. A new setting
+must either be read when used or be re-applied there. Keep three things in
 sync: `DEFAULT_BINDINGS`, the binding table in `config.rs`'s module doc and the defaults
 listed in `config.example.toml`; and the `USAGE` string in `main.rs` with the CLI flags
 and env vars.

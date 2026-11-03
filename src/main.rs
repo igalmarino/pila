@@ -13,6 +13,7 @@
 mod backend;
 mod capture;
 mod config;
+mod config_reload;
 mod cursor;
 mod decoration;
 mod focus;
@@ -138,6 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let config_path = Config::path(config_path.as_deref());
     let config = Config::load(config_path.as_deref());
     tracing::info!(
         mod_key = ?config.mod_key,
@@ -152,6 +154,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_loop: EventLoop<'static, Pila> = EventLoop::try_new()?;
     let display: Display<Pila> = Display::new()?;
     let mut state = Pila::new(&mut event_loop, display, config);
+    state.config_path = config_path;
+    state.watch_config();
 
     match backend {
         BackendKind::Winit => winit::init_winit(&mut event_loop, &mut state)?,

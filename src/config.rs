@@ -481,6 +481,11 @@ pub struct Config {
     pub input: InputConfig,
 }
 
+/// A non-empty `PILA_*` environment variable.
+fn env_override(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self::from_toml("", &|_| None).expect("the defaults are valid")
@@ -497,33 +502,35 @@ impl Config {
         Some(base.join("pila/config.toml"))
     }
 
-    /// Load `path` (or the default path), apply `PILA_*` overrides. A missing
-    /// file means defaults; an invalid one is reported and ignored, since a
-    /// typo shouldn't leave you without a desktop.
-    pub fn load(path: Option<&Path>) -> Self {
-        let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        let path = path.map(Path::to_path_buf).or_else(Self::default_path);
-        let text = match &path {
+    /// The file pila reads: `explicit` (`--config`) or the default path.
+    pub fn path(explicit: Option<&Path>) -> Option<PathBuf> {
+        explicit.map(Path::to_path_buf).or_else(Self::default_path)
+    }
+
+    /// Read `path` and apply `PILA_*` overrides. A missing file means the
+    /// defaults; an unreadable or invalid one is an error.
+    pub fn read(path: Option<&Path>) -> Result<Self, String> {
+        let text = match path {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(text) => {
                     info!(path = %path.display(), "loading config");
                     text
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-                Err(err) => {
-                    warn!(path = %path.display(), %err, "can't read config; using defaults");
-                    String::new()
-                }
+                Err(err) => return Err(format!("can't read {}: {err}", path.display())),
             },
             None => String::new(),
         };
-        match Self::from_toml(&text, &env) {
-            Ok(config) => config,
-            Err(err) => {
-                warn!(%err, "invalid config; using defaults");
-                Self::from_toml("", &env).unwrap_or_default()
-            }
-        }
+        Self::from_toml(&text, &env_override)
+    }
+
+    /// `read` at startup: an invalid file is reported and ignored, since a
+    /// typo shouldn't leave you without a desktop.
+    pub fn load(path: Option<&Path>) -> Self {
+        Self::read(path).unwrap_or_else(|err| {
+            warn!(%err, "invalid config; using defaults");
+            Self::from_toml("", &env_override).unwrap_or_default()
+        })
     }
 
     /// Parse a config file's contents; `env` looks up `PILA_*` overrides.
@@ -839,7 +846,10 @@ mod tests {
     #[test]
     fn shipped_configs_are_valid() {
         for (name, text) in [
-            ("config.example.toml", include_str!("../config.example.toml")),
+            (
+                "config.example.toml",
+                include_str!("../config.example.toml"),
+            ),
             (
                 "resources/daily/config.toml",
                 include_str!("../resources/daily/config.toml"),
@@ -849,6 +859,19 @@ mod tests {
                 panic!("{name}: {err}");
             }
         }
+        // The day-to-day config switches windows with Super+Tab and Alt+Tab.
+        let daily =
+            Config::from_toml(include_str!("../resources/daily/config.toml"), &no_env).unwrap();
+        let alt = mods(false, true, false, false);
+        let logo = mods(false, false, false, true);
+        assert_eq!(
+            daily.action_for(Keysym::Tab, &alt),
+            Some(Action::CycleFocus)
+        );
+        assert_eq!(
+            daily.action_for(Keysym::Tab, &logo),
+            Some(Action::CycleFocus)
+        );
     }
 
     #[test]

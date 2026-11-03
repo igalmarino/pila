@@ -3,6 +3,8 @@
 # Every setting is optional; what's shown here are the defaults or examples.
 # PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
 # An invalid file is reported in the log and pila starts with the defaults.
+# Saved changes apply right away (except autostart); if the edited file is
+# invalid, pila keeps the running config and says why in a notification.
 
 # The modifier in "Mod+..." bindings and for Mod+drag: alt, super or ctrl.
 # Alt is the default because a host desktop grabs Super when pila runs nested;

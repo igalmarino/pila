@@ -99,6 +99,10 @@ pub struct Pila {
     /// Windows most recently focused first, and the Mod+Tab in progress
     /// (`switcher.rs`).
     pub focus_history: Vec<Window>,
+    /// The config file, watched for changes (`config_reload.rs`).
+    pub config_path: Option<std::path::PathBuf>,
+    /// A reload is scheduled (changes are coalesced).
+    pub config_reload_pending: bool,
     /// Screen capture sessions (`capture.rs`).
     pub captures: Vec<crate::capture::Session>,
     /// Where captures may use dma-bufs (set by the backend).
@@ -160,6 +164,17 @@ const SESSION_ENV: [&str; 4] = [
     "XDG_SESSION_TYPE",
 ];
 
+/// xkbcommon's settings for `[keyboard]` (empty strings: its defaults).
+pub fn xkb_config(kb: &crate::config::KeyboardConfig) -> XkbConfig<'_> {
+    XkbConfig {
+        rules: "",
+        model: &kb.model,
+        layout: &kb.layout,
+        variant: &kb.variant,
+        options: kb.options.clone(),
+    }
+}
+
 impl Pila {
     pub fn new(
         event_loop: &mut EventLoop<'static, Pila>,
@@ -195,14 +210,7 @@ impl Pila {
         // A keymap xkbcommon can't build (e.g. a typo in the layout) falls
         // back to the default one rather than leaving pila without keyboard.
         let kb = &config.keyboard;
-        let xkb = XkbConfig {
-            rules: "",
-            model: &kb.model,
-            layout: &kb.layout,
-            variant: &kb.variant,
-            options: kb.options.clone(),
-        };
-        if let Err(err) = seat.add_keyboard(xkb, kb.repeat_delay, kb.repeat_rate) {
+        if let Err(err) = seat.add_keyboard(xkb_config(kb), kb.repeat_delay, kb.repeat_rate) {
             warn!(
                 ?err,
                 ?kb,
@@ -233,6 +241,8 @@ impl Pila {
             snap_preview_buffer: SolidColorBuffer::default(),
             focus_history: Vec::new(),
             captures: Vec::new(),
+            config_path: None,
+            config_reload_pending: false,
             capture_dmabuf: None,
             switch: None,
             xwayland_token: None,
@@ -1086,7 +1096,7 @@ impl Pila {
     /// The environment of everything pila starts. Its output goes to pila's
     /// log (stderr) instead of the terminal pila was started from (on a TTY,
     /// the console), and it doesn't read that terminal.
-    fn session_env(&self, cmd: &mut Command) {
+    pub(crate) fn session_env(&self, cmd: &mut Command) {
         cmd.stdin(Stdio::null());
         if let Ok(stderr) = std::io::stderr().as_fd().try_clone_to_owned() {
             cmd.stdout(Stdio::from(stderr));

@@ -152,9 +152,14 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
 pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the
 file given with `--config`). [`config.example.toml`](config.example.toml) documents every
 option: the modifier key, terminal and launcher, programs to start with pila (`autostart`),
-keyboard layout and repeat, and key bindings (including media keys). A missing file means
-the defaults; an invalid one is reported in the log and pila starts with the defaults.
-`PILA_MOD`, `PILA_TERMINAL` and `PILA_LAUNCHER` override the file.
+keyboard layout and repeat, key bindings (including media keys), touchpad and mouse settings,
+and monitor mode, scale and position. A missing file means the defaults; an invalid one is
+reported in the log and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
+`PILA_LAUNCHER` override the file.
+
+Saving the file applies it right away, everything but `autostart`. If the new version is
+invalid, pila keeps running with the previous one and shows the error in a notification
+(with a notification daemon such as mako) and in the log.
 
 ## Running pila on a TTY (real hardware)
 
