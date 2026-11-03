@@ -12,12 +12,9 @@ use smithay::{
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
     },
     wayland::{
-        compositor::{get_parent, with_states},
         content_type::ContentTypeState,
         foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
-        fractional_scale::{
-            with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState,
-        },
+        fractional_scale::{FractionalScaleHandler, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         keyboard_shortcuts_inhibit::{
@@ -104,27 +101,12 @@ delegate_relative_pointer!(Pila);
 impl XdgToplevelIconHandler for Pila {}
 delegate_xdg_toplevel_icon!(Pila);
 
-// wp_fractional_scale_v1: tell each surface the scale of the output it's on.
-// Nested pila always runs at scale 1; a DRM backend with per-output scales
-// must also update surfaces when they move between outputs.
+// wp_fractional_scale_v1: tell each surface the scale of the output it's on
+// (`scale.rs`, which keeps it up to date as surfaces move between outputs).
 impl FractionalScaleHandler for Pila {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        let mut root = surface.clone();
-        while let Some(parent) = get_parent(&root) {
-            root = parent;
-        }
-        let output = self
-            .window_for_surface(&root)
-            .and_then(|window| self.space.outputs_for_element(&window).first().cloned())
-            .or_else(|| self.layer_for_surface(&root).map(|(output, _)| output))
-            .or_else(|| self.space.outputs().next().cloned());
-        if let Some(output) = output {
-            with_states(&surface, |states| {
-                with_fractional_scale(states, |fractional_scale| {
-                    fractional_scale.set_preferred_scale(output.current_scale().fractional_scale());
-                });
-            });
-        }
+        let output = self.output_for_surface(&surface);
+        self.send_initial_scale(&surface, output);
     }
 }
 delegate_fractional_scale!(Pila);

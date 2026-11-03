@@ -275,6 +275,7 @@ impl Pila {
             let window = self.unmapped[index].clone();
             let toplevel = window.toplevel().unwrap();
             if !toplevel.is_initial_configure_sent() {
+                self.send_initial_scale(surface, None);
                 toplevel.send_configure();
             } else if has_buffer(surface) {
                 self.unmapped.remove(index);
@@ -285,6 +286,8 @@ impl Pila {
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(ref xdg)) = self.popups.find_popup(surface) {
             if !xdg.is_initial_configure_sent() {
+                let output = self.output_for_surface(surface);
+                self.send_initial_scale(surface, output);
                 // The initial configure is always allowed.
                 xdg.send_configure().expect("initial configure failed");
             }

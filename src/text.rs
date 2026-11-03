@@ -13,7 +13,7 @@ use cosmic_text::{
 };
 use tracing::{info, warn};
 
-/// Title font size, in logical pixels (the nested output is scale 1).
+/// Title font size, in logical pixels.
 pub const FONT_SIZE: f32 = 13.0;
 
 struct Fonts {
@@ -45,22 +45,29 @@ pub fn init() {
 }
 
 /// `title` in `color` as one line at most `max_width` wide (ending in "…" if
-/// it doesn't fit), vertically centered in `height`. Returns premultiplied
-/// ARGB8888 pixels (little-endian: B, G, R, A) cropped to the text, and their
-/// width, so callers can position it. `None` until the fonts have loaded.
+/// it doesn't fit), vertically centered in `height` (both logical), drawn
+/// at `scale` physical pixels per logical one. Returns premultiplied
+/// ARGB8888 pixels (little-endian: B, G, R, A) cropped to the text, and
+/// their width in physical pixels (a multiple of `scale`), so callers can
+/// position it. `None` until the fonts have loaded.
 pub fn render_title(
     title: &str,
     color: [f32; 3],
     max_width: i32,
     height: i32,
+    scale: i32,
 ) -> Option<(Vec<u8>, i32)> {
-    let width = max_width;
+    let width = max_width * scale;
+    let height = height * scale;
     let fonts = FONTS.get()?;
     let mut fonts = fonts.lock().ok()?;
     let Fonts { system, cache } = &mut *fonts;
 
     // A line as tall as the bar: cosmic-text centers the glyphs within it.
-    let mut buffer = Buffer::new(system, Metrics::new(FONT_SIZE, height as f32));
+    let mut buffer = Buffer::new(
+        system,
+        Metrics::new(FONT_SIZE * scale as f32, height as f32),
+    );
     let mut buffer = buffer.borrow_with(system);
     buffer.set_wrap(Wrap::None);
     buffer.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
@@ -106,7 +113,9 @@ pub fn render_title(
         .layout_runs()
         .map(|run| run.line_w)
         .fold(0.0, f32::max);
+    // A whole number of logical pixels, so the buffer's logical size is exact.
     let cropped = ((text_width.ceil() as i32) + 1).clamp(1, width);
+    let cropped = ((cropped + scale - 1) / scale * scale).min(width);
     let pixels = pixels
         .chunks_exact((width * 4) as usize)
         .flat_map(|row| &row[..(cropped * 4) as usize])

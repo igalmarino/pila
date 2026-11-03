@@ -148,7 +148,7 @@ impl Pila {
         let clock = Clock::new();
         let dh = display.handle();
 
-        let compositor_state = CompositorState::new::<Self>(&dh);
+        let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
@@ -922,6 +922,7 @@ impl Pila {
     /// Housekeeping after `output` was drawn, for any backend: drop dead
     /// windows and popups, re-check idle inhibitors, and flush clients.
     pub fn post_render(&mut self, output: &Output) {
+        self.update_surface_scales(output);
         self.space.refresh();
         self.update_idle_inhibit();
         layer_map_for_output(output).cleanup();

@@ -274,6 +274,7 @@ impl SessionLockHandler for Pila {
         let Some(output) = Output::from_resource(&output) else {
             return;
         };
+        crate::scale::send_scale_to_tree(surface.wl_surface(), &output);
         if let Some(geo) = self.space.output_geometry(&output) {
             // Smithay sends the initial configure after this returns.
             surface.with_pending_state(|state| {

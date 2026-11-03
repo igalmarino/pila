@@ -111,7 +111,8 @@ Key flows and invariants:
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
-- **Bare metal (udev):** one GPU (the seat's primary), outputs left to right, EDID off
+- **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
+  `[[output]]` config (mode, scale, position) or else left to right, EDID off
   (make/model "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one
   idle `render_all`; an output with a frame in flight renders at its vblank
@@ -123,7 +124,7 @@ Key flows and invariants:
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
   `fullscreen_request` honors the requested output for mapped windows
-  (`set_fill_state_on`). Still missing: per-output scale, gestures, touch.
+  (`set_fill_state_on`). Still missing: output rotation, gestures, touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
@@ -181,8 +182,15 @@ Key flows and invariants:
   have a layer-surface root (`unconstrain_popup`, popup `grab`).
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
-  must return is kept (`Pila::globals`). Fractional scale is always 1 nested; a backend
-  with per-output scales must update surfaces as they move between outputs.
+  must return is kept (`Pila::globals`).
+- **Output scale** (`scale.rs`): per output from `[[output]]` (`Config::output`; nested
+  the output is `winit`, scale only), may be fractional. Every coordinate pila handles is
+  logical; `render.rs` gets the scale per output (`scale::output_scale`). pila's own
+  textures (title bar buttons and text, xcursor images) are rasterized at the scale rounded
+  up (`scale::buffer_scale`) and cached per scale. Clients get fractional-scale and
+  `preferred_buffer_scale` (wl_compositor v6) for their surface's primary output after
+  every frame (`update_surface_scales` from `post_render`), and before their first
+  configure (`send_initial_scale`). Xwayland stays at scale 1 (upscaled).
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

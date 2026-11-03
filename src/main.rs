@@ -25,6 +25,7 @@ mod layers;
 mod minimize;
 mod pointer_constraints;
 mod render;
+mod scale;
 mod session_lock;
 mod snap;
 mod state;

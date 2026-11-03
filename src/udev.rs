@@ -34,7 +34,7 @@ use smithay::{
     },
     desktop::{layer_map_for_output, utils::OutputPresentationFeedback},
     input::{keyboard::LedState, pointer::CursorImageStatus},
-    output::{Mode as WlMode, Output, PhysicalProperties},
+    output::{Mode as WlMode, Output, PhysicalProperties, Scale as OutputScale},
     reexports::{
         calloop::{EventLoop, LoopHandle},
         drm::control::{connector, crtc, Device as _, ModeTypeFlags},
@@ -359,25 +359,57 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         connector.interface().as_str(),
         connector.interface_id()
     );
-    let Some(drm_mode) = connector
-        .modes()
+    let output_config = state.config.output(&name).cloned();
+    let modes = connector.modes();
+    let preferred = modes
         .iter()
-        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-        .or_else(|| connector.modes().first())
+        .position(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED));
+    let configured = output_config
+        .as_ref()
+        .and_then(|c| c.mode)
+        .and_then(|spec| {
+            let sizes: Vec<_> = modes
+                .iter()
+                .map(|&mode| {
+                    let wl = WlMode::from(mode);
+                    ((wl.size.w, wl.size.h), wl.refresh)
+                })
+                .collect();
+            let picked = spec.pick(&sizes, preferred);
+            if picked.is_none() {
+                warn!(
+                    name,
+                    ?spec,
+                    "the monitor has no such mode; using its preferred one"
+                );
+            }
+            picked
+        });
+    let Some(drm_mode) = configured
+        .or(preferred)
+        .and_then(|i| modes.get(i))
+        .or_else(|| modes.first())
         .copied()
     else {
         warn!(name, "connector has no modes");
         return;
     };
+    let scale = output_config.as_ref().and_then(|c| c.scale).unwrap_or(1.0);
 
-    // Right of the outputs that are already there.
-    let x = state
-        .space
-        .outputs()
-        .filter_map(|o| state.space.output_geometry(o))
-        .map(|geo| geo.loc.x + geo.size.w)
-        .max()
-        .unwrap_or(0);
+    // Where the config puts it, else right of the outputs already there.
+    let (x, y) = output_config
+        .as_ref()
+        .and_then(|c| c.position)
+        .unwrap_or_else(|| {
+            let x = state
+                .space
+                .outputs()
+                .filter_map(|o| state.space.output_geometry(o))
+                .map(|geo| geo.loc.x + geo.size.w)
+                .max()
+                .unwrap_or(0);
+            (x, 0)
+        });
 
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
@@ -400,7 +432,12 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
     );
     let wl_mode = WlMode::from(drm_mode);
     output.set_preferred(wl_mode);
-    output.change_current_state(Some(wl_mode), None, None, Some((x, 0).into()));
+    output.change_current_state(
+        Some(wl_mode),
+        None,
+        Some(OutputScale::Fractional(scale)),
+        Some((x, y).into()),
+    );
 
     let planes = data.drm.device().planes(&crtc).ok();
     let drm_output = match data
@@ -425,7 +462,9 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         name,
         mode = ?wl_mode.size,
         refresh_mhz = wl_mode.refresh,
+        scale,
         x,
+        y,
         "output connected"
     );
     data.outputs.insert(
@@ -440,7 +479,7 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         },
     );
 
-    state.space.map_output(&output, (x, 0));
+    state.space.map_output(&output, (x, y));
     layer_map_for_output(&output).arrange();
     state.refit_maximized();
     state.configure_lock_surfaces();
@@ -522,6 +561,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     };
     let scene = state.scene();
     let lock_pending = state.lock_pending();
+    let scale = crate::scale::output_scale(&output);
 
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
@@ -541,18 +581,25 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
             renderer,
             cursor_surface.as_ref(),
             output_geo.loc,
+            scale,
         ));
         if let Some(icon) = named_cursor {
-            let cursor = cursor_theme.get(icon);
+            let cursor = cursor_theme.get(icon, crate::scale::buffer_scale(scale));
             elements.extend(render::named_cursor_elements(
                 renderer,
                 &cursor,
                 pointer,
                 output_geo.loc,
+                scale,
             ));
         }
     }
-    elements.extend(render::scene_elements(renderer, &scene, output_geo.loc));
+    elements.extend(render::scene_elements(
+        renderer,
+        &scene,
+        output_geo.loc,
+        scale,
+    ));
 
     let rendered = surface.drm_output.render_frame(
         renderer,

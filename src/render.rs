@@ -28,9 +28,6 @@ use crate::{
     decoration::{self, TitleBarPart},
 };
 
-/// The nested output is always scale 1.
-const SCALE: f64 = 1.0;
-
 smithay::backend::renderer::element::render_elements! {
     pub PilaRenderElement<R> where R: ImportAll + ImportMem;
     Surface=WaylandSurfaceRenderElement<R>,
@@ -98,18 +95,18 @@ pub struct SceneTitleBar {
 }
 
 /// Elements for `scene` (front to back), relative to an output whose top-left
-/// is at `output_location`.
+/// is at `output_location`, drawn at `scale` (`scale::output_scale`).
 pub fn scene_elements<R>(
     renderer: &mut R,
     scene: &Scene,
     output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
     if scene.locked {
-        let scale = Scale::from(SCALE);
         return scene
             .lock_surfaces
             .iter()
@@ -127,17 +124,26 @@ where
             })
             .collect();
     }
-    let mut elements = layer_elements(renderer, &scene.upper, output_location);
+    let mut elements = layer_elements(renderer, &scene.upper, output_location, scale);
     if let Some((buffer, rect)) = &scene.snap_preview {
-        let scale = Scale::from(SCALE);
         let loc: Point<i32, Physical> =
             (rect.loc - output_location).to_physical_precise_round(scale);
         elements.push(PilaRenderElement::Solid(
             SolidColorRenderElement::from_buffer(buffer, loc, scale, 1.0, Kind::Unspecified),
         ));
     }
-    elements.extend(window_elements(renderer, &scene.windows, output_location));
-    elements.extend(layer_elements(renderer, &scene.lower, output_location));
+    elements.extend(window_elements(
+        renderer,
+        &scene.windows,
+        output_location,
+        scale,
+    ));
+    elements.extend(layer_elements(
+        renderer,
+        &scene.lower,
+        output_location,
+        scale,
+    ));
     elements
 }
 
@@ -145,12 +151,12 @@ fn layer_elements<R>(
     renderer: &mut R,
     layers: &[SceneLayer],
     output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let scale = Scale::from(SCALE);
     layers
         .iter()
         .flat_map(|entry| {
@@ -171,12 +177,12 @@ fn window_elements<R>(
     renderer: &mut R,
     windows: &[SceneWindow],
     output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let scale = Scale::from(SCALE);
     let mut elements = Vec::new();
     for entry in windows {
         let location: Point<i32, Physical> =
@@ -211,6 +217,7 @@ pub fn cursor_elements<R>(
     renderer: &mut R,
     cursor: Option<&(WlSurface, Point<i32, Logical>)>,
     output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -219,26 +226,25 @@ where
     let Some((surface, location)) = cursor else {
         return Vec::new();
     };
-    let scale = Scale::from(SCALE);
     let location: Point<i32, Physical> =
         (*location - output_location).to_physical_precise_round(scale);
     render_elements_from_surface_tree(renderer, surface, location, scale, 1.0, Kind::Cursor)
 }
 
-/// Elements for a named cursor image (drawn by pila on bare metal) with its
-/// hotspot at `pointer`, relative to an output whose top-left is at
-/// `output_location`.
+/// Elements for a named cursor image (drawn by pila on bare metal, loaded
+/// for this output's `scale`) with its hotspot at `pointer`, relative to an
+/// output whose top-left is at `output_location`.
 pub fn named_cursor_elements<R>(
     renderer: &mut R,
     cursor: &NamedCursor,
     pointer: Point<f64, Logical>,
     output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
 ) -> Vec<PilaRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
-    let scale = Scale::from(SCALE);
     let location =
         (pointer - cursor.hotspot.to_f64() - output_location.to_f64()).to_physical(scale);
     MemoryRenderBufferRenderElement::from_buffer(

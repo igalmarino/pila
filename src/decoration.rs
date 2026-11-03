@@ -219,7 +219,8 @@ enum Look {
 /// A rasterized button and what it was drawn for, so it's only redrawn
 /// (and re-uploaded) when the icon or look changes.
 struct ButtonTexture {
-    key: (Icon, Look),
+    /// Icon, look and buffer scale.
+    key: (Icon, Look, i32),
     buffer: MemoryRenderBuffer,
 }
 
@@ -235,12 +236,12 @@ struct TitleBarBuffers {
     title: Option<TitleTexture>,
 }
 
-/// The rendered title and what it was rendered for (text, width, focus), so
-/// it's only re-shaped when one of those changes.
+/// The rendered title and what it was rendered for (text, width, focus,
+/// buffer scale), so it's only re-shaped when one of those changes.
 struct TitleTexture {
-    key: (String, i32, bool),
+    key: (String, i32, bool, i32),
     buffer: MemoryRenderBuffer,
-    /// Width of the rendered text, for centering.
+    /// Width of the rendered text in logical pixels, for centering.
     width: i32,
 }
 
@@ -285,7 +286,10 @@ fn window_title(window: &Window) -> Option<String> {
 }
 
 /// Render elements for a title bar at `rect` (relative to the output origin),
-/// front to back.
+/// front to back, drawn at `scale`. The textures are rasterized at that
+/// scale rounded up (`scale::buffer_scale`), so they stay sharp on HiDPI
+/// outputs; a window spanning outputs of different scales re-rasterizes
+/// them for each.
 pub fn title_bar_elements<R>(
     renderer: &mut R,
     window: &Window,
@@ -315,6 +319,7 @@ where
     } = &mut *buffers;
 
     let maximized = is_maximized(window);
+    let buffer_scale = crate::scale::buffer_scale(scale);
     let look = |part| match (hover == Some(part), focused) {
         (true, _) => Look::Hover,
         (false, true) => Look::Focused,
@@ -350,7 +355,7 @@ where
     let title_width = rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING;
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
-            let key = (text, title_width, focused);
+            let key = (text, title_width, focused, buffer_scale);
             if title.as_ref().is_none_or(|texture| texture.key != key) {
                 let color = if focused {
                     ICON_FOCUSED
@@ -358,19 +363,25 @@ where
                     ICON_UNFOCUSED
                 };
                 // None until the fonts have loaded; then the next frame draws it.
-                *title = crate::text::render_title(&key.0, color, title_width, TITLE_BAR_HEIGHT)
-                    .map(|(pixels, width)| TitleTexture {
-                        buffer: MemoryRenderBuffer::from_slice(
-                            &pixels,
-                            Fourcc::Argb8888,
-                            (width, TITLE_BAR_HEIGHT),
-                            1,
-                            Transform::Normal,
-                            None,
-                        ),
-                        width,
-                        key,
-                    });
+                *title = crate::text::render_title(
+                    &key.0,
+                    color,
+                    title_width,
+                    TITLE_BAR_HEIGHT,
+                    buffer_scale,
+                )
+                .map(|(pixels, width)| TitleTexture {
+                    buffer: MemoryRenderBuffer::from_slice(
+                        &pixels,
+                        Fourcc::Argb8888,
+                        (width, TITLE_BAR_HEIGHT * buffer_scale),
+                        buffer_scale,
+                        Transform::Normal,
+                        None,
+                    ),
+                    width: width / buffer_scale,
+                    key,
+                });
             }
             if let Some(texture) = title.as_ref() {
                 let x = title_x(rect.loc.x, rect.size.w, texture.width);
@@ -396,11 +407,11 @@ where
             minimize_loc,
         ),
     ] {
-        let key = (icon, look(part));
+        let key = (icon, look(part), buffer_scale);
         if slot.as_ref().is_none_or(|texture| texture.key != key) {
             *slot = Some(ButtonTexture {
                 key,
-                buffer: button_buffer(icon, key.1),
+                buffer: button_buffer(icon, key.1, buffer_scale),
             });
         }
         let buffer = &slot.as_ref().unwrap().buffer;
@@ -414,37 +425,47 @@ where
     elements
 }
 
-/// Draw one button cell (`BUTTON_WIDTH` x `TITLE_BAR_HEIGHT`): a background
-/// (transparent unless hovered, so the bar shows through) and an
-/// anti-aliased 10px glyph in the middle.
-fn button_buffer(icon: Icon, look: Look) -> MemoryRenderBuffer {
+/// Draw one button cell (`BUTTON_WIDTH` x `TITLE_BAR_HEIGHT` logical pixels,
+/// at `scale` physical pixels each): a background (transparent unless
+/// hovered, so the bar shows through) and an anti-aliased 10px glyph in the
+/// middle.
+fn button_buffer(icon: Icon, look: Look, scale: i32) -> MemoryRenderBuffer {
     let (background, color) = match (look, icon) {
         (Look::Hover, Icon::Close) => (Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON),
         (Look::Hover, _) => (Some(HOVER_BG), HOVER_ICON),
         (Look::Focused, _) => (None, ICON_FOCUSED),
         (Look::Unfocused, _) => (None, ICON_UNFOCUSED),
     };
-    let pixels = rasterize_button(icon, background, color);
+    let pixels = rasterize_button(icon, background, color, scale);
     MemoryRenderBuffer::from_slice(
         &pixels,
         Fourcc::Argb8888,
-        (BUTTON_WIDTH, TITLE_BAR_HEIGHT),
-        1,
+        (BUTTON_WIDTH * scale, TITLE_BAR_HEIGHT * scale),
+        scale,
         Transform::Normal,
         None,
     )
 }
 
-/// Premultiplied ARGB8888 pixels (little-endian: B, G, R, A) for a button.
-fn rasterize_button(icon: Icon, background: Option<[f32; 3]>, color: [f32; 3]) -> Vec<u8> {
-    let (w, h) = (BUTTON_WIDTH, TITLE_BAR_HEIGHT);
-    // Glyph center. Outline edges land on pixel centers, so 1px strokes are crisp.
-    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+/// Premultiplied ARGB8888 pixels (little-endian: B, G, R, A) for a button,
+/// `scale` physical pixels per logical one.
+fn rasterize_button(
+    icon: Icon,
+    background: Option<[f32; 3]>,
+    color: [f32; 3],
+    scale: i32,
+) -> Vec<u8> {
+    let (w, h) = (BUTTON_WIDTH * scale, TITLE_BAR_HEIGHT * scale);
+    let s = scale as f64;
+    // Glyph center, in logical pixels. At scale 1, outline edges land on
+    // pixel centers, so 1px strokes are crisp; at 2, on pixel edges, where
+    // 2px strokes are.
+    let (cx, cy) = (BUTTON_WIDTH as f64 / 2.0, TITLE_BAR_HEIGHT as f64 / 2.0);
     let mut pixels = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let p = (x as f64 + 0.5, y as f64 + 0.5);
-            let coverage = glyph_coverage(icon, p, (cx, cy)) as f32;
+            let p = ((x as f64 + 0.5) / s, (y as f64 + 0.5) / s);
+            let coverage = glyph_coverage(icon, p, (cx, cy), s) as f32;
             let (bg, bg_alpha) = match background {
                 Some(bg) => (bg, 1.0),
                 None => ([0.0; 3], 0.0),
@@ -463,10 +484,12 @@ fn rasterize_button(icon: Icon, background: Option<[f32; 3]>, color: [f32; 3]) -
     pixels
 }
 
-/// How much of the pixel at `p` the glyph covers (0..=1).
-fn glyph_coverage(icon: Icon, p: (f64, f64), (cx, cy): (f64, f64)) -> f64 {
-    // A stroke `width` wide along a shape at distance `dist` from p.
-    let stroke = |dist: f64, width: f64| (width / 2.0 + 0.5 - dist).clamp(0.0, 1.0);
+/// How much of the pixel centered at `p` the glyph covers (0..=1). `p` is
+/// in logical pixels; a physical pixel is `1 / scale` of one.
+fn glyph_coverage(icon: Icon, p: (f64, f64), (cx, cy): (f64, f64), scale: f64) -> f64 {
+    // A stroke `width` wide along a shape at distance `dist` from p,
+    // anti-aliased over one physical pixel.
+    let stroke = |dist: f64, width: f64| ((width / 2.0 - dist) * scale + 0.5).clamp(0.0, 1.0);
     match icon {
         Icon::Close => {
             let r = 4.5;
@@ -486,7 +509,7 @@ fn glyph_coverage(icon: Icon, p: (f64, f64), (cx, cy): (f64, f64)) -> f64 {
             // as the maximize square, with edges on pixel centers.
             let front = box_sdf(p, (cx - 1.5, cy + 1.5), 3.0);
             let back = box_sdf(p, (cx + 1.5, cy - 1.5), 3.0);
-            let back = if front < -0.5 {
+            let back = if front < -0.5 / scale {
                 0.0
             } else {
                 stroke(back.abs(), 1.0)
@@ -550,9 +573,13 @@ mod tests {
         pixels[((y * BUTTON_WIDTH + x) * 4 + 3) as usize]
     }
 
+    fn alpha_at_2x(pixels: &[u8], x: i32, y: i32) -> u8 {
+        pixels[((y * BUTTON_WIDTH * 2 + x) * 4 + 3) as usize]
+    }
+
     #[test]
     fn button_glyphs_are_crisp_and_centered() {
-        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED);
+        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 1);
         // The square's left edge (x = 13.5) lands on pixel column 13.
         assert_eq!(alpha_at(&px, 13, TITLE_BAR_HEIGHT / 2), 255);
         assert_eq!(alpha_at(&px, 12, TITLE_BAR_HEIGHT / 2), 0);
@@ -560,13 +587,25 @@ mod tests {
         assert_eq!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2), 0);
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
-        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED);
+        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED, 1);
         assert!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2) > 200); // the cross
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
         // Hovered buttons fill their whole cell.
-        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON);
+        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON, 1);
         assert!(px.chunks(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn buttons_at_scale_2_have_crisp_2px_strokes() {
+        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 2);
+        assert_eq!(px.len() as i32, BUTTON_WIDTH * 2 * TITLE_BAR_HEIGHT * 2 * 4);
+        // The left edge (logical x = 13.5, 1px wide) covers columns 26-27.
+        let y = TITLE_BAR_HEIGHT;
+        assert_eq!(alpha_at_2x(&px, 25, y), 0);
+        assert_eq!(alpha_at_2x(&px, 26, y), 255);
+        assert_eq!(alpha_at_2x(&px, 27, y), 255);
+        assert_eq!(alpha_at_2x(&px, 28, y), 0);
     }
 
     #[test]

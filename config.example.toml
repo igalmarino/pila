@@ -69,3 +69,16 @@ repeat-rate = 25        # repeats per second
 # "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
 # "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
 # "Mod+J" = "none"
+
+# Monitors, matched by connector name (shown in the log as "output connected",
+# e.g. eDP-1, DP-1, HDMI-A-1). Without an entry, a monitor uses its preferred
+# mode at scale 1, right of the others. Nested, the only output is "winit",
+# and only its scale applies.
+# [[output]]
+# name = "eDP-1"
+# scale = 1.25              # may be fractional (in 1/120 steps); default 1
+#
+# [[output]]
+# name = "DP-1"
+# mode = "2560x1440@143.9"  # WIDTHxHEIGHT[@HZ]; the closest refresh is used
+# position = [1536, 0]      # top-left in logical pixels (size / scale)

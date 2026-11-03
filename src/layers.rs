@@ -146,6 +146,7 @@ impl Pila {
                 .is_some_and(|data| data.lock().unwrap().initial_configure_sent)
         });
         if !initial_configure_sent {
+            self.send_initial_scale(surface, Some(output.clone()));
             layer.layer_surface().send_configure();
         }
         if zone_changed {

@@ -261,6 +261,119 @@ impl Default for KeyboardConfig {
     }
 }
 
+/// `[[output]]`: settings for one monitor, matched by connector name
+/// (`eDP-1`, `DP-1`, `HDMI-A-1`, ...; `winit` is the nested window).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputConfig {
+    pub name: String,
+    /// The mode to set instead of the monitor's preferred one (TTY only).
+    pub mode: Option<ModeSpec>,
+    /// Logical pixels are this many physical ones; a multiple of 1/120 (what
+    /// fractional-scale can express), from 0.5 to 8.
+    pub scale: Option<f64>,
+    /// Top-left corner in the global logical space (TTY only). Outputs
+    /// without one go right of the others.
+    pub position: Option<(i32, i32)>,
+}
+
+/// A video mode: `"2560x1440"` or `"2560x1440@59.95"` (refresh in Hz).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModeSpec {
+    pub width: i32,
+    pub height: i32,
+    pub refresh_hz: Option<f64>,
+}
+
+impl ModeSpec {
+    fn parse(text: &str) -> Result<Self, String> {
+        let bad = || format!("bad mode {text:?} (e.g. \"1920x1080\" or \"1920x1080@60\")");
+        let (size, refresh) = match text.split_once('@') {
+            Some((size, refresh)) => (size, Some(refresh)),
+            None => (text, None),
+        };
+        let (w, h) = size.split_once('x').ok_or_else(bad)?;
+        let width = w.trim().parse().map_err(|_| bad())?;
+        let height = h.trim().parse().map_err(|_| bad())?;
+        let refresh_hz = match refresh {
+            Some(r) => Some(
+                r.trim()
+                    .trim_end_matches("Hz")
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|r| *r > 0.0)
+                    .ok_or_else(bad)?,
+            ),
+            None => None,
+        };
+        if width <= 0 || height <= 0 {
+            return Err(bad());
+        }
+        Ok(Self {
+            width,
+            height,
+            refresh_hz,
+        })
+    }
+
+    /// Which of `modes` (size and refresh in mHz) this asks for: the right
+    /// size, at the refresh closest to the one given, else the `preferred`
+    /// one if it has the right size, else the fastest.
+    pub fn pick(&self, modes: &[((i32, i32), i32)], preferred: Option<usize>) -> Option<usize> {
+        let fits = |i: &usize| modes[*i].0 == (self.width, self.height);
+        let candidates = (0..modes.len()).filter(fits);
+        match self.refresh_hz {
+            Some(hz) => candidates.min_by(|a, b| {
+                let off = |i: &usize| (modes[*i].1 as f64 / 1000.0 - hz).abs();
+                off(a).total_cmp(&off(b))
+            }),
+            None => preferred
+                .filter(fits)
+                .or_else(|| candidates.max_by_key(|i| modes[*i].1)),
+        }
+    }
+}
+
+/// `[[output]]` as written in the file.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct OutputFile {
+    name: String,
+    mode: Option<String>,
+    scale: Option<f64>,
+    position: Option<[i32; 2]>,
+}
+
+impl OutputFile {
+    fn validate(self) -> Result<OutputConfig, String> {
+        if self.name.is_empty() {
+            return Err("an [[output]] has no name".into());
+        }
+        let scale = match self.scale {
+            Some(scale) if !(0.5..=8.0).contains(&scale) => {
+                return Err(format!(
+                    "output {:?}: scale {scale} is outside 0.5..8",
+                    self.name
+                ))
+            }
+            // Clients get it in 1/120ths: render at exactly what they're told.
+            Some(scale) => Some((scale * 120.0).round() / 120.0),
+            None => None,
+        };
+        let mode = match &self.mode {
+            Some(mode) => Some(
+                ModeSpec::parse(mode).map_err(|err| format!("output {:?}: {err}", self.name))?,
+            ),
+            None => None,
+        };
+        Ok(OutputConfig {
+            name: self.name,
+            mode,
+            scale,
+            position: self.position.map(|[x, y]| (x, y)),
+        })
+    }
+}
+
 /// The file's layout, before validation.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -272,6 +385,7 @@ struct ConfigFile {
     autostart: Vec<String>,
     keyboard: KeyboardConfig,
     bindings: BTreeMap<String, String>,
+    output: Vec<OutputFile>,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +397,7 @@ pub struct Config {
     pub autostart: Vec<String>,
     pub keyboard: KeyboardConfig,
     pub bindings: Vec<(KeyCombo, Action)>,
+    pub outputs: Vec<OutputConfig>,
 }
 
 impl Default for Config {
@@ -358,6 +473,12 @@ impl Config {
             }
         }
 
+        let outputs = file
+            .output
+            .into_iter()
+            .map(OutputFile::validate)
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Self {
             mod_key,
             terminal,
@@ -365,7 +486,13 @@ impl Config {
             autostart: file.autostart,
             keyboard: file.keyboard,
             bindings,
+            outputs,
         })
+    }
+
+    /// The `[[output]]` settings for the output called `name`, if any.
+    pub fn output(&self, name: &str) -> Option<&OutputConfig> {
+        self.outputs.iter().find(|o| o.name == name)
     }
 
     /// The action bound to `sym` with exactly the pressed modifiers.
@@ -530,11 +657,63 @@ mod tests {
     }
 
     #[test]
+    fn outputs_are_parsed_and_scales_rounded() {
+        let config = Config::from_toml(
+            r#"
+            [[output]]
+            name = "eDP-1"
+            scale = 1.33
+            [[output]]
+            name = "DP-1"
+            mode = "2560x1440@59.95"
+            position = [1440, 0]
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        let edp = config.output("eDP-1").unwrap();
+        assert_eq!(edp.scale, Some(160.0 / 120.0));
+        assert_eq!(edp.mode, None);
+        let dp = config.output("DP-1").unwrap();
+        assert_eq!(dp.position, Some((1440, 0)));
+        assert_eq!(
+            dp.mode,
+            Some(ModeSpec {
+                width: 2560,
+                height: 1440,
+                refresh_hz: Some(59.95)
+            })
+        );
+        assert!(config.output("HDMI-A-1").is_none());
+    }
+
+    #[test]
+    fn modes_pick_size_then_refresh() {
+        let modes = [
+            ((2560, 1440), 59_951),
+            ((2560, 1440), 143_912),
+            ((1920, 1080), 60_000),
+            ((2560, 1440), 120_000),
+        ];
+        let spec = |text| ModeSpec::parse(text).unwrap();
+        assert_eq!(spec("2560x1440@120").pick(&modes, None), Some(3));
+        assert_eq!(spec("2560x1440@60").pick(&modes, None), Some(0));
+        // No refresh: the preferred mode if it fits, else the fastest.
+        assert_eq!(spec("2560x1440").pick(&modes, Some(0)), Some(0));
+        assert_eq!(spec("2560x1440").pick(&modes, Some(2)), Some(1));
+        assert_eq!(spec("1920x1080").pick(&modes, None), Some(2));
+        assert_eq!(spec("800x600").pick(&modes, None), None);
+    }
+
+    #[test]
     fn mistakes_are_reported() {
         let err = |text| Config::from_toml(text, &no_env).unwrap_err();
         assert!(err(r#"mod = "hyper""#).contains("unknown modifier"));
         assert!(err(r#"bindings = { "Mod+Nope" = "quit" }"#).contains("unknown key"));
         assert!(err(r#"bindings = { "Mod+Q" = "explode" }"#).contains("unknown action"));
         assert!(err(r#"terminl = "foot""#).contains("unknown field"));
+        assert!(err("[[output]]\nname = \"DP-1\"\nscale = 0").contains("outside"));
+        assert!(err("[[output]]\nname = \"DP-1\"\nmode = \"big\"").contains("bad mode"));
+        assert!(err("[[output]]\nscale = 2").contains("no name"));
     }
 }

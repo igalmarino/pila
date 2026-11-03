@@ -10,7 +10,7 @@ use smithay::{
     },
     desktop::layer_map_for_output,
     input::pointer::CursorImageStatus,
-    output::{Mode, Output, PhysicalProperties, Subpixel},
+    output::{Mode, Output, PhysicalProperties, Scale as OutputScale, Subpixel},
     reexports::{
         calloop::EventLoop,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -51,10 +51,16 @@ pub fn init_winit(
         },
     );
     let _global = output.create_global::<Pila>(display_handle);
+    // Nested there's one output; only `scale` of its `[[output]]` applies.
+    let output_config = state.config.output("winit");
+    if output_config.is_some_and(|c| c.mode.is_some() || c.position.is_some()) {
+        warn!("the nested output's size follows the window; mode and position are ignored");
+    }
+    let scale = output_config.and_then(|c| c.scale).unwrap_or(1.0);
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
-        None,
+        Some(OutputScale::Fractional(scale)),
         Some((0, 0).into()),
     );
     output.set_preferred(mode);
@@ -135,6 +141,8 @@ fn redraw(
         .map(|geo| geo.loc)
         .unwrap_or_default();
 
+    let scale = crate::scale::output_scale(output);
+
     let Some(Backend::Winit(backend)) = state.backend.as_mut() else {
         return;
     };
@@ -149,8 +157,14 @@ fn redraw(
     // did), and how each element was drawn.
     let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
-            let mut elements = render::cursor_elements(renderer, cursor.as_ref(), output_location);
-            elements.extend(render::scene_elements(renderer, &scene, output_location));
+            let mut elements =
+                render::cursor_elements(renderer, cursor.as_ref(), output_location, scale);
+            elements.extend(render::scene_elements(
+                renderer,
+                &scene,
+                output_location,
+                scale,
+            ));
             match damage_tracker.render_output(
                 renderer,
                 &mut framebuffer,
