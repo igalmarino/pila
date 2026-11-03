@@ -92,7 +92,7 @@ use crate::{
 };
 
 /// The shm formats offered. Rendering reads back RGBA, swizzled per format.
-const SHM_FORMATS: [wl_shm::Format; 4] = [
+pub(crate) const SHM_FORMATS: [wl_shm::Format; 4] = [
     wl_shm::Format::Argb8888,
     wl_shm::Format::Xrgb8888,
     wl_shm::Format::Abgr8888,
@@ -100,7 +100,7 @@ const SHM_FORMATS: [wl_shm::Format; 4] = [
 ];
 
 /// The dma-buf formats offered: what clients (PipeWire consumers) expect.
-const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Xrgb8888];
+pub(crate) const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Xrgb8888];
 
 /// Where and how clients may allocate dma-bufs for captures: the renderer's
 /// DRM device and the modifiers it can render to, per format. Set by the
@@ -126,6 +126,11 @@ impl DmabufTarget {
             .filter(|(_, modifiers)| !modifiers.is_empty())
             .collect();
         Self { device, formats }
+    }
+
+    /// Whether any dma-buf format is offered.
+    pub(crate) fn offers(&self) -> bool {
+        !self.formats.is_empty()
     }
 }
 
@@ -437,7 +442,7 @@ impl Pila {
     }
 }
 
-enum CopyError {
+pub(crate) enum CopyError {
     /// The buffer isn't shm, or doesn't match the size or formats.
     Constraints,
     Render(String),
@@ -445,7 +450,7 @@ enum CopyError {
 
 /// Copy `elements` into the client's `buffer`: rendered straight into a
 /// dma-buf, or offscreen and read back into shm.
-fn copy_frame(
+pub(crate) fn copy_frame(
     renderer: &mut GlesRenderer,
     buffer: &WlBuffer,
     size: Size<i32, Physical>,

@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::OsString,
     os::fd::AsFd,
     process::{Command, Stdio},
@@ -8,7 +8,10 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
+    backend::renderer::{
+        damage::OutputDamageTracker, element::solid::SolidColorBuffer,
+        utils::with_renderer_surface_state,
+    },
     desktop::{
         find_popup_root_surface, layer_map_for_output, LayerSurface, PopupManager, Space, Window,
         WindowSurfaceType,
@@ -25,6 +28,7 @@ use smithay::{
             RegistrationToken,
         },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -107,6 +111,10 @@ pub struct Pila {
     pub captures: Vec<crate::capture::Session>,
     /// Where captures may use dma-bufs (set by the backend).
     pub capture_dmabuf: Option<crate::capture::DmabufTarget>,
+    /// wlr-screencopy frames waiting to be copied, and the damage trackers
+    /// of `copy_with_damage` (`screencopy.rs`).
+    pub screencopies: Vec<ZwlrScreencopyFrameV1>,
+    pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
     pub switch: Option<Switch>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
@@ -202,6 +210,7 @@ impl Pila {
         let loop_handle = event_loop.handle();
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         crate::capture::init_globals(&dh);
+        crate::screencopy::init_global(&dh);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
@@ -246,6 +255,8 @@ impl Pila {
             config_path: None,
             config_reload_pending: false,
             capture_dmabuf: None,
+            screencopies: Vec::new(),
+            screencopy_trackers: HashMap::new(),
             switch: None,
             swipe: None,
             xwayland_token: None,
@@ -521,6 +532,7 @@ impl Pila {
     /// outputs.
     pub fn output_removed(&mut self, output: &Output) {
         self.stop_captures_of(output);
+        self.fail_screencopies_of(output);
         let layers: Vec<_> = layer_map_for_output(output).layers().cloned().collect();
         for layer in layers {
             layer.layer_surface().send_close();
@@ -964,6 +976,7 @@ impl Pila {
     pub fn post_render(&mut self, output: &Output) {
         self.update_surface_scales(output);
         self.process_captures();
+        self.process_screencopies();
         self.space.refresh();
         self.update_idle_inhibit();
         layer_map_for_output(output).cleanup();

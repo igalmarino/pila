@@ -248,6 +248,13 @@ Key flows and invariants:
   the session's own damage tracker sees a change. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
+- **Screencopy** (`screencopy.rs`, wlr-screencopy v3, for clients that predate
+  ext-image-copy-capture): a frame names an output and optionally a region (logical,
+  output-local); pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
+  use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
+  in an idle callback; `copy_with_damage` waits in `Pila::screencopies` until that
+  manager's damage tracker for the output/region (`screencopy_trackers`) sees a change,
+  checked from `post_render`. A mode/scale change or a removed output fails the frame.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.
