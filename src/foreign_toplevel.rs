@@ -19,7 +19,7 @@ use smithay::{
 use crate::Pila;
 
 /// The window's (title, app id), empty if unset.
-fn title_and_app_id(window: &Window) -> (String, String) {
+pub(crate) fn title_and_app_id(window: &Window) -> (String, String) {
     // X11: the title, and WM_CLASS's class as the app id.
     if let Some(x11) = window.x11_surface() {
         return (x11.title(), x11.class());
@@ -67,6 +67,15 @@ pub fn identifier(window: &Window) -> Option<String> {
 }
 
 impl Pila {
+    /// The window a foreign-toplevel identifier names, mapped or minimized.
+    pub(crate) fn window_for_identifier(&self, identifier: &str) -> Option<Window> {
+        self.space
+            .elements()
+            .chain(self.minimized.iter())
+            .find(|w| crate::foreign_toplevel::identifier(w).as_deref() == Some(identifier))
+            .cloned()
+    }
+
     /// List a newly mapped window.
     pub fn announce_toplevel(&mut self, window: &Window) {
         if handle(window).is_some() {
@@ -101,5 +110,6 @@ impl Pila {
         if let Some(handle) = handle(window) {
             self.globals.foreign_toplevel_list.remove_toplevel(handle);
         }
+        self.toplevel_management.closed(window);
     }
 }

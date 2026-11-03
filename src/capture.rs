@@ -40,7 +40,6 @@ use smithay::{
             Bind, BufferType, ExportMem, Offscreen, TextureMapping,
         },
     },
-    desktop::Window,
     input::pointer::CursorImageStatus,
     output::{Output, WeakOutput},
     reexports::{
@@ -229,15 +228,6 @@ impl Session {
 }
 
 impl Pila {
-    /// The window a foreign-toplevel identifier names, mapped or minimized.
-    fn window_for_identifier(&self, identifier: &str) -> Option<Window> {
-        self.space
-            .elements()
-            .chain(self.minimized.iter())
-            .find(|w| crate::foreign_toplevel::identifier(w).as_deref() == Some(identifier))
-            .cloned()
-    }
-
     /// The size (physical pixels) and scale `target` is captured at, or
     /// `None` if it's gone.
     fn capture_geometry(&self, target: &Target) -> Option<(Size<i32, Physical>, Scale<f64>)> {

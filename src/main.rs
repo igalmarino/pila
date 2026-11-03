@@ -37,6 +37,7 @@ mod snap;
 mod state;
 mod switcher;
 mod text;
+mod toplevel_management;
 mod udev;
 mod winit;
 mod xwayland;

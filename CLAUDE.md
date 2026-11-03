@@ -255,6 +255,15 @@ Key flows and invariants:
   in an idle callback; `copy_with_damage` waits in `Pila::screencopies` until that
   manager's damage tracker for the output/region (`screencopy_trackers`) sees a change,
   checked from `post_render`. A mode/scale change or a removed output fails the frame.
+- **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
+  taskbars act on windows named by their ext-foreign-toplevel-list identifier
+  (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in
+  `refresh_toplevels` (from `post_render`, after `space.refresh()`): title, app id, states
+  (Activated = keyboard focus, Minimized from `minimize.rs`, Maximized/Fullscreen from
+  `fill_state`) and the outputs each client's handle was told; new windows get a handle
+  per manager, destroyed ones `closed` (`remove_foreign_toplevel`). Requests map onto
+  `focus_window`/`restore_window`, `minimize_window`/`show_window`, `set_fill_state(_on)`
+  and `close_window`, and are ignored while locked.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.

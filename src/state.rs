@@ -115,6 +115,8 @@ pub struct Pila {
     /// of `copy_with_damage` (`screencopy.rs`).
     pub screencopies: Vec<ZwlrScreencopyFrameV1>,
     pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
+    /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
+    pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     pub switch: Option<Switch>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
@@ -211,6 +213,7 @@ impl Pila {
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         crate::capture::init_globals(&dh);
         crate::screencopy::init_global(&dh);
+        crate::toplevel_management::init_global(&dh);
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
@@ -257,6 +260,7 @@ impl Pila {
             capture_dmabuf: None,
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
+            toplevel_management: Default::default(),
             switch: None,
             swipe: None,
             xwayland_token: None,
@@ -977,7 +981,10 @@ impl Pila {
         self.update_surface_scales(output);
         self.process_captures();
         self.process_screencopies();
+        // The space knows which outputs each window is on only after its
+        // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();
+        self.refresh_toplevels();
         self.update_idle_inhibit();
         layer_map_for_output(output).cleanup();
         self.popups.cleanup();
