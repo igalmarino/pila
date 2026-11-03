@@ -9,13 +9,14 @@ on **Smithay 0.7.x**.
 
 ## Environment
 
-- You run inside a dev container (Arch Linux base). The host is Arch Linux + GNOME (Wayland).
+- You run inside a dev container (Arch Linux base). The host is Arch Linux; the user logs
+  into pila itself through GDM (`scripts/install`), with GNOME kept only as a fallback
+  session.
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
   the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
   (`/run/host-wayland/wayland-0`, a hard link `scripts/link-wayland` makes to the socket of
-  whichever session the container was entered from: GNOME, or pila itself on a TTY); the
-  compositor creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it
-  connect there.
+  whichever session the container was entered from: pila, or GNOME); the compositor
+  creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
   the host, from a TTY. Write that code, but ask the user to test it.
@@ -30,7 +31,8 @@ on **Smithay 0.7.x**.
 
 ## Commands
 
-- Build: `cargo build`; `cargo build --release` for what `scripts/tty` runs.
+- Build: `cargo build`; `cargo build --release` for what `scripts/tty` and
+  `scripts/install` use.
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt`
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
@@ -56,14 +58,21 @@ on **Smithay 0.7.x**.
   Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
+- The login session (the user, on the host): `scripts/install` builds the release binary
+  and installs it with `resources/session/` (the `pila-session` wrapper and the
+  `wayland-sessions` entry) and the portal configs; `scripts/uninstall` removes them. Its
+  log is in the journal (`journalctl -t pila -b`) and in `~/.local/state/pila/pila.log`,
+  mounted here read-only as `/run/host-pila/pila.log` (previous run: `pila.log.old`).
+  Taking a change into the session means logging out and back in, which ends this
+  Claude session; the user does it.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
-  (`--debug` for the debug one) under `dbus-run-session`; read `pila-tty.log` and the
-  previous run's `pila-tty.log.old` in the repo root afterwards. The user's day-to-day
-  config lives in `resources/daily` (installed by `scripts/install-config`); keep it
-  valid (a test parses it, and `config.example.toml`).
-- The user develops from inside pila on a TTY: this container is then connected to that
-  pila, so restarting it ends the Claude session, and `cargo run` opens a nested window
-  inside it. Changes that need a pila restart are tested by the user.
+  (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
+  login session keeps running; read `pila-tty.log` and the previous run's
+  `pila-tty.log.old` in the repo root afterwards. The user's day-to-day config lives in
+  `resources/daily` (installed by `scripts/install-config`); keep it valid (a test parses
+  it, and `config.example.toml`).
+- This container is connected to the user's pila session, so `cargo run` opens a nested
+  window inside it. Changes that need a pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or
   hardware-related; push to GitHub (`origin`, public, GPL-3.0-or-later) only when asked.
 
@@ -243,11 +252,13 @@ Key flows and invariants:
   Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
   which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
-  `~/.config/xdg-desktop-portal-wlr/` (xdpw ignores `XDG_CONFIG_DIRS`). On a TTY, before the
-  startup programs, pila exports that environment to the D-Bus session bus
-  (`export_environment`), but only to a bus of its own (`scripts/tty` uses
-  `dbus-run-session`): the systemd user bus is shared with e.g. a GNOME session on another
-  VT, whose portals it would break. Nested, apps use the host's portals.
+  `~/.config/xdg-desktop-portal-wlr/` or `/etc/xdg` (xdpw ignores `XDG_CONFIG_DIRS`;
+  `scripts/install` puts both in `/etc/xdg`). On a TTY, before the startup programs, pila
+  exports that environment to the D-Bus session bus (`export_environment`): on the systemd
+  user bus (a login session) also to `systemd --user`, which starts the portals and
+  pipewire there (`--systemd`); on a private bus (`scripts/tty`, `dbus-run-session`) the
+  bus alone, so a test instance leaves the login session's services alone. Nested, apps
+  use the host's portals.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

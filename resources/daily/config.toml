@@ -17,8 +17,9 @@ autostart = [
     "mako",
     # Lock after 5 minutes idle and before suspending.
     "swayidle -w timeout 300 'swaylock -f -c 1f2126' before-sleep 'swaylock -f -c 1f2126'",
-    # Apps that keep passwords in the keyring (Chromium, VS Code, git's
-    # libsecret helper) need it on pila's session bus:
+    # In a login session (scripts/install) GDM's PAM setup starts and unlocks
+    # the keyring that Chromium, VS Code and git's libsecret helper use. When
+    # pila is started by hand (scripts/tty), start it here instead:
     # "gnome-keyring-daemon --start --components=secrets",
     "foot",
 ]

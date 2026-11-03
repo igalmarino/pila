@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Starts a pila login session. The display manager runs this through
+# wayland-sessions/pila.desktop (both installed by scripts/install); it has
+# already set up the logind session, XDG_RUNTIME_DIR, the user's D-Bus bus,
+# XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP=pila. pila itself exports
+# its WAYLAND_DISPLAY and DISPLAY to that bus and to systemd --user, so the
+# portals (screen sharing), pipewire and the rest of the user services find it.
+#
+# The log (pila's, and the output of what it starts) goes to the journal
+# (journalctl -t pila -b) and to ~/.local/state/pila/pila.log, which the dev
+# container mounts as /run/host-pila; the previous run's is pila.log.old.
+set -euo pipefail
+
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/pila"
+mkdir -p "$dir"
+[ -f "$dir/pila.log" ] && mv -f "$dir/pila.log" "$dir/pila.log.old"
+
+exec pila --backend udev 2> >(tee "$dir/pila.log" | systemd-cat -t pila)

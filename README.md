@@ -41,6 +41,24 @@ nested as a window inside another Wayland or X11 session for development. Build 
 `cargo build --release`; on Arch, besides Rust, it needs `seatd` (for `libseat.so`),
 `libinput`, `mesa`, `libxkbcommon` and `xorg-xwayland`.
 
+### As a login session
+
+```bash
+scripts/install      # builds the release binary (in the dev container) and installs
+```
+
+installs the binary and a session wrapper in `/usr/local/bin`, a `pila` entry in
+`/usr/local/share/wayland-sessions` for the display manager (GDM: the gear icon on the
+password screen) and the portal configs for screen sharing in `/etc/xdg`. Log out, pick
+*pila*, log in. The session uses the user's D-Bus bus and `systemd --user` like any other
+desktop, so portals, PipeWire and the keyring (unlocked by GDM at login) just work. The log
+goes to the journal (`journalctl -t pila -b`) and to `~/.local/state/pila/pila.log` (the
+previous run's in `pila.log.old`). After changing pila, run `scripts/install` again and log
+out and back in; `scripts/uninstall` removes what it installed. Mod+Shift+E ends the
+session (back to the login screen).
+
+### By hand, on a TTY
+
 On a free TTY (Ctrl+Alt+F3), from this folder:
 
 ```bash
@@ -48,16 +66,18 @@ scripts/tty                        # the release build with ~/.config/pila/confi
 scripts/tty scripts/tty-test.toml  # another config; --debug for the debug build
 ```
 
-`scripts/tty` runs pila under its own D-Bus session bus (`dbus-run-session`), so its portals
-(screen sharing) don't clash with a GNOME session left running on another VT, which stays a
-fallback if pila crashes. The log (portals included) goes to `pila-tty.log`, the previous
-run's to `pila-tty.log.old`. Ctrl+Alt+F1..F12 switch TTYs; Mod+Shift+E quits.
+That's the way to try a build or a config while a pila (or GNOME) session keeps running
+on another VT: this pila gets a D-Bus bus of its own (`dbus-run-session`), so its portals
+don't touch the other session's services. The log (portals included) goes to
+`pila-tty.log`, the previous run's to `pila-tty.log.old`. Ctrl+Alt+F1..F12 switch TTYs;
+Mod+Shift+E quits.
 
 Host packages for a full session (Arch):
 
 ```bash
 sudo pacman -S foot                     # the default terminal (or set `terminal`)
-sudo pacman -S xdg-desktop-portal-wlr   # screen sharing; brings grim and slurp
+sudo pacman -S xdg-desktop-portal-wlr xdg-desktop-portal-gtk   # screen sharing (brings
+                                        # grim and slurp) and the file chooser
 sudo pacman -S waybar swaybg mako swayidle swaylock fuzzel wl-clipboard brightnessctl \
     ttf-nerd-fonts-symbols              # for resources/daily
 ```
@@ -92,22 +112,25 @@ Mod+Shift+E quits.
 
 ## Development environment
 
-pila is developed in a dev container on an **Arch Linux + GNOME** host, with **Claude Code**
-running inside the container:
+pila is developed in a dev container on an **Arch Linux** host, from inside pila itself (or
+GNOME, kept as a fallback session), with **Claude Code** running inside the container:
 
 - Arch Linux with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and every library
   pila needs (winit, DRM/KMS, libinput)
 - pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
-  (`/dev/dri`) are passed into the container
+  (`/dev/dri`) are passed into the container, and the login session's log is mounted at
+  `/run/host-pila` so Claude can read it
 - Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
   `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
   against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
 - Claude Code (native install) with auth and history persisted across rebuilds
 - An egress firewall so Claude Code can only reach crates.io, GitHub, Anthropic and docs.rs
 
-The container follows the session it's entered from: started from GNOME, nested pila opens on
-GNOME; entered from a pila session (`scripts/dev` in a terminal there), it opens inside that
-pila. See [`CLAUDE.md`](CLAUDE.md) for the architecture.
+The container follows the session it's entered from: entered from a pila session
+(`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME, on GNOME.
+Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
+with `scripts/install` and a new login (which ends the container's Claude session too). See
+[`CLAUDE.md`](CLAUDE.md) for the architecture.
 
 ### 1. Host setup (Arch)
 
@@ -150,7 +173,7 @@ npm install -g @devcontainers/cli
 
 ### 2. Start the container
 
-Always launch from inside your desktop session (GNOME, or pila), so `WAYLAND_DISPLAY` and
+Always launch from inside your desktop session (pila, or GNOME), so `WAYLAND_DISPLAY` and
 `XDG_RUNTIME_DIR` are set on the host.
 
 **VS Code:** open this folder, then *Dev Containers: Reopen in Container*.

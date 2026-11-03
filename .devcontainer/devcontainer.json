@@ -25,6 +25,9 @@
     // Only the host compositor's Wayland socket, not the whole XDG_RUNTIME_DIR
     // (which would also expose D-Bus, PipeWire, the keyring, ...).
     "source=${localEnv:XDG_RUNTIME_DIR}/pila-devcontainer,target=/run/host-wayland,type=bind",
+    // The pila login session's log (resources/session/pila-session), so Claude
+    // can read it: /run/host-pila/pila.log and pila.log.old.
+    "source=${localEnv:HOME}/.local/state/pila,target=/run/host-pila,type=bind,readonly",
     // Claude Code auth/settings/history survive rebuilds.
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
     // Crate download cache survives rebuilds.
@@ -45,8 +48,10 @@
   },
 
   // Links the current session's Wayland socket into the mounted directory
-  // (scripts/link-wayland; scripts/dev refreshes it before every command).
-  "initializeCommand": "scripts/link-wayland",
+  // (scripts/link-wayland; scripts/dev refreshes it before every command), and
+  // makes sure the log directory exists before Docker mounts it (a missing
+  // bind source would be created as root).
+  "initializeCommand": "scripts/link-wayland && mkdir -p \"${XDG_STATE_HOME:-$HOME/.local/state}/pila\"",
 
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",

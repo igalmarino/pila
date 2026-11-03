@@ -5,8 +5,9 @@
 //! focus management, keybindings, modifier-drag move/resize, and
 //! maximize/fullscreen.
 //!
-//! Currently runs nested (winit backend) as a window inside another
-//! Wayland session.
+//! Runs on a TTY (DRM/KMS + libinput, `udev.rs`), as a login session or by
+//! hand, or nested as a window inside another Wayland or X11 session
+//! (`winit.rs`).
 
 #![allow(irrefutable_let_patterns)]
 
@@ -70,11 +71,12 @@ Environment (overrides the config file):
 The config file is reloaded when it changes (all but autostart).
 
 Programs pila starts get XDG_CURRENT_DESKTOP=pila, and commands run by
-bindings PILA_OUTPUT, the name of the output under the pointer. For screen sharing on a
-TTY, run pila under its own D-Bus session (dbus-run-session pila), with
-resources/xdg/xdg-desktop-portal/pila-portals.conf installed and
-resources/xdg/xdg-desktop-portal-wlr/pila in ~/.config/xdg-desktop-portal-wlr/
-(scripts/tty does all three).";
+bindings PILA_OUTPUT, the name of the output under the pointer. On a TTY, pila
+exports WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and to systemd
+--user when that's the bus), for the screen-sharing portals: run it as a login
+session (scripts/install) or under dbus-run-session (scripts/tty), with
+resources/xdg/xdg-desktop-portal/pila-portals.conf and
+resources/xdg/xdg-desktop-portal-wlr/pila installed in /etc/xdg or ~/.config.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendKind {

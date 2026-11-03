@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=pila
+Comment=A stacking Wayland compositor
+Exec=/usr/local/bin/pila-session
+Type=Application
+DesktopNames=pila

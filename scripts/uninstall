@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Remove the pila login session that scripts/install put on the host: the
+# binary, the session wrapper, the session entry and the portal configs. Your
+# own files stay: ~/.config/pila (scripts/install-config),
+# ~/.config/xdg-desktop-portal-wlr/pila (scripts/tty) and the logs in
+# ~/.local/state/pila.
+#
+#   scripts/uninstall
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Keep in sync with scripts/install.
+files=(
+    /usr/local/bin/pila
+    /usr/local/bin/pila-session
+    /usr/local/share/wayland-sessions/pila.desktop
+    /etc/xdg/xdg-desktop-portal/pila-portals.conf
+    /etc/xdg/xdg-desktop-portal-wlr/pila
+)
+
+if [ "${XDG_SESSION_DESKTOP:-}" = pila ]; then
+    echo "This is a pila session. It keeps running after the uninstall (the binary"
+    echo "is unlinked, not stopped), but the next login won't offer pila."
+    read -r -p "Uninstall anyway? [y/N] " answer
+    case "$answer" in
+        y | Y | yes) ;;
+        *) echo "Nothing removed."; exit 1 ;;
+    esac
+fi
+
+for target in "${files[@]}"; do
+    if [ -e "$target" ]; then
+        sudo rm -f "$target"
+        echo "removed  $target"
+    else
+        echo "absent   $target"
+    fi
+done
+for dir in /usr/local/share/wayland-sessions /etc/xdg/xdg-desktop-portal /etc/xdg/xdg-desktop-portal-wlr; do
+    [ -d "$dir" ] && sudo rmdir --ignore-fail-on-non-empty "$dir"
+done
+
+echo
+echo "Uninstalled. Kept: ~/.config/pila, ~/.config/xdg-desktop-portal-wlr/pila, ~/.local/state/pila."

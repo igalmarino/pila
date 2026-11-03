@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Install pila as a login session on the host (Arch + GDM, or any display
+# manager that reads wayland-sessions): the release binary built in the dev
+# container, the session wrapper, the session entry and the portal configs for
+# screen sharing. Run it from your desktop session (pila or GNOME); sudo asks
+# once. Afterwards log out and pick "pila" in the login screen's session menu.
+# After changing pila: run it again, then log out and back in.
+#
+#   scripts/install              build the release binary, then install
+#   scripts/install --no-build   install what's in target/release
+#
+# scripts/uninstall removes exactly these files. Your own config
+# (scripts/install-config) and logs are separate.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+build=true
+[ "${1:-}" = "--no-build" ] && build=false
+
+# Keep in sync with scripts/uninstall.
+files=(
+    "target/release/pila:/usr/local/bin/pila:755"
+    "resources/session/pila-session:/usr/local/bin/pila-session:755"
+    "resources/session/pila.desktop:/usr/local/share/wayland-sessions/pila.desktop:644"
+    "resources/xdg/xdg-desktop-portal/pila-portals.conf:/etc/xdg/xdg-desktop-portal/pila-portals.conf:644"
+    "resources/xdg/xdg-desktop-portal-wlr/pila:/etc/xdg/xdg-desktop-portal-wlr/pila:644"
+)
+
+if $build; then
+    scripts/dev cargo build --release
+fi
+if [ ! -x target/release/pila ]; then
+    echo "target/release/pila not found; build it first: scripts/dev cargo build --release" >&2
+    exit 1
+fi
+
+for entry in "${files[@]}"; do
+    IFS=: read -r source target mode <<<"$entry"
+    # install unlinks the old file and creates a new one, so replacing the
+    # binary of a running session is fine: it keeps its old inode.
+    sudo install -D -m "$mode" "$source" "$target"
+    echo "installed $target"
+done
+
+echo
+echo "Installed. Log out and pick \"pila\" in the login screen's session menu."
+echo "Log: journalctl -t pila -b, or ~/.local/state/pila/pila.log."

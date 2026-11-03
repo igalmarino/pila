@@ -1066,10 +1066,12 @@ impl Pila {
     /// desktop name, so services it activates (xdg-desktop-portal and its
     /// wlr backend, for screen sharing) talk to pila.
     ///
-    /// Only on bare metal, and only when the bus is pila's own (started with
-    /// `dbus-run-session`, as `scripts/tty` does): the systemd user bus is
-    /// shared with any other session of the user (e.g. GNOME on another VT),
-    /// whose portals this would break. Nested, apps use the host's portals.
+    /// Only on bare metal; nested, apps use the host's portals. On the
+    /// systemd user bus (a login session, `scripts/install`) the variables go
+    /// to `systemd --user` too, which is what starts the portals and pipewire
+    /// there. A private bus (`scripts/tty` under `dbus-run-session`) has no
+    /// systemd: that's how a test instance on another VT leaves the login
+    /// session's services alone.
     fn export_environment(&self) {
         if !matches!(self.backend, Some(Backend::Udev(_))) {
             return;
@@ -1079,19 +1081,18 @@ impl Pila {
             return;
         };
         let runtime = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default();
-        let shared = format!("unix:path={}/bus", runtime.to_string_lossy());
-        if bus.to_string_lossy() == shared {
-            info!(
-                "the D-Bus session bus is shared with other sessions; not exporting pila's \
-                 environment to it (start pila with dbus-run-session for screen sharing)"
-            );
-            return;
-        }
+        let user_bus = format!("unix:path={}/bus", runtime.to_string_lossy());
+        let systemd = bus.to_string_lossy() == user_bus;
         let mut cmd = Command::new("dbus-update-activation-environment");
+        if systemd {
+            cmd.arg("--systemd");
+        }
         cmd.args(SESSION_ENV);
         self.session_env(&mut cmd);
         match cmd.status() {
-            Ok(status) if status.success() => info!("exported the environment to the session bus"),
+            Ok(status) if status.success() => {
+                info!(systemd, "exported the environment to the session bus")
+            }
             Ok(status) => warn!(?status, "dbus-update-activation-environment failed"),
             Err(err) => warn!(?err, "can't run dbus-update-activation-environment"),
         }

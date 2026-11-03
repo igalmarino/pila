@@ -12,8 +12,12 @@ if [ -S /run/host-wayland/wayland-0 ]; then
     echo "OK: host Wayland socket mounted"
 else
     echo "WARNING: host Wayland socket not found at /run/host-wayland/wayland-0." >&2
-    echo "         Start the container from inside your GNOME session so" >&2
+    echo "         Start the container from inside your desktop session (pila or GNOME) so" >&2
     echo "         XDG_RUNTIME_DIR and WAYLAND_DISPLAY are set on the host." >&2
+fi
+
+if [ -d /run/host-pila ]; then
+    echo "OK: pila session log mounted at /run/host-pila"
 fi
 
 if compgen -G "/dev/dri/renderD*" >/dev/null; then

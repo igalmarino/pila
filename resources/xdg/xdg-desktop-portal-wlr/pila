@@ -1,6 +1,7 @@
 # xdg-desktop-portal-wlr settings for pila sessions (XDG_CURRENT_DESKTOP=pila).
-# It only reads ~/.config/xdg-desktop-portal-wlr/pila (or /etc/xdg/...), not
-# XDG_CONFIG_DIRS, so scripts/tty copies this file there if it's missing.
+# It only reads ~/.config/xdg-desktop-portal-wlr/pila or /etc/xdg/..., not
+# XDG_CONFIG_DIRS: scripts/install puts it in /etc/xdg, and scripts/tty copies
+# it to ~/.config if missing.
 [screencast]
 # Pick the screen to share by clicking it (slurp comes with
 # xdg-desktop-portal-wlr). Without this, xdpw wants a dmenu-style menu
