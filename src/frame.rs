@@ -33,8 +33,8 @@ fn other_trees<'a>(
 }
 
 /// Record `output` as the primary output of every surface it showed in the
-/// frame described by `states`. Presentation feedback (and later per-output
-/// fractional scale) is keyed on it.
+/// frame described by `states`. Presentation feedback and the scale clients
+/// are told (`scale.rs`) are keyed on it.
 pub fn update_primary_outputs(
     scene: &Scene,
     cursor: Option<&WlSurface>,
@@ -99,7 +99,8 @@ pub fn presentation_feedback(
 }
 
 /// Frame callbacks for everything in the scene, so clients draw their next
-/// frame. Single output for now: every surface counts as on `output`.
+/// frame. Every surface in the scene counts as on `output`, so one shown on
+/// several outputs gets callbacks from each output that redraws.
 pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, time: Duration) {
     let on_output = |_: &WlSurface, _: &_| Some(output.clone());
     for entry in &scene.windows {

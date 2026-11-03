@@ -54,6 +54,14 @@ on **Smithay 0.7.x**.
   (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
+- TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
+  (`--debug` for the debug one) under `dbus-run-session`; read `pila-tty.log` and the
+  previous run's `pila-tty.log.old` in the repo root afterwards. The user's day-to-day
+  config lives in `resources/daily` (installed by `scripts/install-config`); keep it
+  valid (a test parses it, and `config.example.toml`).
+- The user develops from inside pila on a TTY: this container is then connected to that
+  pila, so restarting it ends the Claude session, and `cargo run` opens a nested window
+  inside it. Changes that need a pila restart are tested by the user.
 
 ## Language
 

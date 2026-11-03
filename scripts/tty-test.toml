@@ -1,4 +1,5 @@
-# Test config for running pila on the host from a TTY (scripts/tty).
+# A test config for running pila on the host from a TTY:
+#   scripts/tty scripts/tty-test.toml
 # The laptop panel at 125 %, the external monitor at 100 % to its right.
 mod = "super"
 
