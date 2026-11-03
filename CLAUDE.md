@@ -237,9 +237,12 @@ Key flows and invariants:
   logical; `render.rs` gets the scale per output (`scale::output_scale`). pila's own
   textures (title bar buttons and text, xcursor images) are rasterized at the scale rounded
   up (`scale::buffer_scale`) and cached per scale. Clients get fractional-scale and
-  `preferred_buffer_scale` (wl_compositor v6) for their surface's primary output after
-  every frame (`update_surface_scales` from `post_render`), and before their first
-  configure (`send_initial_scale`). Xwayland stays at scale 1 (upscaled).
+  `preferred_buffer_scale` (wl_compositor v6) after every frame (`update_surface_scales`
+  from `post_render`), and before their first configure (`send_initial_scale`). A
+  window's scale is that of `Pila::window_output`, the output holding most of its
+  geometry: Smithay's per-frame primary output flips for a window straddling two
+  outputs of different refresh rates, and a client told a new scale every frame
+  redraws forever. Layer and lock surfaces use their own output. Xwayland stays at scale 1 (upscaled).
 - **Screen capture** (`capture.rs`, ext-image-capture-source + ext-image-copy-capture, on
   the `wayland-protocols` bindings): sources are an output or a window (by its
   foreign-toplevel identifier). Sessions live in `Pila::captures`; frames are rendered
@@ -358,7 +361,8 @@ Key flows and invariants:
   move/resize/center go through `apply_rect`, which also configures X11 windows.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
-  the window's user data (`RestoreGeometry`) and restores it on exit.
+  the window's user data (`RestoreGeometry`) and restores it on exit; a window that
+  started filled (no saved geometry) is restored to two thirds of its output, centered.
 - **Decorations** (`decoration.rs`): pila prefers server-side and honors client requests
   (`handlers/xdg_shell.rs`); clients that don't bind xdg-decoration (GTK, weston) draw
   their own. A decorated window's `Space` location is still its geometry origin; the title

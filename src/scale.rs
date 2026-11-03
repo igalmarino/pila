@@ -4,8 +4,11 @@
 //! fractional. pila renders every output at its own scale (`render.rs` takes
 //! it from the output), so a window spanning two outputs is drawn at each
 //! one's scale. Clients learn the scale to draw at in three ways, all kept to
-//! the surface's *primary* output (the one showing most of it, recorded after
-//! each frame by `frame::update_primary_outputs`):
+//! one output per surface: for a window, the output holding most of its
+//! geometry (`Pila::window_output`, decided by pila so it doesn't flip
+//! between frames: a client told a new scale every frame redraws forever);
+//! for other surfaces (layer surfaces, the lock screen) their own output, or
+//! the primary output recorded by `frame::update_primary_outputs`:
 //!
 //! - `wp_fractional_scale_v1.preferred_scale` (exact, for clients that use
 //!   viewporter to draw at fractional scales);
@@ -81,9 +84,28 @@ impl Pila {
         }
         let root = self.popup_root(&root).unwrap_or(root);
         if let Some(window) = self.window_for_surface(&root) {
-            return self.space.outputs_for_element(&window).first().cloned();
+            return self.window_output(&window);
         }
         self.layer_for_surface(&root).map(|(output, _)| output)
+    }
+
+    /// The output a mapped window draws for: the one its geometry overlaps
+    /// most (shadows of client-side decorations don't count), the first of
+    /// equal ones. `None` if it's not mapped or on no output.
+    pub fn window_output(&self, window: &smithay::desktop::Window) -> Option<Output> {
+        let geo = self.space.element_geometry(window)?;
+        self.space
+            .outputs()
+            .filter_map(|output| {
+                let area = self.space.output_geometry(output)?.intersection(geo)?;
+                Some((output, area.size.w as i64 * area.size.h as i64))
+            })
+            .filter(|(_, area)| *area > 0)
+            .fold(None::<(&Output, i64)>, |best, (output, area)| match best {
+                Some((_, best_area)) if best_area >= area => best,
+                _ => Some((output, area)),
+            })
+            .map(|(output, _)| output.clone())
     }
 
     /// The output a new toplevel will be mapped on (`place_new_window`
@@ -116,8 +138,9 @@ impl Pila {
             if window.x11_surface().is_some() {
                 continue;
             }
-            if self.space.outputs_for_element(window).contains(output) {
-                window.with_surfaces(update);
+            // One output per window, whatever the render states say.
+            if self.window_output(window).as_ref() == Some(output) {
+                window.with_surfaces(|surface, states| apply(surface, states, output));
             }
         }
         for layer in layer_map_for_output(output).layers() {

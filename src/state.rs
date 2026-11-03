@@ -856,25 +856,24 @@ impl Pila {
                 self.space.map_element(window.clone(), output_geo.loc, true);
             }
         } else {
-            let saved = restore.borrow_mut().take();
+            // The saved geometry, or (if the window started out filled, as
+            // a terminal configured to open maximized) two thirds of its
+            // output, centered: left where it was, at a size of its own
+            // choosing, it could end up in a corner straddling two outputs.
+            let saved = restore.borrow_mut().take().or_else(|| {
+                self.output_geometry_for_window(window, true).map(|area| {
+                    let size = (area.size.w * 2 / 3, area.size.h * 2 / 3).into();
+                    let bar = decoration::layout_offset(window, false);
+                    Rectangle::new(centered_location(area, size, bar), size)
+                })
+            });
             if let Some(toplevel) = toplevel {
                 toplevel.with_pending_state(|state| {
                     state.states.unset(xdg_toplevel::State::Maximized);
                     state.states.unset(xdg_toplevel::State::Fullscreen);
-                    // None lets the client pick its own size.
                     state.size = saved.map(|r| r.size);
                 });
             }
-            // X11 windows need a size: the saved one, or (if the window
-            // started out filled) two thirds of its output, centered.
-            let saved = match (saved, x11) {
-                (None, Some(_)) => self.output_geometry_for_window(window, true).map(|area| {
-                    let size = (area.size.w * 2 / 3, area.size.h * 2 / 3).into();
-                    let bar = decoration::layout_offset(window, false);
-                    Rectangle::new(centered_location(area, size, bar), size)
-                }),
-                (saved, _) => saved,
-            };
             if let Some(x11) = x11 {
                 let _ = x11.set_maximized(false);
                 let _ = x11.set_fullscreen(false);
