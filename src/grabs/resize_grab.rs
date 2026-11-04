@@ -226,26 +226,9 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
         // End the grab when the button that started it is released
         // (left for client moves, left or right for modifier drags).
         if !handle.current_pressed().contains(&self.start_data.button) {
-            // No more buttons are pressed, release the grab.
+            // No more buttons are pressed, release the grab (`unset` ends
+            // the resize).
             handle.unset_grab(self, data, event.serial, event.time, true);
-
-            // X11 windows already have their final geometry.
-            let Some(xdg) = self.window.toplevel() else {
-                return;
-            };
-            xdg.with_pending_state(|state| {
-                state.states.unset(xdg_toplevel::State::Resizing);
-                state.size = Some(self.last_window_size);
-            });
-
-            xdg.send_pending_configure();
-
-            ResizeSurfaceState::with(xdg.wl_surface(), |state| {
-                *state = ResizeSurfaceState::WaitingForLastCommit {
-                    edges: self.edges,
-                    initial_rect: self.initial_rect,
-                };
-            });
         }
     }
 
@@ -338,8 +321,29 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
         &self.start_data
     }
 
+    /// However the grab ends (button released, the session locked, another
+    /// grab taking over), the client is told the resize is over; otherwise
+    /// it would stay `Resizing`, and every later commit would be placed
+    /// from this resize's start.
     fn unset(&mut self, data: &mut Pila) {
         data.set_cursor(CursorImageStatus::default_named());
+
+        // X11 windows already have their final geometry.
+        let Some(xdg) = self.window.toplevel().filter(|t| t.alive()) else {
+            return;
+        };
+        xdg.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Resizing);
+            state.size = Some(self.last_window_size);
+        });
+        xdg.send_pending_configure();
+
+        ResizeSurfaceState::with(xdg.wl_surface(), |state| {
+            *state = ResizeSurfaceState::WaitingForLastCommit {
+                edges: self.edges,
+                initial_rect: self.initial_rect,
+            };
+        });
     }
 }
 
