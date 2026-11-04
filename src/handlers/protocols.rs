@@ -5,9 +5,9 @@
 use smithay::{
     delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
     delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
-    delegate_presentation, delegate_relative_pointer, delegate_single_pixel_buffer,
-    delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_foreign,
-    delegate_xdg_toplevel_icon,
+    delegate_presentation, delegate_relative_pointer, delegate_security_context,
+    delegate_single_pixel_buffer, delegate_viewporter, delegate_virtual_keyboard_manager,
+    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
     reexports::{
         calloop::LoopHandle,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -25,6 +25,10 @@ use smithay::{
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
         relative_pointer::RelativePointerManagerState,
+        security_context::{
+            SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
+            SecurityContextState,
+        },
         selection::{ext_data_control, primary_selection::PrimarySelectionState},
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
@@ -34,7 +38,14 @@ use smithay::{
     },
 };
 
-use crate::Pila;
+use std::sync::Arc;
+
+use tracing::{info, warn};
+
+use crate::{
+    state::{is_privileged, ClientState},
+    Pila,
+};
 
 /// Protocol state that handlers need to hand back to Smithay.
 pub struct Globals {
@@ -63,7 +74,7 @@ pub fn init_globals(
     // clipboard history, type into the focused client. Smithay feeds the keys
     // straight to the focused wl_keyboard, so they bypass pila's bindings,
     // `suppressed_keys` and idle activity, as on wlroots.
-    VirtualKeyboardManagerState::new::<Pila, _>(dh, |_| true);
+    VirtualKeyboardManagerState::new::<Pila, _>(dh, is_privileged);
     // Its handler is in `pointer_constraints.rs`.
     PointerConstraintsState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
@@ -72,17 +83,21 @@ pub fn init_globals(
     // Its handler is in `bell.rs`.
     crate::bell::init_global(dh);
     crate::blur::init_global(dh);
+    // Sandboxes (Flatpak) connect their apps through it; they can't make
+    // contexts of their own.
+    SecurityContextState::new::<Pila, _>(dh, is_privileged);
 
     Globals {
         xdg_foreign: XdgForeignState::new::<Pila>(dh),
-        foreign_toplevel_list: ForeignToplevelListState::new::<Pila>(dh),
+        // Every window's title and app id: not for sandboxed apps.
+        foreign_toplevel_list: ForeignToplevelListState::new_with_filter::<Pila>(dh, is_privileged),
         keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Pila>(dh),
         idle_notifier: IdleNotifierState::new(dh, loop_handle.clone()),
-        // Clipboard managers and wl-clipboard; any client may use it.
+        // Clipboard managers and wl-clipboard; any unsandboxed client.
         ext_data_control: ext_data_control::DataControlState::new::<Pila, _>(
             dh,
             Some(primary_selection),
-            |_| true,
+            is_privileged,
         ),
     }
 }
@@ -162,3 +177,34 @@ impl KeyboardShortcutsInhibitHandler for Pila {
     }
 }
 delegate_keyboard_shortcuts_inhibit!(Pila);
+
+// wp_security_context_manager_v1: a sandbox (Flatpak) hands pila a socket
+// for its app; clients connecting through it are marked (`ClientState`) and
+// don't see the privileged globals (`state::is_privileged`).
+impl SecurityContextHandler for Pila {
+    fn context_created(&mut self, source: SecurityContextListenerSource, context: SecurityContext) {
+        info!(
+            engine = ?context.sandbox_engine,
+            app_id = ?context.app_id,
+            "security context created"
+        );
+        let inserted = self
+            .loop_handle
+            .insert_source(source, move |stream, _, state| {
+                let client_state = ClientState {
+                    security_context: Some(context.clone()),
+                    ..Default::default()
+                };
+                if let Err(err) = state
+                    .display_handle
+                    .insert_client(stream, Arc::new(client_state))
+                {
+                    warn!(?err, "failed to insert a sandboxed client");
+                }
+            });
+        if let Err(err) = inserted {
+            warn!(?err, "failed to listen on a security context");
+        }
+    }
+}
+delegate_security_context!(Pila);

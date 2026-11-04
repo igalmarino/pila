@@ -24,8 +24,8 @@
 //! Buffers may be shm (read back from an offscreen texture, rows reversed:
 //! GL reads bottom-up) or dma-buf on the renderer's device (rendered into
 //! directly; what xdg-desktop-portal-wlr uses for PipeWire). Cursor
-//! sessions are created stopped. Any client may capture, as with other
-//! compositors.
+//! sessions are created stopped. Any client but a sandboxed one
+//! (`state::is_privileged`) may capture, as with other compositors.
 
 use std::{sync::Mutex, time::Duration};
 
@@ -584,6 +584,11 @@ impl GlobalDispatch<ExtOutputImageCaptureSourceManagerV1, ()> for Pila {
     ) {
         data_init.init(resource, ());
     }
+
+    // Not for sandboxed apps (`state::is_privileged`).
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::state::is_privileged(&client)
+    }
 }
 
 impl GlobalDispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()> for Pila {
@@ -597,6 +602,11 @@ impl GlobalDispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()> for Pila 
     ) {
         data_init.init(resource, ());
     }
+
+    // Not for sandboxed apps (`state::is_privileged`).
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::state::is_privileged(&client)
+    }
 }
 
 impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
@@ -609,6 +619,11 @@ impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
         data_init: &mut DataInit<'_, Self>,
     ) {
         data_init.init(resource, ());
+    }
+
+    // Not for sandboxed apps (`state::is_privileged`).
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::state::is_privileged(&client)
     }
 }
 

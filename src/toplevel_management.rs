@@ -303,6 +303,11 @@ impl GlobalDispatch<ZwlrForeignToplevelManagerV1, ()> for Pila {
         state.toplevel_management.managers.push(manager);
         state.refresh_toplevels();
     }
+
+    // Not for sandboxed apps (`state::is_privileged`).
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::state::is_privileged(&client)
+    }
 }
 
 impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Pila {

@@ -486,6 +486,11 @@ impl GlobalDispatch<ZwlrOutputManagerV1, ()> for Pila {
         manager.done(om.serial);
         om.managers.insert(manager, client);
     }
+
+    // Not for sandboxed apps (`state::is_privileged`).
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::state::is_privileged(&client)
+    }
 }
 
 impl Dispatch<ZwlrOutputManagerV1, ()> for Pila {

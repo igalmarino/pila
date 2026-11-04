@@ -120,6 +120,14 @@ Noctalia): `wlr-layer-shell`, `wlr-screencopy`, `wlr-foreign-toplevel-management
 added, even if Smithay implements them. Features with no protocol at all go through
 pila's own config/IPC.
 
+Privileged protocols are hidden from sandboxed apps: a client that connected through
+wp-security-context (Flatpak) fails `state::is_privileged` (`ClientState::security_context`;
+Xwayland counts as privileged). Smithay globals take it as their filter, pila's own as
+`GlobalDispatch::can_view`. It covers layer-shell, session lock, ext-data-control,
+virtual-keyboard, ext-foreign-toplevel-list, screen capture (both protocols), toplevel
+management, gamma, output management and power, and security-context itself. A new
+global that exposes or controls other clients, input or outputs must get it too.
+
 ## Architecture
 
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),

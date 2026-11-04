@@ -32,7 +32,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
-            Display, DisplayHandle, Resource,
+            Client, Display, DisplayHandle, Resource,
         },
     },
     utils::{Clock, Logical, Monotonic, Point, Rectangle, Serial},
@@ -43,6 +43,7 @@ use smithay::{
         output::OutputManagerState,
         presentation::PresentationState,
         seat::WaylandFocus,
+        security_context::SecurityContext,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::SessionLockManagerState,
         shell::{
@@ -54,7 +55,7 @@ use smithay::{
         xdg_activation::XdgActivationState,
         xwayland_shell::XWaylandShellState,
     },
-    xwayland::X11Wm,
+    xwayland::{X11Wm, XWaylandClientData},
 };
 use tracing::{debug, info, warn};
 
@@ -216,7 +217,7 @@ impl Pila {
 
         let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new_with_filter::<Self, _>(&dh, is_privileged);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -235,7 +236,7 @@ impl Pila {
         crate::gamma_control::init_global(&dh);
         crate::output_power::init_global(&dh);
         crate::output_management::init_global(&dh);
-        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, is_privileged);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
 
@@ -1377,6 +1378,23 @@ pub fn has_buffer(surface: &WlSurface) -> bool {
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Set for a client that connected through a security context
+    /// (`handlers/protocols.rs`): a sandboxed app (Flatpak).
+    pub security_context: Option<SecurityContext>,
+}
+
+/// Whether `client` may use the privileged protocols (capturing the
+/// screen, reading the clipboard, typing for others, locking, panels and
+/// the like): any client but a sandboxed one, i.e. one that connected
+/// through a security context. Xwayland is trusted (X11 has no such
+/// boundary anyway).
+pub fn is_privileged(client: &Client) -> bool {
+    if client.get_data::<XWaylandClientData>().is_some() {
+        return true;
+    }
+    client
+        .get_data::<ClientState>()
+        .is_some_and(|state| state.security_context.is_none())
 }
 
 impl ClientData for ClientState {
