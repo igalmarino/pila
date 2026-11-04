@@ -474,8 +474,10 @@ impl GlobalDispatch<ZwlrOutputManagerV1, ()> for Pila {
         data_init: &mut DataInit<'_, Self>,
     ) {
         let manager = data_init.init(resource, ());
-        // The snapshot may be stale if nothing refreshed it yet.
-        state.output_management.heads = state.output_heads();
+        // The snapshot may be stale if nothing refreshed it yet; refreshing
+        // it also tells the other managers what changed (and starts a new
+        // serial) before this one is shown it.
+        state.refresh_output_heads();
         let om = &mut state.output_management;
         let mut client = ClientHeads {
             heads: HashMap::new(),
