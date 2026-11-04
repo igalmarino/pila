@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Minimize or unminimize every window, as a taskbar would: a minimal
+wlr-foreign-toplevel-management client (standard library only), for
+scripted tests such as scripts/tty-perf. Run it inside pila (it uses
+WAYLAND_DISPLAY).
+
+    scripts/toplevel-action min|unmin
+"""
+import os
+import socket
+import struct
+import sys
+
+if len(sys.argv) != 2 or sys.argv[1] not in ("min", "unmin"):
+    sys.exit(__doc__)
+action = sys.argv[1]
+path = os.path.join(os.environ["XDG_RUNTIME_DIR"], os.environ["WAYLAND_DISPLAY"])
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(path)
+
+
+def send(obj, opcode, payload=b""):
+    sock.sendall(struct.pack("<II", obj, ((8 + len(payload)) << 16) | opcode) + payload)
+
+
+def string(s):
+    data = s.encode() + b"\0"
+    pad = (4 - len(data) % 4) % 4
+    return struct.pack("<I", len(data)) + data + b"\0" * pad
+
+
+buf = b""
+
+
+def events():
+    """The events the compositor sends, as (object, opcode, body)."""
+    global buf
+    while True:
+        while len(buf) >= 8:
+            obj, word = struct.unpack("<II", buf[:8])
+            size, opcode = word >> 16, word & 0xFFFF
+            if len(buf) < size:
+                break
+            body, buf = buf[8:size], buf[size:]
+            yield obj, opcode, body
+        data = sock.recv(65536)
+        if not data:
+            return
+        buf += data
+
+
+DISPLAY, REGISTRY = 1, 2
+send(DISPLAY, 1, struct.pack("<I", REGISTRY))  # get_registry
+send(DISPLAY, 0, struct.pack("<I", 3))  # sync -> callback 3
+manager_name = None
+for obj, op, body in events():
+    if obj == REGISTRY and op == 0:
+        name, = struct.unpack("<I", body[:4])
+        length, = struct.unpack("<I", body[4:8])
+        iface = body[8:8 + length - 1].decode()
+        if iface == "zwlr_foreign_toplevel_manager_v1":
+            manager_name = name
+    if obj == 3:
+        break
+if manager_name is None:
+    sys.exit("no zwlr_foreign_toplevel_manager_v1")
+
+MANAGER = 4
+send(REGISTRY, 0, struct.pack("<I", manager_name) + string("zwlr_foreign_toplevel_manager_v1")
+     + struct.pack("<II", 3, MANAGER))
+send(DISPLAY, 0, struct.pack("<I", 5))
+handles = []
+for obj, op, body in events():
+    if obj == MANAGER and op == 0:
+        handles.append(struct.unpack("<I", body[:4])[0])
+    if obj == 5:
+        break
+
+opcode = {"min": 2, "unmin": 3}[action]
+for handle in handles:
+    send(handle, opcode)
+send(DISPLAY, 0, struct.pack("<I", 6))
+for obj, op, body in events():
+    if obj == 6:
+        break
+print(f"{action}: {len(handles)} toplevel(s)")

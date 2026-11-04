@@ -37,7 +37,8 @@ impl Pila {
             return false;
         };
         leave_space(window, self.workspaces.active, loc);
-        self.forget_animations(window);
+        // Snapshot taken while it's still mapped.
+        self.animate_minimize(window);
         self.space.unmap_elem(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
@@ -62,6 +63,7 @@ impl Pila {
         }
         // Back on screen even if its output went away meanwhile.
         self.fixup_windows();
+        self.animate_restore(window);
         self.x11_window_moved(window);
         self.queue_redraw();
     }

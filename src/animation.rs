@@ -121,22 +121,43 @@ pub fn center(rect: Rectangle<i32, Logical>) -> Point<f64, Logical> {
     rect.loc + rect.size.downscale(2.0).to_point()
 }
 
+/// How a window comes and goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Opening and closing: it grows in from a little smaller.
+    Open,
+    /// Minimizing and restoring: smaller still, and a little lower, as if
+    /// put away towards the bottom of the screen.
+    Minimize,
+}
+
 /// How much smaller a window is when it starts to open or ends closing.
 const OPEN_SCALE: f64 = 0.95;
+/// How much smaller a minimized window ends up, and how far it drops
+/// (logical pixels).
+const MINIMIZE_SCALE: f64 = 0.9;
+const MINIMIZE_DROP: f64 = 48.0;
 
-/// The look of a window that is `visibility` (0: gone, 1: fully there) of
-/// the way in.
-fn appear_transform(visibility: f64) -> Transform {
-    Transform {
-        alpha: visibility.clamp(0.0, 1.0) as f32,
-        scale: OPEN_SCALE + (1.0 - OPEN_SCALE) * visibility,
-        offset: Point::default(),
+impl Style {
+    /// The look of a window that is `visibility` (0: gone, 1: fully there)
+    /// of the way in.
+    fn transform(self, visibility: f64) -> Transform {
+        let (scale, drop) = match self {
+            Style::Open => (OPEN_SCALE, 0.0),
+            Style::Minimize => (MINIMIZE_SCALE, MINIMIZE_DROP),
+        };
+        Transform {
+            alpha: visibility.clamp(0.0, 1.0) as f32,
+            scale: scale + (1.0 - scale) * visibility,
+            offset: (0.0, drop * (1.0 - visibility)).into(),
+        }
     }
 }
 
 /// A live window's animation: how visible it is.
 struct Appearing {
     window: Window,
+    style: Style,
     visibility: Animation,
 }
 
@@ -147,6 +168,7 @@ pub struct Ghost {
     pub snapshot: Snapshot,
     /// The window just in front of it when it went (`None`: it was in front).
     above: Option<Window>,
+    style: Style,
     visibility: Animation,
 }
 
@@ -238,28 +260,45 @@ impl Pila {
         self.config.animations.duration(kind)
     }
 
-    /// How visible `window` is now, if it's appearing.
+    /// How visible `window` is now, if it's appearing or fading out.
     fn visibility(&self, window: &Window, now: Duration) -> Option<f64> {
-        self.animations
+        let appearing = self
+            .animations
             .appearing
             .iter()
-            .find(|a| a.window == *window)
+            .find(|a| a.window == *window);
+        let ghost = self.animations.ghosts.iter().find(|g| g.window == *window);
+        appearing
             .map(|a| a.visibility.value(now))
+            .or_else(|| ghost.map(|g| g.visibility.value(now)))
     }
 
     /// `window` was just mapped: fade it in.
     pub fn animate_open(&mut self, window: &Window) {
+        self.appear(window, AnimationKind::WindowOpen, Style::Open);
+    }
+
+    /// A minimized `window` was just put back: the reverse of minimizing.
+    pub fn animate_restore(&mut self, window: &Window) {
+        self.appear(window, AnimationKind::Minimize, Style::Minimize);
+    }
+
+    /// Fade the just mapped `window` in, from wherever an animation in
+    /// progress (e.g. a minimize being undone) left it.
+    fn appear(&mut self, window: &Window, kind: AnimationKind, style: Style) {
+        let now = self.animation_time();
+        let from = self.visibility(window, now).unwrap_or(0.0);
+        self.forget_animations(window);
+        self.animations.ghosts.retain(|g| g.window != *window);
         if crate::workspaces::is_override_redirect(window) {
             return;
         }
-        let Some(duration) = self.animation_duration(AnimationKind::WindowOpen) else {
+        let Some(duration) = self.animation_duration(kind) else {
             return;
         };
-        let now = self.animation_time();
-        let from = self.visibility(window, now).unwrap_or(0.0);
-        self.animations.appearing.retain(|a| a.window != *window);
         self.animations.appearing.push(Appearing {
             window: window.clone(),
+            style,
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 1.0),
         });
         self.queue_redraw();
@@ -275,15 +314,42 @@ impl Pila {
 
     /// `animate_close`, with the snapshot's surfaces taken from `surfaces`.
     fn animate_close_from(&mut self, window: &Window, surfaces: Surfaces) {
-        if crate::workspaces::is_override_redirect(window) || self.is_ghost(window) {
+        if self.is_ghost(window) {
             return;
         }
-        let Some(duration) = self.animation_duration(AnimationKind::WindowClose) else {
-            return;
-        };
+        self.disappear(window, surfaces, AnimationKind::WindowClose, Style::Open);
+    }
+
+    /// `window` is about to be minimized: it shrinks away. Call while it's
+    /// still mapped.
+    pub fn animate_minimize(&mut self, window: &Window) {
+        self.disappear(
+            window,
+            Surfaces::Tree,
+            AnimationKind::Minimize,
+            Style::Minimize,
+        );
+    }
+
+    /// Show a snapshot of the still mapped `window` fading out where it is,
+    /// from wherever an animation in progress left it.
+    fn disappear(
+        &mut self,
+        window: &Window,
+        surfaces: Surfaces,
+        kind: AnimationKind,
+        style: Style,
+    ) {
         let now = self.animation_time();
         let from = self.visibility(window, now).unwrap_or(1.0);
         self.forget_animations(window);
+        self.animations.ghosts.retain(|g| g.window != *window);
+        if crate::workspaces::is_override_redirect(window) {
+            return;
+        }
+        let Some(duration) = self.animation_duration(kind) else {
+            return;
+        };
         let Some(snapshot) = self.snapshot(window, surfaces) else {
             return;
         };
@@ -296,6 +362,7 @@ impl Pila {
             window: window.clone(),
             snapshot,
             above,
+            style,
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 0.0),
         });
         self.queue_redraw();
@@ -340,12 +407,16 @@ impl Pila {
 
     /// How `window` is drawn this frame, if it's animating.
     pub fn window_effect(&self, window: &Window, now: Duration) -> Option<WindowEffect> {
-        let visibility = self.visibility(window, now)?;
+        let appearing = self
+            .animations
+            .appearing
+            .iter()
+            .find(|a| a.window == *window)?;
         let geo = self.space.element_geometry(window)?;
         let bar = crate::decoration::title_bar_rect(window, geo.loc);
         let rect = bar.map_or(geo, |bar| bar.merge(geo));
         Some(WindowEffect {
-            transform: appear_transform(visibility),
+            transform: appearing.style.transform(appearing.visibility.value(now)),
             center: center(rect),
             output: self.window_output(window),
         })
@@ -365,7 +436,7 @@ impl Pila {
                 SceneGhost {
                     snapshot: ghost.snapshot.clone(),
                     before,
-                    transform: appear_transform(ghost.visibility.value(now)),
+                    transform: ghost.style.transform(ghost.visibility.value(now)),
                 }
             })
             .collect()
@@ -471,12 +542,26 @@ mod tests {
     }
 
     #[test]
-    fn appearing_windows_grow_and_fade_in() {
-        let gone = appear_transform(0.0);
+    fn windows_grow_and_fade_in() {
+        let gone = Style::Open.transform(0.0);
         assert_eq!(gone.alpha, 0.0);
         assert_eq!(gone.scale, OPEN_SCALE);
-        let there = appear_transform(1.0);
-        assert_eq!(there.alpha, 1.0);
-        assert_eq!(there.scale, 1.0);
+        assert_eq!(gone.offset, Point::default());
+        for style in [Style::Open, Style::Minimize] {
+            let there = style.transform(1.0);
+            assert_eq!(there.alpha, 1.0);
+            assert_eq!(there.scale, 1.0);
+            assert_eq!(there.offset, Point::default());
+        }
+    }
+
+    #[test]
+    fn minimized_windows_shrink_further_and_drop() {
+        let gone = Style::Minimize.transform(0.0);
+        assert_eq!(gone.scale, MINIMIZE_SCALE);
+        assert!(gone.scale < Style::Open.transform(0.0).scale);
+        assert_eq!(gone.offset, (0.0, MINIMIZE_DROP).into());
+        let half = Style::Minimize.transform(0.5);
+        assert_eq!(half.offset, (0.0, MINIMIZE_DROP / 2.0).into());
     }
 }

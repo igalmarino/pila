@@ -333,8 +333,12 @@ Key flows and invariants:
 - **Animations** (`animation.rs`, `[animations]` in the config:
   `config::AnimationsConfig`, all on by default, each with an `enabled`/`duration`, plus
   a global `enabled` and `speed`): short and subtle. So far a window fades and grows in
-  when mapped (`animate_open` from `place_new_window`; not X11 override-redirect) and
-  fades and shrinks out when it goes (`animate_close`). Values come from `Animation`
+  when mapped (`animate_open` from `place_new_window`; not X11 override-redirect),
+  fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
+  when minimized (`animate_minimize` from `hide_window`, before the unmap) and back when
+  restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`) gives
+  each its look. A new animation of a window starts from where one in progress left it
+  (`appear`/`disappear`; Mod+Tab previews of minimized windows toggle quickly). Values come from `Animation`
   (from/to over a duration on `Pila::clock`, one time per `scene()`). An animating
   window's `SceneWindow::effect` makes `render.rs` draw it (bar, popups, corners
   included) into a per-window, per-scale texture (`OffscreenWindow` in its
@@ -347,8 +351,10 @@ Key flows and invariants:
   (pre-commit hook; most clients unmap before destroying) and the surface's destruction
   (a dead client: a destruction hook added before Smithay's, which drops the textures,
   so only the main surface is drawn, `Surfaces::MainOnly`, the tree being gone); X11
-  windows are taken in `unmapped_window`. Windows leaving the space otherwise (minimize,
-  workspaces) drop their animation (`forget_animations`). `step_animations` (from
+  windows are taken in `unmapped_window`. Windows leaving the space otherwise
+  (workspaces) drop their animation (`forget_animations`). `scripts/toplevel-action`
+  (a stdlib Python taskbar client) minimizes/unminimizes for scripted tests; `wtype`
+  can't, the virtual keyboard bypasses bindings. `step_animations` (from
   `after_frames`) prunes finished ones and requests the next frame; locking drops all.
   Animations are visual only: input sees the real geometry.
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
