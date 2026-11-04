@@ -200,7 +200,11 @@ Key flows and invariants:
   overlap when it comes back. `apply_internal_display` applies it (with a
   never-zero-outputs fallback) at the end of `scan_connectors`, in
   `connector_disconnected` before the gone output is unmapped (so its windows move
-  onto the built-in screen); config reloads go through `apply_output_config`. There's
+  onto the built-in screen); config reloads (of `[[output]]` or of this key) and
+  wlr-output-management go through `apply_output_config`, which enables outputs before
+  disabling any, decides held built-in screens last and keeps the same fallback
+  (`others_enabled`, `keep_on`); a changed rule clears built-in screens' `enabled`
+  overrides, which display tools set for every head. There's
   no lid handling: a clamshell mode was tried and dropped, since logind suspends a
   closed laptop while no external output is on (e.g. between sessions).
   `fullscreen_request` honors the requested output for mapped windows

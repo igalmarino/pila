@@ -798,12 +798,29 @@ pub fn apply_output_config(state: &mut Pila) {
         .collect();
 
     // Enabling and disabling first: they change what the space holds.
+    // Enabling goes first, so a built-in screen is only turned off for an
+    // external one that actually came on.
     for (crtc, config) in &configs {
-        let enabled = config.enabled.unwrap_or(true);
-        if enabled {
+        if config.enabled.unwrap_or(true) {
             enable_output(state, *crtc);
-        } else {
+        }
+    }
+    // Then the others, and the built-in screens held by the rule last, once
+    // it's known whether anything else is still on.
+    let off: Vec<crtc::Handle> = configs
+        .iter()
+        .filter(|(_, config)| !config.enabled.unwrap_or(true))
+        .map(|(crtc, _)| *crtc)
+        .collect();
+    for crtc in off.iter().filter(|crtc| !held.contains(crtc)) {
+        disable_output(state, *crtc);
+    }
+    for crtc in off.iter().filter(|crtc| held.contains(crtc)) {
+        if others_enabled(state, &held) {
             disable_output(state, *crtc);
+        } else {
+            // Never leave no output on (as `apply_internal_display`).
+            keep_on(state, *crtc);
         }
     }
 
@@ -891,6 +908,40 @@ pub fn apply_output_config(state: &mut Pila) {
     }
     for (output, loc) in placed {
         state.space.map_output(&output, loc);
+    }
+}
+
+/// Whether an output other than `held` (built-in screens off by
+/// `disable-internal-display`) is on.
+fn others_enabled(state: &Pila, held: &[crtc::Handle]) -> bool {
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return false;
+    };
+    data.outputs
+        .iter()
+        .any(|(crtc, s)| s.enabled && !held.contains(crtc))
+}
+
+/// Keep the built-in screen on `crtc` on (or turn it back on) because no
+/// other output is.
+fn keep_on(state: &mut Pila, crtc: crtc::Handle) {
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return;
+    };
+    let Some(surface) = data.outputs.get(&crtc) else {
+        return;
+    };
+    if surface.enabled {
+        return;
+    }
+    let name = surface.output.name();
+    if enable_output(state, crtc) {
+        warn!(name, "no external monitor is on: built-in screen kept on");
+    } else {
+        warn!(
+            name,
+            "no external monitor is on, and the built-in screen failed to come on"
+        );
     }
 }
 
@@ -1200,7 +1251,7 @@ fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
 }
 
 /// A laptop's built-in screen, by its connector type.
-fn is_internal(name: &str) -> bool {
+pub fn is_internal(name: &str) -> bool {
     ["eDP-", "LVDS-", "DSI-"]
         .iter()
         .any(|prefix| name.starts_with(prefix))
