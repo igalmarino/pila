@@ -29,7 +29,8 @@ impl WlrLayerShellHandler for Pila {
         layer: Layer,
         namespace: String,
     ) {
-        // The requested output, else the one under the pointer.
+        // The requested output if it's in use (a client may still hold the
+        // wl_output of one that was disabled), else the one under the pointer.
         let pointer = self
             .seat
             .get_pointer()
@@ -38,6 +39,7 @@ impl WlrLayerShellHandler for Pila {
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
+            .filter(|output| self.space.outputs().any(|o| o == output))
             .or_else(|| self.output_at(pointer));
         let Some(output) = output else {
             // Nowhere to show it; the client is told to destroy it.
