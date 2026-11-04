@@ -279,7 +279,8 @@ Key flows and invariants:
   on a client's `wl_output` bind via `OutputHandler::output_bound`).
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
-  Background; a fullscreen window on top also covers Top (`layer_order`). All pointer
+  Background; a fullscreen window on top also covers Top (`layer_order`), unless a
+  mapped Top surface takes the keyboard exclusively (`takes_keyboard`). All pointer
   hit testing goes through `Pila::under` (layers and windows in that order; `window_under`
   is windows only), and `Pila::scene` renders the same order. Placement, maximize and
   toplevel bounds use `usable_geometry_at` (the output minus exclusive zones); fullscreen

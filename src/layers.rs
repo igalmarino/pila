@@ -3,7 +3,9 @@
 //! Layer surfaces live in each output's `LayerMap` (`layer_map_for_output`),
 //! not in the `Space`. Stacking, front to back: Overlay, Top, windows, Bottom,
 //! Background, except that a fullscreen window at the top of the stack also
-//! covers the Top layer (`Pila::layer_order`). Rendering and hit testing both
+//! covers the Top layer (`Pila::layer_order`), unless a Top surface takes the
+//! keyboard (a launcher: it's shown, and the rest of Top with it, while it's
+//! up). Rendering and hit testing both
 //! follow that order (`Pila::scene`, `Pila::under`).
 
 use smithay::{
@@ -22,18 +24,31 @@ use crate::{
     Pila,
 };
 
+/// Whether a layer surface is mapped and takes all keyboard input.
+fn takes_keyboard(layer: &LayerSurface) -> bool {
+    layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+        && has_buffer(layer.wl_surface())
+}
+
 /// Layers drawn above and below the windows, each front to back.
 pub type LayerOrder = (&'static [Layer], &'static [Layer]);
 
 impl Pila {
-    /// Which layers go above the windows and which below.
+    /// Which layers go above the windows and which below. A Top surface
+    /// that takes the keyboard (a launcher) stays above a fullscreen
+    /// window, so what gets the keys is shown.
     pub fn layer_order(&self) -> LayerOrder {
         let fullscreen_on_top = self
             .space
             .elements()
             .next_back()
             .is_some_and(|w| fill_state(w).1);
-        if fullscreen_on_top {
+        let exclusive_top = || {
+            self.layer_surfaces(&[Layer::Top])
+                .iter()
+                .any(|(layer, _)| takes_keyboard(layer))
+        };
+        if fullscreen_on_top && !exclusive_top() {
             (
                 &[Layer::Overlay],
                 &[Layer::Top, Layer::Bottom, Layer::Background],
@@ -97,10 +112,7 @@ impl Pila {
         self.layer_surfaces(&[Layer::Overlay, Layer::Top])
             .into_iter()
             .map(|(layer, _)| layer)
-            .find(|layer| {
-                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
-                    && has_buffer(layer.wl_surface())
-            })
+            .find(takes_keyboard)
     }
 
     /// Whether keyboard focus is on `surface` or one of its popups.
