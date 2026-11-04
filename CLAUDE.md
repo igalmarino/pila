@@ -234,7 +234,7 @@ Key flows and invariants:
 - **Minimize** (`minimize.rs`): a minimized window is unmapped from the `Space` and kept
   in `Pila::minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
   `window_for_surface`/`window_for_x11` search it too, and destroyed windows are removed
-  (`forget_minimized`). It comes back only through Mod+Tab: the switch order includes
+  (`forget_off_space`). It comes back only through Mod+Tab: the switch order includes
   minimized windows; a minimized pick is shown (`show_window`) while selected, hidden
   again (`hide_window`) when the switch moves on, and stays when the switch ends.
 - **Workspaces** (`workspaces.rs`, `config.workspaces` of them, spanning all outputs): the
