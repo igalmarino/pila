@@ -66,7 +66,7 @@ use crate::{
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
     handlers::protocols::{self, Globals},
     idle::IdleInhibitors,
-    render::{Scene, SceneLayer, SceneTitleBar, SceneWindow},
+    render::{FrameInput, Scene, SceneLayer, SceneTitleBar, SceneWindow},
     session_lock::SessionLock,
     switcher::Switch,
 };
@@ -409,6 +409,24 @@ impl Pila {
             decoration::border_edges(window, loc, pos)
                 .map(|edges| (window.clone(), Hit::Decoration(Decoration::Border(edges))))
         })
+    }
+
+    /// The scene and the cursor, for a frame or a capture (`render::FrameInput`).
+    pub fn frame_input(&self) -> FrameInput {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .map(|p| p.current_location())
+            .unwrap_or_default();
+        FrameInput {
+            scene: self.scene(),
+            pointer,
+            cursor_surface: crate::cursor::surface_position(&self.cursor_status, pointer),
+            named_cursor: match &self.cursor_status {
+                CursorImageStatus::Named(icon) => Some(*icon),
+                _ => None,
+            },
+        }
     }
 
     /// Layer surfaces and mapped windows front to back, with what's needed to

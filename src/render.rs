@@ -17,15 +17,18 @@ use smithay::{
             texture::TextureRenderElement,
             AsRenderElements, Kind,
         },
+        gles::GlesRenderer,
         ImportAll, ImportMem, Renderer, RendererSuper,
     },
     desktop::{LayerSurface, Window},
+    input::pointer::CursorIcon,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Physical, Point, Rectangle, Scale},
 };
 
 use crate::{
-    cursor::NamedCursor,
+    blur::BlurCache,
+    cursor::{CursorTheme, NamedCursor},
     decoration::{self, TitleBarPart},
 };
 
@@ -320,4 +323,70 @@ where
     )
     .map(|element| vec![PilaRenderElement::Memory(element)])
     .unwrap_or_default()
+}
+
+/// What drawing a frame needs from `Pila` (`Pila::frame_input`), taken
+/// before the backend's renderer is borrowed.
+pub struct FrameInput {
+    pub scene: Scene,
+    /// The pointer, in global logical coordinates.
+    pub pointer: Point<f64, Logical>,
+    /// The client cursor surface and its top-left (`cursor::surface_position`).
+    pub cursor_surface: Option<(WlSurface, Point<i32, Logical>)>,
+    /// The named cursor, for backends that draw it themselves.
+    pub named_cursor: Option<CursorIcon>,
+}
+
+impl FrameInput {
+    pub fn cursor_wl_surface(&self) -> Option<&WlSurface> {
+        self.cursor_surface.as_ref().map(|(surface, _)| surface)
+    }
+}
+
+/// The cursor's elements, relative to `origin`: the client's cursor surface,
+/// or the named cursor from `theme` (none without one: nested, the host draws it).
+pub fn pointer_elements(
+    renderer: &mut GlesRenderer,
+    input: &FrameInput,
+    theme: Option<&mut CursorTheme>,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement<GlesRenderer>> {
+    let mut elements = cursor_elements(renderer, input.cursor_surface.as_ref(), origin, scale);
+    if let (Some(icon), Some(theme)) = (input.named_cursor, theme) {
+        let image = theme.get(icon, crate::scale::buffer_scale(scale));
+        elements.extend(named_cursor_elements(
+            renderer,
+            &image,
+            input.pointer,
+            origin,
+            scale,
+        ));
+    }
+    elements
+}
+
+/// The scene's elements on the output `output_name` at `output_geo`,
+/// relative to `origin` (the output's top-left, or a region's), with the
+/// blurred backdrops prepared for that output first.
+pub fn output_elements(
+    renderer: &mut GlesRenderer,
+    blur: &mut BlurCache,
+    scene: &Scene,
+    output_name: &str,
+    output_geo: Rectangle<i32, Logical>,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement<GlesRenderer>> {
+    blur.prepare(
+        renderer,
+        scene,
+        output_name,
+        output_geo.loc,
+        output_geo.size,
+        scale,
+    );
+    scene_elements(renderer, scene, origin, scale, &mut |i| {
+        blur.element(i, scale)
+    })
 }

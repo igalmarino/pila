@@ -13,11 +13,10 @@
 //! frame (`Pila::post_render`). A region is in the output's logical
 //! coordinates, copied at the output's scale.
 
-use std::{sync::Mutex, time::Duration};
+use std::sync::Mutex;
 
 use smithay::{
     backend::renderer::{buffer_type, damage::OutputDamageTracker, gles::GlesRenderer, BufferType},
-    input::pointer::CursorImageStatus,
     output::{Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::screencopy::v1::server::{
@@ -38,7 +37,6 @@ use tracing::{debug, warn};
 
 use crate::{
     capture::{self, CopyError},
-    cursor,
     render::{self, PilaRenderElement},
     scale::output_scale,
     Pila,
@@ -218,20 +216,10 @@ impl Pila {
         }
 
         // Everything taken from `self` before borrowing the renderer.
-        let scene = self.scene();
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
-        let cursor_surface = cursor::surface_position(&self.cursor_status, pointer);
-        let named_cursor = match &self.cursor_status {
-            CursorImageStatus::Named(icon) => Some(*icon),
-            _ => None,
-        };
+        let input = self.frame_input();
         let origin = geo.loc + region.loc;
         let scale = output_scale(&output);
-        let clear = render::clear_color(&scene);
+        let clear = render::clear_color(&input.scene);
 
         let Pila { backend, blur, .. } = self;
         let Some(backend) = backend.as_mut() else {
@@ -239,28 +227,18 @@ impl Pila {
             return true;
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
-        blur.prepare(renderer, &scene, &output.name(), geo.loc, geo.size, scale);
         let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
         if overlay_cursor {
-            elements.extend(render::cursor_elements(
-                renderer,
-                cursor_surface.as_ref(),
-                origin,
-                scale,
-            ));
-            if let (Some(icon), Some(theme)) = (named_cursor, cursor_theme) {
-                let image = theme.get(icon, crate::scale::buffer_scale(scale));
-                elements.extend(render::named_cursor_elements(
-                    renderer, &image, pointer, origin, scale,
-                ));
-            }
+            elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
         }
-        elements.extend(render::scene_elements(
+        elements.extend(render::output_elements(
             renderer,
-            &scene,
+            blur,
+            &input.scene,
+            &output.name(),
+            geo,
             origin,
             scale,
-            &mut |i| blur.element(i, scale),
         ));
 
         let mut damage = Vec::new();
@@ -307,9 +285,8 @@ impl Pila {
                 rect.size.h as u32,
             );
         }
-        let time: Duration = self.clock.now().into();
-        let secs = time.as_secs();
-        frame.ready((secs >> 32) as u32, secs as u32, time.subsec_nanos());
+        let (hi, lo, nanos) = capture::split_timestamp(self.clock.now().into());
+        frame.ready(hi, lo, nanos);
         true
     }
 

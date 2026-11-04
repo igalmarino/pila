@@ -40,7 +40,6 @@ use smithay::{
             Bind, BufferType, ExportMem, Offscreen, TextureMapping,
         },
     },
-    input::pointer::CursorImageStatus,
     output::{Output, WeakOutput},
     reexports::{
         wayland_protocols::ext::{
@@ -84,7 +83,6 @@ use smithay::{
 use tracing::{debug, warn};
 
 use crate::{
-    cursor,
     render::{self, PilaRenderElement},
     scale::output_scale,
     Pila,
@@ -310,17 +308,8 @@ impl Pila {
         };
 
         // Everything taken from `self` before borrowing the renderer.
-        let scene = self.scene();
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
-        let cursor_surface = cursor::surface_position(&self.cursor_status, pointer);
-        let named_cursor = match &self.cursor_status {
-            CursorImageStatus::Named(icon) => Some(*icon),
-            _ => None,
-        };
+        let input = self.frame_input();
+        let scene = &input.scene;
         let (origin, window) = match &session.target {
             Target::Output(output) => {
                 let output = output.upgrade();
@@ -339,7 +328,7 @@ impl Pila {
         };
         let clear = match window {
             Some(_) => TRANSPARENT,
-            None => render::clear_color(&scene),
+            None => render::clear_color(scene),
         };
 
         let output_for_blur = match &session.target {
@@ -353,29 +342,13 @@ impl Pila {
             return;
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
-        // Blurred backdrops are part of the screen; prepare them for this
-        // output as the backends do.
-        if let Some((name, geo)) = &output_for_blur {
-            blur.prepare(renderer, &scene, name, geo.loc, geo.size, scale);
-        }
 
         let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
         if session.paint_cursors {
-            elements.extend(render::cursor_elements(
-                renderer,
-                cursor_surface.as_ref(),
-                origin,
-                scale,
-            ));
-            if let (Some(icon), Some(theme)) = (named_cursor, cursor_theme) {
-                let image = theme.get(icon, crate::scale::buffer_scale(scale));
-                elements.extend(render::named_cursor_elements(
-                    renderer, &image, pointer, origin, scale,
-                ));
-            }
+            elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
         }
-        match &window {
-            Some(window) => {
+        match (&window, &output_for_blur) {
+            (Some(window), _) => {
                 // The buffer's origin is the window geometry's top-left.
                 let loc: Point<i32, Physical> =
                     (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
@@ -383,13 +356,13 @@ impl Pila {
                     PilaRenderElement<GlesRenderer>,
                 >(window, renderer, loc, scale, 1.0));
             }
-            None => elements.extend(render::scene_elements(
-                renderer,
-                &scene,
-                origin,
-                scale,
-                &mut |i| blur.element(i, scale),
+            // Blurred backdrops are part of the screen; they're prepared
+            // for this output as the backends do.
+            (None, Some((name, geo))) => elements.extend(render::output_elements(
+                renderer, blur, scene, name, *geo, origin, scale,
             )),
+            // The output went away since its geometry was checked.
+            (None, None) => return,
         }
 
         // Changes since the last copied frame; later frames wait for one.
@@ -431,9 +404,8 @@ impl Pila {
         for rect in damage {
             frame.damage(rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
         }
-        let time: Duration = self.clock.now().into();
-        let secs = time.as_secs();
-        frame.presentation_time((secs >> 32) as u32, secs as u32, time.subsec_nanos());
+        let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
+        frame.presentation_time(hi, lo, nanos);
         frame.ready();
         session.pending = false;
         session.captured_once = true;
@@ -454,6 +426,13 @@ pub(crate) enum CopyError {
     /// The buffer isn't shm, or doesn't match the size or formats.
     Constraints,
     Render(String),
+}
+
+/// A timestamp as protocols send it: seconds (high and low 32 bits) and
+/// nanoseconds.
+pub(crate) fn split_timestamp(time: Duration) -> (u32, u32, u32) {
+    let secs = time.as_secs();
+    ((secs >> 32) as u32, secs as u32, time.subsec_nanos())
 }
 
 /// Copy `elements` into the client's `buffer`: rendered straight into a

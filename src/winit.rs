@@ -23,7 +23,7 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::{backend::Backend, cursor, frame, render, Pila};
+use crate::{backend::Backend, frame, render, Pila};
 
 const REFRESH_MHZ: i32 = 60_000;
 
@@ -133,16 +133,10 @@ fn redraw(
     }
 
     // Everything taken from `state` is collected before borrowing the backend.
-    let pointer_location = state
-        .seat
-        .get_pointer()
-        .map(|p| p.current_location())
-        .unwrap_or_default();
-    let cursor = cursor::surface_position(&state.cursor_status, pointer_location);
-    let scene = state.scene();
+    let input = state.frame_input();
+    let scene = &input.scene;
     let lock_pending = state.lock_pending();
     let output_geo = state.space.output_geometry(output).unwrap_or_default();
-    let output_location = output_geo.loc;
 
     let scale = crate::scale::output_scale(output);
 
@@ -161,29 +155,24 @@ fn redraw(
     // did), and how each element was drawn.
     let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
-            blur.prepare(
-                renderer,
-                &scene,
-                &output.name(),
-                output_location,
-                output_geo.size,
-                scale,
-            );
+            // Nested, the host draws named cursors.
             let mut elements =
-                render::cursor_elements(renderer, cursor.as_ref(), output_location, scale);
-            elements.extend(render::scene_elements(
+                render::pointer_elements(renderer, &input, None, output_geo.loc, scale);
+            elements.extend(render::output_elements(
                 renderer,
-                &scene,
-                output_location,
+                blur,
+                scene,
+                &output.name(),
+                output_geo,
+                output_geo.loc,
                 scale,
-                &mut |i| blur.element(i, scale),
             ));
             match damage_tracker.render_output(
                 renderer,
                 &mut framebuffer,
                 age,
                 &elements,
-                render::clear_color(&scene),
+                render::clear_color(scene),
             ) {
                 Ok(result) => (result.damage.cloned(), Some(result.states)),
                 Err(err) => {
@@ -208,13 +197,13 @@ fn redraw(
         state.confirm_lock();
     }
 
-    let cursor_surface = cursor.as_ref().map(|(surface, _)| surface);
+    let cursor_surface = input.cursor_wl_surface();
     if let Some(states) = &render_states {
-        frame::update_primary_outputs(&scene, cursor_surface, output, states);
+        frame::update_primary_outputs(scene, cursor_surface, output, states);
         if submitted {
             // Nested, the host decides when the frame really reaches the
             // screen; "now" at submit is the best estimate available.
-            frame::presentation_feedback(&scene, cursor_surface, output, states).presented(
+            frame::presentation_feedback(scene, cursor_surface, output, states).presented(
                 state.clock.now(),
                 Refresh::fixed(Duration::from_secs_f64(1000.0 / REFRESH_MHZ as f64)),
                 0,
@@ -224,7 +213,7 @@ fn redraw(
     }
     // Frame callback times use the presentation clock too, so clients can
     // compare them with presentation feedback.
-    frame::send_frames(&scene, cursor_surface, output, state.clock.now().into());
+    frame::send_frames(scene, cursor_surface, output, state.clock.now().into());
     state.post_render(output);
 }
 

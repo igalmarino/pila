@@ -59,7 +59,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     backend::Backend,
     config::{AccelProfile, ClickMethod, InputConfig, OutputConfig, PointerConfig},
-    cursor::{self, CursorTheme},
+    cursor::CursorTheme,
     frame,
     output_management::{HeadInfo, ModeInfo},
     render::{self, PilaRenderElement},
@@ -1200,18 +1200,9 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         state.cursor_status = CursorImageStatus::default_named();
     }
     // Everything taken from `state` is collected before borrowing the backend.
-    let pointer = state
-        .seat
-        .get_pointer()
-        .map(|p| p.current_location())
-        .unwrap_or_default();
-    let pointer_here = output_geo.to_f64().contains(pointer);
-    let cursor_surface = cursor::surface_position(&state.cursor_status, pointer);
-    let named_cursor = match &state.cursor_status {
-        CursorImageStatus::Named(icon) => Some(*icon),
-        _ => None,
-    };
-    let scene = state.scene();
+    let input = state.frame_input();
+    let scene = &input.scene;
+    let pointer_here = output_geo.to_f64().contains(input.pointer);
     let lock_pending = state.lock_pending();
     let scale = crate::scale::output_scale(&output);
 
@@ -1229,60 +1220,35 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     let drm_output = surface.drm_output.as_mut().expect("checked above");
     surface.redraw_needed = false;
 
-    blur.prepare(
-        renderer,
-        &scene,
-        &output.name(),
-        output_geo.loc,
-        output_geo.size,
-        scale,
-    );
-
     let mut elements = Vec::new();
     if pointer_here {
-        elements.extend(render::cursor_elements(
-            renderer,
-            cursor_surface.as_ref(),
-            output_geo.loc,
-            scale,
-        ));
-        if let Some(icon) = named_cursor {
-            let cursor = cursor_theme.get(icon, crate::scale::buffer_scale(scale));
-            elements.extend(render::named_cursor_elements(
-                renderer,
-                &cursor,
-                pointer,
-                output_geo.loc,
-                scale,
-            ));
-        }
+        elements =
+            render::pointer_elements(renderer, &input, Some(cursor_theme), output_geo.loc, scale);
     }
-    elements.extend(render::scene_elements(
+    elements.extend(render::output_elements(
         renderer,
-        &scene,
+        blur,
+        scene,
+        &output.name(),
+        output_geo,
         output_geo.loc,
         scale,
-        &mut |i| blur.element(i, scale),
     ));
 
     let rendered = drm_output.render_frame(
         renderer,
         &elements,
-        render::clear_color(&scene),
+        render::clear_color(scene),
         FrameFlags::DEFAULT,
     );
-    let cursor_wl_surface = cursor_surface.as_ref().map(|(s, _)| s);
+    let cursor_wl_surface = input.cursor_wl_surface();
     let mut recover = false;
     match rendered {
         Ok(result) => {
-            frame::update_primary_outputs(&scene, cursor_wl_surface, &output, &result.states);
+            frame::update_primary_outputs(scene, cursor_wl_surface, &output, &result.states);
             if !result.is_empty {
-                let feedback = frame::presentation_feedback(
-                    &scene,
-                    cursor_wl_surface,
-                    &output,
-                    &result.states,
-                );
+                let feedback =
+                    frame::presentation_feedback(scene, cursor_wl_surface, &output, &result.states);
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
@@ -1317,7 +1283,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     if lock_pending {
         maybe_confirm_lock(state);
     }
-    frame::send_frames(&scene, cursor_wl_surface, &output, state.clock.now().into());
+    frame::send_frames(scene, cursor_wl_surface, &output, state.clock.now().into());
     state.post_render(&output);
 }
 
