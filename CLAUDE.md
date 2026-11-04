@@ -67,6 +67,12 @@ on **Smithay 0.7.x**.
   mounted here read-only as `/run/host-pila/pila.log` (previous run: `pila.log.old`).
   Taking a change into the session means logging out and back in, which ends this
   Claude session; the user does it.
+- Arch package: `packaging/aur/pila-git` (`PKGBUILD` + `.SRCINFO`, test with `makepkg -f`
+  there); its `package()` runs `scripts/install --no-build` with `PREFIX=/usr DESTDIR=`, so
+  files added to `install_files` need no change there. Keep `depends` in step with the
+  libraries pila links (`readelf -d`) and README's package table, and regenerate
+  `.SRCINFO` (`makepkg --printsrcinfo`) after editing the `PKGBUILD`. The user publishes
+  it to the AUR.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's

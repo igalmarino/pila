@@ -1,0 +1,5 @@
+src/
+pkg/
+pila/
+*.pkg.tar.*
+*.log

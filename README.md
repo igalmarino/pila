@@ -64,6 +64,29 @@ differ between releases):
 
 Then `cargo build --release`.
 
+### Arch Linux (AUR)
+
+`packaging/aur/pila-git` holds a `PKGBUILD` that builds the latest `main` from GitHub and
+installs the same files as `scripts/install` with `PREFIX=/usr` (plus the README and
+`config.example.toml` in `/usr/share/doc/pila`):
+
+```bash
+cd packaging/aur/pila-git && makepkg -si    # or: yay -S pila-git, once it's on the AUR
+```
+
+Remove a hand install first (`scripts/uninstall`). To publish or update the AUR package,
+regenerate `.SRCINFO` and copy both files into the AUR repository:
+
+```bash
+makepkg --printsrcinfo > .SRCINFO
+git clone ssh://aur@aur.archlinux.org/pila-git.git /tmp/aur-pila-git
+cp PKGBUILD .SRCINFO /tmp/aur-pila-git/
+cd /tmp/aur-pila-git && git add PKGBUILD .SRCINFO && git commit -m "Update" && git push
+```
+
+A `-git` package only needs updating when the `PKGBUILD` changes (dependencies, files);
+`makepkg` picks up new commits by itself.
+
 ### As a login session
 
 ```bash
