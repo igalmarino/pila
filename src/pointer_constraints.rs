@@ -13,6 +13,7 @@
 
 use smithay::{
     delegate_pointer_constraints,
+    desktop::WindowSurfaceType,
     input::pointer::PointerHandle,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     utils::{Logical, Point},
@@ -21,6 +22,7 @@ use smithay::{
         pointer_constraints::{
             with_pointer_constraint, PointerConstraint, PointerConstraintsHandler,
         },
+        seat::WaylandFocus,
     },
 };
 
@@ -49,6 +51,31 @@ fn in_region(region: Option<&RegionAttributes>, local: Point<f64, Logical>) -> b
 }
 
 impl Pila {
+    /// The surface under `pos` that a constraint can be on: `surface_under`,
+    /// except that over one of a window's popups (a menu the constrained
+    /// client opened) it's the window's own surface beneath the popup, so a
+    /// confinement neither stops at the popup nor ends on it.
+    pub fn constraint_surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let (surface, origin) = self.surface_under(pos)?;
+        let Some(root) = self.popup_root(&surface) else {
+            return Some((surface, origin));
+        };
+        let window = self
+            .space
+            .elements()
+            .find(|w| w.wl_surface().is_some_and(|s| *s == root))?;
+        let render_loc = self.space.element_location(window)? - window.geometry().loc;
+        window
+            .surface_under(
+                pos - render_loc.to_f64(),
+                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+            )
+            .map(|(surface, origin)| (surface, (origin + render_loc).to_f64()))
+    }
+
     /// The active constraint on `surface` (origin `origin`), with the
     /// pointer at `pos`.
     pub fn active_constraint(

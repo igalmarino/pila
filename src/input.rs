@@ -254,7 +254,8 @@ impl Pila {
         // pila's own move/resize grabs).
         let current = pointer.current_location();
         let under_current = self.surface_under(current);
-        let constraint = match &under_current {
+        let constrained = self.constraint_surface_under(current);
+        let constraint = match &constrained {
             Some((surface, origin)) if !pointer.is_grabbed() => {
                 self.active_constraint(surface, *origin, current)
             }
@@ -277,9 +278,9 @@ impl Pila {
             }
             // Confined: drop motion that would leave the surface or region.
             Constraint::Confined(region) => {
-                let (surface, origin) = under_current.as_ref().expect("constraint without surface");
+                let (surface, origin) = constrained.as_ref().expect("constraint without surface");
                 let stays = self
-                    .surface_under(location)
+                    .constraint_surface_under(location)
                     .is_some_and(|(under, _)| under == *surface)
                     && region.is_none_or(|r| r.contains((location - *origin).to_i32_round()));
                 if !stays {
