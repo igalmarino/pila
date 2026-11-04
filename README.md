@@ -79,7 +79,13 @@ GDM reads `/usr/local`; LightDM and some SDDM setups need `PREFIX=/usr`.
 
 The build uses the host's `cargo`. Without one, it falls back to the dev container
 (`--container`), whose binary is linked against Arch's libraries and may not run
-elsewhere. `--no-build` installs what's already in `target/release`.
+elsewhere. `--no-build` installs what's already in `target/release`. Before installing, it
+checks that the binary runs on this system (a container build may need a newer glibc than
+the host's), and warns if another pila session entry (e.g. a distro package's) is installed
+too. Run it on the host, not inside the dev container.
+
+This is the way to install your working tree while developing. The AUR package builds
+what's on GitHub, so use it for a published version, and don't keep both installed.
 
 Log out, pick *pila* (on GDM, the gear icon on the password screen), log in. The session
 uses the user's D-Bus bus (and `systemd --user` where there is one) like any other

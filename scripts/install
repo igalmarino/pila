@@ -14,7 +14,9 @@
 # The build uses the host's cargo if there is one: a binary built in the dev
 # container (Arch) needs Arch's glibc and libraries, which other distros may
 # not have. Paths (PREFIX, SYSCONFDIR, DESTDIR, ...) are in
-# scripts/install-paths; e.g. PREFIX=/usr scripts/install.
+# scripts/install-paths; e.g. PREFIX=/usr scripts/install. Unless DESTDIR is
+# set, it refuses to run in the dev container, checks that the binary runs
+# here, and warns about another pila session entry in /usr or /usr/local.
 #
 # scripts/uninstall removes exactly these files (given the same variables).
 # Your own config (scripts/install-config) and logs are separate.
@@ -30,6 +32,13 @@ case "${1:-}" in
     --no-build) build=none ;;
     *) echo "usage: scripts/install [--container | --no-build]" >&2; exit 1 ;;
 esac
+# The session is installed on the host; inside the dev container it would only
+# land in the container's own /usr/local. A staging install (DESTDIR) is fine.
+if [ -n "${DEVCONTAINER:-}" ] && [ -z "$DESTDIR" ]; then
+    echo "This is the dev container: run scripts/install on the host. Build here with" >&2
+    echo "cargo build --release, then run scripts/install --no-build on the host." >&2
+    exit 1
+fi
 if [ "$build" = auto ]; then
     if command -v cargo >/dev/null; then build=native; else build=container; fi
 fi
@@ -48,6 +57,28 @@ esac
 if [ ! -x target/release/pila ]; then
     echo "target/release/pila not found; build it first (cargo build --release)" >&2
     exit 1
+fi
+
+if [ -z "$DESTDIR" ]; then
+    # A binary that can't load here (e.g. built in the dev container against a
+    # newer glibc than the host's) would only fail at the next login.
+    if ! error="$(target/release/pila --help 2>&1 >/dev/null)"; then
+        echo "target/release/pila doesn't run on this system:" >&2
+        echo "$error" >&2
+        echo "Update the system's packages, or build pila here (cargo build --release)." >&2
+        exit 1
+    fi
+    # Another pila session entry under the other usual prefix (e.g. a distro
+    # package in /usr next to this one in /usr/local) means two sessions with
+    # the same name, and the display manager picks one of them.
+    for other in /usr/share /usr/local/share; do
+        entry="$other/wayland-sessions/pila.desktop"
+        if [ "$other" != "$DATADIR" ] && [ -e "$entry" ]; then
+            echo "warning: $entry exists too (another pila install): the login screen" >&2
+            echo "may start that one. Remove it: scripts/uninstall with its PREFIX, or" >&2
+            echo "uninstall the package that owns it." >&2
+        fi
+    done
 fi
 
 # The session entry runs the wrapper by its installed path.
