@@ -196,7 +196,9 @@ Key flows and invariants:
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't
   interleave title bars with windows. Afterwards `frame.rs` (backend-neutral) records each
   drawn surface's primary output from the render states, sends presentation-time feedback
-  once the frame is submitted, and sends frame callbacks; frame callback times and
+  once the frame is submitted, and sends frame callbacks only to surfaces whose primary
+  output it is (surfaces shown nowhere: once a second, `HIDDEN_FRAME_THROTTLE`, so a
+  covered animating client doesn't spin); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Then `space.refresh()`,
   `popups.cleanup()` and a flush. Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,

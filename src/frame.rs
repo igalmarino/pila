@@ -98,22 +98,34 @@ pub fn presentation_feedback(
     feedback
 }
 
-/// Frame callbacks for everything in the scene, so clients draw their next
-/// frame. Every surface in the scene counts as on `output`, so one shown on
-/// several outputs gets callbacks from each output that redraws.
+/// How often a surface that isn't shown anywhere (covered, or off every
+/// output) still gets a frame callback, so its client isn't stalled forever.
+const HIDDEN_FRAME_THROTTLE: Duration = Duration::from_secs(1);
+
+/// Frame callbacks for the surfaces whose primary output is `output` (call
+/// after `update_primary_outputs`), so clients draw their next frame paced by
+/// that output. Surfaces shown nowhere get one every `HIDDEN_FRAME_THROTTLE`:
+/// sending them one on every render would let an animating client that adds
+/// no damage (covered, or on another output) draw as fast as pila loops.
 pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, time: Duration) {
-    let on_output = |_: &WlSurface, _: &_| Some(output.clone());
+    let throttle = Some(HIDDEN_FRAME_THROTTLE);
     for entry in &scene.windows {
         entry
             .window
-            .send_frame(output, time, Some(Duration::ZERO), on_output);
+            .send_frame(output, time, throttle, surface_primary_scanout_output);
     }
     for entry in scene.layers() {
         entry
             .layer
-            .send_frame(output, time, Some(Duration::ZERO), on_output);
+            .send_frame(output, time, throttle, surface_primary_scanout_output);
     }
     for surface in other_trees(scene, cursor) {
-        send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), on_output);
+        send_frames_surface_tree(
+            surface,
+            output,
+            time,
+            throttle,
+            surface_primary_scanout_output,
+        );
     }
 }
