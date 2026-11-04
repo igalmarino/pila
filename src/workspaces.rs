@@ -59,6 +59,12 @@ pub fn leave_space(window: &Window, index: usize, at: Point<i32, Logical>) {
     data.at.set(at);
 }
 
+/// Change where `window`, off the `Space`, comes back to (e.g. it was
+/// maximized meanwhile).
+pub fn set_space_location(window: &Window, at: Point<i32, Logical>) {
+    on_workspace(window).at.set(at);
+}
+
 /// Where `window` was when it left the `Space`.
 pub fn space_location(window: &Window) -> Point<i32, Logical> {
     on_workspace(window).at.get()

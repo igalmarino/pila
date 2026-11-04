@@ -699,6 +699,27 @@ impl Pila {
         }
     }
 
+    /// Where a window is: its place in the `Space`, or for one off it
+    /// (another workspace, minimized) where it comes back to. `None` for an
+    /// unmapped window.
+    fn window_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
+        self.space.element_location(window).or_else(|| {
+            self.off_space_windows()
+                .any(|w| w == window)
+                .then(|| crate::workspaces::space_location(window))
+        })
+    }
+
+    /// Put a window at `loc`: in the `Space` if it's there, else where it
+    /// comes back to when shown again. Nothing for an unmapped window.
+    fn place_window(&mut self, window: &Window, loc: Point<i32, Logical>) {
+        if self.space.element_location(window).is_some() {
+            self.space.map_element(window.clone(), loc, true);
+        } else if self.off_space_windows().any(|w| w == window) {
+            crate::workspaces::set_space_location(window, loc);
+        }
+    }
+
     /// Geometry of the output a window is mostly on, falling back to the
     /// pointer's output: all of it, or only the `usable` part.
     fn output_geometry_for_window(
@@ -706,8 +727,8 @@ impl Pila {
         window: &Window,
         usable: bool,
     ) -> Option<Rectangle<i32, Logical>> {
-        let pos = match self.space.element_geometry(window) {
-            Some(geo) => (geo.loc + geo.size.downscale(2).to_point()).to_f64(),
+        let pos = match self.window_location(window) {
+            Some(loc) => (loc + window.geometry().size.downscale(2).to_point()).to_f64(),
             None => self.seat.get_pointer()?.current_location(),
         };
         if usable {
@@ -881,7 +902,9 @@ impl Pila {
         if toplevel.is_none() && x11.is_none() {
             return;
         }
-        let mapped_loc = self.space.element_location(window);
+        // On another workspace or minimized it counts as mapped too, at
+        // the place it comes back to.
+        let mapped_loc = self.window_location(window);
         let (was_maximized, was_fullscreen) = fill_state(window);
         window
             .user_data()
@@ -926,9 +949,7 @@ impl Pila {
                 let _ = x11.set_fullscreen(fullscreen);
                 let _ = x11.configure(output_geo);
             }
-            if mapped_loc.is_some() {
-                self.space.map_element(window.clone(), output_geo.loc, true);
-            }
+            self.place_window(window, output_geo.loc);
         } else {
             // The saved geometry, or (if the window started out filled, as
             // a terminal configured to open maximized) two thirds of its
@@ -955,8 +976,8 @@ impl Pila {
                     let _ = x11.configure(saved);
                 }
             }
-            if let (Some(saved), Some(_)) = (saved, mapped_loc) {
-                self.space.map_element(window.clone(), saved.loc, true);
+            if let Some(saved) = saved {
+                self.place_window(window, saved.loc);
             }
         }
 
