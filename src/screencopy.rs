@@ -10,7 +10,7 @@
 //! something in the region changed since that manager's last copy of it.
 //! Copies are rendered from the scene like `capture.rs`'s, by `copy_frame`;
 //! plain copies run from an idle callback, damage ones after each rendered
-//! frame (`Pila::post_render`). A region is in the output's logical
+//! frame (`Pila::after_frames`). A region is in the output's logical
 //! coordinates, copied at the output's scale.
 
 use std::sync::Mutex;

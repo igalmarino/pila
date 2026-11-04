@@ -107,6 +107,9 @@ pub struct Pila {
     pub config_path: Option<std::path::PathBuf>,
     /// A reload is scheduled (changes are coalesced).
     pub config_reload_pending: bool,
+    /// An output was drawn this event-loop iteration: `after_frames` has
+    /// housekeeping to do.
+    pub frame_drawn: bool,
     /// Screen capture sessions (`capture.rs`).
     pub captures: Vec<crate::capture::Session>,
     /// Where captures may use dma-bufs (set by the backend).
@@ -270,6 +273,7 @@ impl Pila {
             captures: Vec::new(),
             config_path: None,
             config_reload_pending: false,
+            frame_drawn: false,
             capture_dmabuf: None,
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
@@ -611,10 +615,12 @@ impl Pila {
                 .filter_map(|o| space.output_geometry(o))
                 .any(|geo| geo.overlaps(rect))
         };
+        // No output left: nothing to move windows onto.
+        let area = self.usable_geometry_at(pointer);
         let windows: Vec<Window> = self.space.elements().cloned().collect();
         for window in windows {
-            let Some(area) = self.usable_geometry_at(pointer) else {
-                return;
+            let Some(area) = area else {
+                break;
             };
             let bar = decoration::layout_offset(&window, false);
             if let Some(geo) = self.space.element_geometry(&window) {
@@ -635,8 +641,6 @@ impl Pila {
         self.refit_maximized();
     }
 
-    /// Geometry of the output a window is mostly on, falling back to the
-    /// pointer's output: all of it, or only the `usable` part.
     /// The usable area (minus panels) of the output a window is mostly on.
     pub fn usable_area_for(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.output_geometry_for_window(window, true)
@@ -660,6 +664,8 @@ impl Pila {
         }
     }
 
+    /// Geometry of the output a window is mostly on, falling back to the
+    /// pointer's output: all of it, or only the `usable` part.
     fn output_geometry_for_window(
         &self,
         window: &Window,
@@ -702,13 +708,28 @@ impl Pila {
         let location = if maximized || fullscreen {
             output_geo.loc + Point::from((0, bar))
         } else {
-            let mut loc = centered_location(output_geo, window.geometry().size, bar);
-            while self
-                .space
-                .elements()
-                .any(|w| self.space.element_location(w) == Some(loc))
-            {
+            let size = window.geometry().size;
+            let taken = |loc| {
+                self.space
+                    .elements()
+                    .any(|w| self.space.element_location(w) == Some(loc))
+            };
+            let fits = |loc: Point<i32, Logical>| {
+                let end = output_geo.loc + output_geo.size.to_point();
+                loc.x + size.w <= end.x && loc.y + size.h <= end.y
+            };
+            let mut loc = centered_location(output_geo, size, bar);
+            // Each window takes at most one spot, so this many steps find a
+            // free one unless wrapping comes back to taken spots.
+            for _ in 0..self.space.elements().count() {
+                if !taken(loc) {
+                    break;
+                }
                 loc += Point::from((CASCADE_STEP, CASCADE_STEP));
+                // Off the bottom/right of the area: start again at its top left.
+                if !fits(loc) {
+                    loc = output_geo.loc + Point::from((0, bar));
+                }
             }
             loc
         };
@@ -1016,10 +1037,23 @@ impl Pila {
         }
     }
 
-    /// Housekeeping after `output` was drawn, for any backend: drop dead
-    /// windows and popups, re-check idle inhibitors, and flush clients.
+    /// Housekeeping after `output` was drawn, for any backend: what
+    /// concerns that output now, the rest once per event-loop iteration
+    /// however many outputs were drawn (`after_frames`).
     pub fn post_render(&mut self, output: &Output) {
         self.update_surface_scales(output);
+        layer_map_for_output(output).cleanup();
+        self.frame_drawn = true;
+    }
+
+    /// Called after every event-loop iteration (`main.rs`), once all the
+    /// outputs due were drawn: captures and screencopies, dead windows and
+    /// popups, taskbar listeners and idle inhibitors. Nothing if no output
+    /// was drawn.
+    pub fn after_frames(&mut self) {
+        if !std::mem::take(&mut self.frame_drawn) {
+            return;
+        }
         self.process_captures();
         self.process_screencopies();
         // The space knows which outputs each window is on only after its
@@ -1027,9 +1061,7 @@ impl Pila {
         self.space.refresh();
         self.refresh_toplevels();
         self.update_idle_inhibit();
-        layer_map_for_output(output).cleanup();
         self.popups.cleanup();
-        let _ = self.display_handle.flush_clients();
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

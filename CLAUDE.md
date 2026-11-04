@@ -199,8 +199,9 @@ Key flows and invariants:
   once the frame is submitted, and sends frame callbacks only to surfaces whose primary
   output it is (surfaces shown nowhere: once a second, `HIDDEN_FRAME_THROTTLE`, so a
   covered animating client doesn't spin); frame callback times and
-  feedback both use `Pila::clock` (CLOCK_MONOTONIC). Then `space.refresh()`,
-  `popups.cleanup()` and a flush. Buffer age (for partial repaints) needs the window's EGL
+  feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
+  iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs captures,
+  screencopies, `space.refresh()`, taskbar updates and `popups.cleanup()`, then a flush. Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand** (`Pila::queue_redraw`): after every client dispatch (display
@@ -271,7 +272,7 @@ Key flows and invariants:
   from `scene()` (window sources: only the window, no title bar) straight into the
   client's dma-buf (device and modifiers from `Pila::capture_dmabuf`, set by the backend),
   or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A
-  session's first frame is copied at once (idle), later ones in `post_render` only when
+  session's first frame is copied at once (idle), later ones in `after_frames` only when
   the session's own damage tracker sees a change. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
@@ -281,11 +282,11 @@ Key flows and invariants:
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
   in an idle callback; `copy_with_damage` waits in `Pila::screencopies` until that
   manager's damage tracker for the output/region (`screencopy_trackers`) sees a change,
-  checked from `post_render`. A mode/scale change or a removed output fails the frame.
+  checked from `after_frames`. A mode/scale change or a removed output fails the frame.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in
-  `refresh_toplevels` (from `post_render`, after `space.refresh()`): title, app id, states
+  `refresh_toplevels` (from `after_frames`, after `space.refresh()`): title, app id, states
   (Activated = keyboard focus, Minimized from `minimize.rs`, Maximized/Fullscreen from
   `fill_state`) and the outputs each client's handle was told; new windows get a handle
   per manager, destroyed ones `closed` (`remove_foreign_toplevel`). Requests map onto

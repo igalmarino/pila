@@ -249,9 +249,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.loop_signal.stop();
         })?;
 
-    // Events queued outside a redraw (timers, deferred callbacks) must reach
-    // clients too, so flush after every loop iteration.
+    // Once per iteration, after any redraws (idle callbacks run last): the
+    // post-frame housekeeping, then a flush, which events queued outside a
+    // redraw (timers, deferred callbacks) need too.
     event_loop.run(None, &mut state, |state| {
+        state.after_frames();
         let _ = state.display_handle.flush_clients();
     })?;
 

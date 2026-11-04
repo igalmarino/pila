@@ -8,8 +8,8 @@
 //! A session advertises its buffer constraints (the source's size in
 //! physical pixels and the shm formats), then copies one frame per `capture`.
 //! The first frame of a session is copied right away; later ones wait until
-//! the source changes: after every rendered frame (`Pila::post_render`)
-//! pending captures are checked against a per-session damage tracker, and
+//! the source changes: after every event-loop iteration that drew a frame
+//! (`Pila::after_frames`) pending captures are checked against a per-session damage tracker, and
 //! only copied (with that damage) once something changed. A source that
 //! changes size re-sends the constraints and fails the pending frame; a
 //! source that goes away stops the session.
