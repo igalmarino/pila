@@ -1,5 +1,7 @@
 # pila
 
+[![CI](https://github.com/igalmarino/pila/actions/workflows/ci.yml/badge.svg)](https://github.com/igalmarino/pila/actions/workflows/ci.yml)
+
 A stacking Wayland compositor written in Rust on [Smithay](https://github.com/Smithay/smithay).
 Windows float and overlap, with server-side title bars, like a classic desktop; panels,
 launchers, wallpapers and lock screens come from the usual Wayland tools (waybar, fuzzel,
@@ -11,8 +13,19 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-pila is young but usable day to day: its author runs it as their desktop (one AMD laptop with
-an external monitor) and develops it from inside itself.
+<!-- ![pila with a few windows and a panel](docs/screenshot.png) -->
+
+## Status
+
+pila is **alpha**: usable day to day (its author runs it as their only desktop and
+develops it from inside itself), but so far tested on one machine: an AMD laptop (Mesa,
+`amdgpu`) with an external monitor, on Arch Linux. Other GPUs (Intel should work; NVIDIA
+is untested), distros and setups are exactly what testing is needed for: please
+[report](#reporting-bugs) what works and what doesn't.
+
+Known gaps: touchscreens, input methods (IME), several GPUs (pila uses the seat's primary
+one), monitor names (EDID isn't read, so monitors show as "Unknown"; `[[output]]` matches
+connector names such as `eDP-1`). There are no workspaces, by design.
 
 ## Features
 
@@ -43,7 +56,30 @@ Not there yet: touchscreens, input methods (IME), several GPUs.
 
 pila runs on a TTY of any Linux machine (DRM/KMS, libinput, and a session from logind,
 elogind or seatd; systemd isn't required), or nested as a window inside another Wayland or
-X11 session for development.
+X11 session.
+
+### Try it nested first
+
+The safest first run: build it (below) and start it from your current desktop. It opens
+as a window, with a terminal inside, and nothing else on your system changes:
+
+```bash
+cargo run --release
+```
+
+Nested, Mod is **Alt** (your desktop keeps Super). Mod+Return opens a terminal, Mod+Shift+E
+quits. Closing the window works too.
+
+### Getting out
+
+On a TTY or as a login session, Mod is **Super**:
+
+- **Super+Shift+E** quits pila (back to the login screen or the TTY).
+- **Ctrl+Alt+F1..F12** switch to another virtual terminal, where you can log in and
+  `pkill pila` if the screen stops responding.
+- If the pila session doesn't start, pick your usual session at the login screen and
+  look at the log (see [Reporting bugs](#reporting-bugs)); `scripts/uninstall` (or
+  removing the package) takes the session entry away.
 
 ### Building
 
@@ -180,164 +216,22 @@ maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+Shift+S and Mod+Ctrl+S ta
 screenshots (a region to the clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes,
 Mod+Shift+E quits.
 
-## Development environment
+## Reporting bugs
 
-pila is developed in a dev container on any Linux host with Docker, from inside pila itself
-(or another desktop, kept as a fallback session), with **Claude Code** running inside the
-container. (The author's host is Arch with GNOME as the fallback.)
+Open an [issue](https://github.com/igalmarino/pila/issues/new/choose) with:
 
-- An Arch Linux image with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and
-  every library pila needs (winit, DRM/KMS, libinput)
-- pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
-  (`/dev/dri`) are passed into the container, and the login session's log is mounted at
-  `/run/host-pila` so Claude can read it
-- Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
-  `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
-  against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
-- Claude Code (native install) with auth and history persisted across rebuilds
-- An egress firewall so Claude Code can only reach crates.io, GitHub, Anthropic and docs.rs
+- `pila --version`, your distro, GPU and driver (`lspci -k | grep -A3 VGA`);
+- how pila was started: login session, `scripts/tty`, or nested;
+- the log: `~/.local/state/pila/pila.log` for a login session (`pila.log.old` is the run
+  before; with systemd also `journalctl -t pila -b`), `pila-tty.log` for `scripts/tty`, the
+  terminal for nested. `RUST_LOG=debug` makes it detailed; after a crash,
+  `RUST_BACKTRACE=1` adds where it happened;
+- your config file, if you have one, and the steps to reproduce.
 
-The container follows the session it's entered from: entered from a pila session
-(`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME (or any
-other desktop), on that desktop.
-Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
-with `scripts/install` and a new login (which ends the container's Claude session too). See
-[`CLAUDE.md`](CLAUDE.md) for the architecture.
+## Contributing
 
-### 1. Host setup
-
-#### Docker
-
-Install Docker from your distro (Arch: `docker docker-buildx`; Debian, Ubuntu:
-`docker.io docker-buildx`; Fedora: `moby-engine`, or Docker's own repository), start its
-service, and join the `docker` group:
-
-```bash
-sudo systemctl enable --now docker.socket   # with systemd; e.g. OpenRC: rc-update add docker
-sudo usermod -aG docker "$USER"             # log out and back in afterwards
-```
-
-Use regular (rootful) Docker. Rootless Docker remaps UIDs, so the container can't connect
-to your Wayland socket. Note that membership in the `docker` group is root-equivalent on the
-host.
-
-#### GPU check
-
-```bash
-ls -l /dev/dri
-```
-
-You should see `renderD128` with mode `crw-rw-rw-` (the default udev rules on most
-systemd distros). If it's `crw-rw----` with group `render`, add
-`"--group-add=<that group's GID>"` (`getent group render`) to `runArgs` in
-`.devcontainer/devcontainer.json`. Intel and AMD work through Mesa with no extra setup. NVIDIA with the proprietary driver needs the
-`nvidia-container-toolkit` package and `--gpus=all` added to `runArgs` in
-`.devcontainer/devcontainer.json`.
-
-#### The Dev Containers CLI
-
-The container is driven from a terminal with the `scripts/dev` helper, which needs the Dev
-Containers CLI, an npm package (Node.js and npm come from your distro: `nodejs npm` on Arch,
-Debian, Ubuntu and Fedora):
-
-```bash
-npm config set prefix ~/.local     # avoid sudo for global installs; ~/.local/bin must be on PATH
-npm install -g @devcontainers/cli
-```
-
-Any editor works on the checkout as usual. Distro builds of VS Code (Code - OSS) can't
-install Microsoft's *Dev Containers* extension, so the container itself is started and used
-from the terminal.
-
-### 2. Start the container
-
-Always launch from inside your desktop session (pila, or any other), so `WAYLAND_DISPLAY` and
-`XDG_RUNTIME_DIR` are set on the host.
-
-```bash
-scripts/dev up        # first build takes a few minutes
-scripts/dev shell     # shell inside the container
-scripts/dev claude    # Claude Code inside the container
-scripts/dev cargo build
-```
-
-The startup log should show `OK: host Wayland socket mounted`, `OK: GPU render node
-available` and `Firewall ready`.
-
-### 3. Smoke test
-
-Inside the container:
-
-```bash
-wayland-info | head        # talks to the host session through the mounted socket
-eglinfo -B                 # should list your GPU, not llvmpipe
-weston-simple-egl          # a spinning triangle window appears on your desktop
-cargo run                  # nested pila, with a terminal inside
-```
-
-### 4. Claude Code
-
-Run `claude` (or `scripts/dev claude`) and sign in. If the browser login completes but the
-terminal never notices, paste the code shown in the browser at the prompt.
-
-`CLAUDE.md` gives Claude the project context: nested development, no root, firewall, and the
-commands to use. To pre-approve routine commands, create `.claude/settings.json`:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(cargo build *)",
-      "Bash(cargo check *)",
-      "Bash(cargo clippy *)",
-      "Bash(cargo fmt *)",
-      "Bash(cargo test *)",
-      "Bash(git status *)",
-      "Bash(git diff *)",
-      "Bash(git log *)"
-    ]
-  }
-}
-```
-
-Because the container is non-root with the firewall on, you can run
-`claude --dangerously-skip-permissions` for unattended work. Claude can still edit anything in
-this folder (it's your real checkout) and reach anything on the allowlist, so only do this with
-code you trust and commit often.
-
-### Container configuration
-
-| What | Where |
-| - | - |
-| Add system packages | `pacman` line in `.devcontainer/Dockerfile`, then rebuild |
-| Allow another domain | `.devcontainer/allowed-domains.txt`, then rebuild |
-| Start without the firewall | `export DEVCONTAINER_FIREWALL=0` on the host before starting |
-| Full passwordless sudo | `FULL_SUDO` build arg in `devcontainer.json` (lets anything in the container disable the firewall) |
-
-The `dev` user can only `sudo` the firewall script, and the allowlist is baked into the image.
-That's deliberate: nothing running inside, Claude included, can widen its own network access.
-
-### Troubleshooting
-
-- **`Cannot connect to Wayland display` / socket missing.** The host compositor restarted
-  (you logged out and back in, or restarted pila), so its socket is new. Run any
-  `scripts/dev` command from the session to link it again (`scripts/link-wayland`).
-- **Nested pila opens on the wrong desktop.** The container uses the session `scripts/dev`
-  last ran from. Run `scripts/dev` in a terminal of the session you want.
-- **`Permission denied` on the socket.** Your host UID isn't the one the container user got.
-  Check `id -u` on the host and inside; they must match. Make sure you're not using rootless
-  Docker.
-- **`eglinfo` shows llvmpipe.** `/dev/dri` isn't passed through, or (NVIDIA) the container
-  toolkit isn't set up.
-- **A site you need is blocked.** Add it to `allowed-domains.txt` and rebuild.
-- **An allowlisted CDN domain (crates.io, docs.rs) fails intermittently.** The firewall allows
-  IPs, and CDNs rotate theirs every ~60s. A background loop adds the current IPs every 30s
-  (log: `/tmp/firewall-refresh.log`), so retrying after half a minute usually works. To force
-  it, run `sudo /usr/local/bin/init-firewall.sh --refresh`, or rerun the script without
-  arguments to rebuild the firewall; both are safe while it's active (a failed rebuild keeps
-  the previous rules).
-- **Super-key shortcuts go to GNOME.** When testing pila nested on GNOME, GNOME grabs Super.
-  Nested pila uses Alt as Mod by default for that reason.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the development environment (a
+dev container in which pila runs nested on your desktop).
 
 ## License
 

@@ -1,0 +1,56 @@
+name: Bug report
+description: Something doesn't work, looks wrong or crashes
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pila version
+      description: The output of `pila --version` (or the commit, for a source build).
+      placeholder: pila 0.1.0 (v0.1.0)
+    validations:
+      required: true
+  - type: dropdown
+    id: started
+    attributes:
+      label: How pila was started
+      options:
+        - Login session (display manager)
+        - By hand on a TTY (scripts/tty or pila)
+        - Nested, in another desktop
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distro, GPU and driver
+      description: For example "Fedora 43, Intel Iris Xe (i915)". `lspci -k | grep -A3 VGA` shows the GPU and driver.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Login session: `~/.local/state/pila/pila.log` (`pila.log.old` is the previous run; with systemd also `journalctl -t pila -b`).
+        scripts/tty: `pila-tty.log`. Nested: the terminal output.
+        `RUST_LOG=debug` gives more detail, `RUST_BACKTRACE=1` a backtrace after a crash.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: Your `~/.config/pila/config.toml`, if you have one.
+      render: toml
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Apps or desktop tools involved (bar, launcher, shell), monitors, screenshots.
