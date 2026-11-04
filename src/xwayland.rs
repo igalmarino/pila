@@ -58,7 +58,7 @@ impl Pila {
             Ok(spawned) => spawned,
             Err(err) => {
                 warn!(?err, "failed to start Xwayland; X11 apps won't run");
-                self.start_session(&startup);
+                self.start_session(startup);
                 return;
             }
         };
@@ -85,7 +85,7 @@ impl Pila {
                     XWaylandEvent::Error => warn!("Xwayland failed to start; X11 apps won't run"),
                 }
                 let startup = std::mem::take(&mut state.pending_startup);
-                state.start_session(&startup);
+                state.start_session(startup);
             });
         match inserted {
             Ok(token) => {
@@ -94,7 +94,7 @@ impl Pila {
             }
             Err(err) => {
                 warn!(?err, "failed to watch Xwayland");
-                self.start_session(&startup);
+                self.start_session(startup);
             }
         }
     }

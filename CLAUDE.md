@@ -374,8 +374,9 @@ Key flows and invariants:
   exports that environment to the D-Bus session bus (`export_environment`): on the systemd
   user bus (a login session) also to `systemd --user`, which starts the portals and
   pipewire there (`--systemd`); on a private bus (`scripts/tty`, `dbus-run-session`) the
-  bus alone, so a test instance leaves the login session's services alone. Nested, apps
-  use the host's portals.
+  bus alone, so a test instance leaves the login session's services alone. The export
+  runs in the background (a stuck bus mustn't freeze pila); the startup programs follow
+  when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

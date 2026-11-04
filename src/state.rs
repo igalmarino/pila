@@ -24,8 +24,10 @@ use smithay::{
     output::Output,
     reexports::{
         calloop::{
-            generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
-            RegistrationToken,
+            self,
+            generic::Generic,
+            timer::{TimeoutAction, Timer},
+            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, RegistrationToken,
         },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
@@ -193,6 +195,21 @@ const SESSION_ENV: [&str; 4] = [
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_TYPE",
 ];
+
+/// How long the startup programs wait for the session bus to take pila's
+/// environment (`export_environment`).
+const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the D-Bus address `bus` is the systemd user bus of the runtime
+/// directory `runtime` (`unix:path=$XDG_RUNTIME_DIR/bus`, maybe followed by
+/// more `,key=value` pairs such as a guid).
+fn is_user_bus(bus: &str, runtime: &str) -> bool {
+    let Some(rest) = bus.strip_prefix("unix:path=") else {
+        return false;
+    };
+    let path = rest.split(',').next().unwrap_or(rest);
+    !runtime.is_empty() && path == format!("{runtime}/bus")
+}
 
 /// xkbcommon's settings for `[keyboard]` (empty strings: its defaults).
 pub fn xkb_config(kb: &crate::config::KeyboardConfig) -> XkbConfig<'_> {
@@ -1173,10 +1190,18 @@ impl Pila {
 
     /// The startup programs: once Xwayland is ready (or failed), so they
     /// get its `DISPLAY`, and after the session bus knows pila's
-    /// environment (for portals).
-    pub fn start_session(&self, commands: &[String]) {
-        self.export_environment();
-        self.spawn_all(commands);
+    /// environment (for portals), or `EXPORT_TIMEOUT` if that hangs.
+    pub fn start_session(&mut self, commands: Vec<String>) {
+        self.pending_startup = commands;
+        if !self.export_environment() {
+            self.run_pending_startup();
+        }
+    }
+
+    /// The startup programs still waiting, if any (`start_session`).
+    fn run_pending_startup(&mut self) {
+        let commands = std::mem::take(&mut self.pending_startup);
+        self.spawn_all(&commands);
     }
 
     /// Give the D-Bus session bus pila's `WAYLAND_DISPLAY`, `DISPLAY` and
@@ -1189,30 +1214,71 @@ impl Pila {
     /// there. A private bus (`scripts/tty` under `dbus-run-session`) has no
     /// systemd: that's how a test instance on another VT leaves the login
     /// session's services alone.
-    fn export_environment(&self) {
+    ///
+    /// The export runs in the background (a stuck bus mustn't freeze pila);
+    /// `run_pending_startup` follows when it's done or after
+    /// `EXPORT_TIMEOUT`. Returns false if nothing was started.
+    fn export_environment(&mut self) -> bool {
         if !matches!(self.backend, Some(Backend::Udev(_))) {
-            return;
+            return false;
         }
         let Some(bus) = std::env::var_os("DBUS_SESSION_BUS_ADDRESS") else {
             info!("no D-Bus session bus; screen sharing through portals won't work");
-            return;
+            return false;
         };
         let runtime = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default();
-        let user_bus = format!("unix:path={}/bus", runtime.to_string_lossy());
-        let systemd = bus.to_string_lossy() == user_bus;
+        let systemd = is_user_bus(&bus.to_string_lossy(), &runtime.to_string_lossy());
         let mut cmd = Command::new("dbus-update-activation-environment");
         if systemd {
             cmd.arg("--systemd");
         }
         cmd.args(SESSION_ENV);
         self.session_env(&mut cmd);
-        match cmd.status() {
-            Ok(status) if status.success() => {
-                info!(systemd, "exported the environment to the session bus")
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                warn!(?err, "can't run dbus-update-activation-environment");
+                return false;
             }
-            Ok(status) => warn!(?status, "dbus-update-activation-environment failed"),
-            Err(err) => warn!(?err, "can't run dbus-update-activation-environment"),
+        };
+
+        let (sender, channel) = calloop::channel::channel();
+        let waiter = std::thread::Builder::new()
+            .name("pila-dbus-env".into())
+            .spawn(move || {
+                let _ = sender.send(child.wait());
+            });
+        if let Err(err) = waiter {
+            warn!(?err, "can't wait for dbus-update-activation-environment");
+            return false;
         }
+        let done = self
+            .loop_handle
+            .insert_source(channel, move |event, _, state| {
+                if let calloop::channel::Event::Msg(result) = event {
+                    match result {
+                        Ok(status) if status.success() => {
+                            info!(systemd, "exported the environment to the session bus")
+                        }
+                        Ok(status) => warn!(?status, "dbus-update-activation-environment failed"),
+                        Err(err) => warn!(?err, "dbus-update-activation-environment failed"),
+                    }
+                    state.run_pending_startup();
+                }
+            });
+        if let Err(err) = done {
+            warn!(?err, "can't wait for dbus-update-activation-environment");
+            return false;
+        }
+        let timeout = Timer::from_duration(EXPORT_TIMEOUT);
+        let _ = self.loop_handle.insert_source(timeout, |_, _, state| {
+            if !state.pending_startup.is_empty() {
+                warn!("dbus-update-activation-environment hangs; starting the session anyway");
+                state.run_pending_startup();
+            }
+            TimeoutAction::Drop
+        });
+        true
     }
 
     /// The environment of everything pila starts. Its output goes to pila's
@@ -1412,6 +1478,21 @@ mod tests {
         // 600x400 window with a 30px bar: 430 tall in total.
         let loc = centered_location(area, (600, 400).into(), 30);
         assert_eq!(loc, Point::from((100 + 200, 50 + 185 + 30)));
+    }
+
+    #[test]
+    fn the_user_bus_is_recognized_with_or_without_a_guid() {
+        let runtime = "/run/user/1000";
+        assert!(is_user_bus("unix:path=/run/user/1000/bus", runtime));
+        assert!(is_user_bus(
+            "unix:path=/run/user/1000/bus,guid=abc",
+            runtime
+        ));
+        // dbus-run-session's private bus, another user's, or no runtime dir.
+        assert!(!is_user_bus("unix:path=/tmp/dbus-XYZ,guid=abc", runtime));
+        assert!(!is_user_bus("unix:path=/run/user/1001/bus", runtime));
+        assert!(!is_user_bus("unix:abstract=/tmp/dbus-XYZ", runtime));
+        assert!(!is_user_bus("unix:path=/bus", ""));
     }
 
     #[test]
