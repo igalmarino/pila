@@ -109,12 +109,12 @@ impl Pila {
         }
     }
 
-    /// The mapped window for an X11 surface.
-    /// The managed window (mapped or minimized) for an X11 surface.
+    /// The managed window (mapped, minimized or on another workspace) for
+    /// an X11 surface.
     pub fn window_for_x11(&self, surface: &X11Surface) -> Option<Window> {
         self.space
             .elements()
-            .chain(self.minimized.iter())
+            .chain(self.off_space_windows())
             .find(|w| w.x11_surface() == Some(surface))
             .cloned()
     }
@@ -195,6 +195,7 @@ impl XwmHandler for Pila {
             self.remove_foreign_toplevel(&window);
             self.forget_focus_history(&window);
             self.forget_minimized(&window);
+            self.forget_parked(&window);
             self.space.unmap_elem(&window);
         }
         if !surface.is_override_redirect() {

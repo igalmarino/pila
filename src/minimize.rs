@@ -3,6 +3,8 @@
 //! (minimized windows stay in its recent-use order, `switcher.rs`, show while
 //! selected, and are restored when the switch ends on them) or through a
 //! taskbar using wlr-foreign-toplevel-management (`toplevel_management.rs`).
+//! A minimized window remembers its workspace (`workspaces.rs`); restored by
+//! a taskbar's unminimize, it comes back on the active one.
 
 use std::cell::Cell;
 
@@ -30,13 +32,7 @@ impl Pila {
             return;
         }
         if was_focused {
-            let next = self
-                .focus_history
-                .iter()
-                .find(|w| self.space.elements().any(|m| m == *w))
-                .cloned()
-                .or_else(|| self.space.elements().next_back().cloned());
-            self.focus_window(next, SERIAL_COUNTER.next_serial());
+            self.focus_recent_window();
         }
     }
 
@@ -49,6 +45,7 @@ impl Pila {
         if let Some(at) = window.user_data().get::<MinimizedAt>() {
             at.0.set(Some(loc));
         }
+        crate::workspaces::set_workspace(window, self.workspaces.active);
         self.space.unmap_elem(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(true);

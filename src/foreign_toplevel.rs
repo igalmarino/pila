@@ -67,11 +67,12 @@ pub fn identifier(window: &Window) -> Option<String> {
 }
 
 impl Pila {
-    /// The window a foreign-toplevel identifier names, mapped or minimized.
+    /// The window a foreign-toplevel identifier names, mapped, minimized or
+    /// on another workspace.
     pub(crate) fn window_for_identifier(&self, identifier: &str) -> Option<Window> {
         self.space
             .elements()
-            .chain(self.minimized.iter())
+            .chain(self.off_space_windows())
             .find(|w| crate::foreign_toplevel::identifier(w).as_deref() == Some(identifier))
             .cloned()
     }

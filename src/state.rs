@@ -120,6 +120,10 @@ pub struct Pila {
     pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
+    /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
+    /// (`ext_workspace.rs`).
+    pub workspaces: crate::workspaces::Workspaces,
+    pub ext_workspaces: crate::ext_workspace::ExtWorkspaces,
     /// The client controlling each output's gamma (`gamma_control.rs`).
     pub gamma_controls: crate::gamma_control::GammaControls,
     /// Clients watching or setting outputs' power (`output_power.rs`).
@@ -227,6 +231,7 @@ impl Pila {
         crate::capture::init_globals(&dh);
         crate::screencopy::init_global(&dh);
         crate::toplevel_management::init_global(&dh);
+        crate::ext_workspace::init_global(&dh);
         crate::gamma_control::init_global(&dh);
         crate::output_power::init_global(&dh);
         crate::output_management::init_global(&dh);
@@ -278,6 +283,8 @@ impl Pila {
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
             toplevel_management: Default::default(),
+            workspaces: Default::default(),
+            ext_workspaces: Default::default(),
             gamma_controls: Default::default(),
             output_powers: Default::default(),
             output_management: Default::default(),
@@ -516,7 +523,7 @@ impl Pila {
         self.space
             .elements()
             .chain(self.unmapped.iter())
-            .chain(self.minimized.iter())
+            .chain(self.off_space_windows())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
@@ -1060,6 +1067,7 @@ impl Pila {
         // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();
         self.refresh_toplevels();
+        self.refresh_workspaces();
         self.update_idle_inhibit();
         self.popups.cleanup();
     }
@@ -1139,6 +1147,8 @@ impl Pila {
                     self.set_fill_state(&window, maximized, !fullscreen);
                 }
             }
+            Action::Workspace(target) => self.go_to_workspace(target),
+            Action::MoveToWorkspace(target) => self.move_focused_to_workspace(target),
             Action::Quit => {
                 info!("quit requested");
                 self.loop_signal.stop();

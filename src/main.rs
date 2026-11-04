@@ -19,6 +19,7 @@ mod config;
 mod config_reload;
 mod cursor;
 mod decoration;
+mod ext_workspace;
 mod focus;
 mod foreign_toplevel;
 mod frame;
@@ -44,6 +45,7 @@ mod text;
 mod toplevel_management;
 mod udev;
 mod winit;
+mod workspaces;
 mod xwayland;
 
 use std::io::IsTerminal;

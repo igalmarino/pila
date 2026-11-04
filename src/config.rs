@@ -21,6 +21,10 @@
 //! | Mod+C                 | Center the window              |
 //! | Mod+Shift+S           | Screenshot of a region (slurp) to the clipboard |
 //! | Mod+Ctrl+S            | Screenshot of the screen under the pointer to ~/Pictures |
+//! | Mod+1..N              | Go to workspace 1..N (N = `workspaces`, at most 9) |
+//! | Mod+Shift+1..N        | Move the window to workspace 1..N |
+//! | Mod+Page_Down / Mod+Page_Up | Next / previous workspace |
+//! | Mod+Shift+Page_Down / Page_Up | Move the window to the next / previous workspace |
 //! | Mod+Shift+Q           | Close focused window           |
 //! | Mod+Shift+E           | Quit pila                      |
 //! | Mod+Left drag         | Move window                    |
@@ -34,6 +38,7 @@
 //! | 3 fingers left / right | Switch windows, like Mod+Tab / Mod+Shift+Tab |
 //! | 3 fingers up          | Toggle maximize                |
 //! | 3 fingers down        | Restore (undo a snap or maximize) |
+//! | 4 fingers left / right | Next / previous workspace     |
 //!
 //! `[bindings]` in the config adds to or replaces the keyboard bindings above
 //! (`"Mod+Shift+Return" = "spawn kitty -e htop"`, `"Mod+J" = "none"`); the
@@ -89,6 +94,10 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
         "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" \
          ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png",
     ),
+    ("Mod+Page_Down", "workspace-next"),
+    ("Mod+Page_Up", "workspace-prev"),
+    ("Mod+Shift+Page_Down", "move-to-workspace-next"),
+    ("Mod+Shift+Page_Up", "move-to-workspace-prev"),
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
 ];
@@ -99,7 +108,14 @@ const DEFAULT_GESTURES: &[(&str, &str)] = &[
     ("swipe-3-right", "cycle-focus-back"),
     ("swipe-3-up", "maximize"),
     ("swipe-3-down", "restore"),
+    ("swipe-4-left", "workspace-next"),
+    ("swipe-4-right", "workspace-prev"),
 ];
+
+/// How many workspaces there are unless `workspaces` says otherwise, and
+/// the most it may say.
+pub const DEFAULT_WORKSPACES: usize = 4;
+pub const MAX_WORKSPACES: usize = 32;
 
 /// Which way a swipe went (the way the fingers moved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,8 +272,37 @@ pub enum Action {
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
+    /// Go to a workspace, or move the focused window there (`workspaces.rs`).
+    Workspace(WorkspaceTarget),
+    MoveToWorkspace(WorkspaceTarget),
     /// Switch to virtual terminal N (Ctrl+Alt+F<N> on a TTY; not configurable).
     ChangeVt(i32),
+}
+
+/// Which workspace a workspace action goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceTarget {
+    /// Counted from 0 (the config counts from 1).
+    Index(usize),
+    /// The next / previous one, without wrapping around.
+    Next,
+    Prev,
+}
+
+impl WorkspaceTarget {
+    /// `1`..`MAX_WORKSPACES`, `next` or `prev` (after `workspace`).
+    fn parse(text: &str) -> Result<Self, String> {
+        match text.trim() {
+            "next" => Ok(Self::Next),
+            "prev" => Ok(Self::Prev),
+            number => match number.parse::<usize>() {
+                Ok(n @ 1..=MAX_WORKSPACES) => Ok(Self::Index(n - 1)),
+                _ => Err(format!(
+                    "unknown workspace {number:?} (1 to {MAX_WORKSPACES}, next or prev)"
+                )),
+            },
+        }
+    }
 }
 
 impl Action {
@@ -266,6 +311,18 @@ impl Action {
         let text = text.trim();
         if let Some(command) = text.strip_prefix("spawn ") {
             return Ok(Some(Action::Spawn(command.trim().to_string())));
+        }
+        // "workspace 2", "workspace-next", "move-to-workspace-prev", ...
+        for (prefix, make) in [
+            ("move-to-workspace", Action::MoveToWorkspace as fn(_) -> _),
+            ("workspace", Action::Workspace),
+        ] {
+            if let Some(target) = text
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_prefix(' ').or_else(|| rest.strip_prefix('-')))
+            {
+                return WorkspaceTarget::parse(target).map(|t| Some(make(t)));
+            }
         }
         Ok(Some(match text {
             "none" => return Ok(None),
@@ -295,7 +352,8 @@ impl Action {
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
                      cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, snap-left, \
                      snap-right, restore, move-left/right/up/down, grow-width, shrink-width, \
-                     grow-height, shrink-height, center, quit or none)"
+                     grow-height, shrink-height, center, workspace <n|next|prev>, \
+                     move-to-workspace <n|next|prev>, quit or none)"
                 ))
             }
         }))
@@ -597,6 +655,7 @@ struct ConfigFile {
     gestures: BTreeMap<String, String>,
     output: Vec<OutputFile>,
     input: InputFile,
+    workspaces: Option<usize>,
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -624,6 +683,8 @@ pub struct Config {
     pub gestures: Vec<(Gesture, Action)>,
     pub outputs: Vec<OutputConfig>,
     pub input: InputConfig,
+    /// How many workspaces there are (`workspaces.rs`).
+    pub workspaces: usize,
 }
 
 /// Terminals tried in order when `terminal` isn't set.
@@ -726,10 +787,30 @@ impl Config {
         let terminal = env("PILA_TERMINAL").or(file.terminal);
         let launcher = env("PILA_LAUNCHER").or(file.launcher);
 
+        let workspaces = match file.workspaces {
+            None => DEFAULT_WORKSPACES,
+            Some(n @ 1..=MAX_WORKSPACES) => n,
+            Some(n) => return Err(format!("workspaces = {n}: must be 1 to {MAX_WORKSPACES}")),
+        };
+
         // Defaults first, then the user's: a user binding replaces a default
-        // one for the same combo, and "none" removes it.
+        // one for the same combo, and "none" removes it. Mod+N and
+        // Mod+Shift+N only exist for the workspaces there are (up to 9), so
+        // the other digits still reach the apps.
         let mut bindings: Vec<(KeyCombo, Action)> = Vec::new();
-        let defaults = DEFAULT_BINDINGS.iter().map(|&(k, a)| (k, a));
+        let workspace_bindings: Vec<(String, String)> = (1..=workspaces.min(9))
+            .flat_map(|n| {
+                [
+                    (format!("Mod+{n}"), format!("workspace {n}")),
+                    (format!("Mod+Shift+{n}"), format!("move-to-workspace {n}")),
+                ]
+            })
+            .collect();
+        let defaults = DEFAULT_BINDINGS.iter().map(|&(k, a)| (k, a)).chain(
+            workspace_bindings
+                .iter()
+                .map(|(k, a)| (k.as_str(), a.as_str())),
+        );
         let user = file.bindings.iter().map(|(k, a)| (k.as_str(), a.as_str()));
         for (combo, action) in defaults.chain(user) {
             let combo = KeyCombo::parse(combo, mod_key)?;
@@ -789,6 +870,7 @@ impl Config {
             gestures,
             outputs,
             input,
+            workspaces,
         })
     }
 
@@ -1130,6 +1212,69 @@ mod tests {
     }
 
     #[test]
+    fn workspaces_have_a_count_and_bindings() {
+        use WorkspaceTarget::{Index, Next, Prev};
+        let config = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(config.workspaces, DEFAULT_WORKSPACES);
+        let alt = mods(false, true, false, false);
+        let alt_shift = mods(false, true, true, false);
+        assert_eq!(
+            config.action_for(Keysym::_3, &alt),
+            Some(Action::Workspace(Index(2)))
+        );
+        assert_eq!(
+            config.action_for(Keysym::_1, &alt_shift),
+            Some(Action::MoveToWorkspace(Index(0)))
+        );
+        // Only as many digits as there are workspaces.
+        assert_eq!(config.action_for(Keysym::_5, &alt), None);
+        assert_eq!(config.action_for(Keysym::_5, &alt_shift), None);
+        assert_eq!(
+            config.action_for(Keysym::Page_Down, &alt),
+            Some(Action::Workspace(Next))
+        );
+        assert_eq!(
+            config.action_for(Keysym::Page_Up, &alt_shift),
+            Some(Action::MoveToWorkspace(Prev))
+        );
+
+        let config = Config::from_toml(
+            r#"
+            workspaces = 6
+            [bindings]
+            "Mod+F1" = "workspace 6"
+            "Mod+F2" = "move-to-workspace-next"
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(config.workspaces, 6);
+        assert_eq!(
+            config.action_for(Keysym::_6, &alt),
+            Some(Action::Workspace(Index(5)))
+        );
+        assert_eq!(config.action_for(Keysym::_7, &alt), None);
+        assert_eq!(
+            config.action_for(Keysym::F1, &alt),
+            Some(Action::Workspace(Index(5)))
+        );
+        assert_eq!(
+            config.action_for(Keysym::F2, &alt),
+            Some(Action::MoveToWorkspace(Next))
+        );
+
+        assert!(Config::from_toml("workspaces = 0", &no_env).is_err());
+        assert!(Config::from_toml("workspaces = 33", &no_env).is_err());
+        let bad = |action: &str| {
+            Config::from_toml(&format!("[bindings]\n\"Mod+F1\" = \"{action}\""), &no_env).is_err()
+        };
+        assert!(bad("workspace 0"));
+        assert!(bad("workspace"));
+        assert!(bad("workspaces 2"));
+        assert!(bad("move-to-workspace-up"));
+    }
+
+    #[test]
     fn gestures_have_defaults_and_can_be_changed() {
         let swipe = |fingers, direction| Gesture { fingers, direction };
         let config = Config::from_toml("", &no_env).unwrap();
@@ -1138,7 +1283,8 @@ mod tests {
             Some(Action::CycleFocus)
         );
         assert!(config.handles_swipes(3));
-        assert!(!config.handles_swipes(4));
+        assert!(config.handles_swipes(4));
+        assert!(!config.handles_swipes(5));
 
         let config = Config::from_toml(
             r#"

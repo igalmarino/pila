@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Workspaces:** a configurable number (`workspaces`, default 4) spanning all monitors.
+  Mod+1..N (one per workspace, up to 9) / Mod+Page_Up/Page_Down switch, with Shift they move the focused window;
+  four-finger swipes left/right switch. Mod+Tab stays on the current workspace, and
+  activating a window elsewhere (taskbar, xdg-activation) goes to its workspace. Panels
+  see and switch them through ext-workspace.
+
 ## 0.1.0 (2026-11-04)
 
 The first public release: a stacking Wayland compositor for testing by others.

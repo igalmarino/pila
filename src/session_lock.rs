@@ -179,7 +179,7 @@ impl Pila {
 
     /// Re-pick the pointer's focus at its current position, e.g. after the
     /// session (un)locked and what's under it changed.
-    fn refresh_pointer_focus(&mut self) {
+    pub(crate) fn refresh_pointer_focus(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };

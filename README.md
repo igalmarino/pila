@@ -25,7 +25,7 @@ is untested), distros and setups are exactly what testing is needed for: please
 
 Known gaps: touchscreens, input methods (IME), several GPUs (pila uses the seat's primary
 one), monitor names (EDID isn't read, so monitors show as "Unknown"; `[[output]]` matches
-connector names such as `eDP-1`). There are no workspaces, by design.
+connector names such as `eDP-1`).
 
 ## Features
 
@@ -33,7 +33,7 @@ connector names such as `eDP-1`). There are no workspaces, by design.
   client-side decorations for apps that draw their own; Mod+drag to move and resize;
   maximize and fullscreen; snapping to screen halves by keyboard or by dragging to an edge;
   moving, resizing and centering from the keyboard; minimize; switching by recent use
-  (Mod+Tab).
+  (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes).
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
@@ -42,11 +42,11 @@ connector names such as `eDP-1`). There are no workspaces, by design.
   (ext-data-control), screenshots (grim, screencopy) and screen sharing
   (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
-  settings (output power and management), blur behind panels (background-effect), a
-  visual system bell. Enough for a full shell such as Noctalia.
+  settings (output power and management), blur behind panels (background-effect),
+  workspace indicators and switchers (ext-workspace), a visual system bell. Enough for a full shell such as Noctalia.
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
-  speed, disable while typing, ...), three-finger swipes to switch windows and maximize
-  (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
+  speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
+  four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
   any key bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 

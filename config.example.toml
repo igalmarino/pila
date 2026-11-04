@@ -28,6 +28,10 @@
 #     "kitty",
 # ]
 
+# How many workspaces (virtual desktops) there are, 1 to 32. They span all
+# screens; Mod+1..N goes to one, Mod+Shift+1..N moves the window there.
+# workspaces = 4
+
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
 [keyboard]
 layout = ""             # e.g. "us,es"
@@ -63,7 +67,9 @@ tap = true
 # the previous window; hold the modifiers and repeat for older ones),
 # cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
 # fullscreen, snap-left, snap-right, restore, move-left/right/up/down,
-# grow-width, shrink-width, grow-height, shrink-height, center, quit, none.
+# grow-width, shrink-width, grow-height, shrink-height, center,
+# workspace <n|next|prev> (go to a workspace; next/prev don't wrap around),
+# move-to-workspace <n|next|prev> (move the window there), quit, none.
 # Dragging a window to the left/right edge of a screen snaps it to that half;
 # the top edge maximizes it.
 #
@@ -87,6 +93,12 @@ tap = true
 #   "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"   (a region to the clipboard)
 #   "Mod+Ctrl+S"  = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 #                   (the screen under the pointer to a file; both need grim and slurp)
+#   "Mod+1" .. "Mod+N" = "workspace 1" .. "workspace N"
+#   "Mod+Shift+1" .. "Mod+Shift+N" = "move-to-workspace 1" .. "move-to-workspace N"
+#                   (N = workspaces, at most 9; the other digits reach the apps)
+#   "Mod+Page_Down" = "workspace-next"   "Mod+Page_Up" = "workspace-prev"
+#   "Mod+Shift+Page_Down" = "move-to-workspace-next"
+#   "Mod+Shift+Page_Up"   = "move-to-workspace-prev"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
 [bindings]
@@ -108,10 +120,12 @@ tap = true
 #   "swipe-3-right" = "cycle-focus-back"
 #   "swipe-3-up"    = "maximize"
 #   "swipe-3-down"  = "restore"
+#   "swipe-4-left"  = "workspace-next"
+#   "swipe-4-right" = "workspace-prev"
 [gestures]
 # "swipe-3-down" = "minimize"
-# "swipe-4-left" = "snap-left"
-# "swipe-4-right" = "snap-right"
+# "swipe-4-up" = "snap-left"
+# "swipe-4-down" = "snap-right"
 
 # Monitors, matched by connector name (shown in the log as "output connected",
 # e.g. eDP-1, DP-1, HDMI-A-1). Without an entry, a monitor uses its preferred

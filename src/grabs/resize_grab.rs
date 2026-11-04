@@ -114,6 +114,13 @@ impl ResizeSurfaceGrab {
     }
 }
 
+impl ResizeSurfaceGrab {
+    /// The window being resized.
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+}
+
 impl PointerGrab<Pila> for ResizeSurfaceGrab {
     fn motion(
         &mut self,

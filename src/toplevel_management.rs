@@ -229,7 +229,7 @@ impl Pila {
         let mut windows: Vec<Window> = self
             .space
             .elements()
-            .chain(self.minimized.iter())
+            .chain(self.off_space_windows())
             .filter(|w| Some(*w) != focused.as_ref())
             .cloned()
             .collect();
@@ -275,6 +275,7 @@ impl Pila {
         if self.switch.is_some() {
             self.end_switch();
         }
+        self.reveal_workspace_of(window);
         if self.is_minimized(window) {
             self.restore_window(window);
         } else {

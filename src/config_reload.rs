@@ -123,6 +123,9 @@ impl Pila {
                 data.apply_input_config(&self.config.input);
             }
         }
+        if old.workspaces != self.config.workspaces {
+            self.apply_workspace_count();
+        }
         if old.outputs != self.config.outputs {
             // An edited [[output]] section takes over from what a display
             // tool set for that monitor; untouched sections don't.

@@ -54,13 +54,25 @@ impl Pila {
         self.focus_history.insert(0, window.clone());
     }
 
-    /// Switchable windows (mapped or minimized), most recently focused first;
-    /// windows never focused follow in stacking order (top first).
+    /// Switchable windows on the active workspace (mapped or minimized),
+    /// most recently focused first; windows never focused follow in stacking
+    /// order (top first).
     fn switch_order(&mut self) -> Vec<Window> {
         let mut mapped: Vec<Window> = self.space.elements().rev().cloned().collect();
-        mapped.extend(self.minimized.iter().cloned());
-        self.focus_history.retain(|w| mapped.contains(w));
-        let mut order = self.focus_history.clone();
+        let active = self.workspaces.active;
+        mapped.extend(
+            self.minimized
+                .iter()
+                .filter(|w| self.workspace_of(w) == active)
+                .cloned(),
+        );
+        self.focus_history.retain(IsAlive::alive);
+        let mut order: Vec<Window> = self
+            .focus_history
+            .iter()
+            .filter(|w| mapped.contains(w))
+            .cloned()
+            .collect();
         let never_focused: Vec<Window> = mapped
             .into_iter()
             .filter(|w| switchable(w) && !order.contains(w))

@@ -53,6 +53,12 @@ impl XdgActivationHandler for Pila {
         let Some(window) = self.window_for_surface(&surface) else {
             return;
         };
+        // On another workspace: go there; minimized: bring it back (as a
+        // taskbar's activate does).
+        self.reveal_workspace_of(&window);
+        if self.is_minimized(&window) {
+            self.show_window(&window);
+        }
         // Unmapped windows are focused when they map anyway.
         if self.space.elements().any(|w| w == &window) {
             debug!("activating window");
