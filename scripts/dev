@@ -16,7 +16,7 @@ if ! command -v devcontainer >/dev/null; then
     exit 1
 fi
 if [ -z "${WAYLAND_DISPLAY:-}" ] || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-    echo "WAYLAND_DISPLAY/XDG_RUNTIME_DIR are not set; run this from your desktop session (pila or GNOME)." >&2
+    echo "WAYLAND_DISPLAY/XDG_RUNTIME_DIR are not set; run this from your desktop session (pila or another)." >&2
     exit 1
 fi
 

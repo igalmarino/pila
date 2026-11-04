@@ -44,7 +44,7 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     exit 1
 fi
 if ! command -v dbus-run-session >/dev/null; then
-    echo "dbus-run-session not found (Arch package: dbus)" >&2
+    echo "dbus-run-session not found (package dbus, or dbus-daemon on some distros)" >&2
     exit 1
 fi
 

@@ -1,6 +1,7 @@
 # Dev container for a Rust/Smithay Wayland compositor, with Claude Code.
 #
-# Arch base so Mesa, libwayland and friends match an Arch host closely.
+# Arch base (rolling, so Mesa, libwayland and friends are recent); it runs on
+# any Linux host with Docker.
 FROM archlinux:base-devel
 
 ARG TZ=UTC

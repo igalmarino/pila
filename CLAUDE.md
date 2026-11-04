@@ -59,9 +59,11 @@ on **Smithay 0.7.x**.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor.
 - The login session (the user, on the host): `scripts/install` builds the release binary
-  and installs it with `resources/session/` (the `pila-session` wrapper and the
-  `wayland-sessions` entry) and the portal configs; `scripts/uninstall` removes them. Its
-  log is in the journal (`journalctl -t pila -b`) and in `~/.local/state/pila/pila.log`,
+  (with the host's cargo if there is one, else `--container`; `--no-build`) and installs it
+  with `resources/session/` (the `pila-session` wrapper and the `wayland-sessions` entry,
+  whose `@BINDIR@` it fills in) and the portal configs; `scripts/uninstall` removes them.
+  Paths come from `scripts/install-paths` (`PREFIX`, `BINDIR`, `DATADIR`, `SYSCONFDIR`,
+  `DESTDIR`), sourced by both. Its log is in the journal (`journalctl -t pila -b`) and in `~/.local/state/pila/pila.log`,
   mounted here read-only as `/run/host-pila/pila.log` (previous run: `pila.log.old`).
   Taking a change into the session means logging out and back in, which ends this
   Claude session; the user does it.
@@ -81,6 +83,18 @@ on **Smithay 0.7.x**.
 Everything in the repository is in English: code, identifiers, comments, docs, log
 messages, test names, config examples and commit messages, even when the conversation
 isn't.
+
+## Distro policy
+
+pila must not assume a distro, init system or display manager. This machine is Arch with
+systemd and GDM, but the code and the host-side scripts (`scripts/`, `resources/session/`)
+must also work elsewhere (Debian, Fedora, Void, Alpine, ...), including without systemd
+(elogind or seatd, no per-user D-Bus bus, no journal): check for optional tools
+(`systemd-cat`, `logger`, `dbus-run-session`) and degrade, use `/usr/bin/env bash`, and keep
+install paths configurable. Name packages generically in messages ("package dbus"), not
+with one distro's package manager. `rust-version` in `Cargo.toml` is the oldest Rust that
+builds pila; raise it when a dependency or the code needs a newer one. The dev container
+itself is Arch, and its packages are named as Arch's.
 
 ## Protocol policy
 

@@ -41,26 +41,57 @@ Not there yet: touchscreens, input methods (IME), several GPUs.
 
 ## Running pila
 
-pila runs on a TTY of a Linux machine (DRM/KMS, libinput, a logind or seatd session), or
-nested as a window inside another Wayland or X11 session for development. Build it with
-`cargo build --release`; on Arch, besides Rust, it needs `seatd` (for `libseat.so`),
-`libinput`, `mesa`, `libxkbcommon` and `xorg-xwayland`.
+pila runs on a TTY of any Linux machine (DRM/KMS, libinput, and a session from logind,
+elogind or seatd; systemd isn't required), or nested as a window inside another Wayland or
+X11 session for development.
+
+### Building
+
+pila needs Rust 1.89 or newer. If your distro's Rust is older, install it with
+[rustup](https://rustup.rs). It also needs `pkg-config` and the development files of
+`libseat`, `libinput`, `libudev`, `gbm` (Mesa) and `xkbcommon`. At runtime it loads EGL
+(Mesa) and starts `Xwayland` for X11 apps. Package names on common distros (they may
+differ between releases):
+
+| Distro | Packages |
+| - | - |
+| Arch | `seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland pkgconf` |
+| Debian, Ubuntu | `libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev libegl1 xwayland pkg-config` |
+| Fedora | `libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland pkgconf-pkg-config` |
+| openSUSE | `libseat-devel libinput-devel libudev-devel libgbm-devel libxkbcommon-devel Mesa-libEGL1 xwayland pkg-config` |
+| Void | `libseat-devel libinput-devel eudev-libudev-devel libgbm-devel libxkbcommon-devel mesa xorg-server-xwayland pkg-config` |
+| Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev xwayland pkgconf` |
+
+Then `cargo build --release`.
 
 ### As a login session
 
 ```bash
-scripts/install      # builds the release binary (in the dev container) and installs
+scripts/install                # builds the release binary and installs it
+PREFIX=/usr scripts/install    # for display managers that only read /usr/share
 ```
 
-installs the binary and a session wrapper in `/usr/local/bin`, a `pila` entry in
-`/usr/local/share/wayland-sessions` for the display manager (GDM: the gear icon on the
-password screen) and the portal configs for screen sharing in `/etc/xdg`. Log out, pick
-*pila*, log in. The session uses the user's D-Bus bus and `systemd --user` like any other
-desktop, so portals, PipeWire and the keyring (unlocked by GDM at login) just work. The log
-goes to the journal (`journalctl -t pila -b`) and to `~/.local/state/pila/pila.log` (the
-previous run's in `pila.log.old`). After changing pila, run `scripts/install` again and log
-out and back in; `scripts/uninstall` removes what it installed. Mod+Shift+E ends the
-session (back to the login screen).
+This installs the binary and a session wrapper in `$PREFIX/bin`, a `pila` entry in
+`$PREFIX/share/wayland-sessions` for the display manager, and the portal configs for
+screen sharing in `$SYSCONFDIR/xdg`. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
+to `/etc`; `DESTDIR` stages the files for a distro package (see `scripts/install-paths`).
+GDM reads `/usr/local`; LightDM and some SDDM setups need `PREFIX=/usr`.
+
+The build uses the host's `cargo`. Without one, it falls back to the dev container
+(`--container`), whose binary is linked against Arch's libraries and may not run
+elsewhere. `--no-build` installs what's already in `target/release`.
+
+Log out, pick *pila* (on GDM, the gear icon on the password screen), log in. The session
+uses the user's D-Bus bus (and `systemd --user` where there is one) like any other
+desktop, so portals, PipeWire and the keyring (unlocked by the display manager's PAM setup)
+just work. Without a per-user bus (e.g. elogind or seatd without systemd), the wrapper
+starts one for the session with `dbus-run-session`.
+
+The log goes to `~/.local/state/pila/pila.log` (the previous run's is in `pila.log.old`).
+A copy goes to the journal with systemd (`journalctl -t pila -b`), or otherwise to syslog
+through `logger`. After changing pila, run `scripts/install` again and log out and back
+in. `scripts/uninstall`, given the same variables, removes what it installed. Mod+Shift+E
+ends the session (back to the login screen).
 
 ### By hand, on a TTY
 
@@ -71,19 +102,23 @@ scripts/tty                        # the release build with ~/.config/pila/confi
 scripts/tty scripts/tty-test.toml  # another config; --debug for the debug build
 ```
 
-That's the way to try a build or a config while a pila (or GNOME) session keeps running
-on another VT: this pila gets a D-Bus bus of its own (`dbus-run-session`), so its portals
-don't touch the other session's services. The log (portals included) goes to
+This lets you try a build or a config while another session (pila or anything else) keeps
+running on another VT. This pila gets a D-Bus bus of its own (`dbus-run-session`), so its
+portals don't touch the other session's services. The log (portals included) goes to
 `pila-tty.log`, the previous run's to `pila-tty.log.old`. Ctrl+Alt+F1..F12 switch TTYs;
 Mod+Shift+E quits.
 
-Host packages for a full session (Arch):
+Host packages for a full session (names are the same on most distros):
+
+- `foot`: the default terminal (or set `terminal`)
+- `xdg-desktop-portal-wlr`, `grim`, `slurp`: screen sharing
+- `xdg-desktop-portal-gtk`: the file chooser and other portals
+- `noctalia`, `ghostty`, `wlopm`, `wl-clipboard`: for `resources/daily`
 
 ```bash
-sudo pacman -S foot                     # the default terminal (or set `terminal`)
-sudo pacman -S xdg-desktop-portal-wlr xdg-desktop-portal-gtk   # screen sharing (brings
-                                        # grim and slurp) and the file chooser
-sudo pacman -S noctalia wl-clipboard      # for resources/daily
+sudo pacman -S foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp   # Arch
+sudo apt install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Debian, Ubuntu
+sudo dnf install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Fedora
 ```
 
 ### A day-to-day session
@@ -118,11 +153,12 @@ Mod+Shift+E quits.
 
 ## Development environment
 
-pila is developed in a dev container on an **Arch Linux** host, from inside pila itself (or
-GNOME, kept as a fallback session), with **Claude Code** running inside the container:
+pila is developed in a dev container on any Linux host with Docker, from inside pila itself
+(or another desktop, kept as a fallback session), with **Claude Code** running inside the
+container. (The author's host is Arch with GNOME as the fallback.)
 
-- Arch Linux with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and every library
-  pila needs (winit, DRM/KMS, libinput)
+- An Arch Linux image with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and
+  every library pila needs (winit, DRM/KMS, libinput)
 - pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
   (`/dev/dri`) are passed into the container, and the login session's log is mounted at
   `/run/host-pila` so Claude can read it
@@ -133,19 +169,23 @@ GNOME, kept as a fallback session), with **Claude Code** running inside the cont
 - An egress firewall so Claude Code can only reach crates.io, GitHub, Anthropic and docs.rs
 
 The container follows the session it's entered from: entered from a pila session
-(`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME, on GNOME.
+(`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME (or any
+other desktop), on that desktop.
 Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
 with `scripts/install` and a new login (which ends the container's Claude session too). See
 [`CLAUDE.md`](CLAUDE.md) for the architecture.
 
-### 1. Host setup (Arch)
+### 1. Host setup
 
 #### Docker
 
+Install Docker from your distro (Arch: `docker docker-buildx`; Debian, Ubuntu:
+`docker.io docker-buildx`; Fedora: `moby-engine`, or Docker's own repository), start its
+service, and join the `docker` group:
+
 ```bash
-sudo pacman -S docker docker-buildx
-sudo systemctl enable --now docker.socket
-sudo usermod -aG docker "$USER"     # log out and back in afterwards
+sudo systemctl enable --now docker.socket   # with systemd; e.g. OpenRC: rc-update add docker
+sudo usermod -aG docker "$USER"             # log out and back in afterwards
 ```
 
 Use regular (rootful) Docker. Rootless Docker remaps UIDs, so the container can't connect
@@ -158,30 +198,31 @@ host.
 ls -l /dev/dri
 ```
 
-You should see `renderD128` with mode `crw-rw-rw-` (systemd's default on Arch). Intel and AMD
-work through Mesa with no extra setup. NVIDIA with the proprietary driver needs the
+You should see `renderD128` with mode `crw-rw-rw-` (the default udev rules on most
+systemd distros). If it's `crw-rw----` with group `render`, add
+`"--group-add=<that group's GID>"` (`getent group render`) to `runArgs` in
+`.devcontainer/devcontainer.json`. Intel and AMD work through Mesa with no extra setup. NVIDIA with the proprietary driver needs the
 `nvidia-container-toolkit` package and `--gpus=all` added to `runArgs` in
 `.devcontainer/devcontainer.json`.
 
 #### The Dev Containers CLI
 
-Everything on the host comes from Arch's official repositories (no AUR). The container is
-driven from a terminal with the `scripts/dev` helper, which needs the Dev Containers CLI
-(an npm package, not an Arch one):
+The container is driven from a terminal with the `scripts/dev` helper, which needs the Dev
+Containers CLI, an npm package (Node.js and npm come from your distro: `nodejs npm` on Arch,
+Debian, Ubuntu and Fedora):
 
 ```bash
-sudo pacman -S nodejs npm
 npm config set prefix ~/.local     # avoid sudo for global installs; ~/.local/bin must be on PATH
 npm install -g @devcontainers/cli
 ```
 
-Any editor works on the checkout as usual; the `code` package from the official repos is the
-open-source build of VS Code and can't install Microsoft's *Dev Containers* extension, so
-the container itself is started and used from the terminal.
+Any editor works on the checkout as usual. Distro builds of VS Code (Code - OSS) can't
+install Microsoft's *Dev Containers* extension, so the container itself is started and used
+from the terminal.
 
 ### 2. Start the container
 
-Always launch from inside your desktop session (pila, or GNOME), so `WAYLAND_DISPLAY` and
+Always launch from inside your desktop session (pila, or any other), so `WAYLAND_DISPLAY` and
 `XDG_RUNTIME_DIR` are set on the host.
 
 ```bash
