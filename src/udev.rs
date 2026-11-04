@@ -58,7 +58,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     backend::Backend,
-    config::{AccelProfile, ClickMethod, InputConfig, OutputConfig, PointerConfig},
+    config::{
+        AccelProfile, ClickMethod, InputConfig, InternalDisplay, OutputConfig, PointerConfig,
+    },
     cursor::CursorTheme,
     frame,
     output_management::{HeadInfo, ModeInfo},
@@ -111,6 +113,13 @@ pub struct UdevData {
     /// every event.
     recovering: bool,
     loop_handle: LoopHandle<'static, Pila>,
+    /// The laptop's lid is closed (libinput's lid switch), for
+    /// `disable-internal-display = "lid-closed"`.
+    lid_closed: bool,
+    /// Connectors found connected by the scan in progress and not set up
+    /// yet: an external one among them already turns the built-in screen
+    /// off, so it isn't lit for a moment while the scan goes on.
+    scan_pending: Vec<String>,
     /// Last: see the struct docs.
     pub session: LibSeatSession,
 }
@@ -575,6 +584,8 @@ pub fn init_udev(
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
+        lid_closed: false,
+        scan_pending: Vec::new(),
     })));
 
     scan_connectors(state);
@@ -783,6 +794,13 @@ pub fn apply_output_config(state: &mut Pila) {
         })
         .collect();
 
+    // Built-in screens off for an external one keep their place.
+    let held: Vec<crtc::Handle> = configs
+        .iter()
+        .filter(|(_, c)| off_by_rule(state, &c.name))
+        .map(|(crtc, _)| *crtc)
+        .collect();
+
     // Enabling and disabling first: they change what the space holds.
     for (crtc, config) in &configs {
         let enabled = config.enabled.unwrap_or(true);
@@ -855,22 +873,14 @@ pub fn apply_output_config(state: &mut Pila) {
             .output
             .change_current_state(None, None, None, Some(loc));
         // Rotated a quarter turn, width and height swap.
-        let width = surface
-            .output
-            .current_mode()
-            .map(|m| {
-                transform
-                    .transform_size(m.size)
-                    .to_f64()
-                    .to_logical(scale)
-                    .to_i32_round::<i32>()
-                    .w
-            })
-            .unwrap_or(0);
+        let width = logical_width(&surface.output, transform, scale);
         if let Some(on) = config.and_then(|c| c.adaptive_sync) {
             vrr.push((crtc, on));
         }
         if !surface.enabled {
+            if held.contains(&crtc) {
+                right_edge = right_edge.max(loc.x + width);
+            }
             continue;
         }
         right_edge = right_edge.max(loc.x + width);
@@ -900,6 +910,16 @@ fn scan_connectors(state: &mut Pila) {
             return;
         }
     };
+    data.scan_pending = events
+        .iter()
+        .filter_map(|event| match event {
+            DrmScanEvent::Connected {
+                connector,
+                crtc: Some(_),
+            } => Some(connector_name(connector)),
+            _ => None,
+        })
+        .collect();
     for event in events {
         match event {
             DrmScanEvent::Connected {
@@ -912,14 +932,41 @@ fn scan_connectors(state: &mut Pila) {
             _ => {}
         }
     }
+    if let Some(Backend::Udev(data)) = &mut state.backend {
+        data.scan_pending.clear();
+    }
+    // Once every new output is set up (or failed to be): the built-in
+    // screen goes off for an external one, or stays on if none came up.
+    apply_internal_display(state);
 }
 
-fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc::Handle) {
-    let name = format!(
+/// A connector's name as outputs are known by, e.g. `eDP-1`.
+fn connector_name(connector: &connector::Info) -> String {
+    format!(
         "{}-{}",
         connector.interface().as_str(),
         connector.interface_id()
-    );
+    )
+}
+
+/// An output's width in the global logical space, rotation and scale
+/// applied.
+fn logical_width(output: &Output, transform: Transform, scale: f64) -> i32 {
+    output
+        .current_mode()
+        .map(|m| {
+            transform
+                .transform_size(m.size)
+                .to_f64()
+                .to_logical(scale)
+                .to_i32_round::<i32>()
+                .w
+        })
+        .unwrap_or(0)
+}
+
+fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc::Handle) {
+    let name = connector_name(&connector);
     let output_config = effective_output_config(state, &name);
     let modes = connector.modes().to_vec();
     let Some(drm_mode) = pick_mode(&name, &modes, Some(&output_config)) else {
@@ -930,15 +977,24 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
     let transform = output_config.transform.unwrap_or(Transform::Normal);
     let enabled = output_config.enabled.unwrap_or(true);
 
-    // Where the config puts it, else right of the outputs already there.
+    // Where the config puts it, else right of the outputs already there
+    // (a built-in screen turned off for an external one keeps its place, so
+    // it doesn't overlap when it comes back).
     let (x, y) = output_config.position.unwrap_or_else(|| {
-        let x = state
-            .space
-            .outputs()
-            .filter_map(|o| state.space.output_geometry(o))
-            .map(|geo| geo.loc.x + geo.size.w)
-            .max()
-            .unwrap_or(0);
+        let x = match &state.backend {
+            Some(Backend::Udev(data)) => data
+                .outputs
+                .values()
+                .filter(|s| s.enabled || off_by_rule(state, &s.output.name()))
+                .map(|s| {
+                    let o = &s.output;
+                    let scale = o.current_scale().fractional_scale();
+                    o.current_location().x + logical_width(o, o.current_transform(), scale)
+                })
+                .max()
+                .unwrap_or(0),
+            _ => 0,
+        };
         (x, 0)
     });
 
@@ -986,8 +1042,18 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
             gamma: None,
         },
     );
+    // Known now; it stayed pending until here so that it counted as an
+    // external monitor while its place was worked out.
+    data.scan_pending.retain(|n| *n != name);
     if !enabled {
-        info!(name, "output connected, disabled by its config");
+        if off_by_rule(state, &name) {
+            info!(
+                name,
+                "output connected, off while an external monitor is on"
+            );
+        } else {
+            info!(name, "output connected, disabled by its config");
+        }
         state.refresh_output_heads();
         return;
     }
@@ -1109,17 +1175,140 @@ fn set_vrr(data: &UdevData, crtc: crtc::Handle, on: bool) {
     }
 }
 
-/// `[[output]]` for `name`, with what a display tool set at runtime on top
-/// (`Pila::output_overrides`).
+/// `[[output]]` for `name`, turned off by `disable-internal-display` if it's
+/// the built-in screen and that applies now, with what a display tool set at
+/// runtime on top (`Pila::output_overrides`).
 fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
-    let file = state
+    let mut file = state
         .config
         .output(name)
         .cloned()
         .unwrap_or_else(|| OutputConfig::named(name));
-    match state.output_overrides.get(name) {
+    if off_by_rule(state, name) {
+        file.enabled = Some(false);
+    }
+    with_overrides(state, file)
+}
+
+/// Whether `disable-internal-display` (rather than the file) turns output
+/// `name` off now. Such an output keeps its place in the layout.
+fn off_by_rule(state: &Pila, name: &str) -> bool {
+    state.config.output(name).and_then(|c| c.enabled).is_none() && internal_display_off(state, name)
+}
+
+fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
+    match state.output_overrides.get(&file.name) {
         Some(over) => file.overridden_by(over),
         None => file,
+    }
+}
+
+/// A laptop's built-in screen, by its connector type.
+fn is_internal(name: &str) -> bool {
+    ["eDP-", "LVDS-", "DSI-"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
+/// Whether `disable-internal-display` turns the built-in screen `name` off
+/// now: it applies (always, or the lid is closed) and another connected
+/// monitor, an external one, is on by its own config. That's decided from
+/// the config, not from which outputs are running, so it doesn't depend on
+/// the order outputs are set up in.
+fn internal_display_off(state: &Pila, name: &str) -> bool {
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return false;
+    };
+    let applies = match state.config.internal_display {
+        InternalDisplay::Never => false,
+        InternalDisplay::Always => true,
+        InternalDisplay::LidClosed => data.lid_closed,
+    };
+    // Set up, or found by the scan in progress and about to be.
+    let connected = data
+        .outputs
+        .values()
+        .map(|s| s.output.name())
+        .chain(data.scan_pending.iter().cloned());
+    applies
+        && is_internal(name)
+        && connected.into_iter().any(|other| {
+            let config = state
+                .config
+                .output(&other)
+                .cloned()
+                .unwrap_or_else(|| OutputConfig::named(&other));
+            other != name
+                && !is_internal(&other)
+                && with_overrides(state, config).enabled.unwrap_or(true)
+        })
+}
+
+/// Turn built-in screens on or off as `disable-internal-display` says now
+/// (an external monitor came or went, the lid moved). Never leaves no
+/// output on: if every external one failed, the built-in screen stays.
+pub fn apply_internal_display(state: &mut Pila) {
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return;
+    };
+    let internal: Vec<(crtc::Handle, String, bool)> = data
+        .outputs
+        .iter()
+        .map(|(crtc, s)| (*crtc, s.output.name(), s.enabled))
+        .filter(|(_, name, _)| is_internal(name))
+        .collect();
+    if internal.is_empty() {
+        return;
+    }
+    for (crtc, name, _) in &internal {
+        if effective_output_config(state, name).enabled.unwrap_or(true) {
+            enable_output(state, *crtc);
+        } else {
+            disable_output(state, *crtc);
+        }
+    }
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return;
+    };
+    if !data.outputs.values().any(|s| s.enabled) {
+        warn!("no external monitor is on: keeping the built-in screen on");
+        for (crtc, _, _) in &internal {
+            enable_output(state, *crtc);
+        }
+    }
+    let Some(Backend::Udev(data)) = &state.backend else {
+        return;
+    };
+    let changed = internal
+        .iter()
+        .any(|(crtc, _, was)| data.outputs.get(crtc).is_some_and(|s| s.enabled != *was));
+    if !changed {
+        return;
+    }
+    for (crtc, name, was) in &internal {
+        if !*was && data.outputs.get(crtc).is_some_and(|s| s.enabled) {
+            info!(name, "built-in screen back on");
+        }
+    }
+    state.fixup_windows();
+    state.refit_maximized();
+    state.configure_lock_surfaces();
+    state.refresh_output_heads();
+    state.queue_redraw();
+}
+
+impl Pila {
+    /// The laptop's lid opened or closed (libinput's lid switch).
+    pub fn lid_switched(&mut self, closed: bool) {
+        let Some(Backend::Udev(data)) = &mut self.backend else {
+            return;
+        };
+        if data.lid_closed == closed {
+            return;
+        }
+        data.lid_closed = closed;
+        info!(closed, "lid switch");
+        apply_internal_display(self);
     }
 }
 
@@ -1131,6 +1320,9 @@ fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
         return;
     };
     info!(name = surface.output.name(), "output disconnected");
+    // The built-in screen comes back first, so the windows of the monitor
+    // that went away move onto it.
+    apply_internal_display(state);
     if let Some(global) = surface.global {
         state.display_handle.remove_global::<Pila>(global);
     }

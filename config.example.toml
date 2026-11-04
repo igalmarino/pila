@@ -32,6 +32,14 @@
 # screens; Mod+1..N goes to one, Mod+Shift+1..N moves the window there.
 # workspaces = 4
 
+# Turn a laptop's built-in screen (eDP, LVDS or DSI connector) off while an
+# external monitor is on: "never" (the default), "always", or "lid-closed"
+# (only while the lid is closed). It comes back on when the external monitor
+# is unplugged (or the lid opens). An `enabled` set in the built-in screen's
+# [[output]] section (below) wins; wlr-randr and display settings can still
+# turn it back on. TTY only.
+# disable-internal-display = "lid-closed"
+
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
 [keyboard]
 layout = ""             # e.g. "us,es"

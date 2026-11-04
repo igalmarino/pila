@@ -656,6 +656,7 @@ struct ConfigFile {
     output: Vec<OutputFile>,
     input: InputFile,
     workspaces: Option<usize>,
+    disable_internal_display: Option<String>,
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -685,6 +686,32 @@ pub struct Config {
     pub input: InputConfig,
     /// How many workspaces there are (`workspaces.rs`).
     pub workspaces: usize,
+    /// When the built-in screen goes off for an external one (`udev.rs`).
+    pub internal_display: InternalDisplay,
+}
+
+/// `disable-internal-display`: when a laptop's built-in screen (eDP, LVDS,
+/// DSI) is turned off while an external monitor is on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InternalDisplay {
+    #[default]
+    Never,
+    Always,
+    /// Only while the lid is closed (clamshell).
+    LidClosed,
+}
+
+impl InternalDisplay {
+    fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "never" => Ok(Self::Never),
+            "always" => Ok(Self::Always),
+            "lid-closed" => Ok(Self::LidClosed),
+            other => Err(format!(
+                "disable-internal-display = {other:?}: must be never, always or lid-closed"
+            )),
+        }
+    }
 }
 
 /// Terminals tried in order when `terminal` isn't set.
@@ -787,6 +814,10 @@ impl Config {
         let terminal = env("PILA_TERMINAL").or(file.terminal);
         let launcher = env("PILA_LAUNCHER").or(file.launcher);
 
+        let internal_display = match &file.disable_internal_display {
+            Some(text) => InternalDisplay::parse(text)?,
+            None => InternalDisplay::Never,
+        };
         let workspaces = match file.workspaces {
             None => DEFAULT_WORKSPACES,
             Some(n @ 1..=MAX_WORKSPACES) => n,
@@ -871,6 +902,7 @@ impl Config {
             outputs,
             input,
             workspaces,
+            internal_display,
         })
     }
 
@@ -1327,6 +1359,22 @@ mod tests {
         let env = |name: &str| (name == "PILA_MOD").then(|| "ctrl".to_string());
         let config = Config::parse("", &env, ModKey::Super).unwrap();
         assert_eq!(config.mod_key, ModKey::Ctrl);
+    }
+
+    #[test]
+    fn internal_display_parses() {
+        let parse = |text: &str| Config::from_toml(text, &no_env).map(|c| c.internal_display);
+        assert_eq!(parse(""), Ok(InternalDisplay::Never));
+        assert_eq!(
+            parse(r#"disable-internal-display = "always""#),
+            Ok(InternalDisplay::Always)
+        );
+        assert_eq!(
+            parse(r#"disable-internal-display = "lid-closed""#),
+            Ok(InternalDisplay::LidClosed)
+        );
+        assert!(parse(r#"disable-internal-display = "sometimes""#).is_err());
+        assert!(parse("disable-internal-display = true").is_err());
     }
 
     #[test]
