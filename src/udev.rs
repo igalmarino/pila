@@ -1474,6 +1474,8 @@ fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmE
     let frame_duration = surface
         .output
         .current_mode()
+        // A mode without a refresh rate would make an infinite duration.
+        .filter(|mode| mode.refresh > 0)
         .map(|mode| Duration::from_secs_f64(1000.0 / mode.refresh as f64))
         .unwrap_or(Duration::from_millis(16));
     // The kernel's vblank timestamp, when it gives a monotonic one.
