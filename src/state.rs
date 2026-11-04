@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ffi::OsString,
-    os::fd::AsFd,
+    os::{fd::AsFd, unix::process::CommandExt},
     process::{Command, Stdio},
     sync::Arc,
 };
@@ -1307,8 +1307,24 @@ impl Pila {
 
     /// The environment of everything pila starts. Its output goes to pila's
     /// log (stderr) instead of the terminal pila was started from (on a TTY,
-    /// the console), and it doesn't read that terminal.
+    /// the console), and it doesn't read that terminal. It starts with no
+    /// signals blocked: pila blocks SIGINT, SIGTERM and SIGCHLD for its
+    /// signal source (`main.rs`), and a blocked mask survives exec, so
+    /// programs would otherwise ignore `kill` and Ctrl+C, and so would
+    /// everything they start.
     pub(crate) fn session_env(&self, cmd: &mut Command) {
+        // SAFETY: between fork and exec only async-signal-safe calls are
+        // allowed; sigemptyset and sigprocmask are.
+        unsafe {
+            cmd.pre_exec(|| {
+                let mut none = std::mem::zeroed::<libc::sigset_t>();
+                libc::sigemptyset(&mut none);
+                if libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut()) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
         cmd.stdin(Stdio::null());
         if let Ok(stderr) = std::io::stderr().as_fd().try_clone_to_owned() {
             cmd.stdout(Stdio::from(stderr));
