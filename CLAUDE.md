@@ -206,7 +206,8 @@ Key flows and invariants:
   captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
-  `render.rs` (backend-neutral; `PilaRenderElement`), and calls the damage tracker's
+  `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
+  since pila's custom shaders need `GlesFrame`), and calls the damage tracker's
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't
   interleave title bars with windows. Afterwards `frame.rs` (backend-neutral) records each
   drawn surface's primary output from the render states, sends presentation-time feedback
@@ -430,6 +431,20 @@ Key flows and invariants:
   be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw
   without text.
+- **Rounded corners** (`rounded.rs`, `corner-radius`, default 0): `Pila::scene` gives each
+  window a `Rounding` (geometry plus title bar; none when maximized or fullscreen; radius
+  at most half the shorter side and, with a bar, its height). `render::window_elements`
+  then builds the window's elements itself (popups first and unclipped, as
+  `Window::render_elements` does) and wraps its own surface elements that reach into a
+  corner in `RoundedSurface`, whose `draw` overrides the default texture program with one
+  that fades out the corner (`input_to_geo` inverts Smithay's `build_texture_mat`, so
+  keep it in step with Smithay). Elements away from the corners stay plain (direct
+  scanout). Content outside the geometry (CSD shadows) is not clipped. Opaque regions
+  lose the corner squares. The bar background, bell flash and snap preview are
+  `RoundedSolid` (pixel shader over a `SolidColorBuffer`'s element); the close button is
+  rasterized with its corner cut. `ShapeDamage` (draws nothing, in front of the window)
+  damages a window whose shape changed without a commit (e.g. a reload). Shaders are
+  compiled once per EGL context; on failure corners stay square.
 - **Resize** uses per-surface `ResizeSurfaceState` in the surface data map;
   `resize_grab::handle_commit` (called from `CompositorHandler::commit`) repositions the
   window when resizing from the top/left edges once the client commits the new size.

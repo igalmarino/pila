@@ -21,7 +21,7 @@ use smithay::{
                 solid::{SolidColorBuffer, SolidColorRenderElement},
                 Kind,
             },
-            ImportAll, ImportMem, Renderer,
+            gles::GlesRenderer,
         },
     },
     desktop::Window,
@@ -34,7 +34,11 @@ use smithay::{
 };
 use tracing::warn;
 
-use crate::{grabs::resize_grab::ResizeEdge, render::PilaRenderElement};
+use crate::{
+    grabs::resize_grab::ResizeEdge,
+    render::PilaRenderElement,
+    rounded::{self, Corners, RoundedSolid},
+};
 
 pub const TITLE_BAR_HEIGHT: i32 = 28;
 /// Width of each button cell (clickable and hover-highlighted), at the right
@@ -219,8 +223,9 @@ enum Look {
 /// A rasterized button and what it was drawn for, so it's only redrawn
 /// (and re-uploaded) when the icon or look changes.
 struct ButtonTexture {
-    /// Icon, look and buffer scale.
-    key: (Icon, Look, i32),
+    /// Icon, look, buffer scale and the rounded corner it's cut by (in
+    /// buffer pixels; the close button's, at the bar's top-right).
+    key: (Icon, Look, i32, i32),
     buffer: MemoryRenderBuffer,
 }
 
@@ -290,18 +295,18 @@ fn window_title(window: &Window) -> Option<String> {
 /// scale rounded up (`scale::buffer_scale`), so they stay sharp on HiDPI
 /// outputs; a window spanning outputs of different scales re-rasterizes
 /// them for each.
-pub fn title_bar_elements<R>(
-    renderer: &mut R,
+pub fn title_bar_elements(
+    renderer: &mut GlesRenderer,
     window: &Window,
     rect: Rectangle<i32, Logical>,
     focused: bool,
     hover: Option<TitleBarPart>,
+    radius: Option<f64>,
     scale: Scale<f64>,
-) -> Vec<PilaRenderElement<R>>
-where
-    R: Renderer + ImportAll + ImportMem,
-    R::TextureId: Send + Clone + 'static,
-{
+) -> Vec<PilaRenderElement> {
+    // Rounded top corners, if the shaders for them work (`rounded.rs`).
+    let shaders = radius.and_then(|_| rounded::Shaders::get(renderer));
+    let radius = radius.filter(|_| shaders.is_some());
     window
         .user_data()
         .insert_if_missing(|| RefCell::new(TitleBarBuffers::default()));
@@ -335,20 +340,21 @@ where
     };
 
     let mut elements = Vec::with_capacity(4);
-    let upload = |renderer: &mut R, buffer: &MemoryRenderBuffer, loc: Point<i32, Logical>| {
-        let loc: Point<f64, Physical> = loc.to_f64().to_physical(scale);
-        MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            loc,
-            buffer,
-            None,
-            None,
-            None,
-            Kind::Unspecified,
-        )
-        .map_err(|err| warn!(?err, "failed to upload title bar texture"))
-        .ok()
-    };
+    let upload =
+        |renderer: &mut GlesRenderer, buffer: &MemoryRenderBuffer, loc: Point<i32, Logical>| {
+            let loc: Point<f64, Physical> = loc.to_f64().to_physical(scale);
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                loc,
+                buffer,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .map_err(|err| warn!(?err, "failed to upload title bar texture"))
+            .ok()
+        };
 
     // The title: at most the space between the left padding and the buttons,
     // centered on the bar where it fits (see `title_x`).
@@ -407,11 +413,17 @@ where
             minimize_loc,
         ),
     ] {
-        let key = (icon, look(part), buffer_scale);
+        let corner = match (part, radius) {
+            (TitleBarPart::Close, Some(radius)) => {
+                (radius * f64::from(buffer_scale)).round() as i32
+            }
+            _ => 0,
+        };
+        let key = (icon, look(part), buffer_scale, corner);
         if slot.as_ref().is_none_or(|texture| texture.key != key) {
             *slot = Some(ButtonTexture {
                 key,
-                buffer: button_buffer(icon, key.1, buffer_scale),
+                buffer: button_buffer(icon, key.1, buffer_scale, corner),
             });
         }
         let buffer = &slot.as_ref().unwrap().buffer;
@@ -420,23 +432,29 @@ where
 
     bar.update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
     let loc: Point<i32, Physical> = rect.loc.to_physical_precise_round(scale);
-    elements
-        .push(SolidColorRenderElement::from_buffer(bar, loc, scale, 1.0, Kind::Unspecified).into());
+    let bar = SolidColorRenderElement::from_buffer(bar, loc, scale, 1.0, Kind::Unspecified);
+    elements.push(match (radius, &shaders) {
+        (Some(radius), Some(shaders)) => {
+            RoundedSolid::new(bar, shaders, radius, Corners::Top, scale).into()
+        }
+        _ => bar.into(),
+    });
     elements
 }
 
 /// Draw one button cell (`BUTTON_WIDTH` x `TITLE_BAR_HEIGHT` logical pixels,
 /// at `scale` physical pixels each): a background (transparent unless
 /// hovered, so the bar shows through) and an anti-aliased 10px glyph in the
-/// middle.
-fn button_buffer(icon: Icon, look: Look, scale: i32) -> MemoryRenderBuffer {
+/// middle. A nonzero `corner` (buffer pixels) rounds off the top-right
+/// corner: the close button's, when windows have rounded corners.
+fn button_buffer(icon: Icon, look: Look, scale: i32, corner: i32) -> MemoryRenderBuffer {
     let (background, color) = match (look, icon) {
         (Look::Hover, Icon::Close) => (Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON),
         (Look::Hover, _) => (Some(HOVER_BG), HOVER_ICON),
         (Look::Focused, _) => (None, ICON_FOCUSED),
         (Look::Unfocused, _) => (None, ICON_UNFOCUSED),
     };
-    let pixels = rasterize_button(icon, background, color, scale);
+    let pixels = rasterize_button(icon, background, color, scale, corner);
     MemoryRenderBuffer::from_slice(
         &pixels,
         Fourcc::Argb8888,
@@ -448,13 +466,16 @@ fn button_buffer(icon: Icon, look: Look, scale: i32) -> MemoryRenderBuffer {
 }
 
 /// Premultiplied ARGB8888 pixels (little-endian: B, G, R, A) for a button,
-/// `scale` physical pixels per logical one.
+/// `scale` physical pixels per logical one, with the top-right corner
+/// rounded by `corner` physical pixels.
 fn rasterize_button(
     icon: Icon,
     background: Option<[f32; 3]>,
     color: [f32; 3],
     scale: i32,
+    corner: i32,
 ) -> Vec<u8> {
+    let radius = f64::from(corner) / f64::from(scale);
     let (w, h) = (BUTTON_WIDTH * scale, TITLE_BAR_HEIGHT * scale);
     let s = scale as f64;
     // Glyph center, in logical pixels. At scale 1, outline edges land on
@@ -465,9 +486,10 @@ fn rasterize_button(
     for y in 0..h {
         for x in 0..w {
             let p = ((x as f64 + 0.5) / s, (y as f64 + 0.5) / s);
-            let coverage = glyph_coverage(icon, p, (cx, cy), s) as f32;
+            let shape = rounded::top_right_coverage(p, f64::from(BUTTON_WIDTH), radius, s) as f32;
+            let coverage = glyph_coverage(icon, p, (cx, cy), s) as f32 * shape;
             let (bg, bg_alpha) = match background {
-                Some(bg) => (bg, 1.0),
+                Some(bg) => (bg, shape),
                 None => ([0.0; 3], 0.0),
             };
             let channel = |i: usize| color[i] * coverage + bg[i] * bg_alpha * (1.0 - coverage);
@@ -579,7 +601,7 @@ mod tests {
 
     #[test]
     fn button_glyphs_are_crisp_and_centered() {
-        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 1);
+        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 1, 0);
         // The square's left edge (x = 13.5) lands on pixel column 13.
         assert_eq!(alpha_at(&px, 13, TITLE_BAR_HEIGHT / 2), 255);
         assert_eq!(alpha_at(&px, 12, TITLE_BAR_HEIGHT / 2), 0);
@@ -587,18 +609,18 @@ mod tests {
         assert_eq!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2), 0);
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
-        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED, 1);
+        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED, 1, 0);
         assert!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2) > 200); // the cross
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
         // Hovered buttons fill their whole cell.
-        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON, 1);
+        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON, 1, 0);
         assert!(px.chunks(4).all(|p| p[3] == 255));
     }
 
     #[test]
     fn buttons_at_scale_2_have_crisp_2px_strokes() {
-        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 2);
+        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 2, 0);
         assert_eq!(px.len() as i32, BUTTON_WIDTH * 2 * TITLE_BAR_HEIGHT * 2 * 4);
         // The left edge (logical x = 13.5, 1px wide) covers columns 26-27.
         let y = TITLE_BAR_HEIGHT;

@@ -16,7 +16,7 @@
 use std::sync::Mutex;
 
 use smithay::{
-    backend::renderer::{buffer_type, damage::OutputDamageTracker, gles::GlesRenderer, BufferType},
+    backend::renderer::{buffer_type, damage::OutputDamageTracker, BufferType},
     output::{Output, WeakOutput},
     reexports::{
         wayland_protocols_wlr::screencopy::v1::server::{
@@ -227,7 +227,7 @@ impl Pila {
             return true;
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
-        let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
+        let mut elements: Vec<PilaRenderElement> = Vec::new();
         if overlay_cursor {
             elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
         }

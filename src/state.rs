@@ -478,6 +478,7 @@ impl Pila {
                 .map(|rect| (self.snap_preview_buffer.clone(), rect)),
             windows: self.scene_windows(),
             lower: layers(lower),
+            corner_radius: self.config.corner_radius,
             ..Default::default()
         }
     }
@@ -500,7 +501,15 @@ impl Pila {
             .rev()
             .filter_map(|window| {
                 let loc = self.space.element_location(window)?;
-                let title_bar = decoration::title_bar_rect(window, loc).map(|rect| SceneTitleBar {
+                let bar_rect = decoration::title_bar_rect(window, loc);
+                let (maximized, fullscreen) = fill_state(window);
+                let rounding = crate::rounded::Rounding::new(
+                    Rectangle::new(loc, window.geometry().size),
+                    bar_rect,
+                    self.config.corner_radius,
+                    maximized || fullscreen,
+                );
+                let title_bar = bar_rect.map(|rect| SceneTitleBar {
                     rect,
                     focused: focused.as_ref() == Some(window),
                     hover: hovered
@@ -513,6 +522,7 @@ impl Pila {
                     render_location: loc - window.geometry().loc,
                     title_bar,
                     flash: crate::bell::flash(window, loc),
+                    rounding,
                 })
             })
             .collect()

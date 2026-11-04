@@ -35,6 +35,7 @@ mod output_management;
 mod output_power;
 mod pointer_constraints;
 mod render;
+mod rounded;
 mod scale;
 mod screencopy;
 mod session_lock;

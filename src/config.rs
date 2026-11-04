@@ -112,6 +112,10 @@ const DEFAULT_GESTURES: &[(&str, &str)] = &[
     ("swipe-4-right", "workspace-prev"),
 ];
 
+/// The largest `corner-radius` (logical pixels). A window's corners are
+/// further limited by its size and the title bar's height (`rounded.rs`).
+pub const MAX_CORNER_RADIUS: u32 = 64;
+
 /// How many workspaces there are unless `workspaces` says otherwise, and
 /// the most it may say.
 pub const DEFAULT_WORKSPACES: usize = 4;
@@ -657,6 +661,7 @@ struct ConfigFile {
     input: InputFile,
     workspaces: Option<usize>,
     disable_internal_display: Option<String>,
+    corner_radius: Option<u32>,
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -688,6 +693,8 @@ pub struct Config {
     pub workspaces: usize,
     /// When the built-in screen goes off for an external one (`udev.rs`).
     pub internal_display: InternalDisplay,
+    /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
+    pub corner_radius: u32,
 }
 
 /// `disable-internal-display`: whether a laptop's built-in screen (eDP,
@@ -820,6 +827,15 @@ impl Config {
             Some(n @ 1..=MAX_WORKSPACES) => n,
             Some(n) => return Err(format!("workspaces = {n}: must be 1 to {MAX_WORKSPACES}")),
         };
+        let corner_radius = match file.corner_radius {
+            None => 0,
+            Some(r @ 0..=MAX_CORNER_RADIUS) => r,
+            Some(r) => {
+                return Err(format!(
+                    "corner-radius = {r}: must be 0 to {MAX_CORNER_RADIUS}"
+                ))
+            }
+        };
 
         // Defaults first, then the user's: a user binding replaces a default
         // one for the same combo, and "none" removes it. Mod+N and
@@ -900,6 +916,7 @@ impl Config {
             input,
             workspaces,
             internal_display,
+            corner_radius,
         })
     }
 
@@ -1238,6 +1255,15 @@ mod tests {
         };
         assert!(spawned(config.action_for(Keysym::s, &alt_shift)).contains("wl-copy"));
         assert!(spawned(config.action_for(Keysym::s, &alt_ctrl)).contains("$PILA_OUTPUT"));
+    }
+
+    #[test]
+    fn corner_radius_defaults_to_square_and_is_bounded() {
+        assert_eq!(Config::from_toml("", &no_env).unwrap().corner_radius, 0);
+        let config = Config::from_toml("corner-radius = 12", &no_env).unwrap();
+        assert_eq!(config.corner_radius, 12);
+        assert!(Config::from_toml("corner-radius = 65", &no_env).is_err());
+        assert!(Config::from_toml("corner-radius = -1", &no_env).is_err());
     }
 
     #[test]

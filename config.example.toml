@@ -39,6 +39,12 @@
 # still turn it back on. TTY only.
 # disable-internal-display = "always"
 
+# Rounded window corners: the radius in logical pixels, 0 (the default, square
+# corners) to 64. Maximized and fullscreen windows stay square. The radius is
+# at most half the window's shorter side, and with a title bar at most the
+# bar's height (28).
+# corner-radius = 10
+
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
 [keyboard]
 layout = ""             # e.g. "us,es"
@@ -76,7 +82,8 @@ tap = true
 # fullscreen, snap-left, snap-right, restore, move-left/right/up/down,
 # grow-width, shrink-width, grow-height, shrink-height, center,
 # workspace <n|next|prev> (go to a workspace; next/prev don't wrap around),
-# move-to-workspace <n|next|prev> (move the window there), quit, none.
+# move-to-workspace <n|next|prev> (move the window there; "workspace-next" and
+# "move-to-workspace-prev" work too), quit, none.
 # Dragging a window to the left/right edge of a screen snaps it to that half;
 # the top edge maximizes it.
 #

@@ -33,7 +33,8 @@ connector names such as `eDP-1`).
   client-side decorations for apps that draw their own; Mod+drag to move and resize;
   maximize and fullscreen; snapping to screen halves by keyboard or by dragging to an edge;
   moving, resizing and centering from the keyboard; minimize; switching by recent use
-  (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes).
+  (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes); optional
+  rounded corners (`corner-radius`).
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale; optionally, a laptop's built-in screen turns off while an
   external monitor is on.

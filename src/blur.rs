@@ -118,26 +118,10 @@ pub fn blur_rects(layer: &LayerSurface) -> Vec<Rectangle<i32, Logical>> {
     rects
 }
 
-/// Fragment shader prologue Smithay's texture programs expect.
-const PROLOGUE: &str = "\
-#version 100
-//_DEFINES_
-#if defined(EXTERNAL)
-#extension GL_OES_EGL_image_external : require
-#endif
-precision mediump float;
-#if defined(EXTERNAL)
-uniform samplerExternalOES tex;
-#else
-uniform sampler2D tex;
-#endif
-uniform float alpha;
-varying vec2 v_coords;
+/// The blur passes' own uniforms, after `render::texture_shader_prologue`.
+const UNIFORMS: &str = "\
 uniform float offset;
 uniform vec2 halfpixel;
-#if defined(DEBUG_FLAGS)
-uniform float tint;
-#endif
 ";
 
 const DOWN_FRAG: &str = "\
@@ -284,7 +268,13 @@ impl BlurCache {
                 UniformName::new("halfpixel", UniformType::_2f),
             ];
             let compile = |renderer: &mut GlesRenderer, body: &str| {
-                renderer.compile_custom_texture_shader(format!("{PROLOGUE}{body}"), &uniforms)
+                renderer.compile_custom_texture_shader(
+                    format!(
+                        "{}{UNIFORMS}{body}",
+                        crate::render::texture_shader_prologue("mediump")
+                    ),
+                    &uniforms,
+                )
             };
             match (compile(renderer, DOWN_FRAG), compile(renderer, UP_FRAG)) {
                 (Ok(down), Ok(up)) => self.shaders = Some(Shaders { down, up }),
@@ -375,7 +365,7 @@ impl BlurCache {
         // What's behind the region, relative to it; backdrops of blur
         // surfaces further back are included.
         let origin = output_location + rect.loc;
-        let behind: Vec<PilaRenderElement<GlesRenderer>> = {
+        let behind: Vec<PilaRenderElement> = {
             let cache = &*self;
             render::elements_behind_layer(renderer, scene, index, origin, scale, &mut |i| {
                 cache.element(i, scale)
@@ -461,11 +451,7 @@ impl BlurCache {
 
     /// The backdrop element of the upper layer at `index` in the scene
     /// `prepare` ran for, if it has one.
-    pub fn element(
-        &self,
-        index: usize,
-        scale: Scale<f64>,
-    ) -> Option<PilaRenderElement<GlesRenderer>> {
+    pub fn element(&self, index: usize, scale: Scale<f64>) -> Option<PilaRenderElement> {
         let (_, key) = self.current.iter().find(|(i, _)| *i == index)?;
         let entry = self.entries.get(key)?;
         if !entry.drawn {

@@ -291,7 +291,7 @@ impl UdevData {
         if on == surface.drm_output.is_some() {
             return true;
         }
-        let elements = DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default();
+        let elements = DrmOutputRenderElements::<_, PilaRenderElement>::default();
         if !on {
             surface.drm_output = None;
             surface.frame_pending = false;
@@ -834,7 +834,7 @@ pub fn apply_output_config(state: &mut Pila) {
                         &crtc,
                         mode,
                         renderer,
-                        &DrmOutputRenderElements::<_, PilaRenderElement<GlesRenderer>>::default(),
+                        &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
                     ),
                     None => Ok(()),
                 };
@@ -1094,7 +1094,7 @@ fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     }
     let name = surface.output.name();
     let planes = drm.device().planes(&crtc).ok();
-    match drm.initialize_output::<_, PilaRenderElement<GlesRenderer>>(
+    match drm.initialize_output::<_, PilaRenderElement>(
         crtc,
         surface.mode,
         &[surface.connector],

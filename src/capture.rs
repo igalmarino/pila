@@ -343,7 +343,7 @@ impl Pila {
         };
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
 
-        let mut elements: Vec<PilaRenderElement<GlesRenderer>> = Vec::new();
+        let mut elements: Vec<PilaRenderElement> = Vec::new();
         if session.paint_cursors {
             elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
         }
@@ -353,7 +353,7 @@ impl Pila {
                 let loc: Point<i32, Physical> =
                     (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
                 elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
-                    PilaRenderElement<GlesRenderer>,
+                    PilaRenderElement,
                 >(window, renderer, loc, scale, 1.0));
             }
             // Blurred backdrops are part of the screen; they're prepared
@@ -442,7 +442,7 @@ pub(crate) fn copy_frame(
     buffer: &WlBuffer,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement<GlesRenderer>],
+    elements: &[PilaRenderElement],
     clear: [f32; 4],
 ) -> Result<(), CopyError> {
     match buffer_type(buffer) {
@@ -462,7 +462,7 @@ fn render_to_dmabuf(
     buffer: &WlBuffer,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement<GlesRenderer>],
+    elements: &[PilaRenderElement],
     clear: [f32; 4],
 ) -> Result<(), CopyError> {
     let mut dmabuf = get_dmabuf(buffer)
@@ -491,7 +491,7 @@ fn copy_to_shm(
     buffer: &WlBuffer,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement<GlesRenderer>],
+    elements: &[PilaRenderElement],
     clear: [f32; 4],
 ) -> Result<(), CopyError> {
     let (w, h) = (size.w, size.h);
