@@ -13,7 +13,7 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-<!-- ![pila with a few windows and a panel](docs/screenshot.png) -->
+![pila with a terminal and a Noctalia bar](docs/screenshot.png)
 
 ## Status
 
