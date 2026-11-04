@@ -8,7 +8,8 @@
 //! the manager's `commit` (the last activation wins) and ignored while the
 //! session is locked. Listeners are kept up to date by diffing
 //! (`Pila::refresh_workspaces`): after a switch, a change in the number of
-//! workspaces, and after each frame for the outputs.
+//! workspaces, a change in the outputs (`refresh_output_heads`) and a client
+//! binding a `wl_output` (`OutputHandler::output_bound`).
 
 use smithay::reexports::{
     wayland_protocols::ext::workspace::v1::server::{

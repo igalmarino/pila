@@ -38,22 +38,30 @@ pub struct Workspaces {
     pub parked: Vec<Window>,
 }
 
-/// The workspace a window off the `Space` belongs to (parked or minimized),
-/// and where a parked window was.
+/// What a window off the `Space` (parked or minimized) remembers: its
+/// workspace and where it was.
 #[derive(Default)]
-struct OnWorkspace {
+struct OffSpace {
     index: Cell<usize>,
     at: Cell<Point<i32, Logical>>,
 }
 
-fn on_workspace(window: &Window) -> &OnWorkspace {
-    window.user_data().insert_if_missing(OnWorkspace::default);
-    window.user_data().get::<OnWorkspace>().unwrap()
+fn on_workspace(window: &Window) -> &OffSpace {
+    window.user_data().insert_if_missing(OffSpace::default);
+    window.user_data().get::<OffSpace>().unwrap()
 }
 
-/// Remember that `window`, now off the `Space`, belongs to workspace `index`.
-pub fn set_workspace(window: &Window, index: usize) {
-    on_workspace(window).index.set(index);
+/// Record that `window`, leaving the `Space` from `at`, is on workspace
+/// `index`.
+pub fn leave_space(window: &Window, index: usize, at: Point<i32, Logical>) {
+    let data = on_workspace(window);
+    data.index.set(index);
+    data.at.set(at);
+}
+
+/// Where `window` was when it left the `Space`.
+pub fn space_location(window: &Window) -> Point<i32, Logical> {
+    on_workspace(window).at.get()
 }
 
 /// Whether `window` is an X11 menu or tooltip (on no workspace).
@@ -78,7 +86,7 @@ impl Pila {
     /// The workspace `window` is on.
     pub fn workspace_of(&self, window: &Window) -> usize {
         let off_space = self.workspaces.parked.contains(window) || self.is_minimized(window);
-        match window.user_data().get::<OnWorkspace>() {
+        match window.user_data().get::<OffSpace>() {
             Some(data) if off_space => data.index.get(),
             _ => self.workspaces.active,
         }
@@ -182,9 +190,7 @@ impl Pila {
         let Some(loc) = self.space.element_location(window) else {
             return;
         };
-        let data = on_workspace(window);
-        data.index.set(index);
-        data.at.set(loc);
+        leave_space(window, index, loc);
         self.space.unmap_elem(window);
         // The space only deactivates windows it holds.
         window.set_activated(false);
@@ -208,8 +214,8 @@ impl Pila {
         self.workspaces.parked = parked;
         let back: Vec<Window> = back;
         for window in back {
-            let loc = on_workspace(&window).at.get();
-            self.space.map_element(window.clone(), loc, false);
+            self.space
+                .map_element(window.clone(), space_location(&window), false);
             if let Some(x11) = window.x11_surface() {
                 let _ = x11.set_suspended(false);
             }
@@ -236,9 +242,11 @@ impl Pila {
         self.focus_window(next, SERIAL_COUNTER.next_serial());
     }
 
-    /// Forget a parked window whose client went away.
-    pub fn forget_parked(&mut self, window: &Window) {
+    /// Forget a window off the `Space` (parked or minimized) whose client
+    /// went away.
+    pub fn forget_off_space(&mut self, window: &Window) {
         self.workspaces.parked.retain(|w| w != window);
+        self.minimized.retain(|w| w != window);
     }
 
     /// The number of workspaces changed (config reload): windows on

@@ -243,7 +243,8 @@ Key flows and invariants:
   user data, X11 ones suspended). Minimized windows remember their workspace too, so
   "off the `Space`" means `off_space_windows()` (parked + minimized): lookups by surface,
   X11 surface or identifier and taskbar listeners chain it, and destroyed windows are
-  dropped from both (`forget_parked`). Invariant: a window in the `Space` is on the
+  dropped from both (`forget_off_space`); both keep location and workspace in the same
+  user-data record (`workspaces::leave_space`/`space_location`). Invariant: a window in the `Space` is on the
   active workspace. `switch_workspace` (refused while locked) ends Mod+Tab and popup grabs,
   swaps the windows (a window in pila's move/resize grab comes along; other pointer
   grabs, e.g. a client's DnD, are left alone), focuses the most recent one there and
@@ -251,7 +252,8 @@ Key flows and invariants:
   (taskbar, xdg-activation) switches first (`reveal_workspace_of`). ext-workspace
   (`ext_workspace.rs`, on the `wayland-protocols` bindings): one group with every
   output, workspaces "1".."N", only `activate`, applied on `commit`; diffed by
-  `refresh_workspaces` (after a switch, a count change, and from `after_frames`).
+  `refresh_workspaces` (after a switch, a count change, from `refresh_output_heads` and
+  on a client's `wl_output` bind via `OutputHandler::output_bound`).
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
   Background; a fullscreen window on top also covers Top (`layer_order`). All pointer

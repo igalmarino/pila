@@ -8,7 +8,11 @@ use smithay::{
     delegate_cursor_shape, delegate_data_device, delegate_output, delegate_primary_selection,
     delegate_seat,
     input::{keyboard::LedState, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
+    output::Output,
+    reexports::wayland_server::{
+        protocol::{wl_output::WlOutput, wl_surface::WlSurface},
+        Resource,
+    },
     wayland::{
         output::OutputHandler,
         selection::{
@@ -140,5 +144,10 @@ delegate_primary_selection!(Pila);
 
 // wl_output, xdg_output
 
-impl OutputHandler for Pila {}
+impl OutputHandler for Pila {
+    // ext-workspace groups list the client's wl_outputs (ext_workspace.rs).
+    fn output_bound(&mut self, _output: Output, _wl_output: WlOutput) {
+        self.refresh_workspaces();
+    }
+}
 delegate_output!(Pila);

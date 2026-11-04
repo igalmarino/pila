@@ -87,14 +87,19 @@ impl Pila {
             Some(switch) => switch,
             None => {
                 let order = self.switch_order();
-                if order.len() < 2 {
+                // Nothing to switch to: no window, or only the shown one. A
+                // lone minimized window is still brought back.
+                let only_shown = order.len() == 1 && !self.is_minimized(&order[0]);
+                if order.is_empty() || only_shown {
                     return;
                 }
-                // Starting point: the focused window if it's in the list.
+                // Starting point: the focused window if it's in the list;
+                // with none focused (e.g. the last shown one was just
+                // minimized), the first step lands on the most recent.
                 let focused = self.focused_window();
                 let index = focused
                     .and_then(|f| order.iter().position(|w| *w == f))
-                    .unwrap_or(0);
+                    .unwrap_or(if forward { order.len() - 1 } else { 0 });
                 Switch {
                     order,
                     index,

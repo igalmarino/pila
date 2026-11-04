@@ -3,21 +3,16 @@
 //! (minimized windows stay in its recent-use order, `switcher.rs`, show while
 //! selected, and are restored when the switch ends on them) or through a
 //! taskbar using wlr-foreign-toplevel-management (`toplevel_management.rs`).
-//! A minimized window remembers its workspace (`workspaces.rs`); restored by
-//! a taskbar's unminimize, it comes back on the active one.
+//! Where it was and its workspace are kept like a parked window's
+//! (`workspaces.rs`); restored by a taskbar's unminimize, it comes back on
+//! the active workspace.
 
-use std::cell::Cell;
+use smithay::{desktop::Window, utils::SERIAL_COUNTER};
 
-use smithay::{
-    desktop::Window,
-    utils::{Logical, Point, SERIAL_COUNTER},
+use crate::{
+    workspaces::{leave_space, space_location},
+    Pila,
 };
-
-use crate::Pila;
-
-/// Where a minimized window was (its `Space` location).
-#[derive(Default)]
-struct MinimizedAt(Cell<Option<Point<i32, Logical>>>);
 
 impl Pila {
     pub fn is_minimized(&self, window: &Window) -> bool {
@@ -41,11 +36,7 @@ impl Pila {
         let Some(loc) = self.space.element_location(window) else {
             return false;
         };
-        window.user_data().insert_if_missing(MinimizedAt::default);
-        if let Some(at) = window.user_data().get::<MinimizedAt>() {
-            at.0.set(Some(loc));
-        }
-        crate::workspaces::set_workspace(window, self.workspaces.active);
+        leave_space(window, self.workspaces.active, loc);
         self.space.unmap_elem(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(true);
@@ -62,12 +53,8 @@ impl Pila {
             return;
         };
         self.minimized.remove(index);
-        let saved = window
-            .user_data()
-            .get::<MinimizedAt>()
-            .and_then(|at| at.0.get())
-            .unwrap_or_default();
-        self.space.map_element(window.clone(), saved, false);
+        self.space
+            .map_element(window.clone(), space_location(window), false);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(false);
         }
@@ -81,10 +68,5 @@ impl Pila {
     pub fn restore_window(&mut self, window: &Window) {
         self.show_window(window);
         self.focus_window(Some(window.clone()), SERIAL_COUNTER.next_serial());
-    }
-
-    /// Forget a minimized window whose client went away.
-    pub fn forget_minimized(&mut self, window: &Window) {
-        self.minimized.retain(|w| w != window);
     }
 }

@@ -1067,7 +1067,6 @@ impl Pila {
         // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();
         self.refresh_toplevels();
-        self.refresh_workspaces();
         self.update_idle_inhibit();
         self.popups.cleanup();
     }

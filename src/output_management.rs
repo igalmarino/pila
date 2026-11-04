@@ -310,6 +310,8 @@ impl Pila {
     /// Tell every client what changed about the monitors. Called whenever
     /// an output is connected, removed or reconfigured.
     pub fn refresh_output_heads(&mut self) {
+        // Workspace listeners are told about outputs too (ext_workspace.rs).
+        self.refresh_workspaces();
         let new = self.output_heads();
         let dh = self.display_handle.clone();
         let om = &mut self.output_management;
