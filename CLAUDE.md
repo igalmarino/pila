@@ -336,14 +336,20 @@ Key flows and invariants:
   when mapped (`animate_open` from `place_new_window`; not X11 override-redirect),
   fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
   when minimized (`animate_minimize` from `hide_window`, before the unmap) and back when
-  restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`) gives
-  each its look. A new animation of a window starts from where one in progress left it
+  restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`,
+  `Layer`) gives each its look. Transient layer surfaces (Top/Overlay without an
+  exclusive zone, `animates_layer`: launchers, notifications, shell panels; not bars or
+  wallpapers) fade in when they first get a buffer (`layer_committed` from
+  `handle_layer_commit`) and out from a snapshot (`animate_layer_close`: `watch_layer`
+  hooks, `layer_destroyed`), drawn in front of the upper layers (`Scene::layer_ghosts`);
+  their rect comes from the layer map, which outlives the surface tree. A blurred
+  backdrop fades with its layer (`SceneLayer::alpha`). A new animation of a window starts from where one in progress left it
   (`appear`/`disappear`; Mod+Tab previews of minimized windows toggle quickly). Values come from `Animation`
   (from/to over a duration on `Pila::clock`, one time per `scene()`). An animating
-  window's `SceneWindow::effect` makes `render.rs` draw it (bar, popups, corners
-  included) into a per-window, per-scale texture (`OffscreenWindow` in its
-  `WindowTextures` user data) and show that transformed; `frame.rs` paces such a window
-  by `WindowEffect::output`, since it's absent from the output's render states. A closed
+  window's `SceneWindow::effect` (a layer's `SceneLayer::effect`) makes `render.rs` draw
+  it (bar, popups, corners included) into a per-scale texture (`OffscreenWindow` in its
+  `AnimTextures` user data, `animated_element`) and show that transformed; `frame.rs`
+  paces it by `WindowEffect::output`, since it's absent from the output's render states. A closed
   window is a `Ghost`: a snapshot (`render::snapshot_window`) drawn at its old place in
   the stacking order (`Scene::ghosts`) while it fades; its live window is skipped
   meanwhile (`is_ghost`). The snapshot must be taken while the content exists:

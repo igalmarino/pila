@@ -52,6 +52,7 @@ impl WlrLayerShellHandler for Pila {
             output = output.name(),
             "new layer surface"
         );
+        crate::animation::watch_layer(surface.wl_surface());
         let mut map = layer_map_for_output(&output);
         if let Err(err) = map.map_layer(&LayerSurface::new(surface, namespace)) {
             warn!(?err, "failed to map layer surface");
@@ -64,6 +65,8 @@ impl WlrLayerShellHandler for Pila {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        // Still in its layer map, with its content: fade it out.
+        self.animate_layer_close(surface.wl_surface(), crate::render::Surfaces::Tree);
         self.remove_layer(surface.wl_surface());
     }
 }

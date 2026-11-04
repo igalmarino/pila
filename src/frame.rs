@@ -18,7 +18,7 @@ use smithay::{
     wayland::compositor::SurfaceData,
 };
 
-use crate::render::{Scene, SceneWindow};
+use crate::{animation::WindowEffect, render::Scene};
 
 /// Surface trees that aren't windows or layer surfaces: lock surfaces and the
 /// client cursor.
@@ -56,7 +56,7 @@ pub fn update_primary_outputs(
     for entry in scene.windows.iter().filter(|e| e.effect.is_none()) {
         entry.window.with_surfaces(update);
     }
-    for entry in scene.layers() {
+    for entry in scene.layers().filter(|e| e.effect.is_none()) {
         entry.layer.with_surfaces(update);
     }
     for surface in other_trees(scene, cursor) {
@@ -79,14 +79,14 @@ pub fn presentation_feedback(
     for entry in &scene.windows {
         entry.window.take_presentation_feedback(
             &mut feedback,
-            |surface, data| paced_by(entry, surface, data),
+            |surface, data| paced_by(entry.effect.as_ref(), surface, data),
             flags,
         );
     }
     for entry in scene.layers() {
         entry.layer.take_presentation_feedback(
             &mut feedback,
-            surface_primary_scanout_output,
+            |surface, data| paced_by(entry.effect.as_ref(), surface, data),
             flags,
         );
     }
@@ -101,11 +101,16 @@ pub fn presentation_feedback(
     feedback
 }
 
-/// The output a window's surface is paced by: its primary output, or while
-/// it animates (drawn through a texture, so absent from the render states),
-/// the output of the animation (`animation::WindowEffect::output`).
-fn paced_by(entry: &SceneWindow, surface: &WlSurface, data: &SurfaceData) -> Option<Output> {
-    match &entry.effect {
+/// The output a window's or layer surface's surface is paced by: its
+/// primary output, or while it animates (drawn through a texture, so absent
+/// from the render states), the output of the animation
+/// (`animation::WindowEffect::output`).
+fn paced_by(
+    effect: Option<&WindowEffect>,
+    surface: &WlSurface,
+    data: &SurfaceData,
+) -> Option<Output> {
+    match effect {
         Some(effect) => effect.output.clone(),
         None => surface_primary_scanout_output(surface, data),
     }
@@ -126,13 +131,15 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
         entry
             .window
             .send_frame(output, time, throttle, |surface, data| {
-                paced_by(entry, surface, data)
+                paced_by(entry.effect.as_ref(), surface, data)
             });
     }
     for entry in scene.layers() {
         entry
             .layer
-            .send_frame(output, time, throttle, surface_primary_scanout_output);
+            .send_frame(output, time, throttle, |surface, data| {
+                paced_by(entry.effect.as_ref(), surface, data)
+            });
     }
     for surface in other_trees(scene, cursor) {
         send_frames_surface_tree(

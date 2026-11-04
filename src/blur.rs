@@ -368,7 +368,7 @@ impl BlurCache {
         let behind: Vec<PilaRenderElement> = {
             let cache = &*self;
             render::elements_behind_layer(renderer, scene, index, origin, scale, &mut |i| {
-                cache.element(i, scale)
+                cache.element(i, scale, scene.upper[i].alpha())
             })
         };
         let clear = render::clear_color(scene);
@@ -451,7 +451,13 @@ impl BlurCache {
 
     /// The backdrop element of the upper layer at `index` in the scene
     /// `prepare` ran for, if it has one.
-    pub fn element(&self, index: usize, scale: Scale<f64>) -> Option<PilaRenderElement> {
+    /// At `alpha`: a layer surface fading in fades its backdrop with it.
+    pub fn element(
+        &self,
+        index: usize,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Option<PilaRenderElement> {
         let (_, key) = self.current.iter().find(|(i, _)| *i == index)?;
         let entry = self.entries.get(key)?;
         if !entry.drawn {
@@ -464,7 +470,7 @@ impl BlurCache {
             TextureRenderElement::from_texture_render_buffer(
                 location,
                 &entry.result,
-                None,
+                (alpha < 1.0).then_some(alpha),
                 Some(src),
                 Some(entry.rect.size),
                 Kind::Unspecified,

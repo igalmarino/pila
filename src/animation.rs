@@ -20,15 +20,17 @@ use std::{cell::RefCell, time::Duration};
 use smithay::{
     backend::renderer::{element::texture::TextureRenderBuffer, gles::GlesTexture},
     desktop::Window,
+    desktop::{layer_map_for_output, LayerSurface},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point, Rectangle},
+    utils::{user_data::UserDataMap, Logical, Point, Rectangle},
     wayland::{
         compositor::{
             add_destruction_hook, add_pre_commit_hook, with_states, BufferAssignment,
             SurfaceAttributes,
         },
         seat::WaylandFocus,
+        shell::wlr_layer::{ExclusiveZone, Layer},
     },
 };
 use tracing::debug;
@@ -129,6 +131,9 @@ pub enum Style {
     /// Minimizing and restoring: smaller still, and a little lower, as if
     /// put away towards the bottom of the screen.
     Minimize,
+    /// Launchers and notifications (layer surfaces) coming and going:
+    /// barely scaled, mostly a fade.
+    Layer,
 }
 
 /// How much smaller a window is when it starts to open or ends closing.
@@ -137,6 +142,8 @@ const OPEN_SCALE: f64 = 0.95;
 /// (logical pixels).
 const MINIMIZE_SCALE: f64 = 0.9;
 const MINIMIZE_DROP: f64 = 48.0;
+/// How much smaller a layer surface is when it starts to show.
+const LAYER_SCALE: f64 = 0.97;
 
 impl Style {
     /// The look of a window that is `visibility` (0: gone, 1: fully there)
@@ -145,6 +152,7 @@ impl Style {
         let (scale, drop) = match self {
             Style::Open => (OPEN_SCALE, 0.0),
             Style::Minimize => (MINIMIZE_SCALE, MINIMIZE_DROP),
+            Style::Layer => (LAYER_SCALE, 0.0),
         };
         Transform {
             alpha: visibility.clamp(0.0, 1.0) as f32,
@@ -201,22 +209,75 @@ pub struct WindowEffect {
     pub output: Option<Output>,
 }
 
+/// A layer surface showing up.
+struct LayerAppearing {
+    layer: LayerSurface,
+    visibility: Animation,
+}
+
+/// A layer surface that went away (hidden or destroyed), fading out from
+/// its snapshot in front of the upper layers.
+struct LayerGhost {
+    layer: LayerSurface,
+    snapshot: Snapshot,
+    visibility: Animation,
+}
+
 /// Every animation in progress.
 #[derive(Default)]
 pub struct Animations {
     appearing: Vec<Appearing>,
     ghosts: Vec<Ghost>,
+    layers: Vec<LayerAppearing>,
+    layer_ghosts: Vec<LayerGhost>,
 }
 
-/// A window's texture while it animates (`render.rs`), one per scale it's
-/// drawn at; kept in its user data and dropped when it stops animating.
+/// A window's or layer surface's texture while it animates (`render.rs`),
+/// one per scale it's drawn at; kept in its user data and dropped when it
+/// stops animating.
 #[derive(Default)]
-pub struct WindowTextures(pub RefCell<Vec<render::OffscreenWindow>>);
+pub struct AnimTextures(pub RefCell<Vec<render::OffscreenWindow>>);
 
-fn clear_textures(window: &Window) {
-    if let Some(textures) = window.user_data().get::<WindowTextures>() {
+fn clear_textures(user_data: &UserDataMap) {
+    if let Some(textures) = user_data.get::<AnimTextures>() {
         textures.0.borrow_mut().clear();
     }
+}
+
+/// Whether a layer surface animates: launchers, notifications, menus of
+/// shells (Top or Overlay, no exclusive zone). Bars, docks with a zone,
+/// wallpapers and the Bottom layer just appear.
+pub fn animates_layer(layer: &LayerSurface) -> bool {
+    matches!(layer.layer(), Layer::Top | Layer::Overlay)
+        && !matches!(
+            layer.cached_state().exclusive_zone,
+            ExclusiveZone::Exclusive(_)
+        )
+}
+
+/// Whether a layer surface had a buffer at its last commit, to tell when
+/// it shows up (`Pila::layer_committed`).
+#[derive(Default)]
+struct LayerShown(std::cell::Cell<bool>);
+
+/// Fade a layer surface out while its content is still there: when its
+/// client takes the buffer away (pre-commit) or the surface is destroyed
+/// (`layer_destroyed` comes first when the client destroys the role; a dead
+/// client's surface goes without it). Called for each new layer surface,
+/// before its first commit (see `watch_unmap`).
+pub fn watch_layer(surface: &WlSurface) {
+    add_destruction_hook::<Pila, _>(surface, |state, surface| {
+        state.animate_layer_close(surface, Surfaces::MainOnly);
+    });
+    add_pre_commit_hook::<Pila, _>(surface, |state, _, surface| {
+        let removed = with_states(surface, |states| {
+            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+            matches!(attributes.pending().buffer, Some(BufferAssignment::Removed))
+        });
+        if removed && crate::state::has_buffer(surface) {
+            state.animate_layer_close(surface, Surfaces::Tree);
+        }
+    });
 }
 
 /// Start a window's close animation while its content is still there:
@@ -402,7 +463,7 @@ impl Pila {
     /// Stop animating `window` (it's gone or hidden).
     pub fn forget_animations(&mut self, window: &Window) {
         self.animations.appearing.retain(|a| a.window != *window);
-        clear_textures(window);
+        clear_textures(window.user_data());
     }
 
     /// How `window` is drawn this frame, if it's animating.
@@ -450,21 +511,26 @@ impl Pila {
             return;
         }
         let now = self.animation_time();
-        let mut finished = Vec::new();
-        self.animations.appearing.retain(|a| {
+        let before = self.animation_count();
+        let animations = &mut self.animations;
+        animations.appearing.retain(|a| {
             let done = a.visibility.done(now);
             if done {
-                finished.push(a.window.clone());
+                clear_textures(a.window.user_data());
             }
             !done
         });
-        let ghosts = self.animations.ghosts.len();
-        self.animations.ghosts.retain(|g| !g.visibility.done(now));
-        let changed = !finished.is_empty() || ghosts != self.animations.ghosts.len();
-        for window in &finished {
-            clear_textures(window);
-        }
-        if changed || !self.animations.appearing.is_empty() || !self.animations.ghosts.is_empty() {
+        animations.ghosts.retain(|g| !g.visibility.done(now));
+        animations.layers.retain(|a| {
+            let done = a.visibility.done(now);
+            if done {
+                clear_textures(a.layer.user_data());
+            }
+            !done
+        });
+        animations.layer_ghosts.retain(|g| !g.visibility.done(now));
+        let left = self.animation_count();
+        if left > 0 || left != before {
             // From an idle callback, with the loop woken so it runs right
             // away (calloop wouldn't): this runs after the event loop's
             // dispatch, too late for the winit source to see a redraw
@@ -474,27 +540,165 @@ impl Pila {
         }
     }
 
+    /// How many animations are in progress.
+    fn animation_count(&self) -> usize {
+        let a = &self.animations;
+        a.appearing.len() + a.ghosts.len() + a.layers.len() + a.layer_ghosts.len()
+    }
+
     /// Whether anything is still animating now, so frames are wanted back
     /// to back (one that ended during the last frame doesn't count).
     pub fn animating(&self) -> bool {
         let now = self.animation_time();
-        self.animations
-            .appearing
-            .iter()
-            .any(|a| !a.visibility.done(now))
-            || self
-                .animations
-                .ghosts
-                .iter()
-                .any(|g| !g.visibility.done(now))
+        let a = &self.animations;
+        let running = |anim: &Animation| !anim.done(now);
+        a.appearing.iter().any(|x| running(&x.visibility))
+            || a.ghosts.iter().any(|x| running(&x.visibility))
+            || a.layers.iter().any(|x| running(&x.visibility))
+            || a.layer_ghosts.iter().any(|x| running(&x.visibility))
     }
 
     /// Stop every animation (the session locked).
     pub fn drop_animations(&mut self) {
         for appearing in std::mem::take(&mut self.animations.appearing) {
-            clear_textures(&appearing.window);
+            clear_textures(appearing.window.user_data());
+        }
+        for appearing in std::mem::take(&mut self.animations.layers) {
+            clear_textures(appearing.layer.user_data());
         }
         self.animations.ghosts.clear();
+        self.animations.layer_ghosts.clear();
+    }
+
+    // --- Layer surfaces ---------------------------------------------------
+
+    /// A layer surface was committed: if it just got a buffer (it shows
+    /// up), fade it in. Called from `handle_layer_commit`.
+    pub fn layer_committed(&mut self, layer: &LayerSurface) {
+        layer.user_data().insert_if_missing(LayerShown::default);
+        let Some(shown) = layer.user_data().get::<LayerShown>() else {
+            return;
+        };
+        let has_buffer = crate::state::has_buffer(layer.wl_surface());
+        if shown.0.replace(has_buffer) || !has_buffer {
+            return;
+        }
+        let now = self.animation_time();
+        let from = self.layer_visibility(layer, now).unwrap_or(0.0);
+        self.forget_layer_animations(layer);
+        if !animates_layer(layer) {
+            return;
+        }
+        let Some(duration) = self.animation_duration(AnimationKind::Layer) else {
+            return;
+        };
+        self.animations.layers.push(LayerAppearing {
+            layer: layer.clone(),
+            visibility: Animation::new(now, duration, Curve::EaseOut, from, 1.0),
+        });
+        self.queue_redraw();
+    }
+
+    /// The layer surface `surface` is about to be hidden or destroyed: fade
+    /// out a snapshot of it. Once per hiding (a ghost already there wins).
+    pub fn animate_layer_close(&mut self, surface: &WlSurface, surfaces: Surfaces) {
+        let Some((output, layer)) = self.layer_for_surface(surface) else {
+            return;
+        };
+        if self
+            .animations
+            .layer_ghosts
+            .iter()
+            .any(|g| g.layer == layer)
+        {
+            return;
+        }
+        let now = self.animation_time();
+        let from = self.layer_visibility(&layer, now).unwrap_or(1.0);
+        self.forget_layer_animations(&layer);
+        if !animates_layer(&layer) {
+            return;
+        }
+        let Some(duration) = self.animation_duration(AnimationKind::Layer) else {
+            return;
+        };
+        let Some(rect) = self.layer_rect(&output, &layer) else {
+            return;
+        };
+        let scale = crate::scale::output_scale(&output);
+        let Some(renderer) = self.backend.as_mut().map(|b| b.renderer()) else {
+            return;
+        };
+        let Some(snapshot) = render::snapshot_layer(renderer, &layer, rect, surfaces, scale) else {
+            debug!("no snapshot of a closing layer surface; it just goes");
+            return;
+        };
+        self.animations.layer_ghosts.push(LayerGhost {
+            layer,
+            snapshot,
+            visibility: Animation::new(now, duration, Curve::EaseOut, from, 0.0),
+        });
+        self.queue_redraw();
+    }
+
+    /// Where `layer` is on `output`, in space coordinates: its place in the
+    /// layer map (kept even while its surface is being destroyed).
+    fn layer_rect(&self, output: &Output, layer: &LayerSurface) -> Option<Rectangle<i32, Logical>> {
+        let output_loc = self.space.output_geometry(output)?.loc;
+        let geo = layer_map_for_output(output).layer_geometry(layer)?;
+        Some(Rectangle::new(output_loc + geo.loc, geo.size))
+    }
+
+    /// How visible `layer` is now, if it's animating.
+    fn layer_visibility(&self, layer: &LayerSurface, now: Duration) -> Option<f64> {
+        let a = &self.animations;
+        a.layers
+            .iter()
+            .find(|x| x.layer == *layer)
+            .map(|x| x.visibility.value(now))
+            .or_else(|| {
+                a.layer_ghosts
+                    .iter()
+                    .find(|x| x.layer == *layer)
+                    .map(|x| x.visibility.value(now))
+            })
+    }
+
+    fn forget_layer_animations(&mut self, layer: &LayerSurface) {
+        self.animations.layers.retain(|a| a.layer != *layer);
+        self.animations.layer_ghosts.retain(|g| g.layer != *layer);
+        clear_textures(layer.user_data());
+    }
+
+    /// How the layer surface at `location` is drawn this frame, if it's
+    /// appearing.
+    pub fn layer_effect(
+        &self,
+        layer: &LayerSurface,
+        location: Point<i32, Logical>,
+        now: Duration,
+    ) -> Option<WindowEffect> {
+        let appearing = self.animations.layers.iter().find(|a| a.layer == *layer)?;
+        let bbox = layer.bbox();
+        let rect = Rectangle::new(location + bbox.loc, bbox.size);
+        Some(WindowEffect {
+            transform: Style::Layer.transform(appearing.visibility.value(now)),
+            center: center(rect),
+            output: self.layer_for_surface(layer.wl_surface()).map(|(o, _)| o),
+        })
+    }
+
+    /// Layer surfaces fading out, drawn in front of the upper layers.
+    pub fn scene_layer_ghosts(&self, now: Duration) -> Vec<SceneGhost> {
+        self.animations
+            .layer_ghosts
+            .iter()
+            .map(|ghost| SceneGhost {
+                snapshot: ghost.snapshot.clone(),
+                before: 0,
+                transform: Style::Layer.transform(ghost.visibility.value(now)),
+            })
+            .collect()
     }
 }
 

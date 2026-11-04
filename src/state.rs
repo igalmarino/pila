@@ -501,12 +501,14 @@ impl Pila {
             };
         }
         let (upper, lower) = self.layer_order();
-        let (windows, ghosts) = self.scene_windows(self.animation_time());
+        let now = self.animation_time();
+        let (windows, ghosts) = self.scene_windows(now);
         let layers = |layers| {
             self.layer_surfaces(layers)
                 .into_iter()
                 .map(|(layer, location)| SceneLayer {
                     blur: crate::blur::blur_rects(&layer),
+                    effect: self.layer_effect(&layer, location, now),
                     layer,
                     location,
                 })
@@ -514,6 +516,7 @@ impl Pila {
         };
         Scene {
             upper: layers(upper),
+            layer_ghosts: self.scene_layer_ghosts(now),
             snap_preview: self
                 .snap_preview
                 .map(|rect| (self.snap_preview_buffer.clone(), rect)),

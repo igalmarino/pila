@@ -31,7 +31,7 @@ use smithay::{
 };
 
 use crate::{
-    animation::{self, SceneGhost, Snapshot, WindowEffect, WindowTextures},
+    animation::{self, AnimTextures, SceneGhost, Snapshot, WindowEffect},
     blur::BlurCache,
     cursor::{CursorTheme, NamedCursor},
     decoration::{self, TitleBarPart},
@@ -112,6 +112,8 @@ pub struct Scene {
     pub lock_surfaces: Vec<(WlSurface, Point<i32, Logical>)>,
     /// Layer surfaces above the windows (Overlay, Top).
     pub upper: Vec<SceneLayer>,
+    /// Layer surfaces fading out, in front of `upper` (`animation.rs`).
+    pub layer_ghosts: Vec<SceneGhost>,
     /// Where a dragged window would snap to (`snap.rs`): drawn just above
     /// the windows.
     pub snap_preview: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
@@ -137,6 +139,15 @@ pub struct SceneLayer {
     pub location: Point<i32, Logical>,
     /// Where the screen behind it is blurred (surface-local; `blur.rs`).
     pub blur: Vec<Rectangle<i32, Logical>>,
+    /// While it appears: drawn through a texture (`animation.rs`).
+    pub effect: Option<WindowEffect>,
+}
+
+impl SceneLayer {
+    /// Its opacity this frame: its blurred backdrop fades with it.
+    pub fn alpha(&self) -> f32 {
+        self.effect.as_ref().map_or(1.0, |e| e.transform.alpha)
+    }
 }
 
 /// A mapped window as it should be drawn this frame.
@@ -240,6 +251,14 @@ fn scene_elements_from(
             .collect();
     }
     let mut elements = Vec::new();
+    if first_upper == 0 {
+        elements.extend(
+            scene
+                .layer_ghosts
+                .iter()
+                .map(|ghost| ghost_element(ghost, output_location, scale)),
+        );
+    }
     for (i, entry) in scene.upper.iter().enumerate().skip(first_upper) {
         elements.extend(layer_elements(
             renderer,
@@ -282,20 +301,68 @@ fn layer_elements(
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    layers
-        .iter()
-        .flat_map(|entry| {
-            let location: Point<i32, Physical> =
-                (entry.location - output_location).to_physical_precise_round(scale);
-            AsRenderElements::<GlesRenderer>::render_elements::<PilaRenderElement>(
-                &entry.layer,
+    let mut elements = Vec::new();
+    for entry in layers {
+        let plain = |renderer: &mut GlesRenderer, origin: Point<i32, Logical>, scale| {
+            single_layer_elements(
                 renderer,
-                location,
+                &entry.layer,
+                entry.location,
+                Surfaces::Tree,
+                origin,
                 scale,
-                1.0,
             )
-        })
-        .collect()
+        };
+        let animated = entry.effect.as_ref().and_then(|effect| {
+            let rect = layer_content_rect(&entry.layer, entry.location);
+            animated_element(
+                renderer,
+                entry.layer.user_data(),
+                rect,
+                effect,
+                output_location,
+                scale,
+                &mut |r: &mut GlesRenderer, origin, s| plain(r, origin, s),
+            )
+        });
+        match animated {
+            Some(element) => elements.push(element),
+            None => elements.extend(plain(renderer, output_location, scale)),
+        }
+    }
+    elements
+}
+
+/// A layer surface's elements (with its popups), its top-left at `location`,
+/// relative to `origin`.
+fn single_layer_elements(
+    renderer: &mut GlesRenderer,
+    layer: &LayerSurface,
+    location: Point<i32, Logical>,
+    surfaces: Surfaces,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let location: Point<i32, Physical> = (location - origin).to_physical_precise_round(scale);
+    match surfaces {
+        Surfaces::Tree => AsRenderElements::<GlesRenderer>::render_elements::<PilaRenderElement>(
+            layer, renderer, location, scale, 1.0,
+        ),
+        Surfaces::MainOnly => main_surface_element(renderer, layer.wl_surface(), location)
+            .into_iter()
+            .map(PilaRenderElement::Surface)
+            .collect(),
+    }
+}
+
+/// Everything a layer surface at `location` draws, popups included.
+fn layer_content_rect(
+    layer: &LayerSurface,
+    location: Point<i32, Logical>,
+) -> Rectangle<i32, Logical> {
+    let mut rect = layer.bbox_with_popups();
+    rect.loc += location;
+    rect
 }
 
 fn window_elements(
@@ -389,7 +456,11 @@ fn single_window_elements(
         (entry.render_location - output_location).to_physical_precise_round(scale);
     match (rounding, shaders) {
         _ if surfaces == Surfaces::MainOnly => {
-            let main = main_surface_element(renderer, &entry.window, location);
+            let main = entry
+                .window
+                .wl_surface()
+                .map(|surface| main_surface_element(renderer, &surface, location))
+                .unwrap_or_default();
             match (rounding, shaders) {
                 (Some(rounding), Some(shaders)) => elements.extend(
                     rounded::clip_surfaces(main, shaders, rounding, output_location, scale)
@@ -430,16 +501,13 @@ fn single_window_elements(
 /// (`Surfaces::MainOnly`).
 fn main_surface_element(
     renderer: &mut GlesRenderer,
-    window: &Window,
+    surface: &WlSurface,
     location: Point<i32, Physical>,
 ) -> Vec<WaylandSurfaceRenderElement<GlesRenderer>> {
-    let Some(surface) = window.wl_surface() else {
-        return Vec::new();
-    };
-    with_states(&surface, |states| {
+    with_states(surface, |states| {
         WaylandSurfaceRenderElement::from_surface(
             renderer,
-            &surface,
+            surface,
             states,
             location.to_f64(),
             1.0,
@@ -522,20 +590,6 @@ impl OffscreenWindow {
     }
 }
 
-/// `entry` drawn into a texture at `scale`, relative to `rect`'s top-left.
-fn draw_window_offscreen(
-    renderer: &mut GlesRenderer,
-    target: &mut OffscreenWindow,
-    entry: &SceneWindow,
-    rect: Rectangle<i32, Logical>,
-    shaders: Option<&rounded::Shaders>,
-    surfaces: Surfaces,
-) -> bool {
-    let elements =
-        single_window_elements(renderer, entry, shaders, surfaces, rect.loc, target.scale);
-    !elements.is_empty() && target.draw(renderer, &elements)
-}
-
 /// The physical size of a texture holding `rect` at `scale`.
 fn texture_size(rect: Rectangle<i32, Logical>, scale: Scale<f64>) -> Size<i32, Physical> {
     let size: Size<i32, Physical> = rect.size.to_f64().to_physical(scale).to_i32_ceil();
@@ -562,24 +616,28 @@ fn texture_element(
     ))
 }
 
-/// An animating window: drawn into its texture for this scale, then shown
-/// transformed. Falls back to its plain elements if that fails.
-fn animated_window_element(
+/// Makes something's elements relative to an origin, at a scale.
+type DrawAt<'a> =
+    &'a mut dyn FnMut(&mut GlesRenderer, Point<i32, Logical>, Scale<f64>) -> Vec<PilaRenderElement>;
+
+/// Something animating (a window or layer surface whose `user_data` keeps
+/// its textures): `draw` makes its elements relative to an origin, which go
+/// into its texture for this scale (covering `rect`), shown transformed by
+/// `effect`. `None` if that fails (draw it plainly then).
+#[allow(clippy::too_many_arguments)]
+fn animated_element(
     renderer: &mut GlesRenderer,
-    entry: &SceneWindow,
+    user_data: &smithay::utils::user_data::UserDataMap,
+    rect: Rectangle<i32, Logical>,
     effect: &WindowEffect,
-    shaders: Option<&rounded::Shaders>,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
-) -> Vec<PilaRenderElement> {
-    let rect = entry.content_rect();
+    draw: DrawAt<'_>,
+) -> Option<PilaRenderElement> {
     let size = texture_size(rect, scale);
-    entry
-        .window
-        .user_data()
-        .insert_if_missing(WindowTextures::default);
-    let textures = entry.window.user_data().get::<WindowTextures>();
-    let drawn = textures.and_then(|textures| {
+    user_data.insert_if_missing(AnimTextures::default);
+    let textures = user_data.get::<AnimTextures>()?;
+    let buffer = {
         let mut textures = textures.0.borrow_mut();
         textures.retain(|t| t.scale != scale || t.size == size);
         let index = match textures.iter().position(|t| t.scale == scale) {
@@ -590,29 +648,85 @@ fn animated_window_element(
             }
         };
         let target = &mut textures[index];
-        draw_window_offscreen(renderer, target, entry, rect, shaders, Surfaces::Tree)
-            .then(|| target.buffer.clone())
-    });
-    match drawn {
-        Some(buffer) => {
-            let dst = effect.transform.apply(rect.to_f64(), effect.center);
-            vec![texture_element(
-                &buffer,
-                dst,
-                effect.transform.alpha,
-                output_location,
-                scale,
-            )]
+        let elements = draw(renderer, rect.loc, scale);
+        if elements.is_empty() || !target.draw(renderer, &elements) {
+            return None;
         }
-        None => single_window_elements(
-            renderer,
-            entry,
-            shaders,
-            Surfaces::Tree,
-            output_location,
-            scale,
-        ),
+        target.buffer.clone()
+    };
+    let dst = effect.transform.apply(rect.to_f64(), effect.center);
+    Some(texture_element(
+        &buffer,
+        dst,
+        effect.transform.alpha,
+        output_location,
+        scale,
+    ))
+}
+
+/// An animating window: drawn into its texture for this scale, then shown
+/// transformed. Falls back to its plain elements if that fails.
+fn animated_window_element(
+    renderer: &mut GlesRenderer,
+    entry: &SceneWindow,
+    effect: &WindowEffect,
+    shaders: Option<&rounded::Shaders>,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let mut draw = |r: &mut GlesRenderer, origin, s| {
+        single_window_elements(r, entry, shaders, Surfaces::Tree, origin, s)
+    };
+    let user_data = entry.window.user_data();
+    match animated_element(
+        renderer,
+        user_data,
+        entry.content_rect(),
+        effect,
+        output_location,
+        scale,
+        &mut draw,
+    ) {
+        Some(element) => vec![element],
+        None => draw(renderer, output_location, scale),
     }
+}
+
+/// `elements` drawn into a new texture covering `rect` at `scale`.
+fn snapshot(
+    renderer: &mut GlesRenderer,
+    rect: Rectangle<i32, Logical>,
+    center: Point<f64, Logical>,
+    scale: Scale<f64>,
+    elements: &[PilaRenderElement],
+) -> Option<Snapshot> {
+    if elements.is_empty() || rect.is_empty() {
+        return None;
+    }
+    let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
+    target.draw(renderer, elements).then(|| Snapshot {
+        buffer: target.buffer,
+        rect,
+        center,
+    })
+}
+
+/// The layer surface `layer`, placed at `rect` (its place in the layer map),
+/// as it looks now, drawn into a texture (for one about to go).
+pub fn snapshot_layer(
+    renderer: &mut GlesRenderer,
+    layer: &LayerSurface,
+    rect: Rectangle<i32, Logical>,
+    surfaces: Surfaces,
+    scale: Scale<f64>,
+) -> Option<Snapshot> {
+    // The popups too, while the tree is still there.
+    let content = match surfaces {
+        Surfaces::Tree => rect.merge(layer_content_rect(layer, rect.loc)),
+        Surfaces::MainOnly => rect,
+    };
+    let elements = single_layer_elements(renderer, layer, rect.loc, surfaces, content.loc, scale);
+    snapshot(renderer, content, animation::center(rect), scale, &elements)
 }
 
 /// `entry` as it looks now, drawn into a texture at `scale` (for a window
@@ -633,20 +747,15 @@ pub fn snapshot_window(
     if entry.window.geometry().is_empty() {
         return None;
     }
-    let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
-    draw_window_offscreen(
+    let elements =
+        single_window_elements(renderer, entry, shaders.as_ref(), surfaces, rect.loc, scale);
+    snapshot(
         renderer,
-        &mut target,
-        entry,
         rect,
-        shaders.as_ref(),
-        surfaces,
+        animation::center(entry.frame_rect()),
+        scale,
+        &elements,
     )
-    .then(|| Snapshot {
-        buffer: target.buffer,
-        rect,
-        center: animation::center(entry.frame_rect()),
-    })
 }
 
 fn ghost_element(
@@ -838,6 +947,6 @@ pub fn output_elements(
         scale,
     );
     scene_elements(renderer, scene, origin, scale, &mut |i| {
-        blur.element(i, scale)
+        blur.element(i, scale, scene.upper[i].alpha())
     })
 }

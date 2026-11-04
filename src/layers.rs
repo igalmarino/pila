@@ -164,6 +164,7 @@ impl Pila {
         if zone_changed {
             self.refit_maximized();
         }
+        self.layer_committed(&layer);
 
         let serial = SERIAL_COUNTER.next_serial();
         match self.exclusive_layer() {

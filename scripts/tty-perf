@@ -4,8 +4,8 @@
 # pila through scripts/tty with frame statistics on (RUST_LOG
 # pila::frames=trace) and, instead of your autostart, a fixed workload: a
 # terminal opened and closed a few times, then one minimized and restored a
-# few times (with scripts/toplevel-action, if python3 is installed), so those
-# animations play. pila quits by itself at the end and the statistics are
+# few times (with scripts/toplevel-action, if python3 is installed), then a
+# launcher (fuzzel, if installed) shown and closed, so those animations play. pila quits by itself at the end and the statistics are
 # printed; the whole log is in pila-tty.log.
 #
 #   scripts/tty-perf                  ~/.config/pila/config.toml
@@ -58,6 +58,19 @@ if [ "${1:-}" = "--workload" ]; then
         else
             echo "tty-perf: no python3: minimize rounds skipped"
         fi
+        if command -v fuzzel >/dev/null; then
+            for round in $(seq "${PILA_PERF_ROUNDS:-6}"); do
+                echo "tty-perf: round $round: launcher"
+                fuzzel &
+                launcher=$!
+                sleep 1
+                kill "$launcher" 2>/dev/null || true
+                wait "$launcher" || true
+                sleep 1
+            done
+        else
+            echo "tty-perf: no fuzzel: launcher rounds skipped"
+        fi
     else
         echo "tty-perf: no terminal found (kitty or foot); set PILA_PERF_TERMINAL"
     fi
@@ -82,8 +95,8 @@ if [ $# -gt 0 ]; then
     config_args=("$1")
 fi
 
-echo "Opens and closes a terminal ${PILA_PERF_ROUNDS:-6} times, then minimizes and restores one;"
-echo "pila quits by itself (about 45 s)."
+echo "Opens and closes a terminal ${PILA_PERF_ROUNDS:-6} times, minimizes and restores one, then"
+echo "shows a launcher; pila quits by itself (about 1 min)."
 echo "Just watch the animations. To stop early: Mod+Shift+E."
 # Every frame (trace), to see where one goes missing.
 export RUST_LOG="info,pila::frames=trace"
