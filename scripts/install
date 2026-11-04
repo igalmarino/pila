@@ -62,7 +62,7 @@ fi
 if [ -z "$DESTDIR" ]; then
     # A binary that can't load here (e.g. built in the dev container against a
     # newer glibc than the host's) would only fail at the next login.
-    if ! error="$(target/release/pila --help 2>&1 >/dev/null)"; then
+    if ! error="$(target/release/pila --version 2>&1 >/dev/null)"; then
         echo "target/release/pila doesn't run on this system:" >&2
         echo "$error" >&2
         echo "Update the system's packages, or build pila here (cargo build --release)." >&2

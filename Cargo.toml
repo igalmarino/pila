@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 # The oldest Rust that builds pila (cosmic-text needs 1.89).
 rust-version = "1.89"
+readme = "README.md"
+repository = "https://github.com/igalmarino/pila"
+keywords = ["wayland", "compositor", "smithay", "desktop"]
+categories = ["gui"]
 description = "A stacking Wayland compositor built on Smithay"
 license = "GPL-3.0-or-later"
 

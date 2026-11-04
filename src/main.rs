@@ -64,6 +64,7 @@ Options:
   --backend <BACKEND>   winit: a window in another Wayland/X11 session;
                         udev: DRM/KMS on a TTY. Default: winit if
                         WAYLAND_DISPLAY or DISPLAY is set, else udev
+  -V, --version         Show the version
   -h, --help            Show this help
 
 Environment (overrides the config file):
@@ -95,6 +96,37 @@ enum BackendKind {
     Udev,
 }
 
+/// The crate version, plus `git describe` when built from a checkout.
+fn version() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    match env!("PILA_GIT_VERSION") {
+        "" => version.to_string(),
+        git => format!("{version} ({git})"),
+    }
+}
+
+/// Send panics to the log too: in a login session stderr is the log file or
+/// the journal, but the default message is unstructured and has no
+/// timestamp. The default hook still runs (it prints the backtrace when
+/// RUST_BACKTRACE is set).
+fn log_panics() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("(no message)");
+        tracing::error!(%location, version = version(), "pila crashed: {message}");
+        default_hook(info);
+    }));
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
@@ -106,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .with_ansi(std::io::stderr().is_terminal())
         .init();
+    log_panics();
 
     let mut startup_command = None;
     let mut config_path = None;
@@ -135,6 +168,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(2);
                 }
             },
+            "-V" | "--version" => {
+                println!("pila {}", version());
+                return Ok(());
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -176,6 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         autostart = ?config.autostart,
         bindings = config.bindings.len(),
         ?backend,
+        version = version(),
         "starting pila"
     );
 
