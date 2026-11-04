@@ -166,8 +166,8 @@ impl Pila {
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {
             layer_map_for_output(&output).arrange();
         }
+        // Also refits maximized and fullscreen windows.
         self.fixup_windows();
-        self.refit_maximized();
         self.configure_lock_surfaces();
         self.refresh_output_heads();
         self.queue_redraw();

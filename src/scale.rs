@@ -58,8 +58,9 @@ fn apply(surface: &WlSurface, states: &SurfaceData, output: &Output) {
     with_fractional_scale(states, |fractional| {
         fractional.set_preferred_scale(scale.fractional_scale());
     });
-    // pila doesn't rotate outputs; the winit output's `Flipped180` is only
-    // how its GL framebuffer is oriented, so clients are told `Normal`.
+    // Clients are told `Normal` and draw upright: a rotated output's frame
+    // is turned by Smithay as it's rendered, and the winit output's
+    // `Flipped180` is only how its GL framebuffer is oriented.
     send_surface_state(surface, states, scale.integer_scale(), Transform::Normal);
 }
 
