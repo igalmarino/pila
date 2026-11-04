@@ -1,0 +1,110 @@
+# Lint, test and build pila, check the minimum Rust version, build it on
+# other distros with the packages README.md lists, and check the scripts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  arch:
+    name: Arch (fmt, clippy, test, staged install)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed git rust gcc pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo build --release --locked
+      - run: cargo test --release --locked
+      - run: target/release/pila --version
+      - name: Staged install
+        run: |
+          DESTDIR="$RUNNER_TEMP/stage" PREFIX=/usr scripts/install --no-build
+          find "$RUNNER_TEMP/stage" -type f | sort
+
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed git rustup gcc pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-version
+        run: |
+          msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+          rustup toolchain install "$msrv" --profile minimal
+          rustup default "$msrv"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+
+  distros:
+    name: Build on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The package lists from README.md's build table, plus a C compiler
+          # and curl for rustup.
+          - image: debian:trixie
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends
+              build-essential curl ca-certificates git
+              libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libegl1 xwayland pkg-config
+          - image: ubuntu:24.04
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends
+              build-essential curl ca-certificates git
+              libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libegl1 xwayland pkg-config
+          - image: fedora:latest
+            install: >-
+              dnf install -y gcc curl git
+              libseat-devel libinput-devel systemd-devel mesa-libgbm-devel
+              libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland
+              pkgconf-pkg-config
+    steps:
+      - name: Packages
+        run: ${{ matrix.install }}
+      - uses: actions/checkout@v4
+      - name: Rust (rustup, stable)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.image }}
+      - run: cargo build --locked
+      - run: ./target/debug/pila --version
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          shellcheck --severity=warning --external-sources \
+            scripts/dev scripts/install scripts/link-wayland scripts/tty \
+            scripts/uninstall resources/session/pila-session \
+            .devcontainer/post-start.sh .devcontainer/init-firewall.sh
