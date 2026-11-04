@@ -7,12 +7,14 @@
 # invalid, pila keeps the running config and says why in a notification.
 
 # The modifier in "Mod+..." bindings and for Mod+drag: alt, super or ctrl.
-# Alt is the default because a host desktop grabs Super when pila runs nested;
-# on a TTY, super is the usual choice.
-mod = "alt"
+# Unset, it's super on a TTY and alt nested (a host desktop such as GNOME
+# grabs Super while pila runs inside it).
+# mod = "super"
 
-# Mod+Return, and what starts when there's no autostart.
-terminal = "foot"
+# Mod+Return, and what starts when there's no autostart. Unset, the first
+# installed of kitty, foot, alacritty, ghostty, wezterm, konsole,
+# gnome-terminal and xterm.
+# terminal = "kitty"
 
 # Mod+D. Without one, Mod+D does nothing.
 # launcher = "fuzzel"
@@ -23,7 +25,7 @@ terminal = "foot"
 #     "swaybg -c 333355",
 #     "waybar",
 #     "mako",
-#     "foot",
+#     "kitty",
 # ]
 
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
@@ -88,7 +90,7 @@ tap = true
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
 [bindings]
-# "Mod+Shift+Return" = "spawn foot -e htop"
+# "Mod+Shift+Return" = "spawn kitty -e htop"
 # "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
 # "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
 # "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"

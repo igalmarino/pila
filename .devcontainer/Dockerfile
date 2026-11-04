@@ -28,7 +28,7 @@ RUN pacman -Syu --noconfirm --needed \
         rustup clang mold pkgconf gdb \
         wayland wayland-protocols libxkbcommon libinput systemd-libs seatd \
         mesa libglvnd libdisplay-info pixman \
-        foot weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
+        foot kitty weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
         fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
         grim slurp wtype wlopm wlsunset noctalia \

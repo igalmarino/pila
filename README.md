@@ -139,14 +139,15 @@ Mod+Shift+E quits.
 
 Host packages for a full session (names are the same on most distros):
 
-- `foot`: the default terminal (or set `terminal`)
+- `kitty`: the default terminal (or set `terminal`; foot, alacritty and others are found
+  too)
 - `xdg-desktop-portal-wlr`, `grim`, `slurp`: screen sharing
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
 
 ```bash
-sudo pacman -S foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp   # Arch
-sudo apt install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Debian, Ubuntu
-sudo dnf install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Fedora
+sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp   # Arch
+sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Debian, Ubuntu
+sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Fedora
 ```
 
 ### Desktop shells and tools
@@ -172,7 +173,8 @@ Saving the file applies it right away, everything but `autostart`. If the new ve
 invalid, pila keeps running with the previous one and shows the error in a notification
 (with a notification daemon such as mako) and in the log.
 
-A few defaults (Mod is Alt unless `mod` says otherwise): Mod+Return opens a terminal,
+A few defaults (Mod is Super on a TTY or login session and Alt nested, unless `mod` says
+otherwise): Mod+Return opens a terminal (kitty, or another one that is installed),
 Mod+Tab switches windows, Mod+Left/Right snap, Mod+Up/Down maximize and restore, Mod+M
 maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+Shift+S and Mod+Ctrl+S take
 screenshots (a region to the clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes,

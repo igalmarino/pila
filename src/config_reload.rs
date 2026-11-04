@@ -100,7 +100,7 @@ impl Pila {
     /// Read the config again and apply what changed.
     pub fn reload_config(&mut self) {
         let path = self.config_path.clone();
-        match Config::read(path.as_deref()) {
+        match Config::read(path.as_deref(), self.config.default_mod) {
             Ok(config) => {
                 self.apply_config(config);
                 info!("config reloaded");

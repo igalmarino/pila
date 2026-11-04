@@ -25,7 +25,7 @@ depends=(
 )
 makedepends=(cargo git pkgconf)
 optdepends=(
-    'foot: the default terminal'
+    'kitty: the default terminal (or foot, alacritty, ...)'
     'xdg-desktop-portal-wlr: screen sharing'
     'grim: screenshots'
     'slurp: picking the screen to share, and screenshot regions'

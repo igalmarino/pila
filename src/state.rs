@@ -1029,7 +1029,11 @@ impl Pila {
     pub fn run_action(&mut self, action: Action, serial: Serial) {
         match action {
             Action::Spawn(command) => self.spawn(&command),
-            Action::Terminal => self.spawn(&self.config.terminal.clone()),
+            Action::Terminal => {
+                if let Some(terminal) = self.config.terminal_command() {
+                    self.spawn(&terminal);
+                }
+            }
             Action::Launcher => {
                 if let Some(launcher) = self.config.launcher.clone() {
                     self.spawn(&launcher);

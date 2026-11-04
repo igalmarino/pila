@@ -50,7 +50,7 @@ use std::io::IsTerminal;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
-use crate::config::Config;
+use crate::config::{Config, ModKey};
 pub use crate::state::Pila;
 
 const USAGE: &str = "\
@@ -67,8 +67,11 @@ Options:
   -h, --help            Show this help
 
 Environment (overrides the config file):
-  PILA_MOD       Modifier for bindings: alt (default), super, ctrl
-  PILA_TERMINAL  Terminal for Mod+Return and startup (default: foot)
+  PILA_MOD       Modifier for bindings: super, alt, ctrl (default: super
+                 on a TTY, alt nested)
+  PILA_TERMINAL  Terminal for Mod+Return and startup (default: the first
+                 installed of kitty, foot, alacritty, ghostty, wezterm,
+                 konsole, gnome-terminal, xterm)
   PILA_LAUNCHER  Command for Mod+D (unset: binding disabled)
   XCURSOR_THEME  Cursor theme on a TTY (default: default)
   XCURSOR_SIZE   Cursor size on a TTY (default: 24)
@@ -159,11 +162,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Nested, the host desktop (e.g. GNOME) grabs Super.
+    let default_mod = match backend {
+        BackendKind::Winit => ModKey::Alt,
+        BackendKind::Udev => ModKey::Super,
+    };
     let config_path = Config::path(config_path.as_deref());
-    let config = Config::load(config_path.as_deref());
+    let config = Config::load(config_path.as_deref(), default_mod);
     tracing::info!(
         mod_key = ?config.mod_key,
-        terminal = config.terminal,
+        terminal = ?config.terminal_command(),
         launcher = ?config.launcher,
         autostart = ?config.autostart,
         bindings = config.bindings.len(),
@@ -187,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let startup = match startup_command {
         Some(command) => vec![command],
         None if !state.config.autostart.is_empty() => state.config.autostart.clone(),
-        None => vec![state.config.terminal.clone()],
+        None => state.config.terminal_command().into_iter().collect(),
     };
     state.start_xwayland(startup);
 

@@ -43,7 +43,8 @@ on **Smithay 0.7.x**.
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
 - Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`).
-  Env overrides: `PILA_MOD` (alt default / super / ctrl), `PILA_TERMINAL` (default `foot`),
+  Env overrides: `PILA_MOD` (super / alt / ctrl; default super on a TTY, alt nested),
+  `PILA_TERMINAL` (default: the first installed of `config::TERMINALS`, kitty first),
   `PILA_LAUNCHER` (Mod+D, disabled if unset). Alt is the default because GNOME grabs Super
   while nested. On a TTY: `XCURSOR_THEME`/`XCURSOR_SIZE`, and the keymap from libxkbcommon's
   `XKB_DEFAULT_LAYOUT`/`_VARIANT`/`_OPTIONS`.

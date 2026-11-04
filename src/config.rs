@@ -2,7 +2,8 @@
 //! or `--config PATH`), then `PILA_*` environment overrides. See
 //! `config.example.toml` for every option.
 //!
-//! Default bindings (Mod is Alt unless configured, see `mod`/`PILA_MOD`):
+//! Default bindings (Mod is Super on a TTY and Alt nested, unless configured;
+//! see `mod`/`PILA_MOD`):
 //!
 //! | Binding               | Action                         |
 //! |-----------------------|--------------------------------|
@@ -35,14 +36,14 @@
 //! | 3 fingers down        | Restore (undo a snap or maximize) |
 //!
 //! `[bindings]` in the config adds to or replaces the keyboard bindings above
-//! (`"Mod+Shift+Return" = "spawn foot -e htop"`, `"Mod+J" = "none"`); the
+//! (`"Mod+Shift+Return" = "spawn kitty -e htop"`, `"Mod+J" = "none"`); the
 //! modifiers of a binding must match the pressed ones exactly. The VT switch
 //! comes from the keymap (`XF86_Switch_VT_N` keysyms), so it's handled in the
 //! keyboard filter and can't be rebound; the mouse bindings aren't
 //! configurable yet.
 //!
-//! Alt is the default because a host desktop such as GNOME grabs Super while
-//! pila runs nested. Use `mod = "super"` on bare metal.
+//! Nested, Alt is the default because a host desktop such as GNOME grabs
+//! Super while pila runs inside it.
 
 use std::{
     collections::BTreeMap,
@@ -609,7 +610,11 @@ struct InputFile {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub mod_key: ModKey,
-    pub terminal: String,
+    /// The Mod used when neither the file nor `PILA_MOD` sets one (depends on
+    /// the backend; kept so a reload parses the same way).
+    pub default_mod: ModKey,
+    /// `None`: the first of `TERMINALS` that is installed (`terminal_command`).
+    pub terminal: Option<String>,
     pub launcher: Option<String>,
     /// Commands run at startup (when no `-c` is given).
     pub autostart: Vec<String>,
@@ -619,6 +624,30 @@ pub struct Config {
     pub gestures: Vec<(Gesture, Action)>,
     pub outputs: Vec<OutputConfig>,
     pub input: InputConfig,
+}
+
+/// Terminals tried in order when `terminal` isn't set.
+pub const TERMINALS: &[&str] = &[
+    "kitty",
+    "foot",
+    "alacritty",
+    "ghostty",
+    "wezterm",
+    "konsole",
+    "gnome-terminal",
+    "xterm",
+];
+
+/// Whether `program` is an executable file in a `PATH` directory.
+fn in_path(program: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| {
+        std::fs::metadata(dir.join(program))
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    })
 }
 
 /// A non-empty `PILA_*` environment variable.
@@ -649,7 +678,7 @@ impl Config {
 
     /// Read `path` and apply `PILA_*` overrides. A missing file means the
     /// defaults; an unreadable or invalid one is an error.
-    pub fn read(path: Option<&Path>) -> Result<Self, String> {
+    pub fn read(path: Option<&Path>, default_mod: ModKey) -> Result<Self, String> {
         let text = match path {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(text) => {
@@ -661,29 +690,40 @@ impl Config {
             },
             None => String::new(),
         };
-        Self::from_toml(&text, &env_override)
+        if text.is_empty() {
+            info!("no config file; using the defaults (see config.example.toml)");
+        }
+        Self::parse(&text, &env_override, default_mod)
     }
 
     /// `read` at startup: an invalid file is reported and ignored, since a
     /// typo shouldn't leave you without a desktop.
-    pub fn load(path: Option<&Path>) -> Self {
-        Self::read(path).unwrap_or_else(|err| {
+    pub fn load(path: Option<&Path>, default_mod: ModKey) -> Self {
+        Self::read(path, default_mod).unwrap_or_else(|err| {
             warn!(%err, "invalid config; using defaults");
-            Self::from_toml("", &env_override).unwrap_or_default()
+            Self::parse("", &env_override, default_mod).unwrap_or_default()
         })
     }
 
-    /// Parse a config file's contents; `env` looks up `PILA_*` overrides.
+    /// Parse a config file's contents with Alt as the default Mod; `env`
+    /// looks up `PILA_*` overrides.
     pub fn from_toml(text: &str, env: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
+        Self::parse(text, env, ModKey::Alt)
+    }
+
+    /// `from_toml` with the Mod to use when none is configured.
+    pub fn parse(
+        text: &str,
+        env: &dyn Fn(&str) -> Option<String>,
+        default_mod: ModKey,
+    ) -> Result<Self, String> {
         let file: ConfigFile = toml::from_str(text).map_err(|err| err.to_string())?;
 
         let mod_key = match env("PILA_MOD").or(file.mod_key) {
             Some(name) => ModKey::parse(&name)?,
-            None => ModKey::Alt,
+            None => default_mod,
         };
-        let terminal = env("PILA_TERMINAL")
-            .or(file.terminal)
-            .unwrap_or_else(|| "foot".to_string());
+        let terminal = env("PILA_TERMINAL").or(file.terminal);
         let launcher = env("PILA_LAUNCHER").or(file.launcher);
 
         // Defaults first, then the user's: a user binding replaces a default
@@ -740,6 +780,7 @@ impl Config {
 
         Ok(Self {
             mod_key,
+            default_mod,
             terminal,
             launcher,
             autostart: file.autostart,
@@ -749,6 +790,22 @@ impl Config {
             outputs,
             input,
         })
+    }
+
+    /// The terminal to run: the configured one, else the first of
+    /// `TERMINALS` that is installed (`None` if none is).
+    pub fn terminal_command(&self) -> Option<String> {
+        if let Some(terminal) = &self.terminal {
+            return Some(terminal.clone());
+        }
+        let found = TERMINALS.iter().find(|t| in_path(t)).map(|t| t.to_string());
+        if found.is_none() {
+            warn!(
+                tried = ?TERMINALS,
+                "no terminal installed; set `terminal` in the config"
+            );
+        }
+        found
     }
 
     /// The `[[output]]` settings for the output called `name`, if any.
@@ -813,7 +870,7 @@ mod tests {
     fn defaults_bind_mod_return_to_the_terminal() {
         let config = Config::from_toml("", &no_env).unwrap();
         assert_eq!(config.mod_key, ModKey::Alt);
-        assert_eq!(config.terminal, "foot");
+        assert_eq!(config.terminal, None);
         let alt = mods(false, true, false, false);
         assert_eq!(
             config.action_for(Keysym::Return, &alt),
@@ -884,7 +941,8 @@ mod tests {
         let logo = mods(false, false, false, true);
         let logo_shift = mods(false, false, true, true);
         assert_eq!(config.mod_key, ModKey::Super);
-        assert_eq!(config.terminal, "kgx");
+        assert_eq!(config.terminal.as_deref(), Some("kgx"));
+        assert_eq!(config.terminal_command().as_deref(), Some("kgx"));
         assert_eq!(config.autostart, ["waybar", "mako"]);
         assert_eq!(config.keyboard.layout, "us,es");
         assert_eq!(config.keyboard.repeat_rate, 25);
@@ -1107,6 +1165,22 @@ mod tests {
         assert!(err(r#"gestures = { "swipe-2-left" = "close" }"#).contains("unknown gesture"));
         assert!(err(r#"gestures = { "pinch-3-in" = "close" }"#).contains("unknown gesture"));
         assert!(err(r#"gestures = { "swipe-3-left" = "fly" }"#).contains("unknown action"));
+    }
+
+    #[test]
+    fn default_mod_applies_only_when_unset() {
+        let config = Config::parse("", &no_env, ModKey::Super).unwrap();
+        assert_eq!(config.mod_key, ModKey::Super);
+        let logo = mods(false, false, false, true);
+        assert_eq!(
+            config.action_for(Keysym::Return, &logo),
+            Some(Action::Terminal)
+        );
+        let config = Config::parse(r#"mod = "alt""#, &no_env, ModKey::Super).unwrap();
+        assert_eq!(config.mod_key, ModKey::Alt);
+        let env = |name: &str| (name == "PILA_MOD").then(|| "ctrl".to_string());
+        let config = Config::parse("", &env, ModKey::Super).unwrap();
+        assert_eq!(config.mod_key, ModKey::Ctrl);
     }
 
     #[test]
