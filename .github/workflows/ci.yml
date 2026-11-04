@@ -21,7 +21,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git rust gcc pkgconf \
             seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
@@ -45,7 +45,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git rustup gcc pkgconf \
             seatd libinput systemd-libs mesa libxkbcommon
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Toolchain from rust-version
         run: |
           msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
@@ -85,7 +85,7 @@ jobs:
     steps:
       - name: Packages
         run: ${{ matrix.install }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Rust (rustup, stable)
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -101,7 +101,7 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: shellcheck
         run: |
           shellcheck --severity=warning --external-sources \
