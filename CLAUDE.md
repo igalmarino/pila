@@ -181,7 +181,7 @@ Key flows and invariants:
   nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
-  `disable-internal-display` (`Config::internal_display`: never / always / lid-closed)
+  `disable-internal-display` (`Config::internal_display`: never / always)
   turns a built-in screen (connector eDP/LVDS/DSI, `is_internal`) off while another,
   external output is on by its own config: `effective_output_config` sets its `enabled`
   to false unless its `[[output]]` sets `enabled` (overrides still on top), decided from
@@ -192,8 +192,9 @@ Key flows and invariants:
   overlap when it comes back. `apply_internal_display` applies it (with a
   never-zero-outputs fallback) at the end of `scan_connectors`, in
   `connector_disconnected` before the gone output is unmapped (so its windows move
-  onto the built-in screen), and on libinput's lid switch (`Pila::lid_switched`,
-  `UdevData::lid_closed`); config reloads go through `apply_output_config`.
+  onto the built-in screen); config reloads go through `apply_output_config`. There's
+  no lid handling: a clamshell mode was tried and dropped, since logind suspends a
+  closed laptop while no external output is on (e.g. between sessions).
   `fullscreen_request` honors the requested output for mapped windows
   (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are forwarded to the
   pointer focus through pointer-gestures (`gestures.rs`), except swipes with a finger

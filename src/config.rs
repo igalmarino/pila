@@ -690,15 +690,13 @@ pub struct Config {
     pub internal_display: InternalDisplay,
 }
 
-/// `disable-internal-display`: when a laptop's built-in screen (eDP, LVDS,
-/// DSI) is turned off while an external monitor is on.
+/// `disable-internal-display`: whether a laptop's built-in screen (eDP,
+/// LVDS, DSI) is turned off while an external monitor is on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum InternalDisplay {
     #[default]
     Never,
     Always,
-    /// Only while the lid is closed (clamshell).
-    LidClosed,
 }
 
 impl InternalDisplay {
@@ -706,9 +704,8 @@ impl InternalDisplay {
         match text {
             "never" => Ok(Self::Never),
             "always" => Ok(Self::Always),
-            "lid-closed" => Ok(Self::LidClosed),
             other => Err(format!(
-                "disable-internal-display = {other:?}: must be never, always or lid-closed"
+                "disable-internal-display = {other:?}: must be never or always"
             )),
         }
     }
@@ -1369,10 +1366,7 @@ mod tests {
             parse(r#"disable-internal-display = "always""#),
             Ok(InternalDisplay::Always)
         );
-        assert_eq!(
-            parse(r#"disable-internal-display = "lid-closed""#),
-            Ok(InternalDisplay::LidClosed)
-        );
+        assert!(parse(r#"disable-internal-display = "lid-closed""#).is_err());
         assert!(parse(r#"disable-internal-display = "sometimes""#).is_err());
         assert!(parse("disable-internal-display = true").is_err());
     }

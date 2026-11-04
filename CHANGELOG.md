@@ -8,9 +8,8 @@
   activating a window elsewhere (taskbar, xdg-activation) goes to its workspace. Panels
   see and switch them through ext-workspace.
 - **Built-in screen off with an external monitor:** `disable-internal-display = "always"`
-  turns a laptop's built-in screen (eDP, LVDS, DSI) off while an external monitor is on,
-  `"lid-closed"` only while the lid is closed; it comes back when the external monitor is
-  unplugged or the lid opens.
+  turns a laptop's built-in screen (eDP, LVDS, DSI) off while an external monitor is on;
+  it comes back when the external monitor is unplugged.
 
 ## 0.1.0 (2026-11-04)
 

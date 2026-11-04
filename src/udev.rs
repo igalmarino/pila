@@ -113,9 +113,6 @@ pub struct UdevData {
     /// every event.
     recovering: bool,
     loop_handle: LoopHandle<'static, Pila>,
-    /// The laptop's lid is closed (libinput's lid switch), for
-    /// `disable-internal-display = "lid-closed"`.
-    lid_closed: bool,
     /// Connectors found connected by the scan in progress and not set up
     /// yet: an external one among them already turns the built-in screen
     /// off, so it isn't lit for a moment while the scan goes on.
@@ -584,7 +581,6 @@ pub fn init_udev(
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
-        lid_closed: false,
         scan_pending: Vec::new(),
     })));
 
@@ -1211,19 +1207,15 @@ fn is_internal(name: &str) -> bool {
 }
 
 /// Whether `disable-internal-display` turns the built-in screen `name` off
-/// now: it applies (always, or the lid is closed) and another connected
-/// monitor, an external one, is on by its own config. That's decided from
-/// the config, not from which outputs are running, so it doesn't depend on
-/// the order outputs are set up in.
+/// now: it's "always" and another connected monitor, an external one, is on
+/// by its own config. That's decided from the config, not from which
+/// outputs are running, so it doesn't depend on the order outputs are set
+/// up in.
 fn internal_display_off(state: &Pila, name: &str) -> bool {
     let Some(Backend::Udev(data)) = &state.backend else {
         return false;
     };
-    let applies = match state.config.internal_display {
-        InternalDisplay::Never => false,
-        InternalDisplay::Always => true,
-        InternalDisplay::LidClosed => data.lid_closed,
-    };
+    let applies = state.config.internal_display == InternalDisplay::Always;
     // Set up, or found by the scan in progress and about to be.
     let connected = data
         .outputs
@@ -1245,8 +1237,8 @@ fn internal_display_off(state: &Pila, name: &str) -> bool {
 }
 
 /// Turn built-in screens on or off as `disable-internal-display` says now
-/// (an external monitor came or went, the lid moved). Never leaves no
-/// output on: if every external one failed, the built-in screen stays.
+/// (an external monitor came or went). Never leaves no output on: if every
+/// external one failed, the built-in screen stays.
 pub fn apply_internal_display(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
@@ -1295,21 +1287,6 @@ pub fn apply_internal_display(state: &mut Pila) {
     state.configure_lock_surfaces();
     state.refresh_output_heads();
     state.queue_redraw();
-}
-
-impl Pila {
-    /// The laptop's lid opened or closed (libinput's lid switch).
-    pub fn lid_switched(&mut self, closed: bool) {
-        let Some(Backend::Udev(data)) = &mut self.backend else {
-            return;
-        };
-        if data.lid_closed == closed {
-            return;
-        }
-        data.lid_closed = closed;
-        info!(closed, "lid switch");
-        apply_internal_display(self);
-    }
 }
 
 fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {

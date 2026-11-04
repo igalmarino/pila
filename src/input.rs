@@ -2,7 +2,6 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-        Switch, SwitchState, SwitchToggleEvent,
     },
     desktop::Window,
     input::{
@@ -54,10 +53,6 @@ impl Pila {
             InputEvent::GesturePinchEnd { event, .. } => self.on_gesture_pinch_end::<I>(event),
             InputEvent::GestureHoldBegin { event, .. } => self.on_gesture_hold_begin::<I>(event),
             InputEvent::GestureHoldEnd { event, .. } => self.on_gesture_hold_end::<I>(event),
-            // The lid, for `disable-internal-display` (`udev.rs`).
-            InputEvent::SwitchToggle { event, .. } if event.switch() == Some(Switch::Lid) => {
-                self.lid_switched(event.state() == SwitchState::On);
-            }
             _ => {}
         }
     }

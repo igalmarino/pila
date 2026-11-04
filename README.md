@@ -36,7 +36,7 @@ connector names such as `eDP-1`).
   (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes).
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale; optionally, a laptop's built-in screen turns off while an
-  external monitor is on (always, or with the lid closed).
+  external monitor is on.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
