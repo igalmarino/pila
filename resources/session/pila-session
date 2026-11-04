@@ -47,4 +47,16 @@ syslog() {
     fi
 }
 
-exec "$pila" --backend udev 2> >(tee "$dir/pila.log" | syslog)
+# Writes the log file, up to a size (clients chatty over a long session
+# would fill the disk), then keeps reading so pila's stderr never breaks.
+log_limit=$((50 * 1024 * 1024))
+logfile() {
+    {
+        head -c "$log_limit"
+        echo
+        echo "pila-session: $1 reached $log_limit bytes; the rest is only in the system log"
+        cat >/dev/null
+    } >"$1"
+}
+
+exec "$pila" --backend udev 2> >(tee >(logfile "$dir/pila.log") | syslog)
