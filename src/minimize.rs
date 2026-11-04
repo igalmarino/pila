@@ -10,7 +10,7 @@
 use smithay::{desktop::Window, utils::SERIAL_COUNTER};
 
 use crate::{
-    workspaces::{leave_space, space_location},
+    workspaces::{deactivate, leave_space, space_location},
     Pila,
 };
 
@@ -38,6 +38,7 @@ impl Pila {
         };
         leave_space(window, self.workspaces.active, loc);
         self.space.unmap_elem(window);
+        deactivate(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(true);
         }

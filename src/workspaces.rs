@@ -64,6 +64,15 @@ pub fn space_location(window: &Window) -> Point<i32, Logical> {
     on_workspace(window).at.get()
 }
 
+/// Tell a window that just left the `Space` it's no longer activated: the
+/// space only deactivates windows it holds.
+pub fn deactivate(window: &Window) {
+    window.set_activated(false);
+    if let Some(toplevel) = window.toplevel() {
+        toplevel.send_pending_configure();
+    }
+}
+
 /// Whether `window` is an X11 menu or tooltip (on no workspace).
 fn is_override_redirect(window: &Window) -> bool {
     window
@@ -192,11 +201,7 @@ impl Pila {
         };
         leave_space(window, index, loc);
         self.space.unmap_elem(window);
-        // The space only deactivates windows it holds.
-        window.set_activated(false);
-        if let Some(toplevel) = window.toplevel() {
-            toplevel.send_pending_configure();
-        }
+        deactivate(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(true);
         }
