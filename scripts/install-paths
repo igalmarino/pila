@@ -1,0 +1,47 @@
+# Where scripts/install puts pila and what scripts/uninstall removes; sourced
+# by both. Override with environment variables, the usual ones for packaging:
+#
+#   PREFIX       /usr/local     (PREFIX=/usr for display managers that only
+#                               read /usr/share/wayland-sessions)
+#   BINDIR       $PREFIX/bin
+#   DATADIR      $PREFIX/share
+#   SYSCONFDIR   /etc           (the portal configs go in $SYSCONFDIR/xdg)
+#   DESTDIR      empty          (a staging root, e.g. for a distro package)
+#
+# shellcheck shell=bash
+
+PREFIX="${PREFIX:-/usr/local}"
+BINDIR="${BINDIR:-$PREFIX/bin}"
+DATADIR="${DATADIR:-$PREFIX/share}"
+SYSCONFDIR="${SYSCONFDIR:-/etc}"
+DESTDIR="${DESTDIR:-}"
+
+# source in the repository : installed path (before DESTDIR) : mode
+install_files=(
+    "target/release/pila:$BINDIR/pila:755"
+    "resources/session/pila-session:$BINDIR/pila-session:755"
+    "resources/session/pila.desktop:$DATADIR/wayland-sessions/pila.desktop:644"
+    "resources/xdg/xdg-desktop-portal/pila-portals.conf:$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf:644"
+    "resources/xdg/xdg-desktop-portal-wlr/pila:$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila:644"
+)
+
+# Directories that may be left empty by an uninstall.
+install_dirs=(
+    "$DATADIR/wayland-sessions"
+    "$SYSCONFDIR/xdg/xdg-desktop-portal"
+    "$SYSCONFDIR/xdg/xdg-desktop-portal-wlr"
+)
+
+# Runs a command with sudo only if $1's directory (or its nearest existing
+# ancestor) isn't writable, so a DESTDIR install needs no root.
+as_owner_of() {
+    local dir
+    dir="$(dirname "$1")"
+    shift
+    while [ ! -e "$dir" ]; do dir="$(dirname "$dir")"; done
+    if [ -w "$dir" ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}

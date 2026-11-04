@@ -1,18 +1,50 @@
 #!/usr/bin/env bash
 # Starts a pila login session. The display manager runs this through
 # wayland-sessions/pila.desktop (both installed by scripts/install); it has
-# already set up the logind session, XDG_RUNTIME_DIR, the user's D-Bus bus,
+# already set up the session (logind or elogind, or seatd), XDG_RUNTIME_DIR,
 # XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP=pila. pila itself exports
-# its WAYLAND_DISPLAY and DISPLAY to that bus and to systemd --user, so the
-# portals (screen sharing), pipewire and the rest of the user services find it.
+# its WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and, on systemd,
+# to systemd --user), so the portals (screen sharing), pipewire and the rest
+# of the user services find it.
 #
-# The log (pila's, and the output of what it starts) goes to the journal
-# (journalctl -t pila -b) and to ~/.local/state/pila/pila.log, which the dev
-# container mounts as /run/host-pila; the previous run's is pila.log.old.
+# Without systemd there may be no per-user bus; then this starts one for the
+# session (dbus-run-session).
+#
+# The log (pila's, and the output of what it starts) goes to
+# ~/.local/state/pila/pila.log (the previous run's is pila.log.old), which the
+# dev container mounts as /run/host-pila, and to the system log: the journal
+# (journalctl -t pila -b) with systemd, otherwise syslog through logger if
+# there is one.
 set -euo pipefail
+
+# The binary installed next to this script; the display manager's PATH may
+# not include it.
+pila="$(dirname "$(readlink -f "$0")")/pila"
+[ -x "$pila" ] || pila=pila
+
+# A session bus: the systemd user bus if there is one, else a new one.
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    elif command -v dbus-run-session >/dev/null; then
+        exec dbus-run-session -- "$0" "$@"
+    fi
+fi
 
 dir="${XDG_STATE_HOME:-$HOME/.local/state}/pila"
 mkdir -p "$dir"
 [ -f "$dir/pila.log" ] && mv -f "$dir/pila.log" "$dir/pila.log.old"
 
-exec pila --backend udev 2> >(tee "$dir/pila.log" | systemd-cat -t pila)
+# Copies the log to the system log. If the logger fails, the rest is drained
+# so that pila's stderr never breaks.
+syslog() {
+    if command -v systemd-cat >/dev/null; then
+        systemd-cat -t pila 2>/dev/null || cat >/dev/null
+    elif command -v logger >/dev/null; then
+        logger -t pila 2>/dev/null || cat >/dev/null
+    else
+        cat >/dev/null
+    fi
+}
+
+exec "$pila" --backend udev 2> >(tee "$dir/pila.log" | syslog)
