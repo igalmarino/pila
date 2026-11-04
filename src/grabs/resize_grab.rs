@@ -14,7 +14,7 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Point, Rectangle, Size},
     wayland::{compositor, shell::xdg::SurfaceCachedState},
 };
 use std::cell::RefCell;
@@ -131,6 +131,13 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
     ) {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
+
+        // Minimized, moved to another workspace or closed meanwhile: the
+        // resize is over (and must not map the window again).
+        if !self.window.alive() || data.space.element_location(&self.window).is_none() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+            return;
+        }
 
         let mut delta = event.location - self.start_data.location;
 

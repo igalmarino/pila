@@ -14,7 +14,7 @@ use smithay::{
         RelativeMotionEvent,
     },
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point},
+    utils::{IsAlive, Logical, Point},
 };
 
 pub struct MoveSurfaceGrab {
@@ -42,6 +42,12 @@ impl PointerGrab<Pila> for MoveSurfaceGrab {
     ) {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
+        // Minimized, moved to another workspace or closed meanwhile: the
+        // move is over (and must not map the window again).
+        if !self.window.alive() || data.space.element_location(&self.window).is_none() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+            return;
+        }
         self.moved = true;
 
         let delta = event.location - self.start_data.location;
