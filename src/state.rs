@@ -94,6 +94,8 @@ pub struct Pila {
     pub xwayland_shell_state: XWaylandShellState,
     /// The startup commands, held back until Xwayland is ready.
     pub pending_startup: Vec<String>,
+    /// Programs pila started, reaped on SIGCHLD (`reap_children`).
+    pub children: Vec<std::process::Child>,
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
 
@@ -289,6 +291,7 @@ impl Pila {
             xdisplay: None,
             xwayland_shell_state,
             pending_startup: Vec::new(),
+            children: Vec::new(),
             minimized: Vec::new(),
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
@@ -1320,14 +1323,14 @@ impl Pila {
         };
     }
 
-    pub fn spawn_all(&self, commands: &[String]) {
+    pub fn spawn_all(&mut self, commands: &[String]) {
         for command in commands {
             self.spawn(command);
         }
     }
 
     /// Run a shell command as a client of this compositor.
-    pub fn spawn(&self, command: &str) {
+    pub fn spawn(&mut self, command: &str) {
         info!(command, "spawning");
         let mut cmd = Command::new("/bin/sh");
         cmd.arg("-c").arg(command);
@@ -1340,14 +1343,24 @@ impl Pila {
             None => cmd.env_remove("PILA_OUTPUT"),
         };
         match cmd.spawn() {
-            // Reap the child so exited clients don't linger as zombies.
-            Ok(mut child) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-            }
+            Ok(child) => self.adopt_child(child),
             Err(err) => warn!(command, ?err, "failed to spawn"),
         }
+    }
+
+    /// Keep a program pila started until it exits, so it can be reaped
+    /// (`reap_children`) instead of lingering as a zombie.
+    pub(crate) fn adopt_child(&mut self, child: std::process::Child) {
+        self.children.push(child);
+        // A SIGCHLD may have come before this one was listed.
+        self.reap_children();
+    }
+
+    /// Reap the programs pila started that exited (on SIGCHLD, `main.rs`).
+    /// Only pila's own: Smithay waits for Xwayland itself.
+    pub fn reap_children(&mut self) {
+        self.children
+            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
     }
 }
 

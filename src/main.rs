@@ -186,6 +186,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs;
+    // SIGCHLD reaps the programs pila started. Set up before any thread
+    // exists: the source blocks these signals in this thread, threads
+    // inherit that, and a thread that didn't block them could take one
+    // (process-directed) instead of the event loop.
+    let mut event_loop: EventLoop<'static, Pila> = EventLoop::try_new()?;
+    let signals = calloop::signals::Signals::new(&[
+        calloop::signals::Signal::SIGINT,
+        calloop::signals::Signal::SIGTERM,
+        calloop::signals::Signal::SIGCHLD,
+    ])?;
+    event_loop
+        .handle()
+        .insert_source(signals, |event, _, state: &mut Pila| {
+            if event.signal() == calloop::signals::Signal::SIGCHLD {
+                state.reap_children();
+            } else {
+                tracing::info!(signal = ?event.signal(), "quitting");
+                state.loop_signal.stop();
+            }
+        })?;
+
     // Slow (system font scan), so it runs in the background; title bars get
     // their text once it's done.
     text::init();
@@ -220,7 +242,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting pila"
     );
 
-    let mut event_loop: EventLoop<'static, Pila> = EventLoop::try_new()?;
     let display: Display<Pila> = Display::new()?;
     let mut state = Pila::new(&mut event_loop, display, config);
     state.config_path = config_path;
@@ -239,18 +260,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => state.config.terminal_command().into_iter().collect(),
     };
     state.start_xwayland(startup);
-
-    // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs.
-    let signals = calloop::signals::Signals::new(&[
-        calloop::signals::Signal::SIGINT,
-        calloop::signals::Signal::SIGTERM,
-    ])?;
-    event_loop
-        .handle()
-        .insert_source(signals, |event, _, state: &mut Pila| {
-            tracing::info!(signal = ?event.signal(), "quitting");
-            state.loop_signal.stop();
-        })?;
 
     // Once per iteration, after any redraws (idle callbacks run last): the
     // post-frame housekeeping, then a flush, which events queued outside a

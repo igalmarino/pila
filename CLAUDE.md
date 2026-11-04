@@ -377,7 +377,10 @@ Key flows and invariants:
   pipewire there (`--systemd`); on a private bus (`scripts/tty`, `dbus-run-session`) the
   bus alone, so a test instance leaves the login session's services alone. The export
   runs in the background (a stuck bus mustn't freeze pila); the startup programs follow
-  when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals.
+  when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals. Spawned
+  programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`); the
+  signal source is created first thing in `main`, before any thread, so no thread can
+  take the signal instead.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

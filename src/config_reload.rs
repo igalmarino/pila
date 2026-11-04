@@ -208,7 +208,7 @@ impl Pila {
 
     /// A desktop notification (through `notify-send`, if there's a
     /// notification daemon such as mako); also in the log.
-    fn notify(&self, summary: &str, body: &str) {
+    fn notify(&mut self, summary: &str, body: &str) {
         let mut cmd = Command::new("notify-send");
         cmd.args(["--app-name=pila", "--expire-time=3000", summary]);
         if !body.is_empty() {
@@ -216,11 +216,7 @@ impl Pila {
         }
         self.session_env(&mut cmd);
         match cmd.spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-            }
+            Ok(child) => self.adopt_child(child),
             Err(err) => debug!(?err, "no notify-send"),
         }
     }
