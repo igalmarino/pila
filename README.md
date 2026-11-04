@@ -228,6 +228,9 @@ Open an [issue](https://github.com/igalmarino/pila/issues/new/choose) with:
   `RUST_BACKTRACE=1` adds where it happened;
 - your config file, if you have one, and the steps to reproduce.
 
+Questions, ideas and "does X work with pila?" go to
+[Discussions](https://github.com/igalmarino/pila/discussions).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the development environment (a
