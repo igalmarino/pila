@@ -19,7 +19,7 @@
 # here, and warns about another pila session entry in /usr or /usr/local.
 #
 # scripts/uninstall removes exactly these files (given the same variables).
-# Your own config (scripts/install-config) and logs are separate.
+# Your own config (~/.config/pila) and logs are left alone.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

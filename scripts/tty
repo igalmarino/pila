@@ -13,7 +13,7 @@
 # xdg-desktop-portal-wlr's settings are copied to ~/.config if missing.
 #
 #   scripts/tty                        release build, ~/.config/pila/config.toml
-#   scripts/tty <config.toml>          another config (e.g. scripts/tty-test.toml)
+#   scripts/tty <config.toml>          another config
 #   scripts/tty --debug [config.toml]  the debug build (scripts/dev cargo build)
 set -euo pipefail
 

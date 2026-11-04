@@ -128,7 +128,7 @@ On a free TTY (Ctrl+Alt+F3), from this folder:
 
 ```bash
 scripts/tty                        # the release build with ~/.config/pila/config.toml
-scripts/tty scripts/tty-test.toml  # another config; --debug for the debug build
+scripts/tty my-test.toml           # another config; --debug for the debug build
 ```
 
 This lets you try a build or a config while another session (pila or anything else) keeps
@@ -142,7 +142,6 @@ Host packages for a full session (names are the same on most distros):
 - `foot`: the default terminal (or set `terminal`)
 - `xdg-desktop-portal-wlr`, `grim`, `slurp`: screen sharing
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
-- `noctalia`, `ghostty`, `wlopm`, `wl-clipboard`: for `resources/daily`
 
 ```bash
 sudo pacman -S foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp   # Arch
@@ -150,15 +149,14 @@ sudo apt install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp #
 sudo dnf install foot xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Fedora
 ```
 
-### A day-to-day session
+### Desktop shells and tools
 
-`resources/daily` holds a complete session config: Super as Mod (and Alt+Tab too), a `us`
-`altgr-intl` keyboard, touchpad settings like GNOME's, media, brightness and screenshot
-keys, a laptop-plus-monitor layout, and [Noctalia](https://noctalia.dev) as the desktop
-shell (bar, launcher, notifications, wallpaper, lock screen and idle, OSDs, clipboard
-history, night light, screen off on idle, screenshots, monitor settings), with a Noctalia
-settings file adapted to pila (no workspaces widget). `scripts/install-config` copies both
-files to `~/.config/`, keeping existing ones (`--force` replaces them, saving a `.bak`).
+pila draws windows and title bars only; the rest of a desktop comes from the usual Wayland
+tools: a bar (waybar), launcher (fuzzel), notifications (mako), wallpaper (swaybg), lock
+screen and idle (swaylock, swayidle), night light (wlsunset), clipboard (wl-clipboard), all
+started from `autostart`. A full shell such as [Noctalia](https://noctalia.dev) provides all
+of these at once. To turn screens off on idle, use `wlopm` (`wlopm --off '*'`): shells that
+don't recognize pila may run `wlr-randr --off` without naming an output, which fails.
 
 ## Configuring pila
 

@@ -2,7 +2,7 @@
 # Remove the pila login session that scripts/install put on the host: the
 # binary, the session wrapper, the session entry and the portal configs. Give
 # it the same PREFIX, SYSCONFDIR, ... as the install (scripts/install-paths).
-# Your own files stay: ~/.config/pila (scripts/install-config),
+# Your own files stay: ~/.config/pila,
 # ~/.config/xdg-desktop-portal-wlr/pila (scripts/tty) and the logs in
 # ~/.local/state/pila.
 #

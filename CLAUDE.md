@@ -37,7 +37,7 @@ on **Smithay 0.7.x**.
 - Format: `cargo fmt`
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
   logic only (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
-  `shipped_configs_are_valid` for `config.example.toml` and `resources/daily`); anything
+  `example_config_is_valid` for `config.example.toml`); anything
   needing a `Window` or a client is tested nested.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
@@ -76,9 +76,8 @@ on **Smithay 0.7.x**.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's
-  `pila-tty.log.old` in the repo root afterwards. The user's day-to-day config lives in
-  `resources/daily` (installed by `scripts/install-config`); keep it valid (a test parses
-  it, and `config.example.toml`).
+  `pila-tty.log.old` in the repo root afterwards. The user's own config lives outside the
+  repo (`~/.config/pila`); keep `config.example.toml` valid (a test parses it).
 - This container is connected to the user's pila session, so `cargo run` opens a nested
   window inside it. Changes that need a pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or

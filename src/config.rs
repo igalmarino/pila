@@ -1110,34 +1110,10 @@ mod tests {
     }
 
     #[test]
-    fn shipped_configs_are_valid() {
-        for (name, text) in [
-            (
-                "config.example.toml",
-                include_str!("../config.example.toml"),
-            ),
-            (
-                "resources/daily/config.toml",
-                include_str!("../resources/daily/config.toml"),
-            ),
-        ] {
-            if let Err(err) = Config::from_toml(text, &no_env) {
-                panic!("{name}: {err}");
-            }
+    fn example_config_is_valid() {
+        if let Err(err) = Config::from_toml(include_str!("../config.example.toml"), &no_env) {
+            panic!("config.example.toml: {err}");
         }
-        // The day-to-day config switches windows with Super+Tab and Alt+Tab.
-        let daily =
-            Config::from_toml(include_str!("../resources/daily/config.toml"), &no_env).unwrap();
-        let alt = mods(false, true, false, false);
-        let logo = mods(false, false, false, true);
-        assert_eq!(
-            daily.action_for(Keysym::Tab, &alt),
-            Some(Action::CycleFocus)
-        );
-        assert_eq!(
-            daily.action_for(Keysym::Tab, &logo),
-            Some(Action::CycleFocus)
-        );
     }
 
     #[test]
