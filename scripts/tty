@@ -16,6 +16,7 @@
 #   scripts/tty                        release build, ~/.config/pila/config.toml
 #   scripts/tty <config.toml>          another config
 #   scripts/tty --debug [config.toml]  the debug build (scripts/dev cargo build)
+#   scripts/tty [...] -- <pila args>   pass arguments on to pila (e.g. -c CMD)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,12 +29,18 @@ if [ "${1:-}" = "--debug" ]; then
     shift
 fi
 config_args=()
-if [ $# -gt 0 ]; then
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then
     if [ ! -f "$1" ]; then
         echo "config $1 not found" >&2
         exit 1
     fi
     config_args=(--config "$1")
+    shift
+fi
+pila_args=()
+if [ "${1:-}" = "--" ]; then
+    shift
+    pila_args=("$@")
 fi
 
 if [ ! -x "$bin" ]; then
@@ -74,5 +81,5 @@ fi
 # Keep the last run's log: after a crash, it's the one that matters.
 [ -f pila-tty.log ] && mv -f pila-tty.log pila-tty.log.old
 
-echo "Starting $bin ${config_args[*]:-}; log in pila-tty.log. Quit with Mod+Shift+E."
-exec dbus-run-session -- "$bin" --backend udev "${config_args[@]}" 2>pila-tty.log
+echo "Starting $bin ${config_args[*]:-} ${pila_args[*]:-}; log in pila-tty.log. Quit with Mod+Shift+E."
+exec dbus-run-session -- "$bin" --backend udev "${config_args[@]}" "${pila_args[@]}" 2>pila-tty.log

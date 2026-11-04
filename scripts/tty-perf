@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Measure pila's frames on bare metal (the performance pillar in CLAUDE.md):
+# run it from a TTY on the host (Ctrl+Alt+F3, log in, run this). It starts
+# pila through scripts/tty with frame statistics on (RUST_LOG
+# pila::frames=debug) and, instead of your autostart, a fixed workload: a
+# terminal opened and closed a few times, so the open and close animations
+# play. pila quits by itself at the end and the statistics are printed; the
+# whole log is in pila-tty.log.
+#
+#   scripts/tty-perf                  ~/.config/pila/config.toml
+#   scripts/tty-perf <config.toml>    another config
+#
+# Environment: PILA_PERF_TERMINAL, the terminal to open (default: kitty,
+# else foot); PILA_PERF_ROUNDS, how many times (default: 6).
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Inside pila (started with -c): the workload.
+if [ "${1:-}" = "--workload" ]; then
+    terminal="${PILA_PERF_TERMINAL:-}"
+    if [ -z "$terminal" ]; then
+        for candidate in kitty foot; do
+            if command -v "$candidate" >/dev/null; then
+                terminal=$candidate
+                break
+            fi
+        done
+    fi
+    # Written to pila's log (programs' output goes there), as landmarks.
+    echo "tty-perf: workload starts (terminal: ${terminal:-none})"
+    sleep 3
+    if [ -n "$terminal" ]; then
+        for round in $(seq "${PILA_PERF_ROUNDS:-6}"); do
+            echo "tty-perf: round $round: open"
+            # The terminal closes by itself when its program exits, as
+            # when you type `exit`.
+            "$terminal" sleep 2 &
+            wait $! || true
+            echo "tty-perf: round $round: closed"
+            sleep 2
+        done
+    else
+        echo "tty-perf: no terminal found (kitty or foot); set PILA_PERF_TERMINAL"
+    fi
+    echo "tty-perf: workload done"
+    sleep 1
+    # Quit pila (SIGTERM quits cleanly): the nearest pila among this
+    # script's ancestors, never another one (the login session's).
+    pid=$PPID
+    while [ "$pid" -gt 1 ]; do
+        if [ "$(ps -o comm= -p "$pid")" = pila ]; then
+            kill -TERM "$pid"
+            exit 0
+        fi
+        pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+    done
+    echo "tty-perf: pila not found among the ancestors; quit it with Mod+Shift+E"
+    exit 0
+fi
+
+config_args=()
+if [ $# -gt 0 ]; then
+    config_args=("$1")
+fi
+
+echo "Opens and closes a terminal ${PILA_PERF_ROUNDS:-6} times; pila quits by itself (about 30 s)."
+echo "Just watch the animations. To stop early: Mod+Shift+E."
+# Every frame (trace), to see where one goes missing.
+export RUST_LOG="info,pila::frames=trace"
+status=0
+scripts/tty "${config_args[@]}" -- -c "$PWD/scripts/tty-perf --workload" || status=$?
+
+echo
+echo "== Frame statistics (pila-tty.log) =="
+# The per-frame trace stays in the log; the summary lines are enough here.
+grep -E "pila::frames|tty-perf:" pila-tty.log | grep -vE "TRACE" |
+    sed -E 's/^[0-9-]+T([0-9:.]+)Z +[A-Z]+ /\1 /' || true
+exit "$status"

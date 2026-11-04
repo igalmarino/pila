@@ -394,12 +394,28 @@ impl Pila {
             clear_textures(window);
         }
         if changed || !self.animations.appearing.is_empty() || !self.animations.ghosts.is_empty() {
-            // From an idle callback: this runs after the event loop's
+            // From an idle callback, with the loop woken so it runs right
+            // away (calloop wouldn't): this runs after the event loop's
             // dispatch, too late for the winit source to see a redraw
-            // request before the loop sleeps; a pending idle callback keeps
-            // it awake and runs within the next dispatch.
+            // request before the loop sleeps.
             self.loop_handle.insert_idle(|state| state.queue_redraw());
+            self.wake.ping();
         }
+    }
+
+    /// Whether anything is still animating now, so frames are wanted back
+    /// to back (one that ended during the last frame doesn't count).
+    pub fn animating(&self) -> bool {
+        let now = self.animation_time();
+        self.animations
+            .appearing
+            .iter()
+            .any(|a| !a.visibility.done(now))
+            || self
+                .animations
+                .ghosts
+                .iter()
+                .any(|g| !g.visibility.done(now))
     }
 
     /// Stop every animation (the session locked).

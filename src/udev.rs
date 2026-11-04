@@ -135,6 +135,11 @@ struct OutputSurface {
     global: Option<GlobalId>,
     /// A frame was queued and its vblank hasn't arrived yet.
     frame_pending: bool,
+    /// The sequence number of the vblank that showed the last frame, and
+    /// whether pila wanted a new frame at every vblank after it (an
+    /// animation was running; `frame_stats.rs`).
+    last_vblank: Option<u64>,
+    back_to_back: bool,
     /// Something changed since the last frame.
     redraw_needed: bool,
     /// Progress of the frame that confirms a session lock.
@@ -1083,6 +1088,8 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
             enabled: false,
             global: None,
             frame_pending: false,
+            last_vblank: None,
+            back_to_back: false,
             redraw_needed: true,
             lock_frame: LockFrame::None,
             modes,
@@ -1384,7 +1391,7 @@ fn render_all(state: &mut Pila) {
     data.redraw_scheduled = false;
     let crtcs: Vec<_> = data.outputs.keys().copied().collect();
     for crtc in crtcs {
-        render_output(state, crtc);
+        render_output(state, crtc, false);
     }
     // With every output powered off nothing is drawn, so nothing above
     // checks the lock: a locker (swaylock -f waits for it) would wait forever.
@@ -1394,8 +1401,9 @@ fn render_all(state: &mut Pila) {
 }
 
 /// Draw one output, unless it has a frame in flight (then it's drawn at the
-/// next vblank) or nothing changed.
-fn render_output(state: &mut Pila, crtc: crtc::Handle) {
+/// next vblank) or nothing changed. `at_vblank`: called right after one, so
+/// the frame is due at the next (`frame_stats.rs`).
+fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: bool) {
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
@@ -1415,6 +1423,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
         return;
     };
 
+    let started = std::time::Instant::now();
     // A destroyed cursor surface falls back to the default arrow.
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.alive()) {
         state.cursor_status = CursorImageStatus::default_named();
@@ -1496,12 +1505,25 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
     if !scene.locked {
         surface.lock_frame = LockFrame::None;
     }
+    let queued = surface.frame_pending;
     if recover {
         data.schedule_recovery();
     }
 
     if lock_pending {
         maybe_confirm_lock(state);
+    }
+    if queued {
+        let cpu = started.elapsed();
+        tracing::trace!(
+            target: "pila::frames",
+            output = output.name(),
+            at_vblank,
+            cpu_us = cpu.as_micros() as u64,
+            animating = state.animating(),
+            "queued"
+        );
+        state.record_frame(&output, cpu);
     }
     frame::send_frames(scene, cursor_wl_surface, &output, state.clock.now().into());
     state.post_render(&output);
@@ -1511,6 +1533,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle) {
 /// again if something changed meanwhile.
 fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmEventMetadata>) {
     let now = state.clock.now();
+    let animating = state.animating();
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
@@ -1522,19 +1545,23 @@ fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmE
         surface.lock_frame = LockFrame::Shown;
     }
 
-    let frame_duration = surface
-        .output
-        .current_mode()
-        // A mode without a refresh rate would make an infinite duration.
-        .filter(|mode| mode.refresh > 0)
-        .map(|mode| Duration::from_secs_f64(1000.0 / mode.refresh as f64))
-        .unwrap_or(Duration::from_millis(16));
+    let frame_duration = crate::frame_stats::refresh_period(&surface.output);
     // The kernel's vblank timestamp, when it gives a monotonic one.
     let hw_time = metadata.as_ref().and_then(|m| match m.time {
         DrmEventTime::Monotonic(time) if !time.is_zero() => Some(time),
         _ => None,
     });
     let seq = metadata.as_ref().map_or(0, |m| m.sequence as u64);
+    // While an animation runs every vblank should show a new frame: the
+    // vblanks since the last frame shown, beyond one, were missed (if it's
+    // still running: the pause after one ends doesn't count).
+    let missed = match (metadata.is_some(), surface.last_vblank) {
+        (true, Some(last)) if surface.back_to_back && animating => seq.saturating_sub(last + 1),
+        _ => 0,
+    };
+    surface.last_vblank = metadata.is_some().then_some(seq);
+    tracing::trace!(target: "pila::frames", output = surface.output.name(), seq, missed, "shown");
+    let output = surface.output.clone();
     let (time, flags) = match hw_time {
         Some(time) => (
             time.into(),
@@ -1557,10 +1584,17 @@ fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmE
         Err(err) => warn!(?err, "frame submission failed"),
     }
 
+    state.record_missed(&output, u32::try_from(missed).unwrap_or(u32::MAX));
     if state.lock_pending() {
         maybe_confirm_lock(state);
     }
-    render_output(state, crtc);
+    render_output(state, crtc, true);
+    let animating = state.animating();
+    if let Some(Backend::Udev(data)) = &mut state.backend {
+        if let Some(surface) = data.outputs.get_mut(&crtc) {
+            surface.back_to_back = animating;
+        }
+    }
 }
 
 /// Confirm a pending session lock once every output shows a locked frame.

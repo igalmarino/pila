@@ -58,7 +58,9 @@ on **Smithay 0.7.x**.
   (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
   Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
-  compositor.
+  compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
+  "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
+  and `grim` in a loop from a script run with `cargo run -- -c`.
 - The login session (the user, on the host): `scripts/install` builds the release binary
   (with the host's cargo if there is one, else `--container`; `--no-build`) and installs it
   with `resources/session/` (the `pila-session` wrapper and the `wayland-sessions` entry,
@@ -101,6 +103,33 @@ install paths configurable. Name packages generically in messages ("package dbus
 with one distro's package manager. `rust-version` in `Cargo.toml` is the oldest Rust that
 builds pila; raise it when a dependency or the code needs a newer one. The dev container
 itself is Arch, and its packages are named as Arch's.
+
+## Performance pillar
+
+pila never makes an output miss a refresh while there is something to show (an
+animation, a drag, a client's new frame), at the output's own refresh rate (60, 144 Hz,
+...); 60 Hz is the floor it must hold everywhere. It renders on demand: smooth doesn't
+mean redrawing when nothing changed. How fast clients draw is up to them.
+
+- **Budget:** the CPU time pila spends on a frame (scene, elements, submitting the
+  render) stays well inside the period. Target: release build on the user's laptop (AMD
+  Renoir), typical scenes, **at most 4 ms per output** (a quarter of 60 Hz, still room at
+  144 Hz).
+- **Measure it:** `RUST_LOG=pila::frames=debug` (`frame_stats.rs`) logs per output,
+  every 5 s, frames, average and worst CPU time and missed refreshes, plus every frame
+  over half the period. Missed refreshes are vblanks with no new frame while an
+  animation runs: exact on bare metal (the DRM sequence of the vblanks that showed
+  frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
+  show); `pila::frames=trace` logs every frame. Any change that touches rendering, input
+  or the event loop is checked with it (release build) before it's committed; bare-metal
+  numbers come from the user with `scripts/tty-perf` (a scripted workload on a TTY, then
+  the statistics).
+- **Rules:** nothing blocking on the event loop (I/O, D-Bus, font loading go to threads
+  or run in the background, like `text.rs` and `export_environment`); work proportional
+  to damage; expensive paths (offscreen textures, blur, captures) only while they're
+  needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
+  timers; idle callbacks inserted outside an event source come with a `Pila::wake`
+  ping (see "Redraws are on demand").
 
 ## Protocol policy
 
@@ -236,9 +265,12 @@ Key flows and invariants:
   first locked frame, and while an animation runs. Nothing else redraws, so state changes
   outside those paths (timers, `insert_idle` callbacks) must call `queue_redraw`
   themselves. Clients are flushed after every event-loop iteration (`main.rs`), not only
-  on redraw. A redraw requested from `after_frames` (the `event_loop.run` callback) must
-  go through `insert_idle`: nested, the winit source has already checked for redraw
-  requests before the loop sleeps, so a direct request waits for the next unrelated event.
+  on redraw. calloop doesn't wake the loop for pending idle callbacks: they run after
+  the next event, however late. So `queue_redraw` pings `Pila::wake` (bare metal, the
+  redraw itself is an idle `render_all`), and anything else inserting an idle callback
+  outside an event source (e.g. from `after_frames`, the `event_loop.run` callback) must
+  ping it too. A redraw requested from `after_frames` goes through `insert_idle` plus
+  the ping: nested, the winit source has already checked for redraw requests by then.
 - **Pointer grabs:** Mod+drag installs the move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
   via `Pila::set_cursor`, which must be called *after* `set_grab` (`Focus::Clear` resets the

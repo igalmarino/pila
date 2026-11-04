@@ -74,6 +74,9 @@ pub fn init_winit(
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
     // Frames left to render in full: buffer ages are unreliable after a resize.
     let mut full_redraw = 0u8;
+    // When the last frame started, and whether pila wanted the next one right
+    // after it (`frame_stats.rs`).
+    let mut last_frame: Option<(std::time::Instant, bool)> = None;
     state.backend = Some(Backend::Winit(Box::new(backend)));
 
     event_loop
@@ -105,7 +108,18 @@ pub fn init_winit(
                 WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => {
                     full_redraw = full_redraw.saturating_sub(1);
-                    redraw(state, &output, &mut damage_tracker, full_redraw > 0);
+                    let started = std::time::Instant::now();
+                    if redraw(state, &output, &mut damage_tracker, full_redraw > 0) {
+                        if let Some((last, true)) = last_frame {
+                            let period = crate::frame_stats::refresh_period(&output);
+                            let missed = crate::frame_stats::missed_in_gap(started - last, period);
+                            state.record_missed(&output, missed);
+                        }
+                        state.record_frame(&output, started.elapsed());
+                        // Only animations: the full redraws after a resize
+                        // go at the host's pace, which may well pause.
+                        last_frame = Some((started, state.animating()));
+                    }
                     // Keep going while buffers need repainting in full, or a
                     // lock still waits for its first locked frame.
                     queue_redraw = full_redraw > 0 || state.lock_pending();
@@ -121,12 +135,13 @@ pub fn init_winit(
     Ok(())
 }
 
+/// Draw the frame; whether one was submitted.
 fn redraw(
     state: &mut Pila,
     output: &Output,
     damage_tracker: &mut OutputDamageTracker,
     full_redraw: bool,
-) {
+) -> bool {
     // A destroyed cursor surface falls back to the default arrow.
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
         state.set_cursor(CursorImageStatus::default_named());
@@ -142,7 +157,7 @@ fn redraw(
 
     let Pila { backend, blur, .. } = state;
     let Some(Backend::Winit(backend)) = backend.as_mut() else {
-        return;
+        return false;
     };
     // Age 0 makes the damage tracker redraw everything. The frame that
     // confirms a session lock must not keep anything of the unlocked screen.
@@ -215,6 +230,7 @@ fn redraw(
     // compare them with presentation feedback.
     frame::send_frames(scene, cursor_surface, output, state.clock.now().into());
     state.post_render(output);
+    submitted
 }
 
 /// Make the window's EGL surface current, so its buffer age can be queried.

@@ -24,6 +24,7 @@ mod ext_workspace;
 mod focus;
 mod foreign_toplevel;
 mod frame;
+mod frame_stats;
 mod gamma_control;
 mod gestures;
 mod grabs;
@@ -82,7 +83,8 @@ Environment (overrides the config file):
   XCURSOR_SIZE   Cursor size on a TTY (default: 24)
   XKB_DEFAULT_LAYOUT, _VARIANT, _OPTIONS
                  Keymap when the config's [keyboard] leaves it empty
-  RUST_LOG       Log filter (default: info)
+  RUST_LOG       Log filter (default: info); pila::frames=debug logs frame
+                 times and missed refreshes per output
 
 The config file is reloaded when it changes (all but autostart).
 
@@ -270,6 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = state.display_handle.flush_clients();
     })?;
 
+    state.report_frames();
     state.stop_xwayland();
     // Leave the monitors as found: no night-light ramps for the next
     // compositor on this seat.

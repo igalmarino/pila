@@ -86,6 +86,10 @@ pub struct Pila {
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, Pila>,
+    /// Wakes the event loop: calloop doesn't for pending idle callbacks, so
+    /// one inserted outside an event source (e.g. from `after_frames`)
+    /// would otherwise wait for the next unrelated event (`queue_redraw`).
+    pub wake: smithay::reexports::calloop::ping::Ping,
     pub config: Config,
 
     /// Xwayland's window manager and display number, once it's running
@@ -143,6 +147,8 @@ pub struct Pila {
     pub switch: Option<Switch>,
     /// Animations in progress (`animation.rs`).
     pub animations: crate::animation::Animations,
+    /// Each output's frame statistics, by name (`frame_stats.rs`).
+    pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
 
@@ -250,6 +256,13 @@ impl Pila {
         let dmabuf_state = DmabufState::new();
         let popups = PopupManager::default();
         let loop_handle = event_loop.handle();
+        // Wakes the event loop (`queue_redraw`); there's nothing to do on
+        // waking but run the idle callbacks that follow every dispatch.
+        let (wake, wake_source) =
+            smithay::reexports::calloop::ping::make_ping().expect("failed to create a ping");
+        loop_handle
+            .insert_source(wake_source, |_, _, _| {})
+            .expect("failed to insert the wake source");
         let globals = protocols::init_globals(&dh, &loop_handle, &primary_selection_state);
         crate::capture::init_globals(&dh);
         crate::screencopy::init_global(&dh);
@@ -289,6 +302,7 @@ impl Pila {
             display_handle: dh,
             loop_signal,
             loop_handle,
+            wake,
             config,
             xwm: None,
             xdisplay: None,
@@ -316,6 +330,7 @@ impl Pila {
             output_overrides: HashMap::new(),
             switch: None,
             animations: Default::default(),
+            frame_stats: HashMap::new(),
             swipe: None,
             xwayland_token: None,
             space: Space::default(),
@@ -1121,6 +1136,9 @@ impl Pila {
         if let Some(backend) = &mut self.backend {
             backend.queue_redraw();
         }
+        // On bare metal the redraw is an idle callback, which calloop only
+        // runs after the next event; waking the loop makes that now.
+        self.wake.ping();
     }
 
     /// Housekeeping after `output` was drawn, for any backend: what
