@@ -29,6 +29,25 @@ use crate::Pila;
 
 const VERSION: u32 = 1;
 
+/// Read a client's ramp from `file` into `bytes`, without ever blocking:
+/// the fd may be a pipe nobody writes to, and pila reads it on the main
+/// thread. Data that isn't there yet means a short ramp; more than `bytes`
+/// holds is a malformed one. A pipe still open for writing after the ramp
+/// is fine.
+fn read_ramp(mut file: File, bytes: &mut [u8]) -> std::io::Result<()> {
+    use smithay::reexports::rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
+    let flags = fcntl_getfl(&file)?;
+    fcntl_setfl(&file, flags | OFlags::NONBLOCK)?;
+    file.read_exact(bytes)?;
+    let mut extra = [0u8; 1];
+    match file.read(&mut extra) {
+        Ok(0) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
+        Ok(_) => Err(std::io::Error::other("ramp too long")),
+        Err(err) => Err(err),
+    }
+}
+
 /// The live control of each output (`Pila::gamma_controls`).
 pub type GammaControls = HashMap<Output, ZwlrGammaControlV1>;
 
@@ -160,15 +179,7 @@ impl Dispatch<ZwlrGammaControlV1, GammaData> for Pila {
         // Three ramps of `size` u16s: red, green, blue.
         let mut ramp = vec![0u16; data.size as usize * 3];
         let mut bytes = vec![0u8; ramp.len() * 2];
-        let mut file = File::from(fd);
-        let read = file.read_exact(&mut bytes).and_then(|()| {
-            // Exactly that much: a longer file is a malformed ramp.
-            let mut extra = [0u8; 1];
-            match file.read(&mut extra)? {
-                0 => Ok(()),
-                _ => Err(std::io::Error::other("ramp too long")),
-            }
-        });
+        let read = read_ramp(File::from(fd), &mut bytes);
         if let Err(err) = read {
             resource.post_error(
                 control::Error::InvalidGamma,
@@ -192,5 +203,45 @@ impl Dispatch<ZwlrGammaControlV1, GammaData> for Pila {
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrGammaControlV1, _: &GammaData) {
         state.drop_gamma_control(resource);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs::File, io::Write, os::fd::OwnedFd};
+
+    use super::read_ramp;
+
+    fn pipe() -> (File, std::io::PipeWriter) {
+        let (reader, writer) = std::io::pipe().unwrap();
+        (File::from(OwnedFd::from(reader)), writer)
+    }
+
+    #[test]
+    fn a_pipe_nobody_writes_to_fails_instead_of_blocking() {
+        let (reader, _writer) = pipe();
+        let mut bytes = [0u8; 6];
+        assert!(read_ramp(reader, &mut bytes).is_err());
+    }
+
+    #[test]
+    fn a_ramp_from_a_pipe_still_open_is_read() {
+        let (reader, mut writer) = pipe();
+        writer.write_all(&[1, 2, 3, 4, 5, 6]).unwrap();
+        let mut bytes = [0u8; 6];
+        read_ramp(reader, &mut bytes).unwrap();
+        assert_eq!(bytes, [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn short_and_long_ramps_fail() {
+        let (reader, mut writer) = pipe();
+        writer.write_all(&[1, 2, 3]).unwrap();
+        drop(writer);
+        assert!(read_ramp(reader, &mut [0u8; 6]).is_err());
+
+        let (reader, mut writer) = pipe();
+        writer.write_all(&[0u8; 7]).unwrap();
+        assert!(read_ramp(reader, &mut [0u8; 6]).is_err());
     }
 }
