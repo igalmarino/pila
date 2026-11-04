@@ -16,13 +16,14 @@ use smithay::{
     desktop::WindowSurfaceType,
     input::pointer::PointerHandle,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
-    utils::{Logical, Point},
+    utils::{Logical, Point, Rectangle},
     wayland::{
         compositor::{get_parent, RegionAttributes},
         pointer_constraints::{
             with_pointer_constraint, PointerConstraint, PointerConstraintsHandler,
         },
         seat::WaylandFocus,
+        shell::wlr_layer::Layer,
     },
 };
 
@@ -154,25 +155,28 @@ impl Pila {
         });
     }
 
-    /// Global origin of a window's or layer surface's main surface.
-    fn surface_origin(&self, surface: &WlSurface) -> Option<Point<f64, Logical>> {
+    /// Global origin of a window's or layer surface's main surface, and
+    /// the part of it that's shown (surface-local: a window's geometry, a
+    /// layer surface's size).
+    fn surface_origin(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<(Point<f64, Logical>, Rectangle<i32, Logical>)> {
         let window = self
             .space
             .elements()
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
         if let Some(window) = window {
-            let loc = self.space.element_location(window)? - window.geometry().loc;
-            return Some(loc.to_f64());
+            let geometry = window.geometry();
+            let loc = self.space.element_location(window)? - geometry.loc;
+            return Some((loc.to_f64(), geometry));
         }
-        self.layer_surfaces(&[
-            smithay::wayland::shell::wlr_layer::Layer::Overlay,
-            smithay::wayland::shell::wlr_layer::Layer::Top,
-            smithay::wayland::shell::wlr_layer::Layer::Bottom,
-            smithay::wayland::shell::wlr_layer::Layer::Background,
-        ])
-        .into_iter()
-        .find(|(layer, _)| layer.wl_surface() == surface)
-        .map(|(_, loc)| loc.to_f64())
+        let (layer, loc) = self
+            .layer_surfaces(&[Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background])
+            .into_iter()
+            .find(|(layer, _)| layer.wl_surface() == surface)?;
+        let size = layer.bbox().size;
+        Some((loc.to_f64(), Rectangle::from_size(size)))
     }
 }
 
@@ -195,11 +199,21 @@ impl PointerConstraintsHandler for Pila {
     ) {
         // A locked client draws its own cursor; keep pila's pointer where the
         // client says it is, so unlocking doesn't jump. (Nested, the next host
-        // motion moves it back to the host pointer anyway.)
+        // motion moves it back to the host pointer anyway.) The hint is kept
+        // on the surface: a client can't send the pointer elsewhere.
         let active =
             with_pointer_constraint(surface, pointer, |c| c.is_some_and(|c| c.is_active()));
-        if let (true, Some(origin)) = (active, self.surface_origin(surface)) {
-            pointer.set_location(origin + location);
+        if let (true, Some((origin, shown))) = (active, self.surface_origin(surface)) {
+            if shown.is_empty() {
+                return;
+            }
+            let min = shown.loc.to_f64();
+            let max = (shown.loc + shown.size.to_point()).to_f64() - Point::from((1.0, 1.0));
+            let clamped = Point::from((
+                location.x.clamp(min.x, max.x),
+                location.y.clamp(min.y, max.y),
+            ));
+            pointer.set_location(origin + clamped);
         }
     }
 }
