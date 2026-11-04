@@ -50,6 +50,7 @@ impl XdgShellHandler for Pila {
                 state.bounds = Some(output_geo.size);
             });
         }
+        crate::animation::watch_unmap(surface.wl_surface());
         // Mapped on its first buffer commit, once we know its size.
         self.unmapped.push(Window::new_wayland_window(surface));
     }
@@ -65,6 +66,7 @@ impl XdgShellHandler for Pila {
             self.remove_foreign_toplevel(&window);
             self.forget_focus_history(&window);
             self.forget_off_space(&window);
+            self.animate_close(&window);
             self.space.unmap_elem(&window);
         }
         if was_focused {

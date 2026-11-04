@@ -195,6 +195,7 @@ impl XwmHandler for Pila {
             self.remove_foreign_toplevel(&window);
             self.forget_focus_history(&window);
             self.forget_off_space(&window);
+            self.animate_close(&window);
             self.space.unmap_elem(&window);
         }
         if !surface.is_override_redirect() {

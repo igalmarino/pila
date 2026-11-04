@@ -37,6 +37,7 @@ impl Pila {
             return false;
         };
         leave_space(window, self.workspaces.active, loc);
+        self.forget_animations(window);
         self.space.unmap_elem(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {

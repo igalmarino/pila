@@ -45,6 +45,19 @@
 # bar's height (28).
 # corner-radius = 10
 
+# Short, subtle animations. `enabled = false` turns them all off; `speed`
+# multiplies every duration (0.25 to 4: 2 is twice as slow). Each one can be
+# turned off or given its own duration in ms (0 to 1000; 0 is off).
+[animations]
+enabled = true
+speed = 1.0
+window-open = { enabled = true, duration = 180 }    # fade and grow in
+window-close = { enabled = true, duration = 150 }   # fade and shrink out
+minimize = { enabled = true, duration = 200 }       # and restoring
+maximize = { enabled = true, duration = 220 }       # also fullscreen and snapping
+layer = { enabled = true, duration = 150 }          # launchers, notifications
+workspace = { enabled = true, duration = 250 }      # slide sideways
+
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
 [keyboard]
 layout = ""             # e.g. "us,es"

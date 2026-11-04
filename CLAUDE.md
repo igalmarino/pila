@@ -232,10 +232,13 @@ Key flows and invariants:
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand** (`Pila::queue_redraw`): after every client dispatch (display
-  source), every winit event, and while a resize needs full frames or a lock awaits its
-  first locked frame. Nothing else redraws, so state changes outside those paths (timers,
-  `insert_idle` callbacks) must call `queue_redraw` themselves. Clients are flushed after
-  every event-loop iteration (`main.rs`), not only on redraw.
+  source), every winit event, while a resize needs full frames or a lock awaits its
+  first locked frame, and while an animation runs. Nothing else redraws, so state changes
+  outside those paths (timers, `insert_idle` callbacks) must call `queue_redraw`
+  themselves. Clients are flushed after every event-loop iteration (`main.rs`), not only
+  on redraw. A redraw requested from `after_frames` (the `event_loop.run` callback) must
+  go through `insert_idle`: nested, the winit source has already checked for redraw
+  requests before the loop sleeps, so a direct request waits for the next unrelated event.
 - **Pointer grabs:** Mod+drag installs the move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
   via `Pila::set_cursor`, which must be called *after* `set_grab` (`Focus::Clear` resets the
@@ -295,6 +298,27 @@ Key flows and invariants:
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`).
+- **Animations** (`animation.rs`, `[animations]` in the config:
+  `config::AnimationsConfig`, all on by default, each with an `enabled`/`duration`, plus
+  a global `enabled` and `speed`): short and subtle. So far a window fades and grows in
+  when mapped (`animate_open` from `place_new_window`; not X11 override-redirect) and
+  fades and shrinks out when it goes (`animate_close`). Values come from `Animation`
+  (from/to over a duration on `Pila::clock`, one time per `scene()`). An animating
+  window's `SceneWindow::effect` makes `render.rs` draw it (bar, popups, corners
+  included) into a per-window, per-scale texture (`OffscreenWindow` in its
+  `WindowTextures` user data) and show that transformed; `frame.rs` paces such a window
+  by `WindowEffect::output`, since it's absent from the output's render states. A closed
+  window is a `Ghost`: a snapshot (`render::snapshot_window`) drawn at its old place in
+  the stacking order (`Scene::ghosts`) while it fades; its live window is skipped
+  meanwhile (`is_ghost`). The snapshot must be taken while the content exists:
+  `watch_unmap` (added in `new_toplevel`) catches the commit that removes the buffer
+  (pre-commit hook; most clients unmap before destroying) and the surface's destruction
+  (a dead client: a destruction hook added before Smithay's, which drops the textures,
+  so only the main surface is drawn, `Surfaces::MainOnly`, the tree being gone); X11
+  windows are taken in `unmapped_window`. Windows leaving the space otherwise (minimize,
+  workspaces) drop their animation (`forget_animations`). `step_animations` (from
+  `after_frames`) prunes finished ones and requests the next frame; locking drops all.
+  Animations are visual only: input sees the real geometry.
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
   window for a subsurface or popup; the focused window when the client names none) gets a
   short `BellFlash` in its user data, which `scene()` turns into a solid element drawn just

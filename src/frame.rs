@@ -15,9 +15,10 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
+    wayland::compositor::SurfaceData,
 };
 
-use crate::render::Scene;
+use crate::render::{Scene, SceneWindow};
 
 /// Surface trees that aren't windows or layer surfaces: lock surfaces and the
 /// client cursor.
@@ -50,7 +51,9 @@ pub fn update_primary_outputs(
             default_primary_scanout_output_compare,
         );
     };
-    for entry in &scene.windows {
+    // An animating window is drawn through a texture, so it isn't in
+    // `states`: it keeps the output it had (`send_frames` paces it).
+    for entry in scene.windows.iter().filter(|e| e.effect.is_none()) {
         entry.window.with_surfaces(update);
     }
     for entry in scene.layers() {
@@ -76,7 +79,7 @@ pub fn presentation_feedback(
     for entry in &scene.windows {
         entry.window.take_presentation_feedback(
             &mut feedback,
-            surface_primary_scanout_output,
+            |surface, data| paced_by(entry, surface, data),
             flags,
         );
     }
@@ -98,6 +101,16 @@ pub fn presentation_feedback(
     feedback
 }
 
+/// The output a window's surface is paced by: its primary output, or while
+/// it animates (drawn through a texture, so absent from the render states),
+/// the output of the animation (`animation::WindowEffect::output`).
+fn paced_by(entry: &SceneWindow, surface: &WlSurface, data: &SurfaceData) -> Option<Output> {
+    match &entry.effect {
+        Some(effect) => effect.output.clone(),
+        None => surface_primary_scanout_output(surface, data),
+    }
+}
+
 /// How often a surface that isn't shown anywhere (covered, or off every
 /// output) still gets a frame callback, so its client isn't stalled forever.
 const HIDDEN_FRAME_THROTTLE: Duration = Duration::from_secs(1);
@@ -112,7 +125,9 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
     for entry in &scene.windows {
         entry
             .window
-            .send_frame(output, time, throttle, surface_primary_scanout_output);
+            .send_frame(output, time, throttle, |surface, data| {
+                paced_by(entry, surface, data)
+            });
     }
     for entry in scene.layers() {
         entry

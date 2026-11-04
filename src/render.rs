@@ -9,7 +9,10 @@
 //! elements while it holds a mutable borrow of its renderer.
 
 use smithay::{
+    backend::allocator::Fourcc,
     backend::renderer::{
+        damage::OutputDamageTracker,
+        element::texture::TextureRenderBuffer,
         element::{
             memory::MemoryRenderBufferRenderElement,
             solid::{SolidColorBuffer, SolidColorRenderElement},
@@ -18,15 +21,17 @@ use smithay::{
             AsRenderElements, Kind,
         },
         gles::{GlesRenderer, GlesTexture},
+        Bind, Offscreen,
     },
     desktop::{LayerSurface, PopupManager, Window},
     input::pointer::CursorIcon,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Physical, Point, Rectangle, Scale},
-    wayland::seat::WaylandFocus,
+    utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    wayland::{compositor::with_states, seat::WaylandFocus},
 };
 
 use crate::{
+    animation::{self, SceneGhost, Snapshot, WindowEffect, WindowTextures},
     blur::BlurCache,
     cursor::{CursorTheme, NamedCursor},
     decoration::{self, TitleBarPart},
@@ -111,6 +116,8 @@ pub struct Scene {
     /// the windows.
     pub snap_preview: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
     pub windows: Vec<SceneWindow>,
+    /// Closed windows fading out, among `windows` (`animation.rs`).
+    pub ghosts: Vec<SceneGhost>,
     /// Layer surfaces below the windows (Bottom, Background; also Top while
     /// a fullscreen window is on top).
     pub lower: Vec<SceneLayer>,
@@ -143,6 +150,35 @@ pub struct SceneWindow {
     pub flash: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
     /// Its rounded corners, if any (`rounded.rs`).
     pub rounding: Option<Rounding>,
+    /// While it animates: drawn through a texture (`animation.rs`).
+    pub effect: Option<WindowEffect>,
+}
+
+impl SceneWindow {
+    /// Everything it draws (surfaces, popups, title bar, flash), in space
+    /// coordinates.
+    fn content_rect(&self) -> Rectangle<i32, Logical> {
+        let mut rect = self.window.bbox_with_popups();
+        rect.loc += self.render_location;
+        if let Some(bar) = &self.title_bar {
+            rect = rect.merge(bar.rect);
+        }
+        if let Some((_, flash)) = &self.flash {
+            rect = rect.merge(*flash);
+        }
+        rect
+    }
+
+    /// Its geometry plus title bar: what animations scale about.
+    fn frame_rect(&self) -> Rectangle<i32, Logical> {
+        let geo = Rectangle::new(
+            self.render_location + self.window.geometry().loc,
+            self.window.geometry().size,
+        );
+        self.title_bar
+            .as_ref()
+            .map_or(geo, |bar| bar.rect.merge(geo))
+    }
 }
 
 pub struct SceneTitleBar {
@@ -227,6 +263,7 @@ fn scene_elements_from(
     elements.extend(window_elements(
         renderer,
         &scene.windows,
+        &scene.ghosts,
         output_location,
         scale,
     ));
@@ -264,6 +301,7 @@ fn layer_elements(
 fn window_elements(
     renderer: &mut GlesRenderer,
     windows: &[SceneWindow],
+    ghosts: &[SceneGhost],
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
@@ -272,59 +310,361 @@ fn window_elements(
         .any(|entry| entry.rounding.is_some())
         .then(|| rounded::Shaders::get(renderer))
         .flatten();
+    let ghosts_before = |i: usize| {
+        ghosts
+            .iter()
+            .filter(move |g| g.before == i || (i == windows.len() && g.before > i))
+            .map(|g| ghost_element(g, output_location, scale))
+    };
     let mut elements = Vec::new();
-    for entry in windows {
-        let rounding = entry.rounding.as_ref().filter(|_| shaders.is_some());
-        if let Some(rounding) = rounding {
-            // In front of everything of this window, so its opaque regions
-            // can't hide the damage.
-            elements.push(PilaRenderElement::ShapeDamage(ShapeDamage::new(
-                &entry.window,
-                rounding,
-                output_location,
-                scale,
-            )));
-        }
-        // In front of this window only (elements go front to back).
-        if let Some((buffer, rect)) = &entry.flash {
-            elements.push(solid_element(
+    for (i, entry) in windows.iter().enumerate() {
+        elements.extend(ghosts_before(i));
+        match &entry.effect {
+            Some(effect) => elements.extend(animated_window_element(
                 renderer,
-                buffer,
-                rect.loc - output_location,
-                rounding.map(|r| r.radius),
-                scale,
-            ));
-        }
-        let location: Point<i32, Physical> =
-            (entry.render_location - output_location).to_physical_precise_round(scale);
-        match (rounding, &shaders) {
-            (Some(rounding), Some(shaders)) => elements.extend(rounded_window_elements(
-                renderer,
-                &entry.window,
-                location,
-                rounding,
-                shaders,
+                entry,
+                effect,
+                shaders.as_ref(),
                 output_location,
                 scale,
             )),
-            _ => elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
-                PilaRenderElement,
-            >(&entry.window, renderer, location, scale, 1.0)),
-        }
-        if let Some(bar) = &entry.title_bar {
-            let rect = Rectangle::new(bar.rect.loc - output_location, bar.rect.size);
-            elements.extend(decoration::title_bar_elements(
+            None => elements.extend(single_window_elements(
                 renderer,
-                &entry.window,
-                rect,
-                bar.focused,
-                bar.hover,
-                rounding.map(|r| r.radius),
+                entry,
+                shaders.as_ref(),
+                Surfaces::Tree,
+                output_location,
                 scale,
-            ));
+            )),
         }
     }
+    elements.extend(ghosts_before(windows.len()));
     elements
+}
+
+/// Where a window's surface elements come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surfaces {
+    /// Its surface tree and popups, as usual.
+    Tree,
+    /// Only its main surface, straight from its renderer state: while the
+    /// surface is being destroyed (its client died) the tree is already
+    /// taken apart, but the textures are still there.
+    MainOnly,
+}
+
+/// One window's elements (front to back): its flash, surfaces and popups,
+/// then its title bar.
+fn single_window_elements(
+    renderer: &mut GlesRenderer,
+    entry: &SceneWindow,
+    shaders: Option<&rounded::Shaders>,
+    surfaces: Surfaces,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let mut elements = Vec::new();
+    let rounding = entry.rounding.as_ref().filter(|_| shaders.is_some());
+    if let Some(rounding) = rounding {
+        // In front of everything of this window, so its opaque regions
+        // can't hide the damage.
+        elements.push(PilaRenderElement::ShapeDamage(ShapeDamage::new(
+            &entry.window,
+            rounding,
+            output_location,
+            scale,
+        )));
+    }
+    // In front of this window only (elements go front to back).
+    if let Some((buffer, rect)) = &entry.flash {
+        elements.push(solid_element(
+            renderer,
+            buffer,
+            rect.loc - output_location,
+            rounding.map(|r| r.radius),
+            scale,
+        ));
+    }
+    let location: Point<i32, Physical> =
+        (entry.render_location - output_location).to_physical_precise_round(scale);
+    match (rounding, shaders) {
+        _ if surfaces == Surfaces::MainOnly => {
+            let main = main_surface_element(renderer, &entry.window, location);
+            match (rounding, shaders) {
+                (Some(rounding), Some(shaders)) => elements.extend(
+                    rounded::clip_surfaces(main, shaders, rounding, output_location, scale)
+                        .map(PilaRenderElement::from),
+                ),
+                _ => elements.extend(main.into_iter().map(PilaRenderElement::Surface)),
+            }
+        }
+        (Some(rounding), Some(shaders)) => elements.extend(rounded_window_elements(
+            renderer,
+            &entry.window,
+            location,
+            rounding,
+            shaders,
+            output_location,
+            scale,
+        )),
+        _ => elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
+            PilaRenderElement,
+        >(&entry.window, renderer, location, scale, 1.0)),
+    }
+    if let Some(bar) = &entry.title_bar {
+        let rect = Rectangle::new(bar.rect.loc - output_location, bar.rect.size);
+        elements.extend(decoration::title_bar_elements(
+            renderer,
+            &entry.window,
+            rect,
+            bar.focused,
+            bar.hover,
+            rounding.map(|r| r.radius),
+            scale,
+        ));
+    }
+    elements
+}
+
+/// `window`'s main surface at `location`, from its renderer state alone
+/// (`Surfaces::MainOnly`).
+fn main_surface_element(
+    renderer: &mut GlesRenderer,
+    window: &Window,
+    location: Point<i32, Physical>,
+) -> Vec<WaylandSurfaceRenderElement<GlesRenderer>> {
+    let Some(surface) = window.wl_surface() else {
+        return Vec::new();
+    };
+    with_states(&surface, |states| {
+        WaylandSurfaceRenderElement::from_surface(
+            renderer,
+            &surface,
+            states,
+            location.to_f64(),
+            1.0,
+            Kind::Unspecified,
+        )
+    })
+    .ok()
+    .flatten()
+    .into_iter()
+    .collect()
+}
+
+/// A window drawn into a texture, so an animation can fade and scale it as
+/// a whole (`animation.rs`). Kept per window and scale while it animates.
+pub struct OffscreenWindow {
+    scale: Scale<f64>,
+    size: Size<i32, Physical>,
+    texture: GlesTexture,
+    buffer: TextureRenderBuffer<GlesTexture>,
+    tracker: OutputDamageTracker,
+    drawn: bool,
+}
+
+impl OffscreenWindow {
+    fn new(
+        renderer: &mut GlesRenderer,
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Option<Self> {
+        let buffer_size: Size<i32, Buffer> = (size.w, size.h).into();
+        let texture: GlesTexture =
+            Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, buffer_size)
+                .map_err(|err| tracing::debug!(?err, "animation: no offscreen texture"))
+                .ok()?;
+        let buffer = TextureRenderBuffer::from_texture(
+            renderer,
+            texture.clone(),
+            1,
+            Transform::Normal,
+            None,
+        );
+        Some(Self {
+            scale,
+            size,
+            texture,
+            buffer,
+            tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
+            drawn: false,
+        })
+    }
+
+    /// Draw `elements` (relative to the texture's top-left) into it.
+    fn draw(&mut self, renderer: &mut GlesRenderer, elements: &[PilaRenderElement]) -> bool {
+        let age = usize::from(self.drawn);
+        let damage = {
+            let mut texture = self.texture.clone();
+            let Ok(mut target) = renderer.bind(&mut texture) else {
+                return false;
+            };
+            match self
+                .tracker
+                .render_output(renderer, &mut target, age, elements, [0.0; 4])
+            {
+                Ok(result) => result.damage.cloned().unwrap_or_default(),
+                Err(err) => {
+                    tracing::debug!(?err, "animation: offscreen render failed");
+                    return false;
+                }
+            }
+        };
+        self.drawn = true;
+        if !damage.is_empty() {
+            let damage: Vec<Rectangle<i32, Buffer>> = damage
+                .iter()
+                .map(|r| Rectangle::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into()))
+                .collect();
+            let _ = self.buffer.render().draw(|_| Ok::<_, ()>(damage));
+        }
+        true
+    }
+}
+
+/// `entry` drawn into a texture at `scale`, relative to `rect`'s top-left.
+fn draw_window_offscreen(
+    renderer: &mut GlesRenderer,
+    target: &mut OffscreenWindow,
+    entry: &SceneWindow,
+    rect: Rectangle<i32, Logical>,
+    shaders: Option<&rounded::Shaders>,
+    surfaces: Surfaces,
+) -> bool {
+    let elements =
+        single_window_elements(renderer, entry, shaders, surfaces, rect.loc, target.scale);
+    !elements.is_empty() && target.draw(renderer, &elements)
+}
+
+/// The physical size of a texture holding `rect` at `scale`.
+fn texture_size(rect: Rectangle<i32, Logical>, scale: Scale<f64>) -> Size<i32, Physical> {
+    let size: Size<i32, Physical> = rect.size.to_f64().to_physical(scale).to_i32_ceil();
+    (size.w.max(1), size.h.max(1)).into()
+}
+
+/// A texture of `snapshot`-like content drawn at `dst` (space coordinates).
+fn texture_element(
+    buffer: &TextureRenderBuffer<GlesTexture>,
+    dst: Rectangle<f64, Logical>,
+    alpha: f32,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> PilaRenderElement {
+    let location = (dst.loc - output_location.to_f64()).to_physical(scale);
+    let size: Size<i32, Logical> = dst.size.to_i32_round();
+    PilaRenderElement::Texture(TextureRenderElement::from_texture_render_buffer(
+        location,
+        buffer,
+        Some(alpha),
+        None,
+        Some((size.w.max(1), size.h.max(1)).into()),
+        Kind::Unspecified,
+    ))
+}
+
+/// An animating window: drawn into its texture for this scale, then shown
+/// transformed. Falls back to its plain elements if that fails.
+fn animated_window_element(
+    renderer: &mut GlesRenderer,
+    entry: &SceneWindow,
+    effect: &WindowEffect,
+    shaders: Option<&rounded::Shaders>,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let rect = entry.content_rect();
+    let size = texture_size(rect, scale);
+    entry
+        .window
+        .user_data()
+        .insert_if_missing(WindowTextures::default);
+    let textures = entry.window.user_data().get::<WindowTextures>();
+    let drawn = textures.and_then(|textures| {
+        let mut textures = textures.0.borrow_mut();
+        textures.retain(|t| t.scale != scale || t.size == size);
+        let index = match textures.iter().position(|t| t.scale == scale) {
+            Some(index) => index,
+            None => {
+                textures.push(OffscreenWindow::new(renderer, size, scale)?);
+                textures.len() - 1
+            }
+        };
+        let target = &mut textures[index];
+        draw_window_offscreen(renderer, target, entry, rect, shaders, Surfaces::Tree)
+            .then(|| target.buffer.clone())
+    });
+    match drawn {
+        Some(buffer) => {
+            let dst = effect.transform.apply(rect.to_f64(), effect.center);
+            vec![texture_element(
+                &buffer,
+                dst,
+                effect.transform.alpha,
+                output_location,
+                scale,
+            )]
+        }
+        None => single_window_elements(
+            renderer,
+            entry,
+            shaders,
+            Surfaces::Tree,
+            output_location,
+            scale,
+        ),
+    }
+}
+
+/// `entry` as it looks now, drawn into a texture at `scale` (for a window
+/// about to go). `None` if it has nothing to draw.
+pub fn snapshot_window(
+    renderer: &mut GlesRenderer,
+    entry: &SceneWindow,
+    surfaces: Surfaces,
+    scale: Scale<f64>,
+) -> Option<Snapshot> {
+    let rect = entry.content_rect();
+    let shaders = entry
+        .rounding
+        .is_some()
+        .then(|| rounded::Shaders::get(renderer))
+        .flatten();
+    // A window whose client already took its buffer away has nothing left.
+    if entry.window.geometry().is_empty() {
+        return None;
+    }
+    let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
+    draw_window_offscreen(
+        renderer,
+        &mut target,
+        entry,
+        rect,
+        shaders.as_ref(),
+        surfaces,
+    )
+    .then(|| Snapshot {
+        buffer: target.buffer,
+        rect,
+        center: animation::center(entry.frame_rect()),
+    })
+}
+
+fn ghost_element(
+    ghost: &SceneGhost,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> PilaRenderElement {
+    let snapshot = &ghost.snapshot;
+    let dst = ghost
+        .transform
+        .apply(snapshot.rect.to_f64(), snapshot.center);
+    texture_element(
+        &snapshot.buffer,
+        dst,
+        ghost.transform.alpha,
+        output_location,
+        scale,
+    )
 }
 
 /// A window's elements, as `Window::render_elements` makes them (popups in

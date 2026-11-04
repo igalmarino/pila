@@ -442,6 +442,152 @@ impl PointerConfig {
     }
 }
 
+/// The animations pila can play (`animation.rs`), each with its own
+/// `[animations]` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationKind {
+    /// A window appears.
+    WindowOpen,
+    /// A window closes.
+    WindowClose,
+    /// A window is minimized or restored.
+    Minimize,
+    /// A window is maximized, made fullscreen or snapped, or back.
+    Maximize,
+    /// A launcher or notification (layer surface) appears or goes.
+    Layer,
+    /// The workspace changes.
+    Workspace,
+}
+
+impl AnimationKind {
+    const ALL: [AnimationKind; 6] = [
+        AnimationKind::WindowOpen,
+        AnimationKind::WindowClose,
+        AnimationKind::Minimize,
+        AnimationKind::Maximize,
+        AnimationKind::Layer,
+        AnimationKind::Workspace,
+    ];
+
+    /// Its key in `[animations]`.
+    fn key(self) -> &'static str {
+        match self {
+            AnimationKind::WindowOpen => "window-open",
+            AnimationKind::WindowClose => "window-close",
+            AnimationKind::Minimize => "minimize",
+            AnimationKind::Maximize => "maximize",
+            AnimationKind::Layer => "layer",
+            AnimationKind::Workspace => "workspace",
+        }
+    }
+
+    /// Its duration in milliseconds unless configured.
+    fn default_duration(self) -> u32 {
+        match self {
+            AnimationKind::WindowOpen => 180,
+            AnimationKind::WindowClose => 150,
+            AnimationKind::Minimize => 200,
+            AnimationKind::Maximize => 220,
+            AnimationKind::Layer => 150,
+            AnimationKind::Workspace => 250,
+        }
+    }
+}
+
+/// The longest an animation may be configured to last, in milliseconds.
+pub const MAX_ANIMATION_MS: u32 = 1000;
+/// The range of `[animations] speed`.
+const ANIMATION_SPEEDS: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
+/// `[animations]`, validated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationsConfig {
+    /// Each kind's duration in milliseconds (`AnimationKind::ALL` order);
+    /// 0 when it's off.
+    durations: [u32; 6],
+    /// Multiplies every duration (2: twice as slow).
+    speed: f64,
+}
+
+impl Default for AnimationsConfig {
+    fn default() -> Self {
+        Self {
+            durations: AnimationKind::ALL.map(AnimationKind::default_duration),
+            speed: 1.0,
+        }
+    }
+}
+
+impl AnimationsConfig {
+    /// How long `kind` lasts, or `None` if it's off.
+    pub fn duration(&self, kind: AnimationKind) -> Option<std::time::Duration> {
+        let index = AnimationKind::ALL.iter().position(|k| *k == kind)?;
+        let ms = f64::from(self.durations[index]) * self.speed;
+        (ms >= 1.0).then(|| std::time::Duration::from_secs_f64(ms / 1000.0))
+    }
+}
+
+/// One animation's entry in `[animations]`, as written.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct AnimationFile {
+    enabled: Option<bool>,
+    /// Milliseconds.
+    duration: Option<u32>,
+}
+
+/// `[animations]` as written.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct AnimationsFile {
+    enabled: Option<bool>,
+    speed: Option<f64>,
+    window_open: AnimationFile,
+    window_close: AnimationFile,
+    minimize: AnimationFile,
+    maximize: AnimationFile,
+    layer: AnimationFile,
+    workspace: AnimationFile,
+}
+
+impl AnimationsFile {
+    fn validate(self) -> Result<AnimationsConfig, String> {
+        let speed = self.speed.unwrap_or(1.0);
+        if !ANIMATION_SPEEDS.contains(&speed) {
+            return Err(format!(
+                "[animations] speed {speed} is outside {}..{}",
+                ANIMATION_SPEEDS.start(),
+                ANIMATION_SPEEDS.end()
+            ));
+        }
+        let all_on = self.enabled.unwrap_or(true);
+        let entries = [
+            self.window_open,
+            self.window_close,
+            self.minimize,
+            self.maximize,
+            self.layer,
+            self.workspace,
+        ];
+        let mut durations = [0; 6];
+        for ((kind, entry), duration) in AnimationKind::ALL.iter().zip(entries).zip(&mut durations)
+        {
+            let ms = entry.duration.unwrap_or(kind.default_duration());
+            if ms > MAX_ANIMATION_MS {
+                return Err(format!(
+                    "[animations] {}: duration {ms} is over {MAX_ANIMATION_MS} ms",
+                    kind.key()
+                ));
+            }
+            if all_on && entry.enabled.unwrap_or(true) {
+                *duration = ms;
+            }
+        }
+        Ok(AnimationsConfig { durations, speed })
+    }
+}
+
 /// `[input]`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -662,6 +808,7 @@ struct ConfigFile {
     workspaces: Option<usize>,
     disable_internal_display: Option<String>,
     corner_radius: Option<u32>,
+    animations: AnimationsFile,
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -695,6 +842,8 @@ pub struct Config {
     pub internal_display: InternalDisplay,
     /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
     pub corner_radius: u32,
+    /// Which animations play and how long they last (`animation.rs`).
+    pub animations: AnimationsConfig,
 }
 
 /// `disable-internal-display`: whether a laptop's built-in screen (eDP,
@@ -837,6 +986,8 @@ impl Config {
             }
         };
 
+        let animations = file.animations.validate()?;
+
         // Defaults first, then the user's: a user binding replaces a default
         // one for the same combo, and "none" removes it. Mod+N and
         // Mod+Shift+N only exist for the workspaces there are (up to 9), so
@@ -917,6 +1068,7 @@ impl Config {
             workspaces,
             internal_display,
             corner_radius,
+            animations,
         })
     }
 
@@ -1264,6 +1416,48 @@ mod tests {
         assert_eq!(config.corner_radius, 12);
         assert!(Config::from_toml("corner-radius = 65", &no_env).is_err());
         assert!(Config::from_toml("corner-radius = -1", &no_env).is_err());
+    }
+
+    #[test]
+    fn animations_are_on_by_default_and_configurable() {
+        use std::time::Duration;
+        use AnimationKind::*;
+        let config = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(
+            config.animations.duration(WindowOpen),
+            Some(Duration::from_millis(180))
+        );
+        assert_eq!(
+            config.animations.duration(Workspace),
+            Some(Duration::from_millis(250))
+        );
+
+        let config = Config::from_toml(
+            "[animations]\nspeed = 2\nminimize = { enabled = false }\n\
+             layer = { duration = 100 }\nmaximize = { duration = 0 }",
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(config.animations.duration(Minimize), None);
+        assert_eq!(config.animations.duration(Maximize), None);
+        assert_eq!(
+            config.animations.duration(Layer),
+            Some(Duration::from_millis(200))
+        );
+        assert_eq!(
+            config.animations.duration(WindowClose),
+            Some(Duration::from_millis(300))
+        );
+
+        let off = Config::from_toml("[animations]\nenabled = false", &no_env).unwrap();
+        assert!(AnimationKind::ALL
+            .iter()
+            .all(|kind| off.animations.duration(*kind).is_none()));
+
+        let err = |text| Config::from_toml(text, &no_env).unwrap_err();
+        assert!(err("[animations]\nspeed = 0").contains("outside"));
+        assert!(err("[animations]\nlayer = { duration = 5000 }").contains("over"));
+        assert!(err("[animations]\nfade = { duration = 1 }").contains("unknown field"));
     }
 
     #[test]

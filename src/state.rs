@@ -62,9 +62,10 @@ use smithay::{
 use tracing::{debug, info, warn};
 
 use crate::{
+    animation::SceneGhost,
     backend::Backend,
     config::{Action, Config},
-    decoration::{self, Decoration},
+    decoration::{self, Decoration, TitleBarPart},
     focus::KeyboardFocus,
     grabs::{resize_grab::ResizeEdge, MoveSurfaceGrab, ResizeSurfaceGrab},
     handlers::protocols::{self, Globals},
@@ -140,6 +141,8 @@ pub struct Pila {
     pub output_management: crate::output_management::OutputManagement,
     pub output_overrides: HashMap<String, crate::config::OutputConfig>,
     pub switch: Option<Switch>,
+    /// Animations in progress (`animation.rs`).
+    pub animations: crate::animation::Animations,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
 
@@ -312,6 +315,7 @@ impl Pila {
             blur: Default::default(),
             output_overrides: HashMap::new(),
             switch: None,
+            animations: Default::default(),
             swipe: None,
             xwayland_token: None,
             space: Space::default(),
@@ -482,6 +486,7 @@ impl Pila {
             };
         }
         let (upper, lower) = self.layer_order();
+        let (windows, ghosts) = self.scene_windows(self.animation_time());
         let layers = |layers| {
             self.layer_surfaces(layers)
                 .into_iter()
@@ -497,14 +502,15 @@ impl Pila {
             snap_preview: self
                 .snap_preview
                 .map(|rect| (self.snap_preview_buffer.clone(), rect)),
-            windows: self.scene_windows(),
+            windows,
+            ghosts,
             lower: layers(lower),
             corner_radius: self.config.corner_radius,
             ..Default::default()
         }
     }
 
-    fn scene_windows(&self) -> Vec<SceneWindow> {
+    fn scene_windows(&self, now: std::time::Duration) -> (Vec<SceneWindow>, Vec<SceneGhost>) {
         let focused = self.focused_window();
         let pointer = self
             .seat
@@ -517,36 +523,56 @@ impl Pila {
             }
             _ => None,
         };
-        self.space
+        // A window fading out as a ghost isn't drawn itself.
+        let windows: Vec<Window> = self
+            .space
             .elements()
             .rev()
+            .filter(|w| !self.is_ghost(w))
+            .cloned()
+            .collect();
+        let ghosts = self.scene_ghosts(&windows, now);
+        let windows = windows
+            .iter()
             .filter_map(|window| {
-                let loc = self.space.element_location(window)?;
-                let bar_rect = decoration::title_bar_rect(window, loc);
-                let (maximized, fullscreen) = fill_state(window);
-                let rounding = crate::rounded::Rounding::new(
-                    Rectangle::new(loc, window.geometry().size),
-                    bar_rect,
-                    self.config.corner_radius,
-                    maximized || fullscreen,
-                );
-                let title_bar = bar_rect.map(|rect| SceneTitleBar {
-                    rect,
-                    focused: focused.as_ref() == Some(window),
-                    hover: hovered
-                        .as_ref()
-                        .filter(|(w, _)| w == window)
-                        .map(|(_, part)| *part),
-                });
-                Some(SceneWindow {
-                    window: window.clone(),
-                    render_location: loc - window.geometry().loc,
-                    title_bar,
-                    flash: crate::bell::flash(window, loc),
-                    rounding,
-                })
+                self.scene_window(window, focused.as_ref(), hovered.as_ref(), Some(now))
             })
-            .collect()
+            .collect();
+        (windows, ghosts)
+    }
+
+    /// How a mapped `window` is drawn: its title bar (`focused` and
+    /// `hovered` decide its look), flash, corners and, given the time,
+    /// its animation.
+    pub(crate) fn scene_window(
+        &self,
+        window: &Window,
+        focused: Option<&Window>,
+        hovered: Option<&(Window, TitleBarPart)>,
+        now: Option<std::time::Duration>,
+    ) -> Option<SceneWindow> {
+        let loc = self.space.element_location(window)?;
+        let bar_rect = decoration::title_bar_rect(window, loc);
+        let (maximized, fullscreen) = fill_state(window);
+        let rounding = crate::rounded::Rounding::new(
+            Rectangle::new(loc, window.geometry().size),
+            bar_rect,
+            self.config.corner_radius,
+            maximized || fullscreen,
+        );
+        let title_bar = bar_rect.map(|rect| SceneTitleBar {
+            rect,
+            focused: focused == Some(window),
+            hover: hovered.filter(|(w, _)| w == window).map(|(_, part)| *part),
+        });
+        Some(SceneWindow {
+            window: window.clone(),
+            render_location: loc - window.geometry().loc,
+            title_bar,
+            flash: crate::bell::flash(window, loc),
+            rounding,
+            effect: now.and_then(|now| self.window_effect(window, now)),
+        })
     }
 
     /// Find a window (mapped or not) by its toplevel surface.
@@ -795,6 +821,7 @@ impl Pila {
 
         debug!(?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
         self.space.map_element(window.clone(), location, true);
+        self.animate_open(&window);
         self.announce_toplevel(&window);
         self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());
     }
@@ -1121,6 +1148,7 @@ impl Pila {
         self.refresh_toplevels();
         self.update_idle_inhibit();
         self.popups.cleanup();
+        self.step_animations();
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

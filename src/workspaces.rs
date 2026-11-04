@@ -80,7 +80,7 @@ pub fn deactivate(window: &Window) {
 }
 
 /// Whether `window` is an X11 menu or tooltip (on no workspace).
-fn is_override_redirect(window: &Window) -> bool {
+pub(crate) fn is_override_redirect(window: &Window) -> bool {
     window
         .x11_surface()
         .is_some_and(|x11| x11.is_override_redirect())
@@ -206,6 +206,7 @@ impl Pila {
             return;
         };
         leave_space(window, index, loc);
+        self.forget_animations(window);
         self.space.unmap_elem(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
