@@ -49,7 +49,7 @@ impl Pila {
             .parent()
             .filter(|dir| !dir.as_os_str().is_empty())
             .unwrap_or(std::path::Path::new("."));
-        let file = file.to_owned();
+        let mut names = vec![file.to_owned()];
         let fd = match inotify::init(inotify::CreateFlags::CLOEXEC | inotify::CreateFlags::NONBLOCK)
         {
             Ok(fd) => fd,
@@ -66,9 +66,28 @@ impl Pila {
             info!(dir = %dir.display(), ?err, "not watching the config (no such directory?)");
             return;
         }
+        // A symlinked config (dotfiles managers) is edited where it points
+        // to: watch that file's directory too.
+        if path.is_symlink() {
+            let target = std::fs::canonicalize(&path).ok();
+            let parts = target
+                .as_deref()
+                .and_then(|t| Some((t.parent()?, t.file_name()?)));
+            match parts {
+                Some((target_dir, target_file)) => {
+                    match inotify::add_watch(&fd, target_dir, flags) {
+                        Ok(_) => names.push(target_file.to_owned()),
+                        Err(err) => {
+                            info!(dir = %target_dir.display(), ?err, "not watching the config's target")
+                        }
+                    }
+                }
+                None => info!(path = %path.display(), "the config is a broken symlink"),
+            }
+        }
         let source = Generic::new(fd, Interest::READ, Mode::Level);
         let inserted = self.loop_handle.insert_source(source, move |_, fd, state| {
-            if changed(fd, &file) {
+            if changed(fd, &names) {
                 state.schedule_config_reload();
             }
             Ok(PostAction::Continue)
@@ -207,8 +226,8 @@ impl Pila {
     }
 }
 
-/// Whether the inotify events waiting on `fd` touch the file `name`.
-fn changed(fd: &impl std::os::fd::AsFd, name: &OsString) -> bool {
+/// Whether the inotify events waiting on `fd` touch one of the files `names`.
+fn changed(fd: &impl std::os::fd::AsFd, names: &[OsString]) -> bool {
     let mut buf = [MaybeUninit::<u8>::uninit(); 4096];
     let mut reader = inotify::Reader::new(fd, &mut buf);
     let mut changed = false;
@@ -217,7 +236,7 @@ fn changed(fd: &impl std::os::fd::AsFd, name: &OsString) -> bool {
             Ok(event) => {
                 let ours = event
                     .file_name()
-                    .is_some_and(|n| n.to_bytes() == name.as_bytes());
+                    .is_some_and(|n| names.iter().any(|name| n.to_bytes() == name.as_bytes()));
                 changed |= ours;
             }
             Err(Errno::WOULDBLOCK | Errno::INTR) => break,
