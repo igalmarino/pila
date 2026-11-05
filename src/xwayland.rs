@@ -41,10 +41,37 @@ use tracing::{debug, info, warn};
 
 use crate::{focus::KeyboardFocus, state::fill_state, Pila};
 
+/// Where X servers put their sockets. Usually created at boot (tmpfiles)
+/// or by the first X server; a minimal system or a container may lack it,
+/// and then Xwayland can't start. Created like X does: world-writable with
+/// the sticky bit.
+const X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
+
+fn ensure_x11_socket_dir() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::path::Path::new(X11_SOCKET_DIR);
+    if dir.exists() {
+        return;
+    }
+    let created = std::fs::create_dir(dir)
+        .and_then(|()| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o1777)));
+    match created {
+        Ok(()) => info!(dir = X11_SOCKET_DIR, "created the X11 socket directory"),
+        // Another X server may have just made it.
+        Err(_) if dir.exists() => {}
+        Err(err) => warn!(
+            ?err,
+            dir = X11_SOCKET_DIR,
+            "can't create the X11 socket directory"
+        ),
+    }
+}
+
 impl Pila {
     /// Start Xwayland; the `startup` commands run once X is ready (or failed
     /// to start).
     pub fn start_xwayland(&mut self, startup: Vec<String>) {
+        ensure_x11_socket_dir();
         let spawned = XWayland::spawn(
             &self.display_handle,
             None,
