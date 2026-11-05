@@ -183,7 +183,7 @@ macro_rules! logged {
                     _: &Connection,
                     _: &QueueHandle<Self>,
                 ) {
-                    log(state, tag, proxy.id().protocol_id(), format!("{event:?}"));
+                    log(state, tag, proxy.id(), format!("{event:?}"));
                 }
             }
         )*
@@ -201,17 +201,18 @@ macro_rules! logged_with_children {
                 _: &Connection,
                 _: &QueueHandle<Self>,
             ) {
-                log(state, tag, proxy.id().protocol_id(), format!("{event:?}"));
+                log(state, tag, proxy.id(), format!("{event:?}"));
             }
             event_created_child!(Handler, $iface, [$($opcode => ($child, String::from($tag))),*]);
         }
     };
 }
 
-fn log(state: &mut Handler, tag: &str, id: u32, event: String) {
+fn log(state: &mut Handler, tag: &str, object: wayland_client::backend::ObjectId, event: String) {
     state.lock().log.push(Logged {
         tag: tag.to_string(),
-        id,
+        id: object.protocol_id(),
+        object,
         event,
     });
 }
@@ -303,7 +304,7 @@ impl Dispatch<WlDataDevice, String> for Handler {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        log(state, tag, proxy.id().protocol_id(), format!("{event:?}"));
+        log(state, tag, proxy.id(), format!("{event:?}"));
         if let wl_data_device::Event::Selection { id } = event {
             state.lock().data_offer = id;
         }
@@ -322,7 +323,7 @@ impl Dispatch<ZwpPrimarySelectionDeviceV1, String> for Handler {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        log(state, tag, proxy.id().protocol_id(), format!("{event:?}"));
+        log(state, tag, proxy.id(), format!("{event:?}"));
         if let zwp_primary_selection_device_v1::Event::Selection { id } = event {
             state.lock().primary_offer = id;
         }
@@ -342,7 +343,7 @@ impl Dispatch<ExtDataControlDeviceV1, String> for Handler {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        log(state, tag, proxy.id().protocol_id(), format!("{event:?}"));
+        log(state, tag, proxy.id(), format!("{event:?}"));
         match event {
             ext_data_control_device_v1::Event::Selection { id } => {
                 state.lock().control_offer = id;
@@ -403,12 +404,7 @@ macro_rules! source {
                 _: &Connection,
                 _: &QueueHandle<Self>,
             ) {
-                log(
-                    state,
-                    &data.tag,
-                    proxy.id().protocol_id(),
-                    format!("{event:?}"),
-                );
+                log(state, &data.tag, proxy.id(), format!("{event:?}"));
                 if let $module::Event::Send { fd, .. } = event {
                     send_text(fd, &data.text);
                 }
@@ -506,6 +502,7 @@ impl Dispatch<XdgPopup, PopupRef> for Handler {
         s.log.push(Logged {
             tag: format!("popup:{}", s.surfaces[index.0].name),
             id: proxy.id().protocol_id(),
+            object: proxy.id(),
             event: format!("{event:?}"),
         });
         let surface = &mut s.surfaces[index.0];
@@ -658,6 +655,66 @@ impl Client {
 
     pub fn has_logged(&self, tag: &str, text: &str) -> bool {
         self.lock().has_logged(tag, text)
+    }
+
+    /// The objects with `tag` that got an event containing `text`, in the
+    /// order of their first such event.
+    pub fn objects<I: Proxy>(&self, tag: &str, text: &str) -> Vec<I> {
+        let mut ids: Vec<wayland_client::backend::ObjectId> = Vec::new();
+        for l in self.lock().log.iter() {
+            if l.tag == tag && l.event.contains(text) && !ids.contains(&l.object) {
+                ids.push(l.object.clone());
+            }
+        }
+        ids.into_iter()
+            .filter_map(|id| I::from_id(&self.conn, id).ok())
+            .collect()
+    }
+
+    /// The one object with `tag` that got an event containing `text`.
+    #[track_caller]
+    pub fn object<I: Proxy>(&self, tag: &str, text: &str) -> I {
+        let mut found = self.objects::<I>(tag, text);
+        assert_eq!(
+            found.len(),
+            1,
+            "objects {tag} with {text:?}: {:?}",
+            self.logged(tag)
+        );
+        found.remove(0)
+    }
+
+    /// The events of one object, in order.
+    pub fn events_of(&self, object: &impl Proxy) -> Vec<String> {
+        let id = object.id();
+        self.lock()
+            .log
+            .iter()
+            .filter(|l| l.object == id)
+            .map(|l| l.event.clone())
+            .collect()
+    }
+
+    /// An shm buffer of `size` (XRGB8888 unless `format` says otherwise)
+    /// whose pixels can be read back (`read_pixels`): for captures.
+    pub fn capture_buffer(
+        &self,
+        size: (i32, i32),
+        format: wayland_client::protocol::wl_shm::Format,
+    ) -> (wayland_client::protocol::wl_buffer::WlBuffer, std::fs::File) {
+        let (w, h) = size;
+        let len = (w * h * 4) as usize;
+        // SAFETY: a new fd, owned by the File.
+        let fd = unsafe { libc::memfd_create(c"capture".as_ptr(), libc::MFD_CLOEXEC) };
+        assert!(fd >= 0);
+        let file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.set_len(len as u64).unwrap();
+        let shm = self.lock().shm.clone().expect("wl_shm");
+        let pool = shm.create_pool(file.as_fd(), len as i32, &self.qh, ());
+        let buffer = pool.create_buffer(0, w, h, w * 4, format, &self.qh, ());
+        pool.destroy();
+        self.flush();
+        (buffer, file)
     }
 
     /// The `wl_output` named `name`.
@@ -887,4 +944,14 @@ impl Client {
         self.flush();
         (surf, subsurface)
     }
+}
+
+/// The pixel at (x, y) of a capture buffer `width` wide, as [r, g, b] (the
+/// buffer is XRGB/ARGB8888: B, G, R, A in memory).
+pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
+    use std::os::unix::fs::FileExt;
+    let mut px = [0u8; 4];
+    file.read_exact_at(&mut px, ((y * width + x) * 4) as u64)
+        .unwrap();
+    [px[2], px[1], px[0]]
 }

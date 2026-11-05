@@ -208,6 +208,7 @@ pub struct Shared {
 pub struct Logged {
     pub tag: String,
     pub id: u32,
+    pub object: wayland_client::backend::ObjectId,
     pub event: String,
 }
 
@@ -492,7 +493,9 @@ impl Client {
         self.wait("a roundtrip", |s| s.syncs_done.contains(&id));
     }
 
-    /// Wait until `cond` holds for the client's state.
+    /// Wait until `cond` holds for the client's state. `cond` runs with the
+    /// client's lock held: it must read the `Shared` it's given, never call
+    /// the client's methods (that deadlocks).
     #[track_caller]
     pub fn wait(&self, what: &str, cond: impl Fn(&Shared) -> bool) {
         let started = Instant::now();
