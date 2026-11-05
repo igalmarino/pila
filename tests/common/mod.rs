@@ -338,6 +338,23 @@ impl TestPila {
         [px[0], px[1], px[2], px[3]]
     }
 
+    /// Wait until the pixel at (x, y) is `color` (for content a client
+    /// draws on its own schedule, e.g. through Xwayland).
+    #[track_caller]
+    pub fn wait_pixel(&mut self, x: f64, y: f64, color: [u8; 4]) {
+        let started = Instant::now();
+        loop {
+            let px = self.pixel(x, y);
+            if px == color {
+                return;
+            }
+            if started.elapsed() > TIMEOUT {
+                panic!("the pixel at {x},{y} is {px:?}, not {color:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Replace the config file (pila reloads it).
     pub fn write_config(&mut self, config: &str) {
         // Atomically, as editors do: the reload never sees half a file.

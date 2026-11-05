@@ -58,3 +58,5 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
+# X11 test clients (`tests/x11.rs`), through pila's Xwayland.
+x11rb = "0.13"
