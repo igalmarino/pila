@@ -269,6 +269,7 @@ fn check_grab(
 impl Pila {
     /// Called on every `wl_surface.commit`.
     pub fn handle_xdg_commit(&mut self, surface: &WlSurface) {
+        self.unmap_if_buffer_removed(surface);
         if let Some(index) = self
             .unmapped
             .iter()
@@ -295,6 +296,46 @@ impl Pila {
                 xdg.send_configure().expect("initial configure failed");
             }
         }
+    }
+
+    /// A client unmaps a toplevel by committing a null buffer: it leaves
+    /// the screen (and Mod+Tab, taskbars) and maps again like a new window,
+    /// after a new initial commit (Smithay resets the initial configure).
+    /// A new `Window` waits in `unmapped`, so nothing of the old mapping
+    /// (taskbar handle, rules, restore geometry) carries over; the old one's
+    /// close animation, started by `watch_unmap`, fades out on its own.
+    fn unmap_if_buffer_removed(&mut self, surface: &WlSurface) {
+        let waiting = self
+            .unmapped
+            .iter()
+            .any(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
+        if has_buffer(surface) || waiting {
+            return;
+        }
+        let Some(window) = self.window_for_surface(surface) else {
+            return;
+        };
+        let Some(toplevel) = window
+            .toplevel()
+            .filter(|t| t.wl_surface() == surface)
+            .cloned()
+        else {
+            return;
+        };
+        let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
+        debug!(app_id, "window unmapped by its client");
+        let was_focused = self.focused_window().as_ref() == Some(&window);
+        self.remove_foreign_toplevel(&window);
+        self.forget_focus_history(&window);
+        self.forget_in_switch(&window);
+        self.forget_off_space(&window);
+        self.space.unmap_elem(&window);
+        self.unmapped.push(Window::new_wayland_window(toplevel));
+        if was_focused {
+            self.focus_recent_window();
+        }
+        self.refresh_pointer_focus();
+        self.queue_redraw();
     }
 
     fn update_fill(

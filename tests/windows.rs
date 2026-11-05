@@ -203,7 +203,6 @@ fn closing_the_focused_window_focuses_the_one_below() {
 }
 
 #[test]
-#[ignore = "bug: a null-buffer commit leaves the window in the Space (still focused, in Mod+Tab and taskbars)"]
 fn a_window_unmapped_by_its_client_leaves_and_maps_again() {
     let mut pila = TestPila::start();
     let client = pila.client();
@@ -334,5 +333,40 @@ fn title_and_app_id_changes_show_in_the_state() {
     client.flush();
     pila.wait("the new title", |s| {
         window_in(s, "a").unwrap()["title"] == "second"
+    });
+}
+
+#[test]
+fn an_unmapped_window_leaves_taskbars_and_comes_back_as_a_new_one() {
+    use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
+    let mut pila = TestPila::start();
+    let other = pila.client();
+    other.window("other").create();
+    pila.wait_focus("other");
+    let client = pila.client();
+    let a = client.window("a").create();
+    pila.wait_focus("a");
+    let taskbar = pila.client();
+    let _list: ExtForeignToplevelListV1 = taskbar.bind("ext_foreign_toplevel_list_v1", 1);
+    taskbar.wait_logged("ext_toplevel", "AppId { app_id: \"a\" }");
+    client.set_auto_draw(a, false);
+    client.unmap(a);
+    taskbar.wait_logged("ext_toplevel", "Closed");
+    // Focus goes back to the other window, and Mod+Tab has nothing to switch to.
+    pila.wait_focus("other");
+    pila.combo("Super+Tab");
+    pila.stays("still other", std::time::Duration::from_millis(100), |s| {
+        s["focused"] == "other"
+    });
+    client.set_auto_draw(a, true);
+    client.surface(a).commit();
+    client.flush();
+    pila.wait_focus("a");
+    taskbar.wait("a second handle", |s| {
+        s.log
+            .iter()
+            .filter(|l| l.tag == "ext_toplevel" && l.event == "AppId { app_id: \"a\" }")
+            .count()
+            == 2
     });
 }

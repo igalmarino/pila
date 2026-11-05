@@ -146,6 +146,22 @@ impl Pila {
         }
     }
 
+    /// Take a window that went away out of a Mod+Tab in progress.
+    pub fn forget_in_switch(&mut self, window: &Window) {
+        if let Some(switch) = &mut self.switch {
+            let Some(index) = switch.order.iter().position(|w| w == window) else {
+                return;
+            };
+            switch.order.remove(index);
+            if switch.index > index || switch.index >= switch.order.len() {
+                switch.index = switch.index.saturating_sub(1);
+            }
+            if switch.shown_minimized.as_ref() == Some(window) {
+                switch.shown_minimized = None;
+            }
+        }
+    }
+
     /// Forget a window that was unmapped or destroyed.
     pub fn forget_focus_history(&mut self, window: &Window) {
         self.focus_history.retain(|w| w != window);
