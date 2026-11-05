@@ -127,6 +127,8 @@ pub struct Pila {
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
+    /// Surfaces with fifo barriers to signal (`commit_pacing.rs`).
+    pub commit_pacing: crate::commit_pacing::CommitPacing,
     /// Screen capture sessions (`capture.rs`).
     pub captures: Vec<crate::capture::Session>,
     /// Where captures may use dma-bufs (set by the backend).
@@ -349,6 +351,7 @@ impl Pila {
             config_reload_pending: false,
             frame_drawn: false,
             hidden_frame_timer: false,
+            commit_pacing: Default::default(),
             capture_dmabuf: None,
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
@@ -1267,6 +1270,7 @@ impl Pila {
     pub fn post_render(&mut self, output: &Output) {
         self.update_surface_scales(output);
         layer_map_for_output(output).cleanup();
+        self.signal_barriers_on(output);
         self.frame_drawn = true;
     }
 
@@ -1280,6 +1284,7 @@ impl Pila {
         if !std::mem::take(&mut self.frame_drawn) {
             return;
         }
+        self.apply_unblocked_commits();
         self.process_captures();
         self.process_screencopies();
         // The space knows which outputs each window is on only after its

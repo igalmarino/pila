@@ -16,6 +16,7 @@ mod backend;
 mod bell;
 mod blur;
 mod capture;
+mod commit_pacing;
 mod config;
 mod config_reload;
 mod cursor;

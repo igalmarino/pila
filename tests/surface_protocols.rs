@@ -6,6 +6,9 @@
 mod common;
 
 use std::os::{fd::AsFd, unix::net::UnixListener};
+use wayland_protocols::wp::fifo::v1::client::{
+    wp_fifo_manager_v1::WpFifoManagerV1, wp_fifo_v1::WpFifoV1,
+};
 
 use common::*;
 use wayland_client::protocol::{
@@ -58,6 +61,7 @@ const PUBLIC: &[&str] = &[
     "zxdg_exporter_v2",
     "zxdg_importer_v2",
     "zxdg_output_manager_v1",
+    "wp_fifo_manager_v1",
     "xdg_session_manager_v1",
     "xdg_toplevel_tag_manager_v1",
     "xdg_wm_dialog_v1",
@@ -577,4 +581,141 @@ fn a_dmabuf_buffer_ready_to_read_applies_at_once() {
         let w = window_in(s, "a").unwrap();
         w["geometry"]["w"] == 120 && w["geometry"]["h"] == 90
     });
+}
+
+// --- wp-fifo (`commit_pacing.rs`) ---
+
+/// A window that draws only when told to, with a wp-fifo object.
+fn fifo_window(pila: &mut TestPila, client: &Client) -> common::client::Window {
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    client.set_auto_draw(window, false);
+    window
+}
+
+/// Commit a buffer of `size` that waits for the last barrier and sets one.
+fn fifo_commit(client: &Client, window: common::client::Window, fifo: &WpFifoV1, size: (i32, i32)) {
+    fifo.wait_barrier();
+    fifo.set_barrier();
+    client.draw(window, Some(size));
+}
+
+fn fifo_of(client: &Client, window: common::client::Window) -> WpFifoV1 {
+    let manager: WpFifoManagerV1 = client.bind("wp_fifo_manager_v1", 1);
+    manager.get_fifo(&client.surface(window), &client.qh, "fifo".to_string())
+}
+
+fn frames(state: &Value) -> u64 {
+    state["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["frames"].as_u64().unwrap_or(0))
+        .sum()
+}
+
+fn width_is(state: &Value, width: i64) -> bool {
+    window_in(state, "a").is_some_and(|w| w["geometry"]["w"] == width)
+}
+
+#[test]
+fn fifo_commits_reach_the_screen_one_per_frame() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    let before = frames(&pila.state());
+    const COMMITS: i32 = 10;
+    for i in 1..=COMMITS {
+        fifo_commit(&client, window, &fifo, (100 + i, 100));
+    }
+    client.flush();
+    let state = pila.wait("the last commit", |s| width_is(s, 100 + COMMITS as i64));
+    // Every commit had to be drawn before the next one applied.
+    let drawn = frames(&state) - before;
+    assert!(
+        drawn >= COMMITS as u64 - 1,
+        "{drawn} frames for {COMMITS} commits"
+    );
+}
+
+#[test]
+fn a_commit_without_fifo_isnt_held_back() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    fifo.set_barrier();
+    client.draw(window, Some((150, 100)));
+    client.draw(window, Some((160, 100)));
+    client.flush();
+    pila.wait("the second commit", |s| width_is(s, 160));
+}
+
+#[test]
+fn a_fifo_client_on_another_workspace_keeps_going() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    pila.combo("Super+Shift+2");
+    pila.wait("moved", |s| window_in(s, "a").unwrap()["workspace"] == 2);
+    fifo_commit(&client, window, &fifo, (150, 100));
+    fifo_commit(&client, window, &fifo, (160, 100));
+    client.flush();
+    // Nothing is drawn: the first barrier goes after a second.
+    pila.wait("the second commit", |s| width_is(s, 160));
+}
+
+#[test]
+fn a_minimized_fifo_client_keeps_going() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    fifo_commit(&client, window, &fifo, (150, 100));
+    fifo_commit(&client, window, &fifo, (160, 100));
+    client.flush();
+    pila.wait("the second commit", |s| width_is(s, 160));
+}
+
+#[test]
+fn a_fifo_client_keeps_going_while_the_session_is_locked() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    let surf = locker.lock_surface(&lock, "HEADLESS-1", [255, 0, 0, 0]);
+    locker.wait_surface_configured(surf);
+    locker.wait_logged("lock", "Locked");
+    fifo_commit(&client, window, &fifo, (150, 100));
+    fifo_commit(&client, window, &fifo, (160, 100));
+    client.flush();
+    pila.wait("the second commit", |s| width_is(s, 160));
+}
+
+#[test]
+fn a_fifo_client_going_away_with_commits_held_back_harms_nothing() {
+    let mut pila = TestPila::start();
+    let mut client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let fifo = fifo_of(&client, window);
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    fifo_commit(&client, window, &fifo, (150, 100));
+    fifo_commit(&client, window, &fifo, (160, 100));
+    client.flush();
+    client.disconnect();
+    pila.wait("the window gone", |s| window_in(s, "a").is_none());
+    let other = pila.client();
+    other.window("b").create();
+    pila.wait_focus("b");
 }

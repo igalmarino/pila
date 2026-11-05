@@ -156,6 +156,14 @@ Key flows and invariants:
   still writing (`Dmabuf::generate_blocker`, polling its implicit fence). The commit applies
   when the fence signals (`blocker_cleared`, then `queue_redraw`), so a slow client delays
   its own frame and never pila's. Commits of one surface still apply in order.
+- **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
+  on a barrier; pila signals barriers. A commit that sets one registers its surface
+  (`commit_paced`), `post_render` signals those shown on the output just drawn, and
+  `after_frames` applies what that unblocked and asks for a redraw. So a client gets at most
+  one content update per refresh. A barrier a frame didn't signal in a second is signaled by a
+  timer (`signal_old_barriers`) wherever the surface is, so hidden clients and clients on an
+  output turned off carry on, once a second. No damage means no flip, so a commit that changes
+  nothing frees its barrier without waiting for a refresh, as with frame callbacks.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises (with its family, see "Transient windows") and sets keyboard
   focus, then flushes pending configures.

@@ -1037,6 +1037,10 @@ pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
 
 logged!(XdgSessionManagerV1, XdgSessionV1);
 logged!(
+    wayland_protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1,
+    wayland_protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1,
+);
+logged!(
     wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
     wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1,
 );

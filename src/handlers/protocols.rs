@@ -87,6 +87,7 @@ pub fn init_globals(
     IdleInhibitManagerState::new::<Pila>(dh);
     // Its handler is in `bell.rs`.
     crate::bell::init_global(dh);
+    crate::commit_pacing::init_globals(dh);
     crate::blur::init_global(dh);
     // Sandboxes (Flatpak) connect their apps through it; they can't make
     // contexts of their own.
