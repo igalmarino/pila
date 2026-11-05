@@ -1041,6 +1041,11 @@ logged!(
     wayland_protocols::wp::commit_timing::v1::client::wp_commit_timer_v1::WpCommitTimerV1,
 );
 logged!(
+    wayland_protocols::wp::linux_drm_syncobj::v1::client::wp_linux_drm_syncobj_manager_v1::WpLinuxDrmSyncobjManagerV1,
+    wayland_protocols::wp::linux_drm_syncobj::v1::client::wp_linux_drm_syncobj_surface_v1::WpLinuxDrmSyncobjSurfaceV1,
+    wayland_protocols::wp::linux_drm_syncobj::v1::client::wp_linux_drm_syncobj_timeline_v1::WpLinuxDrmSyncobjTimelineV1,
+);
+logged!(
     wayland_protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1,
     wayland_protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1,
 );

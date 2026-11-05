@@ -127,6 +127,9 @@ pub struct Pila {
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
+    /// linux-drm-syncobj, where the backend has a DRM device that can do it
+    /// (set by the backend).
+    pub syncobj_state: Option<smithay::wayland::drm_syncobj::DrmSyncobjState>,
     /// Surfaces with fifo barriers to signal (`commit_pacing.rs`).
     pub commit_pacing: crate::commit_pacing::CommitPacing,
     /// Screen capture sessions (`capture.rs`).
@@ -351,6 +354,7 @@ impl Pila {
             config_reload_pending: false,
             frame_drawn: false,
             hidden_frame_timer: false,
+            syncobj_state: None,
             commit_pacing: Default::default(),
             capture_dmabuf: None,
             screencopies: Vec::new(),

@@ -3,9 +3,9 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         renderer::{utils::on_commit_buffer_handler, ImportDma},
     },
-    delegate_compositor, delegate_dmabuf, delegate_shm,
+    delegate_compositor, delegate_dmabuf, delegate_drm_syncobj, delegate_shm,
     reexports::{
-        calloop::Interest,
+        calloop::{EventSource, Interest},
         wayland_server::{
             protocol::{wl_buffer, wl_surface::WlSurface},
             Client, Resource,
@@ -19,6 +19,7 @@ use smithay::{
             SurfaceAttributes,
         },
         dmabuf::{get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
+        drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState},
         shm::{ShmHandler, ShmState},
     },
 };
@@ -79,38 +80,66 @@ impl CompositorHandler for Pila {
 
 impl Pila {
     /// Called before a commit applies: if it brings a dmabuf the client's GPU
-    /// is still rendering to, hold the commit back until it's done. Drawing
-    /// it now would make pila's frame wait for the client's, and miss a
-    /// refresh.
+    /// is still rendering to, hold the commit back until it's done: until its
+    /// acquire point if it gave one (linux-drm-syncobj), else its implicit
+    /// fence. Drawing it now would make pila's frame wait for the client's,
+    /// and miss a refresh.
     fn wait_for_client_rendering(&mut self, surface: &WlSurface) {
-        let dmabuf = with_states(surface, |states| {
+        let (dmabuf, acquire_point) = with_states(surface, |states| {
             let mut attributes = states.cached_state.get::<SurfaceAttributes>();
-            match attributes.pending().buffer.as_ref() {
+            let dmabuf = match attributes.pending().buffer.as_ref() {
                 Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).ok().cloned(),
                 _ => None,
+            };
+            let mut sync = states.cached_state.get::<DrmSyncobjCachedState>();
+            (dmabuf, sync.pending().acquire_point.clone())
+        });
+        let Some(dmabuf) = dmabuf else {
+            return;
+        };
+        if let Some(Ok((blocker, source))) = acquire_point.map(|point| point.generate_blocker()) {
+            if self.apply_when_ready(surface, source) {
+                add_blocker(surface, blocker);
+                return;
             }
-        });
-        let (Some(dmabuf), Some(client)) = (dmabuf, surface.client()) else {
-            return;
-        };
+        }
         // An error: it's ready already.
-        let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) else {
-            return;
-        };
-        let inserted = self.loop_handle.insert_source(source, move |_, _, state| {
-            let display = state.display_handle.clone();
-            state
-                .client_compositor_state(&client)
-                .blocker_cleared(state, &display);
-            // Outside a client's dispatch: nothing else asks for this redraw.
-            state.queue_redraw();
-            Ok(())
-        });
-        if inserted.is_ok() {
-            add_blocker(surface, blocker);
+        if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
+            if self.apply_when_ready(surface, source) {
+                add_blocker(surface, blocker);
+            }
         }
     }
+
+    /// When `source` fires, apply the commits of `surface`'s client that were
+    /// waiting for it, and draw them. Whether that could be set up.
+    fn apply_when_ready<S>(&mut self, surface: &WlSurface, source: S) -> bool
+    where
+        S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
+    {
+        let Some(client) = surface.client() else {
+            return false;
+        };
+        self.loop_handle
+            .insert_source(source, move |_, _, state| {
+                let display = state.display_handle.clone();
+                state
+                    .client_compositor_state(&client)
+                    .blocker_cleared(state, &display);
+                // Outside a client's dispatch: nothing else asks for this redraw.
+                state.queue_redraw();
+                Ok(())
+            })
+            .is_ok()
+    }
 }
+
+impl DrmSyncobjHandler for Pila {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.syncobj_state.as_mut()
+    }
+}
+delegate_drm_syncobj!(Pila);
 
 /// A window's size at its last commit, to log when it changes.
 #[derive(Default)]

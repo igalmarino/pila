@@ -155,7 +155,11 @@ Key flows and invariants:
   pre-commit hook on every surface blocks a commit whose new dmabuf the client's GPU is
   still writing (`Dmabuf::generate_blocker`, polling its implicit fence). The commit applies
   when the fence signals (`blocker_cleared`, then `queue_redraw`), so a slow client delays
-  its own frame and never pila's. Commits of one surface still apply in order.
+  its own frame and never pila's. Commits of one surface still apply in order. With
+  linux-drm-syncobj (explicit sync; offered where the backend has a DRM device whose kernel
+  has `syncobj_eventfd`: bare metal and headless with a GPU, not nested) a commit's acquire
+  point takes the place of the fence, and Smithay signals the release point when the buffer
+  is dropped. pila keeps no buffer of its own: animation snapshots are textures.
 - **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
   on a barrier; pila signals barriers. A commit that sets one registers its surface
   (`commit_paced`), `post_render` signals those shown on the output just drawn, and

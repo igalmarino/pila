@@ -50,7 +50,10 @@ connector names such as `eDP-1`).
   (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
   settings (output power and management), blur behind panels (background-effect),
-  workspace indicators and switchers (ext-workspace), a visual system bell. Enough for a full shell such as Noctalia.
+  workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay
+  above their window and modal ones that keep the focus (xdg-dialog), window rules by tag
+  (xdg-toplevel-tag), Vulkan's FIFO presentation (wp-fifo, wp-commit-timing), explicit sync
+  (linux-drm-syncobj). Enough for a full shell such as Noctalia.
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps, pointer lock and confinement for games,

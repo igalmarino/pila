@@ -13,6 +13,8 @@
 
 use std::{collections::HashMap, time::Duration};
 
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
+
 use smithay::{
     backend::{
         allocator::{
@@ -463,6 +465,12 @@ pub fn init_udev(
         OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
     )?;
     let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    if supports_syncobj_eventfd(&fd) {
+        state.syncobj_state = Some(DrmSyncobjState::new::<Pila>(
+            &state.display_handle,
+            fd.clone(),
+        ));
+    }
     let (drm, drm_notifier) = DrmDevice::new(fd.clone(), true)?;
     let gbm = GbmDevice::new(fd)?;
 

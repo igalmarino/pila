@@ -13,6 +13,11 @@ use wayland_protocols::wp::commit_timing::v1::client::{
 use wayland_protocols::wp::fifo::v1::client::{
     wp_fifo_manager_v1::WpFifoManagerV1, wp_fifo_v1::WpFifoV1,
 };
+use wayland_protocols::wp::linux_drm_syncobj::v1::client::{
+    wp_linux_drm_syncobj_manager_v1::WpLinuxDrmSyncobjManagerV1,
+    wp_linux_drm_syncobj_surface_v1::{Error as SyncobjError, WpLinuxDrmSyncobjSurfaceV1},
+    wp_linux_drm_syncobj_timeline_v1::WpLinuxDrmSyncobjTimelineV1,
+};
 
 use common::*;
 use wayland_client::protocol::{
@@ -112,7 +117,10 @@ fn pila_offers_exactly_these_globals() {
         .map(|s| s.to_string())
         .collect();
     expected.sort();
-    assert_eq!(interfaces(&client), expected);
+    // Only with a DRM device that can do it (not on CI's software renderer).
+    let mut offered = interfaces(&client);
+    offered.retain(|interface| interface != "wp_linux_drm_syncobj_manager_v1");
+    assert_eq!(offered, expected);
 }
 
 #[test]
@@ -815,4 +823,180 @@ fn a_timestamp_in_the_far_future_harms_nothing() {
     let other = pila.client();
     other.window("b").create();
     pila.wait_focus("b");
+}
+
+// --- linux-drm-syncobj (`handlers/compositor.rs`) ---
+
+/// A DRM device for a test client's timelines.
+struct DrmFile(std::fs::File);
+
+impl std::os::fd::AsFd for DrmFile {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+impl smithay::reexports::drm::Device for DrmFile {}
+impl smithay::reexports::drm::control::Device for DrmFile {}
+
+/// A timeline a test client signals by hand, imported into pila.
+struct Timeline {
+    device: DrmFile,
+    handle: smithay::reexports::drm::control::syncobj::Handle,
+    object: WpLinuxDrmSyncobjTimelineV1,
+}
+
+impl Timeline {
+    fn signal(&self, point: u64) {
+        use smithay::reexports::drm::control::Device;
+        self.device
+            .syncobj_timeline_signal(&[self.handle], &[point])
+            .unwrap();
+    }
+
+    fn signaled_up_to(&self) -> u64 {
+        use smithay::reexports::drm::control::Device;
+        let mut points = [0];
+        self.device
+            .syncobj_timeline_query(&[self.handle], &mut points, false)
+            .unwrap();
+        points[0]
+    }
+}
+
+/// The surface's syncobj object and a timeline; `None` (the test is skipped)
+/// where pila doesn't offer the protocol.
+fn syncobj_of(
+    client: &Client,
+    window: common::client::Window,
+) -> Option<(WpLinuxDrmSyncobjSurfaceV1, Timeline)> {
+    use smithay::reexports::drm::control::Device;
+    let Some(manager) =
+        client.try_bind::<WpLinuxDrmSyncobjManagerV1>("wp_linux_drm_syncobj_manager_v1", 1)
+    else {
+        eprintln!("no linux-drm-syncobj: skipped");
+        return None;
+    };
+    let node = common::protocols::render_node().expect("a render node, with the protocol offered");
+    let device = DrmFile(
+        std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(node)
+            .unwrap(),
+    );
+    let handle = device.create_syncobj(false).unwrap();
+    let fd = device.syncobj_to_fd(handle, false).unwrap();
+    let object = manager.import_timeline(fd.as_fd(), &client.qh, "timeline".to_string());
+    let surface = manager.get_surface(&client.surface(window), &client.qh, "syncobj".to_string());
+    client.flush();
+    Some((
+        surface,
+        Timeline {
+            device,
+            handle,
+            object,
+        },
+    ))
+}
+
+/// The connection fails with this error. A client can lose the race with
+/// pila closing the connection and get an I/O error first, with no way to read
+/// the protocol error that came before it.
+#[track_caller]
+fn assert_syncobj_error(client: &Client, code: SyncobjError) {
+    let error = client.wait_error();
+    let expected = format!("Protocol error {} ", code as u32);
+    assert!(
+        error.contains(&expected) || error.contains("Io error"),
+        "{error}"
+    );
+}
+
+/// Attach a dmabuf of `size` with its sync points, and commit.
+fn commit_with_points(
+    client: &Client,
+    window: common::client::Window,
+    sync: &WpLinuxDrmSyncobjSurfaceV1,
+    timeline: &Timeline,
+    size: (i32, i32),
+    (acquire, release): (u64, u64),
+) {
+    let buffer = client.dmabuf_buffer(size).expect("a dmabuf buffer");
+    let surface = client.surface(window);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, size.0, size.1);
+    sync.set_acquire_point(&timeline.object, (acquire >> 32) as u32, acquire as u32);
+    sync.set_release_point(&timeline.object, (release >> 32) as u32, release as u32);
+    surface.commit();
+    client.flush();
+}
+
+#[test]
+fn a_commit_waits_for_its_acquire_point() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let Some((sync, timeline)) = syncobj_of(&client, window) else {
+        return;
+    };
+    commit_with_points(&client, window, &sync, &timeline, (120, 90), (1, 2));
+    pila.stays("held back", Duration::from_millis(150), |s| {
+        !width_is(s, 120)
+    });
+    timeline.signal(1);
+    pila.wait("applied", |s| width_is(s, 120));
+}
+
+#[test]
+fn the_release_point_is_signaled_when_the_buffer_is_replaced() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let Some((sync, timeline)) = syncobj_of(&client, window) else {
+        return;
+    };
+    timeline.signal(1);
+    commit_with_points(&client, window, &sync, &timeline, (120, 90), (1, 2));
+    pila.wait("the dmabuf", |s| width_is(s, 120));
+    assert_eq!(timeline.signaled_up_to(), 1, "released while in use");
+    client.draw(window, Some((130, 90)));
+    client.flush();
+    pila.wait("the next buffer", |s| width_is(s, 130));
+    let started = std::time::Instant::now();
+    while timeline.signaled_up_to() < 2 {
+        assert!(started.elapsed() < TIMEOUT, "never released");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn an_acquire_point_needs_a_release_point() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let Some((sync, timeline)) = syncobj_of(&client, window) else {
+        return;
+    };
+    let buffer = client.dmabuf_buffer((120, 90)).expect("a dmabuf buffer");
+    let surface = client.surface(window);
+    surface.attach(Some(&buffer), 0, 0);
+    sync.set_acquire_point(&timeline.object, 0, 1);
+    surface.commit();
+    client.flush();
+    assert_syncobj_error(&client, SyncobjError::NoReleasePoint);
+}
+
+#[test]
+fn sync_points_need_a_dmabuf() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let Some((sync, timeline)) = syncobj_of(&client, window) else {
+        return;
+    };
+    sync.set_acquire_point(&timeline.object, 0, 1);
+    sync.set_release_point(&timeline.object, 0, 2);
+    client.draw(window, Some((130, 90)));
+    client.flush();
+    assert_syncobj_error(&client, SyncobjError::UnsupportedBuffer);
 }

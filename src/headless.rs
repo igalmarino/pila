@@ -11,7 +11,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use smithay::backend::drm::DrmDeviceFd;
 use smithay::reexports::wayland_server::Resource;
+use smithay::utils::DeviceFd;
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -370,6 +373,15 @@ pub fn init_headless(
             state
                 .dmabuf_state
                 .create_global::<Pila>(&state.display_handle, formats);
+        }
+    }
+    if let Some((path, _)) = &node {
+        let device = std::fs::File::options().read(true).write(true).open(path);
+        if let Ok(device) = device {
+            let fd = DrmDeviceFd::new(DeviceFd::from(std::os::fd::OwnedFd::from(device)));
+            if supports_syncobj_eventfd(&fd) {
+                state.syncobj_state = Some(DrmSyncobjState::new::<Pila>(&state.display_handle, fd));
+            }
         }
     }
     if let Some((_, dev)) = node {
