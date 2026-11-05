@@ -624,6 +624,27 @@ impl OffscreenWindow {
     }
 }
 
+/// Do once, at startup, what the first animation would otherwise pay for
+/// inside a frame (performance pillar): compile the rounded-corner shaders
+/// and create and draw into an offscreen texture.
+pub fn warm_up(renderer: &mut GlesRenderer) {
+    let start = std::time::Instant::now();
+    let _ = rounded::Shaders::get(renderer);
+    let scale = Scale::from(1.0);
+    if let Some(mut target) = OffscreenWindow::new(renderer, (1, 1).into(), scale) {
+        let buffer = SolidColorBuffer::new((1, 1), [0.0, 0.0, 0.0, 1.0]);
+        let element = PilaRenderElement::Solid(SolidColorRenderElement::from_buffer(
+            &buffer,
+            (0, 0),
+            scale,
+            1.0,
+            Kind::Unspecified,
+        ));
+        target.draw(renderer, &[element]);
+    }
+    tracing::debug!(elapsed = ?start.elapsed(), "renderer warmed up");
+}
+
 /// The physical size of a texture holding `rect` at `scale`.
 fn texture_size(rect: Rectangle<i32, Logical>, scale: Scale<f64>) -> Size<i32, Physical> {
     let size: Size<i32, Physical> = rect.size.to_f64().to_physical(scale).to_i32_ceil();

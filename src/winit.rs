@@ -34,6 +34,7 @@ pub fn init_winit(
     let display_handle = &state.display_handle.clone();
 
     let (mut backend, winit) = winit::init::<GlesRenderer>()?;
+    crate::render::warm_up(backend.renderer());
     init_dmabuf(&mut backend, &mut state.dmabuf_state, display_handle);
     if let Ok((_, dev)) = main_device(&mut backend) {
         state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(dev, backend.renderer()));

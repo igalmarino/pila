@@ -465,7 +465,8 @@ pub fn init_udev(
         .unwrap_or(node);
     let context = EGLContext::new(&display)?;
     // SAFETY: the context was just created for this renderer only.
-    let renderer = unsafe { GlesRenderer::new(context)? };
+    let mut renderer = unsafe { GlesRenderer::new(context)? };
+    crate::render::warm_up(&mut renderer);
     state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(
         render_node.dev_id(),
         &renderer,

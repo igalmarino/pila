@@ -140,7 +140,10 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
   timers; idle callbacks inserted outside an event source come with a `Pila::wake`
-  ping (see "Redraws are on demand").
+  ping (see "Redraws are on demand"); one-time costs are paid at startup, not in the
+  first frame that needs them (`render::warm_up` when a renderer is created: shaders,
+  an offscreen texture; `text::init` shapes and rasterizes common characters on its
+  thread before publishing the fonts).
 
 ## Protocol policy
 

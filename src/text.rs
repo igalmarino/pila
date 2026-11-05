@@ -29,12 +29,19 @@ pub fn init() {
         .name("pila-fonts".into())
         .spawn(|| {
             let start = std::time::Instant::now();
-            let fonts = Fonts {
+            let mut fonts = Fonts {
                 system: FontSystem::new(),
                 cache: SwashCache::new(),
             };
+            let loaded = start.elapsed();
+            // Shape and rasterize the usual characters once here, off the
+            // main thread, before anyone can wait for the lock: else the
+            // first title bar drawn pays for it inside a frame.
+            for scale in [1, 2] {
+                let _ = render_with(&mut fonts, WARM_UP_TEXT, [1.0; 3], 4000, 28, scale);
+            }
             let _ = FONTS.set(Mutex::new(fonts));
-            info!(elapsed = ?start.elapsed(), "fonts loaded");
+            info!(elapsed = ?loaded, warm_up = ?(start.elapsed() - loaded), "fonts loaded");
         });
     if let Err(err) = spawned {
         warn!(
@@ -43,6 +50,11 @@ pub fn init() {
         );
     }
 }
+
+/// Characters titles commonly use, drawn once at startup to warm the
+/// shaping and glyph caches.
+const WARM_UP_TEXT: &str = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+     0123456789 .,:;-_/\\|()[]{}<>@#%&*+=~'\"!?… áéíóúñü";
 
 /// `title` in `color` as one line at most `max_width` wide (ending in "…" if
 /// it doesn't fit), vertically centered in `height` (both logical), drawn
@@ -57,11 +69,23 @@ pub fn render_title(
     height: i32,
     scale: i32,
 ) -> Option<(Vec<u8>, i32)> {
-    let width = max_width * scale;
-    let height = height * scale;
     let fonts = FONTS.get()?;
     let mut fonts = fonts.lock().ok()?;
-    let Fonts { system, cache } = &mut *fonts;
+    render_with(&mut fonts, title, color, max_width, height, scale)
+}
+
+/// `render_title` with these fonts.
+fn render_with(
+    fonts: &mut Fonts,
+    title: &str,
+    color: [f32; 3],
+    max_width: i32,
+    height: i32,
+    scale: i32,
+) -> Option<(Vec<u8>, i32)> {
+    let width = max_width * scale;
+    let height = height * scale;
+    let Fonts { system, cache } = fonts;
 
     // A line as tall as the bar: cosmic-text centers the glyphs within it.
     let mut buffer = Buffer::new(
