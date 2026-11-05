@@ -1266,7 +1266,7 @@ pub fn is_internal(name: &str) -> bool {
 }
 
 /// Whether `disable-internal-display` turns the built-in screen `name` off
-/// now: it's "always" and another connected monitor, an external one, is on
+/// now: it's on and another connected monitor, an external one, is on
 /// by its own config. That's decided from the config, not from which
 /// outputs are running, so it doesn't depend on the order outputs are set
 /// up in.

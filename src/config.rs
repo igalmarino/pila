@@ -544,13 +544,16 @@ impl AnimationsConfig {
     }
 }
 
-/// One animation's entry in `[animations]`, as written.
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct AnimationFile {
-    enabled: Option<bool>,
-    /// Milliseconds.
-    duration: Option<u32>,
+/// One animation's entry in `[animations]`, as written: its duration in
+/// milliseconds, or `false` (off) / `true` (the default duration).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(
+    untagged,
+    expecting = "a duration in ms (e.g. 180), or false to turn it off"
+)]
+enum AnimationFile {
+    On(bool),
+    Duration(u32),
 }
 
 /// `[animations]` as written.
@@ -559,12 +562,12 @@ struct AnimationFile {
 struct AnimationsFile {
     enabled: Option<bool>,
     speed: Option<f64>,
-    window_open: AnimationFile,
-    window_close: AnimationFile,
-    minimize: AnimationFile,
-    maximize: AnimationFile,
-    layer: AnimationFile,
-    workspace: AnimationFile,
+    window_open: Option<AnimationFile>,
+    window_close: Option<AnimationFile>,
+    minimize: Option<AnimationFile>,
+    maximize: Option<AnimationFile>,
+    layer: Option<AnimationFile>,
+    workspace: Option<AnimationFile>,
 }
 
 impl AnimationsFile {
@@ -589,14 +592,19 @@ impl AnimationsFile {
         let mut durations = [0; 6];
         for ((kind, entry), duration) in AnimationKind::ALL.iter().zip(entries).zip(&mut durations)
         {
-            let ms = entry.duration.unwrap_or(kind.default_duration());
-            if ms > MAX_ANIMATION_MS {
-                return Err(format!(
-                    "[animations] {}: duration {ms} is over {MAX_ANIMATION_MS} ms",
-                    kind.key()
-                ));
-            }
-            if all_on && entry.enabled.unwrap_or(true) {
+            let ms = match entry {
+                None | Some(AnimationFile::On(true)) => kind.default_duration(),
+                Some(AnimationFile::On(false)) => 0,
+                Some(AnimationFile::Duration(ms @ 1..=MAX_ANIMATION_MS)) => ms,
+                Some(AnimationFile::Duration(ms)) => {
+                    return Err(format!(
+                        "[animations] {} = {ms}: a duration is 1 to {MAX_ANIMATION_MS} ms \
+                         (false turns it off)",
+                        kind.key()
+                    ))
+                }
+            };
+            if all_on {
                 *duration = ms;
             }
         }
@@ -822,7 +830,7 @@ struct ConfigFile {
     output: Vec<OutputFile>,
     input: InputFile,
     workspaces: Option<usize>,
-    disable_internal_display: Option<String>,
+    disable_internal_display: Option<bool>,
     corner_radius: Option<u32>,
     animations: AnimationsFile,
     #[serde(rename = "window-rule")]
@@ -876,18 +884,6 @@ pub enum InternalDisplay {
     #[default]
     Never,
     Always,
-}
-
-impl InternalDisplay {
-    fn parse(text: &str) -> Result<Self, String> {
-        match text {
-            "never" => Ok(Self::Never),
-            "always" => Ok(Self::Always),
-            other => Err(format!(
-                "disable-internal-display = {other:?}: must be never or always"
-            )),
-        }
-    }
 }
 
 /// Terminals tried in order when `terminal` isn't set.
@@ -990,9 +986,9 @@ impl Config {
         let terminal = env("PILA_TERMINAL").or(file.terminal);
         let launcher = env("PILA_LAUNCHER").or(file.launcher);
 
-        let internal_display = match &file.disable_internal_display {
-            Some(text) => InternalDisplay::parse(text)?,
-            None => InternalDisplay::Never,
+        let internal_display = match file.disable_internal_display {
+            Some(true) => InternalDisplay::Always,
+            Some(false) | None => InternalDisplay::Never,
         };
         let workspaces = match file.workspaces {
             None => DEFAULT_WORKSPACES,
@@ -1469,13 +1465,15 @@ mod tests {
         );
 
         let config = Config::from_toml(
-            "[animations]\nspeed = 2\nminimize = { enabled = false }\n\
-             layer = { duration = 100 }\nmaximize = { duration = 0 }",
+            "[animations]\nspeed = 2\nminimize = false\nlayer = 100\nworkspace = true",
             &no_env,
         )
         .unwrap();
         assert_eq!(config.animations.duration(Minimize), None);
-        assert_eq!(config.animations.duration(Maximize), None);
+        assert_eq!(
+            config.animations.duration(Workspace),
+            Some(Duration::from_millis(500))
+        );
         assert_eq!(
             config.animations.duration(Layer),
             Some(Duration::from_millis(200))
@@ -1492,8 +1490,11 @@ mod tests {
 
         let err = |text| Config::from_toml(text, &no_env).unwrap_err();
         assert!(err("[animations]\nspeed = 0").contains("outside"));
-        assert!(err("[animations]\nlayer = { duration = 5000 }").contains("over"));
-        assert!(err("[animations]\nfade = { duration = 1 }").contains("unknown field"));
+        assert!(err("[animations]\nlayer = 5000").contains("1 to 1000"));
+        assert!(err("[animations]\nlayer = 0").contains("false turns it off"));
+        assert!(err("[animations]\nfade = 100").contains("unknown field"));
+        // The form it used to take.
+        assert!(err("[animations]\nlayer = { duration = 100 }").contains("a duration in ms"));
     }
 
     #[test]
@@ -1647,12 +1648,15 @@ mod tests {
         let parse = |text: &str| Config::from_toml(text, &no_env).map(|c| c.internal_display);
         assert_eq!(parse(""), Ok(InternalDisplay::Never));
         assert_eq!(
-            parse(r#"disable-internal-display = "always""#),
+            parse("disable-internal-display = true"),
             Ok(InternalDisplay::Always)
         );
-        assert!(parse(r#"disable-internal-display = "lid-closed""#).is_err());
-        assert!(parse(r#"disable-internal-display = "sometimes""#).is_err());
-        assert!(parse("disable-internal-display = true").is_err());
+        assert_eq!(
+            parse("disable-internal-display = false"),
+            Ok(InternalDisplay::Never)
+        );
+        // The words it used to take.
+        assert!(parse(r#"disable-internal-display = "always""#).is_err());
     }
 
     #[test]

@@ -33,11 +33,11 @@
 # workspaces = 4
 
 # Turn a laptop's built-in screen (eDP, LVDS or DSI connector) off while an
-# external monitor is on: "never" (the default) or "always". It comes back on
-# when the external monitor is unplugged. An `enabled` set in the built-in
-# screen's [[output]] section (below) wins; wlr-randr and display settings can
-# still turn it back on. TTY only.
-# disable-internal-display = "always"
+# external monitor is on (default false). It comes back on when the external
+# monitor is unplugged. An `enabled` set in the built-in screen's [[output]]
+# section (below) wins; wlr-randr and display settings can still turn it back
+# on. TTY only.
+# disable-internal-display = true
 
 # Rounded window corners: the radius in logical pixels, 0 (the default, square
 # corners) to 64. Maximized and fullscreen windows stay square. The radius is
@@ -46,17 +46,17 @@
 # corner-radius = 10
 
 # Short, subtle animations. `enabled = false` turns them all off; `speed`
-# multiplies every duration (0.25 to 4: 2 is twice as slow). Each one can be
-# turned off or given its own duration in ms (0 to 1000; 0 is off).
+# multiplies every duration (0.25 to 4: 2 is twice as slow). Each one takes
+# its duration in ms (1 to 1000), or false to turn it off.
 [animations]
 enabled = true
 speed = 1.0
-window-open = { enabled = true, duration = 180 }    # fade and grow in
-window-close = { enabled = true, duration = 150 }   # fade and shrink out
-minimize = { enabled = true, duration = 200 }       # and restoring
-maximize = { enabled = true, duration = 220 }       # also fullscreen and snapping
-layer = { enabled = true, duration = 150 }          # launchers, notifications
-workspace = { enabled = true, duration = 250 }      # slide sideways
+window-open = 180     # fade and grow in
+window-close = 150    # fade and shrink out
+minimize = 200        # and restoring
+maximize = 220        # also fullscreen and snapping
+layer = 150           # launchers, notifications
+workspace = 250       # slide sideways
 
 # Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
 [keyboard]

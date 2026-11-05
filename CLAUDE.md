@@ -233,7 +233,7 @@ Key flows and invariants:
   nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
   pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
-  `disable-internal-display` (`Config::internal_display`: never / always)
+  `disable-internal-display` (a boolean; `Config::internal_display`: never / always)
   turns a built-in screen (connector eDP/LVDS/DSI, `is_internal`) off while another,
   external output is on by its own config: `effective_output_config` sets its `enabled`
   to false unless its `[[output]]` sets `enabled` (overrides still on top), decided from
@@ -346,7 +346,7 @@ Key flows and invariants:
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`).
 - **Animations** (`animation.rs`, `[animations]` in the config:
-  `config::AnimationsConfig`, all on by default, each with an `enabled`/`duration`, plus
+  `config::AnimationsConfig`, all on by default, each a duration in ms or `false`, plus
   a global `enabled` and `speed`): short and subtle. So far a window fades and grows in
   when mapped (`animate_open` from `place_new_window`; not X11 override-redirect),
   fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
