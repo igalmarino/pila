@@ -151,6 +151,11 @@ Key flows and invariants:
   where its session restores it, see "Session management"; cascaded by `CASCADE_STEP` if
   the spot is taken). Lookups that must find unmapped windows
   use `window_for_surface`, which searches both.
+- **Client rendering** (`handlers/compositor.rs`, `wait_for_client_rendering`): a
+  pre-commit hook on every surface blocks a commit whose new dmabuf the client's GPU is
+  still writing (`Dmabuf::generate_blocker`, polling its implicit fence). The commit applies
+  when the fence signals (`blocker_cleared`, then `queue_redraw`), so a slow client delays
+  its own frame and never pila's. Commits of one surface still apply in order.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises (with its family, see "Transient windows") and sets keyboard
   focus, then flushes pending configures.

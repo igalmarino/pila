@@ -84,6 +84,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Output scale, fractional scale, viewporter | `surface_protocols::a_fractional_output_scale_reaches_the_window`, `surface_protocols::a_window_moved_to_another_output_gets_its_scale`, `surface_protocols::a_viewport_sets_the_window_size_and_single_pixel_buffers_fill_it` |
 | Cursors | `surface_protocols::a_client_sets_named_hidden_and_surface_cursors`, `surface_protocols::a_stale_serial_cant_set_the_cursor`, `src/cursor.rs` unit test; xcursor themes on bare metal |
 | Subsurfaces | `surface_protocols::a_subsurface_is_drawn_and_gets_the_pointer` |
+| Dmabuf buffers wait for the client's rendering (a real wait: the acquire points of linux-drm-syncobj; an implicit fence can't be made to stay pending headless) | `surface_protocols::a_dmabuf_buffer_ready_to_read_applies_at_once` |
 | Frame callbacks and presentation feedback | `surface_protocols::frame_callbacks_and_presentation_feedback_follow_a_commit`, `surface_protocols::a_covered_window_gets_frame_callbacks_about_once_a_second` |
 
 ## Outputs

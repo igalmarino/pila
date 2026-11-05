@@ -932,6 +932,58 @@ impl Client {
             .expect("the selection's data")
     }
 
+    /// A dmabuf-backed buffer of `size` on the first render node, or `None`
+    /// where pila has none to import it with (no GPU, as in CI).
+    pub fn dmabuf_buffer(
+        &self,
+        size: (i32, i32),
+    ) -> Option<wayland_client::protocol::wl_buffer::WlBuffer> {
+        use smithay::reexports::gbm::{BufferObjectFlags, Device, Format};
+        use wayland_protocols::wp::linux_dmabuf::zv1::client::{
+            zwp_linux_buffer_params_v1::{Flags, ZwpLinuxBufferParamsV1},
+            zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+        };
+        let node = render_node()?;
+        let device = Device::new(
+            std::fs::File::options()
+                .read(true)
+                .write(true)
+                .open(node)
+                .ok()?,
+        )
+        .ok()?;
+        let bo = device
+            .create_buffer_object::<()>(
+                size.0 as u32,
+                size.1 as u32,
+                Format::Argb8888,
+                BufferObjectFlags::RENDERING | BufferObjectFlags::LINEAR,
+            )
+            .ok()?;
+        let manager: ZwpLinuxDmabufV1 = self.bind("zwp_linux_dmabuf_v1", 3);
+        let params: ZwpLinuxBufferParamsV1 =
+            manager.create_params(&self.qh, "dmabuf_params".to_string());
+        let modifier: u64 = bo.modifier().into();
+        params.add(
+            bo.fd_for_plane(0).ok()?.as_fd(),
+            0,
+            bo.offset(0),
+            bo.stride(),
+            (modifier >> 32) as u32,
+            modifier as u32,
+        );
+        let buffer = params.create_immed(
+            size.0,
+            size.1,
+            Format::Argb8888 as u32,
+            Flags::empty(),
+            &self.qh,
+            (),
+        );
+        self.flush();
+        Some(buffer)
+    }
+
     /// A subsurface of `parent` at (x, y), drawn in `color`.
     pub fn subsurface(
         &self,
@@ -953,6 +1005,24 @@ impl Client {
     }
 }
 
+/// The render node a test pila renders on, unless it was told to use none.
+pub fn render_node() -> Option<std::path::PathBuf> {
+    if std::env::var("PILA_HEADLESS_DEVICE").as_deref() == Ok("software") {
+        return None;
+    }
+    let mut nodes: Vec<_> = std::fs::read_dir("/dev/dri")
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("renderD"))
+        })
+        .collect();
+    nodes.sort();
+    nodes.into_iter().next()
+}
+
 /// The pixel at (x, y) of a capture buffer `width` wide, as [r, g, b] (the
 /// buffer is XRGB/ARGB8888: B, G, R, A in memory).
 pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
@@ -966,6 +1036,10 @@ pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
 // --- xdg-session-management -----------------------------------------------------
 
 logged!(XdgSessionManagerV1, XdgSessionV1);
+logged!(
+    wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+    wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1,
+);
 logged!(
     wayland_protocols::xdg::dialog::v1::client::xdg_wm_dialog_v1::XdgWmDialogV1,
     wayland_protocols::xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1,

@@ -556,3 +556,25 @@ fn a_covered_window_gets_frame_callbacks_about_once_a_second() {
     // Not at 60 Hz: about one per second.
     assert!((2..=4).contains(&done), "{done} frame callbacks in 2.5 s");
 }
+
+#[test]
+fn a_dmabuf_buffer_ready_to_read_applies_at_once() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    client.set_auto_draw(window, false);
+    let Some(buffer) = client.dmabuf_buffer((120, 90)) else {
+        eprintln!("no render node: skipped");
+        return;
+    };
+    let surface = client.surface(window);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, 120, 90);
+    surface.commit();
+    client.flush();
+    pila.wait("the dmabuf's size", |s| {
+        let w = window_in(s, "a").unwrap();
+        w["geometry"]["w"] == 120 && w["geometry"]["h"] == 90
+    });
+}

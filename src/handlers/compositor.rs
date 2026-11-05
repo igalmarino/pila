@@ -4,17 +4,21 @@ use smithay::{
         renderer::{utils::on_commit_buffer_handler, ImportDma},
     },
     delegate_compositor, delegate_dmabuf, delegate_shm,
-    reexports::wayland_server::{
-        protocol::{wl_buffer, wl_surface::WlSurface},
-        Client,
+    reexports::{
+        calloop::Interest,
+        wayland_server::{
+            protocol::{wl_buffer, wl_surface::WlSurface},
+            Client, Resource,
+        },
     },
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            get_parent, is_sync_subsurface, CompositorClientState, CompositorHandler,
-            CompositorState,
+            add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes,
         },
-        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
+        dmabuf::{get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         shm::{ShmHandler, ShmState},
     },
 };
@@ -37,6 +41,12 @@ impl CompositorHandler for Pila {
             .get_data::<ClientState>()
             .expect("client without pila's client data")
             .compositor_state
+    }
+
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, _, surface| {
+            state.wait_for_client_rendering(surface);
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -62,6 +72,41 @@ impl CompositorHandler for Pila {
             self.keep_transients_above(&moved);
         }
         crate::cursor::handle_commit(&self.cursor_status, surface);
+    }
+}
+
+impl Pila {
+    /// Called before a commit applies: if it brings a dmabuf the client's GPU
+    /// is still rendering to, hold the commit back until it's done. Drawing
+    /// it now would make pila's frame wait for the client's, and miss a
+    /// refresh.
+    fn wait_for_client_rendering(&mut self, surface: &WlSurface) {
+        let dmabuf = with_states(surface, |states| {
+            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+            match attributes.pending().buffer.as_ref() {
+                Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).ok().cloned(),
+                _ => None,
+            }
+        });
+        let (Some(dmabuf), Some(client)) = (dmabuf, surface.client()) else {
+            return;
+        };
+        // An error: it's ready already.
+        let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) else {
+            return;
+        };
+        let inserted = self.loop_handle.insert_source(source, move |_, _, state| {
+            let display = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &display);
+            // Outside a client's dispatch: nothing else asks for this redraw.
+            state.queue_redraw();
+            Ok(())
+        });
+        if inserted.is_ok() {
+            add_blocker(surface, blocker);
+        }
     }
 }
 
