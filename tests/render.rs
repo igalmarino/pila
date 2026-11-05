@@ -195,9 +195,17 @@ fn a_blur_rule_blurs_whats_behind_a_layer() {
     let mut pila = TestPila::with_config("[[layer-rule]]\nnamespace = \"glass\"\nblur = true\n");
     let client = pila.client();
     halves_and_a_glass(&mut pila, &client, "glass");
-    // Just left of the red/green edge, under the glass: a mix.
-    let px = pila.pixel(636.0, 400.0);
-    assert!(px[1] > 20 && px[0] > 20, "not blurred: {px:?}");
+    // Just left of the red/green edge, under the glass: a mix (once the
+    // glass has been drawn with what's behind it).
+    let started = std::time::Instant::now();
+    loop {
+        let px = pila.pixel(636.0, 400.0);
+        if px[1] > 20 && px[0] > 20 {
+            break;
+        }
+        assert!(started.elapsed() < TIMEOUT, "not blurred: {px:?}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     // Outside the glass: sharp.
     assert_eq!(pila.pixel(636.0, 100.0), [255, 0, 0, 255]);
 }
