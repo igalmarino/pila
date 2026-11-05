@@ -370,6 +370,29 @@ impl TestPila {
         }
     }
 
+    /// Wait for a file in pila's runtime directory (`$XDG_RUNTIME_DIR`,
+    /// which spawned commands inherit) to exist and be non-empty; its
+    /// contents.
+    #[track_caller]
+    pub fn wait_file(&self, name: &str) -> String {
+        let path = self.dir.join(name);
+        let started = Instant::now();
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+            if started.elapsed() > TIMEOUT {
+                panic!(
+                    "no file {name} from a spawned command:\n{}",
+                    self.log_tail()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Whether pila is still running.
     pub fn alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
