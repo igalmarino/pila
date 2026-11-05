@@ -5,6 +5,7 @@
 # An invalid file is reported in the log and pila starts with the defaults.
 # Saved changes apply right away (except autostart); if the edited file is
 # invalid, pila keeps the running config and says why in a notification.
+# `pila --check-config` checks the file (keymap included) without starting.
 
 # The modifier in "Mod+..." bindings and for Mod+drag: alt, super or ctrl.
 # Unset, it's super on a TTY and alt nested (a host desktop such as GNOME

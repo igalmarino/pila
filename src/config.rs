@@ -408,6 +408,34 @@ pub fn keymap_description(kb: &KeyboardConfig) -> String {
     parts.join(", ")
 }
 
+/// Whether xkbcommon can build the keymap `[keyboard]` asks for (empty
+/// fields fall back to its defaults and `XKB_DEFAULT_*`, as when pila
+/// starts). The file can't tell a misspelt layout; this can.
+pub fn check_keymap(kb: &KeyboardConfig) -> Result<(), String> {
+    let mut context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    // The message below says what's wrong; xkbcommon's own lines (include
+    // paths searched, ...) only when asked for (XKB_LOG_LEVEL).
+    if std::env::var_os("XKB_LOG_LEVEL").is_none() {
+        context.set_log_level(xkb::LogLevel::Critical);
+    }
+    xkb::Keymap::new_from_names(
+        &context,
+        "",
+        &kb.model,
+        &kb.layout,
+        &kb.variant,
+        kb.options.clone(),
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    )
+    .map(|_| ())
+    .ok_or_else(|| {
+        format!(
+            "[keyboard]: {}: xkbcommon can't build that keymap",
+            keymap_description(kb)
+        )
+    })
+}
+
 /// Pointer acceleration (`accel-profile`): libinput's adaptive curve, or a
 /// constant factor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1688,6 +1716,17 @@ mod tests {
         };
         assert!(config.window_rules.len() >= 3);
         assert!(config.layer_rules.len() >= 2);
+    }
+
+    #[test]
+    fn keymaps_xkbcommon_doesnt_know_are_found() {
+        let kb = |layout: &str| KeyboardConfig {
+            layout: layout.into(),
+            ..KeyboardConfig::default()
+        };
+        assert_eq!(check_keymap(&kb("us")), Ok(()));
+        let err = check_keymap(&kb("en")).unwrap_err();
+        assert!(err.contains(r#"layout "en""#), "{err}");
     }
 
     #[test]

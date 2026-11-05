@@ -16,6 +16,8 @@
   monitor's own rate; animations no longer stutter on bare metal, and the first one of a
   session no longer costs a long frame. `RUST_LOG=pila::frames=debug` logs frame times
   and missed refreshes per monitor.
+- **`pila --check-config`** checks the config file, keyboard layout included, without
+  starting pila (exit status 0 if it's valid, 1 if not).
 - **Rounded corners:** optional, `corner-radius`.
 - **Sandboxed apps** (Flatpak, through security-context) no longer see privileged
   protocols: layer shell, session lock, clipboard managers, screen capture, virtual

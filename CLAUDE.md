@@ -42,7 +42,9 @@ on **Smithay 0.7.x**.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
-- Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`).
+- Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`);
+  `pila --check-config [--config FILE]` validates a file as pila reads it, plus the
+  keymap (`config::check_keymap`), and exits 0/1 (`main::run_config_check`).
   Env overrides: `PILA_MOD` (super / alt / ctrl; default super on a TTY, alt nested),
   `PILA_TERMINAL` (default: the first installed of `config::TERMINALS`, kitty first),
   `PILA_LAUNCHER` (Mod+D, disabled if unset). Alt is the default because GNOME grabs Super

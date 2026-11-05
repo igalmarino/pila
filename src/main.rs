@@ -62,6 +62,7 @@ pub use crate::state::Pila;
 
 const USAGE: &str = "\
 Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev]
+       pila --check-config [--config <FILE>]
 
 Options:
   -c, --command <CMD>   Shell command to run at startup, instead of the
@@ -71,6 +72,8 @@ Options:
   --backend <BACKEND>   winit: a window in another Wayland/X11 session;
                         udev: DRM/KMS on a TTY. Default: winit if
                         WAYLAND_DISPLAY or DISPLAY is set, else udev
+  --check-config        Check the config file (as pila would read it, the
+                        keymap included) and exit: 0 if it's valid, 1 if not
   -V, --version         Show the version
   -h, --help            Show this help
 
@@ -102,6 +105,34 @@ resources/xdg/xdg-desktop-portal-wlr/pila installed in /etc/xdg or ~/.config.";
 enum BackendKind {
     Winit,
     Udev,
+}
+
+/// `--check-config`: read the config as pila would and say whether it's
+/// valid. Returns the exit status.
+fn run_config_check(path: Option<&std::path::Path>) -> i32 {
+    let path = Config::path(path);
+    let shown = path
+        .as_deref()
+        .map_or("(no config path)".to_string(), |p| p.display().to_string());
+    let exists = path.as_deref().is_some_and(std::path::Path::exists);
+    // The Mod default only matters for running; any will do.
+    let config = match Config::read(path.as_deref(), ModKey::Super) {
+        Ok(config) => config,
+        Err(err) => {
+            println!("{shown}: invalid\n{err}");
+            return 1;
+        }
+    };
+    if let Err(err) = config::check_keymap(&config.keyboard) {
+        println!("{shown}: invalid\n{err}");
+        return 1;
+    }
+    if exists {
+        println!("{shown}: OK");
+    } else {
+        println!("{shown}: no such file; pila uses the defaults");
+    }
+    0
 }
 
 /// The crate version, plus `git describe` when built from a checkout.
@@ -136,19 +167,8 @@ fn log_panics() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    // stderr, so `pila 2> file` captures the log (stdout is the TTY or the
-    // nested session's terminal, and clients inherit it). Colors only on a
-    // terminal: a log file or the journal (a login session) gets plain text.
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .with_ansi(std::io::stderr().is_terminal())
-        .init();
-    log_panics();
-
     let mut startup_command = None;
+    let mut check_config = false;
     let mut config_path = None;
     let mut backend = None;
     let mut args = std::env::args().skip(1);
@@ -176,6 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(2);
                 }
             },
+            "--check-config" => check_config = true,
             "-V" | "--version" => {
                 println!("pila {}", version());
                 return Ok(());
@@ -189,6 +210,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(2);
             }
         }
+    }
+
+    // A check says only what's wrong, unless RUST_LOG asks for more.
+    let default_level = if check_config { "warn" } else { "info" };
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_level));
+    // stderr, so `pila 2> file` captures the log (stdout is the TTY or the
+    // nested session's terminal, and clients inherit it). Colors only on a
+    // terminal: a log file or the journal (a login session) gets plain text.
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
+        .init();
+    log_panics();
+
+    if check_config {
+        std::process::exit(run_config_check(config_path.as_deref()));
     }
 
     // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs;

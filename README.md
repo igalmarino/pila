@@ -215,7 +215,9 @@ one is reported in the log and pila starts with the defaults. `PILA_MOD`, `PILA_
 
 Saving the file applies it right away, everything but `autostart`. If the new version is
 invalid, pila keeps running with the previous one and shows the error in a notification
-(with a notification daemon such as mako) and in the log.
+(with a notification daemon such as mako) and in the log. `pila --check-config` checks
+the file, keyboard layout included, without starting pila: it prints what's wrong and
+exits with status 1, or 0 if it's valid.
 
 A few defaults (Mod is Super on a TTY or login session and Alt nested, unless `mod` says
 otherwise): Mod+Return opens a terminal (kitty, or another one that is installed),
