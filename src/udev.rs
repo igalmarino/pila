@@ -1281,18 +1281,30 @@ fn internal_display_off(state: &Pila, name: &str) -> bool {
         .values()
         .map(|s| s.output.name())
         .chain(data.scan_pending.iter().cloned());
+    internal_off(applies, name, connected, |other| {
+        let config = state
+            .config
+            .output(other)
+            .cloned()
+            .unwrap_or_else(|| OutputConfig::named(other));
+        with_overrides(state, config).enabled.unwrap_or(true)
+    })
+}
+
+/// The decision of `internal_display_off`: the rule `applies`, `name` is a
+/// built-in screen, and among the `connected` outputs another one,
+/// external, is on by its own config (`enabled_by_config`).
+fn internal_off(
+    applies: bool,
+    name: &str,
+    connected: impl IntoIterator<Item = String>,
+    enabled_by_config: impl Fn(&str) -> bool,
+) -> bool {
     applies
         && is_internal(name)
-        && connected.into_iter().any(|other| {
-            let config = state
-                .config
-                .output(&other)
-                .cloned()
-                .unwrap_or_else(|| OutputConfig::named(&other));
-            other != name
-                && !is_internal(&other)
-                && with_overrides(state, config).enabled.unwrap_or(true)
-        })
+        && connected
+            .into_iter()
+            .any(|other| other != name && !is_internal(&other) && enabled_by_config(&other))
 }
 
 /// Turn built-in screens on or off as `disable-internal-display` says now
@@ -1611,5 +1623,76 @@ fn maybe_confirm_lock(state: &mut Pila) {
         .all(|surface| surface.lock_frame == LockFrame::Shown)
     {
         state.confirm_lock();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_screens_are_recognized_by_connector() {
+        for name in ["eDP-1", "LVDS-1", "DSI-2"] {
+            assert!(is_internal(name), "{name}");
+        }
+        for name in ["HDMI-A-1", "DP-2", "DVI-D-1", "eDP"] {
+            assert!(!is_internal(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_screen_goes_off_only_for_an_external_one_that_is_on() {
+        let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let all_on = |_: &str| true;
+        // An external monitor on: off.
+        assert!(internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+        // The rule not set: on.
+        assert!(!internal_off(
+            false,
+            "eDP-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+        // Alone: on.
+        assert!(!internal_off(true, "eDP-1", names(&["eDP-1"]), all_on));
+        // The external one off by its config: on.
+        assert!(!internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "DP-1"]),
+            |n| n != "DP-1"
+        ));
+        // Another built-in screen doesn't count.
+        assert!(!internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "eDP-2"]),
+            all_on
+        ));
+        // An external monitor is never turned off by the rule.
+        assert!(!internal_off(
+            true,
+            "HDMI-A-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+    }
+
+    #[test]
+    fn linear_ramps_are_recognized() {
+        let linear = linear_ramp(256);
+        assert_eq!(linear.len(), 3 * 256);
+        assert_eq!((linear[0], linear[255], linear[256]), (0, 0xffff, 0));
+        assert_eq!(ramp_if_set(&linear, 256), None);
+        let mut dimmed = linear.clone();
+        dimmed[100] /= 2;
+        assert_eq!(ramp_if_set(&dimmed, 256), Some(dimmed.clone()));
+        // A size of one doesn't divide by zero.
+        assert_eq!(linear_ramp(1), vec![0, 0, 0]);
     }
 }

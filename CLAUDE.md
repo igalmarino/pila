@@ -49,6 +49,15 @@ on **Smithay 0.7.x**.
   `PILA_HEADLESS_DEVICE=software` renders on llvmpipe as CI does. A pila that
   panics fails its test. Every feature gets integration tests; only bare-metal
   paths (`udev.rs`) and looks stay with `scripts/check` and the user.
+  `tests/FEATURES.md` maps every feature to its tests (or says why it has
+  none), and `features_inventory_is_complete` fails if a test it names is gone
+  or an integration test isn't named there: a new test goes into it. Known
+  bugs are `#[ignore = "bug: ..."]` tests, listed at its end. The client's
+  `wait` closures run with its lock held: read the `Shared` given, never call
+  the client (that deadlocks). `scripts/coverage [--html]` reports line
+  coverage per file (instrumented build in `target/coverage`; needs
+  `llvm-profdata`/`llvm-cov` of rustc's LLVM major version), a guide to what
+  the tests miss.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.

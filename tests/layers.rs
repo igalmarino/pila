@@ -38,8 +38,9 @@ fn top_bar(height: u32) -> LayerSpec {
 }
 
 fn wait_layer(pila: &mut TestPila, namespace: &str) -> Value {
+    // Its size comes with its first buffer.
     let state = pila.wait(&format!("layer {namespace}"), |s| {
-        layer_in(s, namespace).is_some_and(|l| !l["geometry"].is_null())
+        layer_in(s, namespace).is_some_and(|l| l["geometry"]["w"].as_i64().unwrap_or(0) > 0)
     });
     layer_in(&state, namespace).unwrap().clone()
 }
@@ -49,10 +50,7 @@ fn a_bar_is_stretched_and_takes_its_exclusive_zone() {
     let mut pila = TestPila::start();
     let client = pila.client();
     let (bar, _) = client.layer_surface("bar", &top_bar(30), BLUE);
-    let first = client.wait_surface_configured(bar);
-    client.roundtrip();
-    let all = client.surface_data(bar, |s| s.configures.clone());
-    assert_eq!(first, (0, 0, 1280, 30), "configures: {all:?}");
+    assert_eq!(client.wait_surface_configured(bar), (0, 0, 1280, 30));
     let l = wait_layer(&mut pila, "bar");
     assert_eq!(rect(&l["geometry"]), (0, 0, 1280, 30));
     assert_eq!(l["layer"], "top");

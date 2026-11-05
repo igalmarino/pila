@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Line coverage of the test suite (unit and integration tests, the headless
+# pilas they start included), per source file: a guide to what the tests
+# miss, next to tests/FEATURES.md. Bare-metal code (udev.rs) and the nested
+# backend (winit.rs) stay low by nature; scripts/check covers them.
+#
+#   scripts/coverage            report in the terminal
+#   scripts/coverage --html     also an HTML report (target/coverage/html)
+#
+# Needs llvm-profdata and llvm-cov of the same LLVM major version as rustc
+# (package llvm; or rustup's llvm-tools component, whose tools are used
+# when found).
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+html=false
+if [ "${1:-}" = "--html" ]; then
+    html=true
+fi
+
+# rustup's llvm-tools, if installed, match rustc exactly.
+sysroot=$(rustc --print sysroot)
+tools=$(find "$sysroot/lib/rustlib" -maxdepth 3 -name llvm-profdata -printf '%h\n' 2>/dev/null | head -1)
+profdata=${tools:+$tools/}llvm-profdata
+cov=${tools:+$tools/}llvm-cov
+for tool in "$profdata" "$cov"; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "$tool not found: install LLVM's tools (package llvm, or" \
+            "rustup component add llvm-tools)" >&2
+        exit 1
+    fi
+done
+rust_llvm=$(rustc -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')
+tool_llvm=$("$profdata" --version | sed -n 's/.*LLVM version \([0-9]*\).*/\1/p')
+if [ -n "$rust_llvm" ] && [ -n "$tool_llvm" ] && [ "$rust_llvm" != "$tool_llvm" ]; then
+    echo "warning: rustc uses LLVM $rust_llvm, $profdata is LLVM $tool_llvm" >&2
+fi
+
+out=target/coverage
+rm -rf "$out/profiles"
+mkdir -p "$out/profiles"
+echo "Running the tests with coverage (a separate build in $out/target)..."
+RUSTFLAGS="-C instrument-coverage" \
+    LLVM_PROFILE_FILE="$PWD/$out/profiles/%p-%m.profraw" \
+    CARGO_TARGET_DIR="$out/target" \
+    cargo test --quiet || echo "warning: some tests failed; coverage is still reported" >&2
+
+"$profdata" merge -sparse "$out"/profiles/*.profraw -o "$out/pila.profdata"
+ignore='(\.cargo|/rustc/|/tests/|/target/)'
+"$cov" report "$out/target/debug/pila" --instr-profile="$out/pila.profdata" \
+    --ignore-filename-regex="$ignore"
+if $html; then
+    "$cov" show "$out/target/debug/pila" --instr-profile="$out/pila.profdata" \
+        --ignore-filename-regex="$ignore" --format=html --output-dir="$out/html"
+    echo "HTML report: $out/html/index.html"
+fi

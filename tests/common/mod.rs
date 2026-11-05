@@ -433,6 +433,16 @@ impl TestPila {
 
 impl Drop for TestPila {
     fn drop(&mut self) {
+        // SIGTERM quits pila cleanly (Xwayland stopped, a coverage profile
+        // written); SIGKILL if it doesn't.
+        // SAFETY: a signal to our own child.
+        unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        let started = Instant::now();
+        while matches!(self.child.try_wait(), Ok(None))
+            && started.elapsed() < Duration::from_secs(2)
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let log = self.log();
