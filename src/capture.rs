@@ -412,6 +412,16 @@ impl Pila {
     }
 
     /// Stop the sessions of an output that went away.
+    /// The window with foreign-toplevel `identifier` is gone: stop its
+    /// sessions now, whether or not a frame is waiting.
+    pub fn stop_window_captures(&mut self, identifier: &str) {
+        for session in &mut self.captures {
+            if matches!(&session.target, Target::Toplevel(id) if id == identifier) {
+                session.stop();
+            }
+        }
+    }
+
     pub fn stop_captures_of(&mut self, output: &Output) {
         for session in &mut self.captures {
             if matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output))

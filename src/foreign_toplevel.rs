@@ -108,6 +108,10 @@ impl Pila {
 
     /// Unlist a window whose toplevel was destroyed.
     pub fn remove_foreign_toplevel(&mut self, window: &Window) {
+        // Captures name the window by its identifier, which dies with it.
+        if let Some(identifier) = identifier(window) {
+            self.stop_window_captures(&identifier);
+        }
         if let Some(handle) = handle(window) {
             self.globals.foreign_toplevel_list.remove_toplevel(handle);
         }

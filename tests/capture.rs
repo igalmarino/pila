@@ -192,7 +192,6 @@ fn closing_the_window_stops_its_session() {
 }
 
 #[test]
-#[ignore = "bug: a window session with no frame pending isn't told its window is gone (output sessions are)"]
 fn closing_the_window_stops_an_idle_session() {
     let mut pila = TestPila::start();
     let client = pila.client();
