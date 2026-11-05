@@ -30,6 +30,7 @@ use smithay::{
             SecurityContextState,
         },
         selection::{ext_data_control, primary_selection::PrimarySelectionState},
+        shell::xdg::dialog::XdgDialogState,
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
         virtual_keyboard::VirtualKeyboardManagerState,
@@ -78,6 +79,8 @@ pub fn init_globals(
     // Its handler is in `pointer_constraints.rs`.
     PointerConstraintsState::new::<Pila>(dh);
     XdgToplevelIconManager::new::<Pila>(dh);
+    // Its handler is in `transients.rs`.
+    XdgDialogState::new::<Pila>(dh);
     // Its handler is in `idle.rs`.
     IdleInhibitManagerState::new::<Pila>(dh);
     // Its handler is in `bell.rs`.

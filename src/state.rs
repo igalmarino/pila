@@ -970,6 +970,7 @@ impl Pila {
             .map(|l| KeyboardFocus::from(l.wl_surface().clone()));
         match window {
             Some(window) => {
+                let window = self.focus_redirect(window);
                 self.touch_focus_history(&window);
                 self.raise_family(&window);
                 let target = focus_target(&window);

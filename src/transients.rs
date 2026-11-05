@@ -2,7 +2,12 @@
 //! `xdg_toplevel.set_parent` (or xdg-foreign's `set_parent_of`) or, on X11,
 //! `WM_TRANSIENT_FOR`. A window and its descendants are a family: children
 //! stay above their parent in the `Space`'s stacking order, and the family
-//! minimizes and changes workspace together.
+//! minimizes and changes workspace together. A modal child (xdg-dialog's
+//! `set_modal`) takes the focus whenever its parent would get it; the client
+//! keeps blocking its own widgets, pila neither blocks the pointer over the
+//! parent nor dims it. X11 windows are never modal here: Smithay's window
+//! manager ignores `_NET_WM_STATE_MODAL` requests (`X11Surface::is_popup` is
+//! always false).
 //!
 //! Smithay's `Space::map_element` puts the window on top, so whatever moves
 //! a mapped window then calls `keep_transients_above`.
@@ -10,7 +15,14 @@
 //! X11 can make cycles of `WM_TRANSIENT_FOR`, so walks remember where they
 //! have been instead of trusting the relation to be a tree.
 
-use smithay::desktop::Window;
+use smithay::{
+    delegate_xdg_dialog,
+    desktop::Window,
+    wayland::{
+        compositor::with_states,
+        shell::xdg::{dialog::XdgDialogHandler, ToplevelSurface, XdgToplevelSurfaceData},
+    },
+};
 
 use crate::{workspaces::is_override_redirect, Pila};
 
@@ -31,7 +43,55 @@ fn is_parent_of(parent: &Window, child: &Window) -> bool {
     }
 }
 
+/// Whether `window` asked to be modal.
+fn is_modal(window: &Window) -> bool {
+    window.toplevel().is_some_and(|toplevel| {
+        with_states(toplevel.wl_surface(), |states| {
+            states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .and_then(|data| data.lock().ok().map(|data| data.modal))
+                .unwrap_or(false)
+        })
+    })
+}
+
+impl XdgDialogHandler for Pila {
+    fn modal_changed(&mut self, toplevel: ToplevelSurface, is_modal: bool) {
+        // A dialog turning modal takes the focus from its parent.
+        let Some(window) = self.window_for_surface(toplevel.wl_surface()) else {
+            return;
+        };
+        let parent = self.transient_parent(&window);
+        if is_modal && parent.is_some() && parent == self.focused_window() {
+            self.focus_window(parent, smithay::utils::SERIAL_COUNTER.next_serial());
+            self.queue_redraw();
+        }
+    }
+}
+delegate_xdg_dialog!(Pila);
+
 impl Pila {
+    /// Who gets the focus when `window` should: its topmost modal child on
+    /// screen, that one's if it has one, and so on; else `window` itself.
+    pub fn focus_redirect(&self, window: Window) -> Window {
+        let mut seen = vec![window];
+        loop {
+            let current = seen.last().expect("starts with the window");
+            let modal = self
+                .transient_children(current)
+                .into_iter()
+                .rev()
+                .find(|w| {
+                    is_modal(w) && self.space.element_location(w).is_some() && !seen.contains(w)
+                });
+            match modal {
+                Some(modal) => seen.push(modal),
+                None => return seen.pop().expect("starts with the window"),
+            }
+        }
+    }
+
     /// Managed windows, on the `Space` (back to front) or off it.
     fn managed_windows(&self) -> impl Iterator<Item = &Window> {
         self.space

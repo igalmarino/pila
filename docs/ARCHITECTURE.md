@@ -163,6 +163,10 @@ Key flows and invariants:
   alone stays minimized. `move_focused_to_workspace` parks the family, a child opens on its
   parent's workspace unless a rule says otherwise. A drag carrying a window to another
   workspace carries only that window. X11 can make cycles, so walks don't assume a tree.
+  A modal child on screen (xdg-dialog; not X11: Smithay's window manager ignores
+  `_NET_WM_STATE_MODAL`) takes the focus whenever its parent would get it: `focus_window` starts with `focus_redirect`, so clicks, Mod+Tab,
+  activation and taskbars all agree. The pointer still reaches the parent: the client blocks
+  its own widgets.
 - **Window switching** (`switcher.rs`): `focus_window` moves the window to the front of
   `Pila::focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::switch`,
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;

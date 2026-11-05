@@ -4,6 +4,7 @@ mod common;
 
 use common::client::{states, Decorations, Ev};
 use common::*;
+use wayland_protocols::xdg::dialog::v1::client::xdg_wm_dialog_v1::XdgWmDialogV1;
 
 /// Title bar height (`decoration::TITLE_BAR_HEIGHT`).
 const BAR: i64 = 28;
@@ -560,4 +561,83 @@ fn a_child_outlives_its_parent() {
     client.window("other").create();
     let state = pila.wait_focus("other");
     assert_eq!(stacking(&state), vec!["child", "other"]);
+}
+
+/// Make `window` a dialog, modal or not.
+fn set_dialog(client: &Client, window: common::client::Window, modal: bool) {
+    let manager: XdgWmDialogV1 = client.bind("xdg_wm_dialog_v1", 1);
+    let dialog = manager.get_xdg_dialog(&client.toplevel(window), &client.qh, "dialog".to_string());
+    if modal {
+        dialog.set_modal();
+    }
+    client.flush();
+}
+
+/// A corner of the window that a centered child doesn't cover.
+fn click_corner_of(pila: &mut TestPila, app_id: &str) {
+    let geometry = rect(&pila.window(app_id)["geometry"]);
+    pila.click_at(geometry.0 as f64 + 10.0, geometry.1 as f64 + 10.0);
+}
+
+#[test]
+fn clicking_the_parent_of_a_modal_dialog_focuses_the_dialog() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (_, child) = parent_and_child(&mut pila, &client);
+    set_dialog(&client, child, true);
+    client.roundtrip();
+    client.window("other").size(100, 100).create();
+    pila.wait_focus("other");
+    click_corner_of(&mut pila, "parent");
+    let state = pila.wait_focus("child");
+    assert_eq!(stacking(&state), vec!["other", "parent", "child"]);
+}
+
+#[test]
+fn a_dialog_that_isnt_modal_lets_the_parent_have_the_focus() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (_, child) = parent_and_child(&mut pila, &client);
+    set_dialog(&client, child, false);
+    client.roundtrip();
+    click_corner_of(&mut pila, "parent");
+    let state = pila.wait_focus("parent");
+    assert_eq!(stacking(&state), vec!["parent", "child"]);
+}
+
+#[test]
+fn a_dialog_turning_modal_takes_the_focus_from_its_parent() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (_, child) = parent_and_child(&mut pila, &client);
+    click_corner_of(&mut pila, "parent");
+    pila.wait_focus("parent");
+    set_dialog(&client, child, true);
+    pila.wait_focus("child");
+}
+
+#[test]
+fn the_parent_gets_the_focus_again_when_its_modal_dialog_closes() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (_, child) = parent_and_child(&mut pila, &client);
+    set_dialog(&client, child, true);
+    client.roundtrip();
+    client.destroy(child);
+    pila.wait_focus("parent");
+    client.window("other").size(100, 100).create();
+    pila.wait_focus("other");
+    click_corner_of(&mut pila, "parent");
+    pila.wait_focus("parent");
+}
+
+#[test]
+fn a_modal_dialog_minimized_alone_doesnt_take_the_parents_focus() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (_, child) = parent_and_child(&mut pila, &client);
+    set_dialog(&client, child, true);
+    client.roundtrip();
+    pila.combo("Super+n");
+    pila.wait_focus("parent");
 }

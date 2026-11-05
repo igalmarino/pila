@@ -966,6 +966,10 @@ pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
 // --- xdg-session-management -----------------------------------------------------
 
 logged!(XdgSessionManagerV1, XdgSessionV1);
+logged!(
+    wayland_protocols::xdg::dialog::v1::client::xdg_wm_dialog_v1::XdgWmDialogV1,
+    wayland_protocols::xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1,
+);
 
 /// Logged with how many configures the client's windows got by then.
 impl Dispatch<XdgToplevelSessionV1, String> for Handler {
