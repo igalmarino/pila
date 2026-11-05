@@ -205,7 +205,10 @@ impl Pila {
             );
             self.notify(
                 "Keyboard config not applied",
-                "invalid layout, variant or options",
+                &format!(
+                    "{}: xkbcommon doesn't know it; keeping the current keymap.",
+                    crate::config::keymap_description(&kb)
+                ),
             );
         }
         keyboard.change_repeat_info(kb.repeat_rate, kb.repeat_delay);
@@ -227,7 +230,8 @@ impl Pila {
 
     /// A desktop notification (through `notify-send`, if there's a
     /// notification daemon such as mako); also in the log.
-    fn notify(&mut self, summary: &str, body: &str) {
+    pub(crate) fn notify(&mut self, summary: &str, body: &str) {
+        info!(summary, body, "notification");
         let mut cmd = Command::new("notify-send");
         cmd.args(["--app-name=pila", "--expire-time=3000", summary]);
         if !body.is_empty() {

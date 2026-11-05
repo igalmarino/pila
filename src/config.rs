@@ -392,6 +392,22 @@ impl Default for KeyboardConfig {
     }
 }
 
+/// The keymap `[keyboard]` asks for, for messages: `layout "en"`, with the
+/// variant, model and options when set.
+pub fn keymap_description(kb: &KeyboardConfig) -> String {
+    let mut parts = vec![format!("layout \"{}\"", kb.layout)];
+    if !kb.variant.is_empty() {
+        parts.push(format!("variant \"{}\"", kb.variant));
+    }
+    if !kb.model.is_empty() {
+        parts.push(format!("model \"{}\"", kb.model));
+    }
+    if let Some(options) = kb.options.as_ref().filter(|o| !o.is_empty()) {
+        parts.push(format!("options \"{options}\""));
+    }
+    parts.join(", ")
+}
+
 /// Pointer acceleration (`accel-profile`): libinput's adaptive curve, or a
 /// constant factor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1668,6 +1684,28 @@ mod tests {
         };
         assert!(config.window_rules.len() >= 3);
         assert!(config.layer_rules.len() >= 2);
+    }
+
+    #[test]
+    fn keymaps_are_described_by_what_is_set() {
+        let kb = KeyboardConfig {
+            layout: "en".into(),
+            variant: "altgr-intl".into(),
+            ..KeyboardConfig::default()
+        };
+        assert_eq!(
+            keymap_description(&kb),
+            r#"layout "en", variant "altgr-intl""#
+        );
+        let kb = KeyboardConfig {
+            layout: "us,es".into(),
+            options: Some("grp:alt_shift_toggle".into()),
+            ..KeyboardConfig::default()
+        };
+        assert_eq!(
+            keymap_description(&kb),
+            r#"layout "us,es", options "grp:alt_shift_toggle""#
+        );
     }
 
     #[test]

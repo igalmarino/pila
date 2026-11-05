@@ -75,6 +75,10 @@ use crate::{
     switcher::Switch,
 };
 
+/// How long after startup a problem found then is shown as a notification
+/// (the session's notification daemon starts with the autostart programs).
+const STARTUP_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_secs(6);
+
 /// Offset applied to each new window that would land exactly on top of another.
 const CASCADE_STEP: i32 = 32;
 
@@ -283,6 +287,7 @@ impl Pila {
         // A keymap xkbcommon can't build (e.g. a typo in the layout) falls
         // back to the default one rather than leaving pila without keyboard.
         let kb = &config.keyboard;
+        let mut keymap_failed = false;
         if let Err(err) = seat.add_keyboard(xkb_config(kb), kb.repeat_delay, kb.repeat_rate) {
             warn!(
                 ?err,
@@ -291,6 +296,24 @@ impl Pila {
             );
             seat.add_keyboard(XkbConfig::default(), kb.repeat_delay, kb.repeat_rate)
                 .expect("failed to initialize keyboard");
+            keymap_failed = true;
+        }
+        if keymap_failed {
+            // Only in the log otherwise: say so on screen too, once the
+            // session's notification daemon has had time to start.
+            let what = crate::config::keymap_description(kb);
+            let _ = loop_handle.insert_source(
+                Timer::from_duration(STARTUP_NOTICE_DELAY),
+                move |_, _, state: &mut Pila| {
+                    state.notify(
+                        "Keyboard layout not found",
+                        &format!(
+                            "{what}: using the default keymap. Check [keyboard] in the config."
+                        ),
+                    );
+                    TimeoutAction::Drop
+                },
+            );
         }
         seat.add_pointer();
 
