@@ -152,7 +152,17 @@ Key flows and invariants:
   the spot is taken). Lookups that must find unmapped windows
   use `window_for_surface`, which searches both.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
-  `focus_window` both raises and sets keyboard focus, then flushes pending configures.
+  `focus_window` both raises (with its family, see "Transient windows") and sets keyboard
+  focus, then flushes pending configures.
+- **Transient windows** (`transients.rs`): a window set on another (`xdg_toplevel.set_parent`,
+  xdg-foreign, X11's `WM_TRANSIENT_FOR`) forms a family with it. `focus_window` raises the
+  whole family (`raise_family`), each window before its children, so a child is always above
+  its parent, even with the parent focused. `Space::map_element` raises the window it moves,
+  so whatever moves a mapped window calls `keep_transients_above` after it. Minimizing hides
+  the descendants too, marked to come back with the parent (`show_window`); one minimized
+  alone stays minimized. `move_focused_to_workspace` parks the family, a child opens on its
+  parent's workspace unless a rule says otherwise. A drag carrying a window to another
+  workspace carries only that window. X11 can make cycles, so walks don't assume a tree.
 - **Window switching** (`switcher.rs`): `focus_window` moves the window to the front of
   `Pila::focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::switch`,
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;

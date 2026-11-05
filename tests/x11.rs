@@ -372,6 +372,54 @@ fn an_iconify_request_minimizes() {
 }
 
 #[test]
+fn a_transient_x11_window_stays_above_its_parent() {
+    let mut pila = TestPila::start();
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    let parent = x.window("XParent", (400, 300), 0xff0000);
+    pila.wait_focus("XParent");
+    let child = x.window("XChild", (100, 100), 0x00ff00);
+    pila.wait_focus("XChild");
+    x.conn
+        .change_property32(
+            PropMode::REPLACE,
+            child,
+            AtomEnum::WM_TRANSIENT_FOR,
+            AtomEnum::WINDOW,
+            &[parent],
+        )
+        .unwrap();
+    x.conn.flush().unwrap();
+    // Set while the child is above: nothing to see yet. Focusing the parent
+    // must not bury the child; a cycle (the parent on the child) must not hang.
+    x.conn
+        .change_property32(
+            PropMode::REPLACE,
+            parent,
+            AtomEnum::WM_TRANSIENT_FOR,
+            AtomEnum::WINDOW,
+            &[child],
+        )
+        .unwrap();
+    x.conn.flush().unwrap();
+    x.conn
+        .delete_property(parent, AtomEnum::WM_TRANSIENT_FOR.into())
+        .unwrap();
+    x.conn.flush().unwrap();
+    let state = pila.wait_focus("XChild");
+    let geometry = rect(&x11_window(&state, "XParent").unwrap()["geometry"]);
+    pila.stays(
+        "the transient set",
+        std::time::Duration::from_millis(100),
+        |_| true,
+    );
+    pila.click_at(geometry.0 as f64 + 5.0, geometry.1 as f64 + 5.0);
+    let state = pila.wait_focus("XParent");
+    assert_eq!(stacking(&state), vec!["XParent", "XChild"]);
+}
+
+#[test]
 fn clicking_an_x11_window_focuses_it() {
     let mut pila = TestPila::start();
     let Some(x) = X11::connect(&mut pila) else {

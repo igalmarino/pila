@@ -7,12 +7,26 @@
 //! (`workspaces.rs`); restored by a taskbar's unminimize, it comes back on
 //! the active workspace.
 
+use std::cell::Cell;
+
 use smithay::{desktop::Window, utils::SERIAL_COUNTER};
 
 use crate::{
     workspaces::{deactivate, leave_space, space_location},
     Pila,
 };
+
+/// In a minimized window's user data: it went with its parent, and comes
+/// back with it (`transients.rs`).
+#[derive(Default)]
+struct WentWithParent(Cell<bool>);
+
+fn went_with_parent(window: &Window) -> &Cell<bool> {
+    window
+        .user_data()
+        .insert_if_missing(WentWithParent::default);
+    &window.user_data().get::<WentWithParent>().unwrap().0
+}
 
 impl Pila {
     pub fn is_minimized(&self, window: &Window) -> bool {
@@ -22,16 +36,18 @@ impl Pila {
     /// Minimize `window` (title bar button, Mod+N, or the client asking).
     /// Focus moves to the most recently used window still on screen.
     pub fn minimize_window(&mut self, window: &Window) {
-        let was_focused = self.focused_window().as_ref() == Some(window);
+        let focused = self.focused_window();
         if !self.hide_window(window) {
             return;
         }
-        if was_focused {
+        // It, or a child that went with it.
+        if focused.is_some_and(|focused| self.is_minimized(&focused)) {
             self.focus_recent_window();
         }
     }
 
-    /// Take a mapped window off screen. Returns false if it wasn't mapped.
+    /// Take a mapped window off screen, its children with it. Returns false
+    /// if it wasn't mapped.
     pub(crate) fn hide_window(&mut self, window: &Window) -> bool {
         let Some(loc) = self.space.element_location(window) else {
             return false;
@@ -45,17 +61,24 @@ impl Pila {
             let _ = x11.set_suspended(true);
         }
         self.minimized.push(window.clone());
+        for child in self.transient_children(window) {
+            if self.hide_window(&child) {
+                went_with_parent(&child).set(true);
+            }
+        }
         self.queue_redraw();
         true
     }
 
     /// Put a minimized window back where it was (or centered, if that spot
-    /// is no longer on any output) without focusing it.
+    /// is no longer on any output) without focusing it, and the children
+    /// that went with it.
     pub(crate) fn show_window(&mut self, window: &Window) {
         let Some(index) = self.minimized.iter().position(|w| w == window) else {
             return;
         };
         self.minimized.remove(index);
+        went_with_parent(window).set(false);
         self.space
             .map_element(window.clone(), space_location(window), false);
         if let Some(x11) = window.x11_surface() {
@@ -65,6 +88,12 @@ impl Pila {
         self.fixup_windows();
         self.animate_restore(window);
         self.x11_window_moved(window);
+        self.keep_transients_above(window);
+        for child in self.transient_children(window) {
+            if went_with_parent(&child).get() {
+                self.show_window(&child);
+            }
+        }
         self.queue_redraw();
     }
 

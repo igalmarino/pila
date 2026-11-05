@@ -58,7 +58,9 @@ impl CompositorHandler for Pila {
         self.handle_layer_commit(surface);
         self.update_foreign_toplevel(surface);
         self.handle_lock_commit(surface);
-        resize_grab::handle_commit(&mut self.space, surface);
+        if let Some(moved) = resize_grab::handle_commit(&mut self.space, surface) {
+            self.keep_transients_above(&moved);
+        }
         crate::cursor::handle_commit(&self.cursor_status, surface);
     }
 }

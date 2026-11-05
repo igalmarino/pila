@@ -290,6 +290,11 @@ impl XwmHandler for Pila {
     }
 
     fn property_notify(&mut self, _xwm: XwmId, surface: X11Surface, property: WmWindowProperty) {
+        if property == WmWindowProperty::TransientFor {
+            if let Some(window) = self.window_for_x11(&surface) {
+                self.transient_parent_changed(&window);
+            }
+        }
         // The title bar and taskbars show the title; decorations may change.
         if matches!(
             property,

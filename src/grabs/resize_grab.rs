@@ -209,6 +209,7 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
             }
             let _ = x11.configure(Rectangle::new(loc, self.last_window_size));
             data.space.map_element(self.window.clone(), loc, true);
+            data.keep_transients_above(&self.window);
         }
     }
 
@@ -409,7 +410,8 @@ impl ResizeSurfaceState {
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(space: &mut Space<Window>, surface: &WlSurface) -> Option<()> {
+/// Returns the window, if the commit moved it (`Space::map_element` raised it).
+pub fn handle_commit(space: &mut Space<Window>, surface: &WlSurface) -> Option<Window> {
     let window = space
         .elements()
         .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
@@ -448,8 +450,9 @@ pub fn handle_commit(space: &mut Space<Window>, surface: &WlSurface) -> Option<(
 
     if new_loc.x.is_some() || new_loc.y.is_some() {
         // If TOP or LEFT side of the window got resized, we have to move it
-        space.map_element(window, window_loc, false);
+        space.map_element(window.clone(), window_loc, false);
+        return Some(window);
     }
 
-    Some(())
+    None
 }

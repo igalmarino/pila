@@ -76,6 +76,12 @@ impl XdgShellHandler for Pila {
         }
     }
 
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.transient_parent_changed(&window);
+        }
+    }
+
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
         self.unconstrain_popup(&surface);
         if let Err(err) = self.popups.track_popup(PopupKind::Xdg(surface)) {

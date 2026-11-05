@@ -52,6 +52,7 @@ mod switcher;
 mod test_control;
 mod text;
 mod toplevel_management;
+mod transients;
 mod udev;
 mod winit;
 mod workspace_slide;

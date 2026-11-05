@@ -764,6 +764,7 @@ impl Pila {
                     let loc = centered_location(area, geo.size, bar);
                     debug!(?loc, "moving window off a removed output");
                     self.space.map_element(window.clone(), loc, false);
+                    self.keep_transients_above(&window);
                     self.x11_window_moved(&window);
                 }
             }
@@ -816,6 +817,7 @@ impl Pila {
     fn place_window(&mut self, window: &Window, loc: Point<i32, Logical>) {
         if self.space.element_location(window).is_some() {
             self.space.map_element(window.clone(), loc, true);
+            self.keep_transients_above(window);
         } else if self.off_space_windows().any(|w| w == window) {
             crate::workspaces::set_space_location(window, loc);
         }
@@ -935,8 +937,13 @@ impl Pila {
         debug!(app_id, ?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
         self.space.map_element(window.clone(), location, true);
         self.announce_toplevel(&window);
+        // A window set on another one opens where that one is.
+        let parent_workspace = self
+            .transient_parent(&window)
+            .map(|parent| self.workspace_of(&parent));
         if let Some(index) = props
             .open_on_workspace
+            .or(parent_workspace)
             .filter(|index| *index != self.workspaces.active)
         {
             debug!(target: "pila::rules", app_id, workspace = index + 1, "opens on workspace");
@@ -964,8 +971,7 @@ impl Pila {
         match window {
             Some(window) => {
                 self.touch_focus_history(&window);
-                self.space.raise_element(&window, true);
-                self.x11_window_raised(&window);
+                self.raise_family(&window);
                 let target = focus_target(&window);
                 self.set_keyboard_focus(exclusive.or(target), serial);
             }
@@ -1176,6 +1182,7 @@ impl Pila {
                 start_data.location.y as i32 - y_offset,
             ));
             self.space.map_element(window.clone(), loc, true);
+            self.keep_transients_above(&window);
             self.x11_window_moved(&window);
         } else if crate::snap::snapped_side(&window).is_some() {
             // Same for a snapped window: back to its old size under the cursor.

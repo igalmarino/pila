@@ -370,3 +370,194 @@ fn an_unmapped_window_leaves_taskbars_and_comes_back_as_a_new_one() {
             == 2
     });
 }
+
+// --- Transient windows (`transients.rs`) ---
+
+/// "parent" and, set on it, "child" (focused, on top).
+fn parent_and_child(
+    pila: &mut TestPila,
+    client: &Client,
+) -> (common::client::Window, common::client::Window) {
+    let parent = client.window("parent").size(400, 300).create();
+    pila.wait_focus("parent");
+    let toplevel = client.toplevel(parent);
+    let child = client
+        .window("child")
+        .size(200, 100)
+        .before_commit(|t| t.set_parent(Some(&toplevel)))
+        .create();
+    pila.wait_focus("child");
+    (parent, child)
+}
+
+#[test]
+fn a_child_stays_above_its_parent_when_the_parent_is_focused() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    parent_and_child(&mut pila, &client);
+    client.window("other").size(100, 100).create();
+    let state = pila.wait_focus("other");
+    assert_eq!(stacking(&state), vec!["parent", "child", "other"]);
+    // Clear of the child (centered on the parent) and of the other window.
+    let parent = rect(&window_in(&state, "parent").unwrap()["geometry"]);
+    pila.click_at(parent.0 as f64 + 10.0, parent.1 as f64 + 10.0);
+    let state = pila.wait_focus("parent");
+    assert_eq!(stacking(&state), vec!["other", "parent", "child"]);
+}
+
+#[test]
+fn focusing_a_child_brings_its_parent_along() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (parent, child) = parent_and_child(&mut pila, &client);
+    client.window("other").size(800, 600).create();
+    let state = pila.wait_focus("other");
+    assert_eq!(stacking(&state), vec!["parent", "child", "other"]);
+    // Mod+Tab goes back to the child, the window used before "other".
+    pila.combo("Super+Tab");
+    let state = pila.wait_focus("child");
+    assert_eq!(stacking(&state), vec!["other", "parent", "child"]);
+    client.wait_configure(child, "the child active", |c| c.has(states::ACTIVATED));
+    client.wait_configure(parent, "the parent inactive", |c| !c.has(states::ACTIVATED));
+}
+
+#[test]
+fn siblings_keep_their_order_with_the_focused_one_on_top() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let parent = client.window("parent").size(800, 600).create();
+    pila.wait_focus("parent");
+    let toplevel = client.toplevel(parent);
+    for name in ["first", "second"] {
+        client
+            .window(name)
+            .size(100, 100)
+            .before_commit(|t| t.set_parent(Some(&toplevel)))
+            .create();
+        pila.wait_focus(name);
+    }
+    pila.combo("Super+Tab");
+    let state = pila.wait_focus("first");
+    assert_eq!(stacking(&state), vec!["parent", "second", "first"]);
+}
+
+#[test]
+fn a_parent_set_late_brings_the_child_above_it_without_the_focus() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let child = client.window("child").size(100, 100).create();
+    pila.wait_focus("child");
+    let parent = client.window("parent").size(400, 300).create();
+    let state = pila.wait_focus("parent");
+    assert_eq!(stacking(&state), vec!["child", "parent"]);
+    let toplevel = client.toplevel(parent);
+    client.request(child, |t| t.set_parent(Some(&toplevel)));
+    let state = pila.wait("the child on top", |s| stacking(s) == ["parent", "child"]);
+    assert_eq!(state["focused"], "parent");
+}
+
+#[test]
+fn moving_a_parent_keeps_its_child_above() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    parent_and_child(&mut pila, &client);
+    pila.combo("Super+Left");
+    let state = pila.wait("snapped", |s| {
+        window_in(s, "parent").unwrap()["snapped"] != Value::Null
+            || window_in(s, "child").unwrap()["snapped"] != Value::Null
+    });
+    assert_eq!(stacking(&state), vec!["parent", "child"]);
+    // The parent moved, this time, with the child still above it.
+    let parent = rect(&window_in(&state, "parent").unwrap()["geometry"]);
+    pila.click_at(parent.0 as f64 + 5.0, parent.1 as f64 + 5.0);
+    pila.wait_focus("parent");
+    pila.combo("Super+Right");
+    let state = pila.wait("the parent snapped", |s| {
+        window_in(s, "parent").unwrap()["snapped"] != Value::Null
+    });
+    assert_eq!(stacking(&state), vec!["parent", "child"]);
+}
+
+#[test]
+fn a_family_minimizes_and_comes_back_together() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    parent_and_child(&mut pila, &client);
+    let state = pila.window("parent");
+    let parent = rect(&state["geometry"]);
+    pila.click_at(parent.0 as f64 + 10.0, parent.1 as f64 + 10.0);
+    pila.wait_focus("parent");
+    pila.combo("Super+n");
+    let state = pila.wait("both minimized", |s| {
+        window_in(s, "parent").unwrap()["minimized"] == true
+            && window_in(s, "child").unwrap()["minimized"] == true
+    });
+    assert!(state["focused"].is_null());
+    pila.combo("Super+Tab");
+    let state = pila.wait("both back", |s| {
+        window_in(s, "parent").unwrap()["minimized"] == false
+            && window_in(s, "child").unwrap()["minimized"] == false
+    });
+    assert_eq!(stacking(&state), vec!["parent", "child"]);
+}
+
+#[test]
+fn a_child_minimized_alone_stays_minimized_when_its_parent_is_focused() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    parent_and_child(&mut pila, &client);
+    pila.combo("Super+n");
+    let state = pila.wait_focus("parent");
+    assert_eq!(window_in(&state, "child").unwrap()["minimized"], true);
+    assert_eq!(window_in(&state, "parent").unwrap()["minimized"], false);
+}
+
+#[test]
+fn a_family_changes_workspace_together() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    parent_and_child(&mut pila, &client);
+    pila.combo("Super+Shift+2");
+    let state = pila.wait("both moved", |s| {
+        window_in(s, "parent").unwrap()["workspace"] == 2
+            && window_in(s, "child").unwrap()["workspace"] == 2
+    });
+    assert!(state["focused"].is_null());
+    pila.combo("Super+2");
+    let state = pila.wait_focus("child");
+    assert_eq!(stacking(&state), vec!["parent", "child"]);
+}
+
+#[test]
+fn a_child_opens_on_its_parents_workspace() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let parent = client.window("parent").create();
+    pila.wait_focus("parent");
+    pila.combo("Super+Shift+2");
+    pila.wait("moved", |s| {
+        window_in(s, "parent").unwrap()["workspace"] == 2
+    });
+    let toplevel = client.toplevel(parent);
+    client
+        .window("child")
+        .before_commit(|t| t.set_parent(Some(&toplevel)))
+        .create();
+    let state = pila.wait("the child on workspace 2", |s| {
+        window_in(s, "child").is_some_and(|w| w["workspace"] == 2)
+    });
+    assert_eq!(state["workspace"], 1);
+}
+
+#[test]
+fn a_child_outlives_its_parent() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (parent, _child) = parent_and_child(&mut pila, &client);
+    client.destroy(parent);
+    let state = pila.wait("the parent gone", |s| window_in(s, "parent").is_none());
+    assert_eq!(state["focused"], "child");
+    client.window("other").create();
+    let state = pila.wait_focus("other");
+    assert_eq!(stacking(&state), vec!["child", "other"]);
+}

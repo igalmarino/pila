@@ -128,13 +128,17 @@ impl Pila {
         else {
             return;
         };
-        if index == active || self.grabbed_window().as_ref() == Some(&window) {
+        let family = self.transient_family(&window);
+        let grabbed = self.grabbed_window();
+        if index == active || grabbed.is_some_and(|grabbed| family.contains(&grabbed)) {
             return;
         }
         debug!(index, "moving window to workspace");
         // A Mod+Tab in progress must not come back to the parked window.
         self.end_switch();
-        self.park(&window, index);
+        for member in &family {
+            self.park(member, index);
+        }
         self.focus_recent_window();
         self.refresh_pointer_focus();
         self.queue_redraw();
