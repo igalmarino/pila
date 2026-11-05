@@ -17,7 +17,7 @@ use std::cell::Cell;
 use smithay::{
     desktop::Window,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{Logical, Point, Rectangle},
 };
 
 use crate::{decoration, state::fill_state, Pila};
@@ -232,8 +232,9 @@ impl Pila {
         }
     }
 
-    /// Mod+Ctrl+arrows: grow or shrink by `delta` (right/bottom edge).
-    pub fn resize_window_by(&mut self, window: &Window, delta: Size<i32, Logical>) {
+    /// Mod+Ctrl+arrows: grow or shrink by `delta` (width, height; right and
+    /// bottom edge). Not a `Size`: shrinking makes it negative.
+    pub fn resize_window_by(&mut self, window: &Window, delta: (i32, i32)) {
         let (maximized, fullscreen) = fill_state(window);
         if maximized || fullscreen || self.is_locked() {
             return;
@@ -241,8 +242,8 @@ impl Pila {
         self.forget_snap(window);
         if let Some(rect) = self.window_rect(window) {
             let size = (
-                (rect.size.w + delta.w).max(KEYBOARD_STEP),
-                (rect.size.h + delta.h).max(KEYBOARD_STEP),
+                (rect.size.w + delta.0).max(KEYBOARD_STEP),
+                (rect.size.h + delta.1).max(KEYBOARD_STEP),
             );
             self.apply_rect(window, Rectangle::new(rect.loc, size.into()), None);
         }
@@ -272,15 +273,18 @@ impl Pila {
     ) -> Option<Rectangle<i32, Logical>> {
         let area = self.usable_area_for(window)?;
         let bar = decoration::layout_offset(window, false);
-        let rect = match target {
-            SnapTarget::Half(side) => half(area, side, bar),
-            SnapTarget::Maximize => area,
-        };
-        // The preview covers the title bar too.
-        Some(Rectangle::new(
-            (rect.loc.x, rect.loc.y - bar).into(),
-            (rect.size.w, rect.size.h + bar).into(),
-        ))
+        match target {
+            SnapTarget::Half(side) => {
+                // The preview covers the title bar too.
+                let rect = half(area, side, bar);
+                Some(Rectangle::new(
+                    (rect.loc.x, rect.loc.y - bar).into(),
+                    (rect.size.w, rect.size.h + bar).into(),
+                ))
+            }
+            // Maximized, the bar is inside the area already.
+            SnapTarget::Maximize => Some(area),
+        }
     }
 
     /// Release at the end of a drag: apply what the preview showed.

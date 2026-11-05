@@ -1304,7 +1304,7 @@ impl Pila {
             }
             Action::ResizeWindow(w, h) => {
                 if let Some(window) = self.focused_window() {
-                    self.resize_window_by(&window, (w, h).into());
+                    self.resize_window_by(&window, (w, h));
                 }
             }
             Action::Center => {
