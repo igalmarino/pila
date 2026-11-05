@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- **Animations:** short and subtle, only where they help: windows fade and grow in and
-  out when they open and close, shrink away when minimized, move and stretch when
+- **Animations:** short and subtle, only where they help: windows rise and fade in and
+  drop out when they open and close, shrink away when minimized, move and stretch when
   maximized, made fullscreen or snapped; launchers and notifications fade; workspaces
   slide sideways, each monitor on its own. `[animations]` turns them off, retimes them
   (`speed`) or sets each one's duration.

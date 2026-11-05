@@ -52,8 +52,8 @@
 [animations]
 enabled = true
 speed = 1.0
-window-open = 180     # fade and grow in
-window-close = 150    # fade and shrink out
+window-open = 200     # rise and fade in
+window-close = 180    # shrink, drop and fade out
 minimize = 200        # and restoring
 maximize = 220        # also fullscreen and snapping
 layer = 150           # launchers, notifications

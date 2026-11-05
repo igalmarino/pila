@@ -349,9 +349,9 @@ Key flows and invariants:
   must return is kept (`Pila::globals`).
 - **Animations** (`animation.rs`, `[animations]` in the config:
   `config::AnimationsConfig`, all on by default, each a duration in ms or `false`, plus
-  a global `enabled` and `speed`): short and subtle. So far a window fades and grows in
+  a global `enabled` and `speed`): short and subtle. So far a window rises and fades in
   when mapped (`animate_open` from `place_new_window`; not X11 override-redirect),
-  fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
+  shrinks, drops and fades out when it goes (`animate_close`), and shrinks away a little lower
   when minimized (`animate_minimize` from `hide_window`, before the unmap) and back when
   restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`,
   `Layer`) gives each its look. A workspace switch slides (`workspace_slide.rs`):

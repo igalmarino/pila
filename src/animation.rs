@@ -1,6 +1,6 @@
 //! Animations: short and subtle, only where they help to follow what
-//! happened. A window fades and grows in when it opens and fades and shrinks
-//! out when it closes. Each one can be turned off or retimed in
+//! happened. A window rises and fades in when it opens and shrinks, drops and
+//! fades out when it closes. Each one can be turned off or retimed in
 //! `[animations]` (`config::AnimationsConfig`).
 //!
 //! A window that is animating isn't drawn as its surfaces: `render.rs` draws
@@ -126,7 +126,7 @@ pub fn center(rect: Rectangle<i32, Logical>) -> Point<f64, Logical> {
 /// How a window comes and goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
-    /// Opening and closing: it grows in from a little smaller.
+    /// Opening and closing: it rises in from a little lower and smaller.
     Open,
     /// Minimizing and restoring: smaller still, and a little lower, as if
     /// put away towards the bottom of the screen.
@@ -136,8 +136,10 @@ pub enum Style {
     Layer,
 }
 
-/// How much smaller a window is when it starts to open or ends closing.
-const OPEN_SCALE: f64 = 0.95;
+/// How much smaller a window is when it starts to open or ends closing, and
+/// how far below its place (logical pixels).
+const OPEN_SCALE: f64 = 0.9;
+const OPEN_DROP: f64 = 24.0;
 /// How much smaller a minimized window ends up, and how far it drops
 /// (logical pixels).
 const MINIMIZE_SCALE: f64 = 0.9;
@@ -150,7 +152,7 @@ impl Style {
     /// of the way in.
     fn transform(self, visibility: f64) -> Transform {
         let (scale, drop) = match self {
-            Style::Open => (OPEN_SCALE, 0.0),
+            Style::Open => (OPEN_SCALE, OPEN_DROP),
             Style::Minimize => (MINIMIZE_SCALE, MINIMIZE_DROP),
             Style::Layer => (LAYER_SCALE, 0.0),
         };
@@ -1131,11 +1133,11 @@ mod tests {
     }
 
     #[test]
-    fn windows_grow_and_fade_in() {
+    fn windows_rise_and_fade_in() {
         let gone = Style::Open.transform(0.0);
         assert_eq!(gone.alpha, 0.0);
         assert_eq!(gone.scale, OPEN_SCALE);
-        assert_eq!(gone.offset, Point::default());
+        assert_eq!(gone.offset, (0.0, OPEN_DROP).into());
         for style in [Style::Open, Style::Minimize] {
             let there = style.transform(1.0);
             assert_eq!(there.alpha, 1.0);
@@ -1148,7 +1150,8 @@ mod tests {
     fn minimized_windows_shrink_further_and_drop() {
         let gone = Style::Minimize.transform(0.0);
         assert_eq!(gone.scale, MINIMIZE_SCALE);
-        assert!(gone.scale < Style::Open.transform(0.0).scale);
+        assert!(gone.scale <= Style::Open.transform(0.0).scale);
+        assert!(gone.offset.y > Style::Open.transform(0.0).offset.y);
         assert_eq!(gone.offset, (0.0, MINIMIZE_DROP).into());
         let half = Style::Minimize.transform(0.5);
         assert_eq!(half.offset, (0.0, MINIMIZE_DROP / 2.0).into());

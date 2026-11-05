@@ -529,8 +529,8 @@ impl AnimationKind {
     /// Its duration in milliseconds unless configured.
     fn default_duration(self) -> u32 {
         match self {
-            AnimationKind::WindowOpen => 180,
-            AnimationKind::WindowClose => 150,
+            AnimationKind::WindowOpen => 200,
+            AnimationKind::WindowClose => 180,
             AnimationKind::Minimize => 200,
             AnimationKind::Maximize => 220,
             AnimationKind::Layer => 150,
@@ -1485,7 +1485,7 @@ mod tests {
         let config = Config::from_toml("", &no_env).unwrap();
         assert_eq!(
             config.animations.duration(WindowOpen),
-            Some(Duration::from_millis(180))
+            Some(Duration::from_millis(200))
         );
         assert_eq!(
             config.animations.duration(Workspace),
@@ -1508,7 +1508,7 @@ mod tests {
         );
         assert_eq!(
             config.animations.duration(WindowClose),
-            Some(Duration::from_millis(300))
+            Some(Duration::from_millis(360))
         );
 
         let off = Config::from_toml("[animations]\nenabled = false", &no_env).unwrap();
