@@ -1,7 +1,6 @@
 # pila's features and their tests
 
-Every feature and invariant pila has (the "Architecture" section of
-`CLAUDE.md`), and the tests that cover it: integration tests as
+Every feature and invariant pila has (`docs/ARCHITECTURE.md`), and the tests that cover it: integration tests as
 file::test (in tests/FILE.rs, on the headless backend), unit tests as
 src/FILE.rs::test. `tests/features_inventory.rs` checks that every test
 named here exists and that every integration test is named here, so this

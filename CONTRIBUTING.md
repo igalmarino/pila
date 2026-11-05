@@ -26,7 +26,7 @@ GPU and distro, how pila was started, and the log).
 - Small commits, each one building and passing the tests. Keep `config.example.toml`, the
   `USAGE` text in `src/main.rs` and the README in step with new settings and flags.
 
-[`CLAUDE.md`](CLAUDE.md) describes the architecture: the state struct, the backends, the
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the architecture: the state struct, the backends, the
 render loop, and how each protocol and feature is wired.
 
 ## Development environment
@@ -51,7 +51,7 @@ The container follows the session it's entered from: entered from a pila session
 other desktop), on that desktop.
 Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
 with `scripts/install` and a new login (which ends the container's Claude session too). See
-[`CLAUDE.md`](CLAUDE.md) for the architecture.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architecture.
 
 ### 1. Host setup
 
