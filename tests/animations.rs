@@ -143,7 +143,12 @@ fn nothing_is_drawn_while_nothing_changes() {
     client.window("a").create();
     pila.wait_focus("a");
     // The title gets its text once the fonts are loaded; Xwayland starts.
-    pila.wait_log("fonts loaded");
+    // (Or there are no fonts, as in CI.)
+    let started = std::time::Instant::now();
+    while !pila.log().contains("fonts loaded") && !pila.log().contains("no fonts found") {
+        assert!(started.elapsed() < TIMEOUT, "fonts never loaded");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     pila.wait_log("Xwayland ready");
     std::thread::sleep(Duration::from_millis(100));
     let before = frames(&pila.settle());

@@ -29,17 +29,12 @@ pub fn init() {
         .name("pila-fonts".into())
         .spawn(|| {
             let start = std::time::Instant::now();
-            let mut fonts = Fonts {
-                system: FontSystem::new(),
-                cache: SwashCache::new(),
-            };
+            let system = FontSystem::new();
             let loaded = start.elapsed();
-            // Shape and rasterize the usual characters once here, off the
-            // main thread, before anyone can wait for the lock: else the
-            // first title bar drawn pays for it inside a frame.
-            for scale in [1, 2] {
-                let _ = render_with(&mut fonts, WARM_UP_TEXT, [1.0; 3], 4000, 28, scale);
-            }
+            let Some(fonts) = prepare(system) else {
+                warn!("no fonts found; title bars will have no text");
+                return;
+            };
             let _ = FONTS.set(Mutex::new(fonts));
             info!(elapsed = ?loaded, warm_up = ?(start.elapsed() - loaded), "fonts loaded");
         });
@@ -49,6 +44,25 @@ pub fn init() {
             "failed to start font loading; title bars will have no text"
         );
     }
+}
+
+/// The fonts, warmed up: the usual characters shaped and rasterized once
+/// here, off the main thread, before anyone can wait for the lock (else
+/// the first title bar drawn pays for it inside a frame). `None` without a
+/// single font: cosmic-text panics shaping text then (a minimal system, a
+/// container), so title bars go without text.
+fn prepare(system: FontSystem) -> Option<Fonts> {
+    if system.db().is_empty() {
+        return None;
+    }
+    let mut fonts = Fonts {
+        system,
+        cache: SwashCache::new(),
+    };
+    for scale in [1, 2] {
+        let _ = render_with(&mut fonts, WARM_UP_TEXT, [1.0; 3], 4000, 28, scale);
+    }
+    Some(fonts)
 }
 
 /// Characters titles commonly use, drawn once at startup to warm the
@@ -146,4 +160,18 @@ fn render_with(
         .copied()
         .collect();
     Some((pixels, cropped))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_fonts_means_no_title_text_rather_than_a_panic() {
+        let empty = FontSystem::new_with_locale_and_db(
+            "en-US".into(),
+            cosmic_text::fontdb::Database::new(),
+        );
+        assert!(prepare(empty).is_none());
+    }
 }
