@@ -529,7 +529,6 @@ fn frame_callbacks_and_presentation_feedback_follow_a_commit() {
 }
 
 #[test]
-#[ignore = "bug: the throttled callback of a covered window only goes out when something else redraws; on an idle screen its client waits forever"]
 fn a_covered_window_gets_frame_callbacks_about_once_a_second() {
     let mut pila = TestPila::start();
     let client = pila.client();

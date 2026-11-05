@@ -124,6 +124,9 @@ pub struct Pila {
     /// An output was drawn this event-loop iteration: `after_frames` has
     /// housekeeping to do.
     pub frame_drawn: bool,
+    /// A redraw is scheduled for hidden surfaces waiting for a frame
+    /// callback (`frame.rs`, `schedule_hidden_frames`).
+    pub hidden_frame_timer: bool,
     /// Screen capture sessions (`capture.rs`).
     pub captures: Vec<crate::capture::Session>,
     /// Where captures may use dma-bufs (set by the backend).
@@ -342,6 +345,7 @@ impl Pila {
             config_path: None,
             config_reload_pending: false,
             frame_drawn: false,
+            hidden_frame_timer: false,
             capture_dmabuf: None,
             screencopies: Vec::new(),
             screencopy_trackers: HashMap::new(),
@@ -1244,6 +1248,7 @@ impl Pila {
         self.update_idle_inhibit();
         self.popups.cleanup();
         self.step_animations();
+        self.schedule_hidden_frames();
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

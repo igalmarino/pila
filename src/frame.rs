@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use smithay::{
     backend::renderer::element::{default_primary_scanout_output_compare, RenderElementStates},
+    desktop::layer_map_for_output,
     desktop::utils::{
         send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
         surface_primary_scanout_output, take_presentation_feedback_surface_tree,
@@ -14,11 +15,14 @@ use smithay::{
         OutputPresentationFeedback,
     },
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    wayland::compositor::SurfaceData,
+    reexports::{
+        calloop::timer::{TimeoutAction, Timer},
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
+    wayland::compositor::{SurfaceAttributes, SurfaceData},
 };
 
-use crate::{animation::WindowEffect, render::Scene};
+use crate::{animation::WindowEffect, render::Scene, Pila};
 
 /// Surface trees that aren't windows or layer surfaces: lock surfaces and the
 /// client cursor.
@@ -160,5 +164,53 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
             throttle,
             surface_primary_scanout_output,
         );
+    }
+}
+
+/// Whether a surface shown on no output has frame callbacks waiting.
+fn hidden_and_waiting(surface: &WlSurface, data: &SurfaceData) -> bool {
+    surface_primary_scanout_output(surface, data).is_none()
+        && !data
+            .cached_state
+            .get::<SurfaceAttributes>()
+            .current()
+            .frame_callbacks
+            .is_empty()
+}
+
+impl Pila {
+    /// Frames are drawn on demand, and a surface shown nowhere gets its
+    /// throttled frame callback (`HIDDEN_FRAME_THROTTLE`) only when a frame
+    /// is drawn: on an idle screen a covered client asking for one would
+    /// wait forever. While such a surface waits, a redraw is asked for once
+    /// the throttle has passed. Not frame pacing: at most one wake-up per
+    /// period, and none while no hidden client waits. Called from
+    /// `after_frames`.
+    pub fn schedule_hidden_frames(&mut self) {
+        if self.hidden_frame_timer {
+            return;
+        }
+        let mut waiting = false;
+        let mut check = |surface: &WlSurface, data: &SurfaceData| {
+            waiting |= hidden_and_waiting(surface, data);
+        };
+        for window in self.space.elements() {
+            window.with_surfaces(&mut check);
+        }
+        for output in self.space.outputs() {
+            for layer in layer_map_for_output(output).layers() {
+                layer.with_surfaces(&mut check);
+            }
+        }
+        if !waiting {
+            return;
+        }
+        let timer = Timer::from_duration(HIDDEN_FRAME_THROTTLE);
+        let inserted = self.loop_handle.insert_source(timer, |_, _, state| {
+            state.hidden_frame_timer = false;
+            state.queue_redraw();
+            TimeoutAction::Drop
+        });
+        self.hidden_frame_timer = inserted.is_ok();
     }
 }
