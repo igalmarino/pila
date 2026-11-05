@@ -176,8 +176,9 @@ tap = true
 # enabled = false           # leave the monitor off (no windows go there)
 
 # Window and layer rules. A window rule matches windows by `app-id` (the
-# class of WM_CLASS for X11 apps) and `title`; a layer rule matches layer
-# surfaces (panels, launchers, notifications) by `namespace`. `*` stands for
+# class of WM_CLASS for X11 apps), `title` and `tag` (the name an app gives a
+# kind of window of its own, such as "settings"; few apps set one); a layer
+# rule matches layer surfaces (panels, launchers, notifications) by `namespace`. `*` stands for
 # any run of characters; a rule's matchers must all match, and a rule without
 # any matches everything. Every matching rule applies, in order, a later one
 # overriding an earlier one field by field. `RUST_LOG=pila=debug` logs each

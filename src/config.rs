@@ -1541,9 +1541,8 @@ mod tests {
             &no_env,
         )
         .unwrap();
-        assert!(
-            !resolve_window(&config.window_rules, "foot", "").animates(AnimationKind::WindowOpen)
-        );
+        assert!(!resolve_window(&config.window_rules, "foot", "", "")
+            .animates(AnimationKind::WindowOpen));
         assert_eq!(
             resolve_layer(&config.layer_rules, "noctalia-osd").blur,
             Some(true)

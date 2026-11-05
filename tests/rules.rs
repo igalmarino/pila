@@ -1,10 +1,11 @@
-//! Window and layer rules: matching (app id, title, wildcards, all
+//! Window and layer rules: matching (app id, title, tag, wildcards, all
 //! matchers), merging, every window property, re-resolving on reload.
 
 mod common;
 
 use common::client::Decorations;
 use common::*;
+use wayland_protocols::xdg::toplevel_tag::v1::client::xdg_toplevel_tag_manager_v1::XdgToplevelTagManagerV1;
 
 const BAR: i64 = 28;
 /// pila's background where nothing is drawn.
@@ -291,4 +292,37 @@ fn invalid_rules_are_refused() {
         assert_eq!(output.status.code(), Some(1), "accepted: {config}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+#[test]
+fn a_rule_matches_the_tag_a_window_set() {
+    let mut pila = TestPila::with_config(
+        "[[window-rule]]\ntag = \"settings\"\nsize = [640, 400]\n\
+         [[window-rule]]\ntag = \"pre*\"\nsize = [300, 200]\n",
+    );
+    let client = pila.client();
+    let manager: XdgToplevelTagManagerV1 = client.bind("xdg_toplevel_tag_manager_v1", 1);
+    client
+        .window("tagged")
+        .before_commit(|t| manager.set_toplevel_tag(t, "settings".to_string()))
+        .create();
+    let w = pila.wait_window("tagged");
+    assert_eq!(w["tag"], "settings");
+    assert_eq!(rect(&w["geometry"]).2, 640);
+    client
+        .window("wildcard")
+        .before_commit(|t| manager.set_toplevel_tag(t, "preferences".to_string()))
+        .create();
+    assert_eq!(rect(&pila.wait_window("wildcard")["geometry"]).2, 300);
+}
+
+#[test]
+fn a_tag_rule_leaves_a_window_without_that_tag_alone() {
+    let mut pila =
+        TestPila::with_config("[[window-rule]]\ntag = \"settings\"\nsize = [640, 400]\n");
+    let client = pila.client();
+    client.window("plain").size(400, 300).create();
+    let w = pila.wait_window("plain");
+    assert_eq!(w["tag"], "");
+    assert_eq!(rect(&w["geometry"]).2, 400);
 }

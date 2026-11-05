@@ -7,7 +7,7 @@ use smithay::{
     delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
     delegate_presentation, delegate_relative_pointer, delegate_security_context,
     delegate_single_pixel_buffer, delegate_viewporter, delegate_virtual_keyboard_manager,
-    delegate_xdg_foreign, delegate_xdg_toplevel_icon,
+    delegate_xdg_foreign, delegate_xdg_toplevel_icon, delegate_xdg_toplevel_tag,
     reexports::{
         calloop::LoopHandle,
         wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
@@ -36,6 +36,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_foreign::{XdgForeignHandler, XdgForeignState},
         xdg_toplevel_icon::{XdgToplevelIconHandler, XdgToplevelIconManager},
+        xdg_toplevel_tag::{XdgToplevelTagHandler, XdgToplevelTagManager},
     },
 };
 
@@ -81,6 +82,7 @@ pub fn init_globals(
     XdgToplevelIconManager::new::<Pila>(dh);
     // Its handler is in `transients.rs`.
     XdgDialogState::new::<Pila>(dh);
+    XdgToplevelTagManager::new::<Pila>(dh);
     // Its handler is in `idle.rs`.
     IdleInhibitManagerState::new::<Pila>(dh);
     // Its handler is in `bell.rs`.
@@ -130,6 +132,11 @@ delegate_relative_pointer!(Pila);
 // doesn't draw it (yet).
 impl XdgToplevelIconHandler for Pila {}
 delegate_xdg_toplevel_icon!(Pila);
+
+// xdg_toplevel_tag_v1: Smithay keeps the tag in the surface's data, for
+// window rules (`rules.rs`); the description isn't used.
+impl XdgToplevelTagHandler for Pila {}
+delegate_xdg_toplevel_tag!(Pila);
 
 // wp_fractional_scale_v1: tell each surface the scale of the output it's on
 // (`scale.rs`, which keeps it up to date as surfaces move between outputs).

@@ -1,6 +1,8 @@
 //! Window rules and layer rules: `[[window-rule]]` and `[[layer-rule]]` in
 //! the config. A rule matches windows by app id (xdg `app_id`, or the class
-//! of an X11 window's WM_CLASS) and title, or layer surfaces by namespace,
+//! of an X11 window's WM_CLASS), title and tag (xdg-toplevel-tag; an X11
+//! window has none, like a Wayland one that sets none: its tag is empty), or
+//! layer surfaces by namespace,
 //! with `*` standing for any run of characters; every matcher a rule gives
 //! must match, and a rule without matchers matches everything. Matching
 //! rules apply in order, the last one winning field by field.
@@ -14,7 +16,10 @@
 use std::cell::RefCell;
 
 use serde::Deserialize;
-use smithay::desktop::{LayerSurface, Window};
+use smithay::{
+    desktop::{LayerSurface, Window},
+    wayland::{compositor::with_states, xdg_toplevel_tag::XdgToplevelTagSurfaceData},
+};
 use tracing::debug;
 
 use crate::{config::AnimationKind, Pila};
@@ -69,6 +74,7 @@ struct EachAnimationFile {
 pub struct WindowRuleFile {
     app_id: Option<String>,
     title: Option<String>,
+    tag: Option<String>,
     animations: Option<AnimationsFile>,
     open_on_workspace: Option<usize>,
     open_maximized: Option<bool>,
@@ -183,6 +189,7 @@ impl LayerProps {
 pub struct WindowRule {
     app_id: Option<String>,
     title: Option<String>,
+    tag: Option<String>,
     props: WindowProps,
 }
 
@@ -248,6 +255,7 @@ impl WindowRuleFile {
         Ok(WindowRule {
             app_id: self.app_id,
             title: self.title,
+            tag: self.tag,
             props: WindowProps {
                 animations,
                 open_on_workspace,
@@ -275,11 +283,11 @@ impl LayerRuleFile {
     }
 }
 
-/// What `rules` set for a window with this app id and title.
-pub fn resolve_window(rules: &[WindowRule], app_id: &str, title: &str) -> WindowProps {
+/// What `rules` set for a window with this app id, title and tag.
+pub fn resolve_window(rules: &[WindowRule], app_id: &str, title: &str, tag: &str) -> WindowProps {
     let mut props = WindowProps::default();
     for rule in rules {
-        if matches(&rule.app_id, app_id) && matches(&rule.title, title) {
+        if matches(&rule.app_id, app_id) && matches(&rule.title, title) && matches(&rule.tag, tag) {
             props.merge(&rule.props);
         }
     }
@@ -328,12 +336,29 @@ pub fn layer_props(layer: &LayerSurface) -> LayerProps {
         .unwrap_or_default()
 }
 
+/// The tag `window` set with xdg-toplevel-tag, or an empty one.
+pub fn window_tag(window: &Window) -> String {
+    window
+        .toplevel()
+        .and_then(|toplevel| {
+            with_states(toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelTagSurfaceData>()
+                    .and_then(|data| data.tag())
+            })
+        })
+        .map(|tag| tag.to_string())
+        .unwrap_or_default()
+}
+
 impl Pila {
     /// Match `window` against the window rules again and keep the result.
     pub fn resolve_window_rules(&self, window: &Window) -> WindowProps {
         let (title, app_id) = crate::foreign_toplevel::title_and_app_id(window);
-        let props = resolve_window(&self.config.window_rules, &app_id, &title);
-        debug!(target: "pila::rules", app_id, title, ?props, "window rules");
+        let tag = window_tag(window);
+        let props = resolve_window(&self.config.window_rules, &app_id, &title, &tag);
+        debug!(target: "pila::rules", app_id, title, tag, ?props, "window rules");
         window
             .user_data()
             .insert_if_missing(WindowRuleProps::default);
@@ -468,11 +493,11 @@ mod tests {
             animations = false
             "#,
         );
-        assert!(!resolve_window(&rules, "firefox", "Picture-in-Picture")
+        assert!(!resolve_window(&rules, "firefox", "Picture-in-Picture", "")
             .animates(AnimationKind::WindowOpen));
-        assert!(resolve_window(&rules, "firefox", "Mozilla Firefox")
+        assert!(resolve_window(&rules, "firefox", "Mozilla Firefox", "")
             .animates(AnimationKind::WindowOpen));
-        assert!(resolve_window(&rules, "chromium", "Picture-in-Picture")
+        assert!(resolve_window(&rules, "chromium", "Picture-in-Picture", "")
             .animates(AnimationKind::WindowOpen));
     }
 
@@ -489,15 +514,15 @@ mod tests {
             "#,
         );
         // A rule without matchers applies to every window.
-        let other = resolve_window(&rules, "kitty", "");
+        let other = resolve_window(&rules, "kitty", "", "");
         assert!(!other.animates(AnimationKind::WindowOpen));
         assert!(!other.animates(AnimationKind::WindowClose));
-        let foot = resolve_window(&rules, "foot", "");
+        let foot = resolve_window(&rules, "foot", "", "");
         assert!(!foot.animates(AnimationKind::WindowOpen));
         assert!(foot.animates(AnimationKind::WindowClose));
         assert!(!foot.animates(AnimationKind::Minimize));
         // No rules: everything plays.
-        assert!(resolve_window(&[], "foot", "").animates(AnimationKind::Minimize));
+        assert!(resolve_window(&[], "foot", "", "").animates(AnimationKind::Minimize));
     }
 
     #[test]
@@ -517,12 +542,12 @@ mod tests {
             size = [1280, 720]
             "#,
         );
-        let mpv = resolve_window(&rules, "mpv", "film");
+        let mpv = resolve_window(&rules, "mpv", "film", "");
         assert_eq!(mpv.open_on_workspace, Some(2));
         assert_eq!(mpv.size, Some((800, 450)));
         assert_eq!(mpv.position, Some((20, 30)));
         assert_eq!(mpv.open_fullscreen, None);
-        let full = resolve_window(&rules, "mpv", "fullscreen film");
+        let full = resolve_window(&rules, "mpv", "fullscreen film", "");
         assert_eq!(full.size, Some((1280, 720)));
         assert_eq!(full.open_fullscreen, Some(true));
         assert_eq!(full.open_on_workspace, Some(2));

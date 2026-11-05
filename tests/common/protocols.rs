@@ -969,6 +969,7 @@ logged!(XdgSessionManagerV1, XdgSessionV1);
 logged!(
     wayland_protocols::xdg::dialog::v1::client::xdg_wm_dialog_v1::XdgWmDialogV1,
     wayland_protocols::xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1,
+    wayland_protocols::xdg::toplevel_tag::v1::client::xdg_toplevel_tag_manager_v1::XdgToplevelTagManagerV1,
 );
 
 /// Logged with how many configures the client's windows got by then.

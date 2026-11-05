@@ -59,6 +59,7 @@ const PUBLIC: &[&str] = &[
     "zxdg_importer_v2",
     "zxdg_output_manager_v1",
     "xdg_session_manager_v1",
+    "xdg_toplevel_tag_manager_v1",
     "xdg_wm_dialog_v1",
 ];
 

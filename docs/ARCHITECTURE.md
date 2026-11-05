@@ -270,7 +270,7 @@ Key flows and invariants:
   Animations are visual only: input sees the real geometry.
 - **Window and layer rules** (`rules.rs`, `[[window-rule]]` / `[[layer-rule]]`): match
   windows by app id (`foreign_toplevel::title_and_app_id`: xdg `app_id` or X11
-  WM_CLASS class) and title, layer surfaces by namespace, with `*` wildcards
+  WM_CLASS class), title and tag (xdg-toplevel-tag, empty if it set none), layer surfaces by namespace, with `*` wildcards
   (`wildcard_match`); all of a rule's matchers must match, matching rules merge in order
   (later wins per field). The result is resolved once and kept in user data
   (`resolve_window_rules` from `place_new_window`, `resolve_layer_rules` from

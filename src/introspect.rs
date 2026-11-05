@@ -55,6 +55,7 @@ impl Pila {
             "id": foreign_toplevel::identifier(window),
             "app_id": app_id,
             "title": title,
+            "tag": rules::window_tag(window),
             "x11": window.x11_surface().is_some(),
             "override_redirect": crate::workspaces::is_override_redirect(window),
             "mapped": in_space,
