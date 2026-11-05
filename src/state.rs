@@ -994,6 +994,13 @@ impl Pila {
         // the place it comes back to.
         let mapped_loc = self.window_location(window);
         let (was_maximized, was_fullscreen) = fill_state(window);
+        // On screen and changing: move to the new rect, not jump (refits
+        // keep the state and don't animate).
+        if (maximized, fullscreen) != (was_maximized, was_fullscreen)
+            && self.space.element_location(window).is_some()
+        {
+            self.animate_geometry(window);
+        }
         window
             .user_data()
             .insert_if_missing(RestoreGeometry::default);
@@ -1095,6 +1102,8 @@ impl Pila {
                 .map(|r| r.size.w)
                 .unwrap_or(window.geometry().size.w);
             self.set_fill_state(&window, false, false);
+            // It follows the pointer at once, no animation in the way.
+            self.forget_animations(&window);
             // Keep the grab point on the title bar if pila draws one,
             // otherwise near the top of the client's own.
             let y_offset = if decoration::is_ssd(&window) {

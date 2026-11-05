@@ -633,6 +633,7 @@ fn texture_size(rect: Rectangle<i32, Logical>, scale: Scale<f64>) -> Size<i32, P
 /// A texture of `snapshot`-like content drawn at `dst` (space coordinates).
 fn texture_element(
     buffer: &TextureRenderBuffer<GlesTexture>,
+    texture_size: Size<i32, Physical>,
     dst: Rectangle<f64, Logical>,
     alpha: f32,
     output_location: Point<i32, Logical>,
@@ -640,11 +641,15 @@ fn texture_element(
 ) -> PilaRenderElement {
     let location = (dst.loc - output_location.to_f64()).to_physical(scale);
     let size: Size<i32, Logical> = dst.size.to_i32_round();
+    // All of the texture (its pixels are its logical units, at buffer
+    // scale 1): without it Smithay samples a `size`-sized corner, cropping
+    // a shrunk texture and repeating a stretched one.
+    let src = Rectangle::from_size((f64::from(texture_size.w), f64::from(texture_size.h)).into());
     PilaRenderElement::Texture(TextureRenderElement::from_texture_render_buffer(
         location,
         buffer,
         Some(alpha),
-        None,
+        Some(src),
         Some((size.w.max(1), size.h.max(1)).into()),
         Kind::Unspecified,
     ))
@@ -686,11 +691,16 @@ fn animated_element(
         if elements.is_empty() || !target.draw(renderer, &elements) {
             return None;
         }
-        target.buffer.clone()
+        (target.buffer.clone(), target.size)
     };
-    let dst = effect.transform.apply(rect.to_f64(), effect.center);
+    let (buffer, texture_size) = buffer;
+    let dst = match &effect.frame {
+        Some(frame) => frame.apply(rect.to_f64()),
+        None => effect.transform.apply(rect.to_f64(), effect.center),
+    };
     Some(texture_element(
         &buffer,
+        texture_size,
         dst,
         effect.transform.alpha,
         output_location,
@@ -708,6 +718,10 @@ fn animated_window_element(
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
+    // Hidden for now (a snapshot stands in while its client resizes).
+    if effect.transform.alpha <= 0.0 {
+        return Vec::new();
+    }
     let mut draw = |r: &mut GlesRenderer, origin, s| {
         single_window_elements(r, entry, shaders, Surfaces::Tree, origin, s)
     };
@@ -851,6 +865,7 @@ fn snapshot(
     let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
     target.draw(renderer, elements).then(|| Snapshot {
         buffer: target.buffer,
+        size: target.size,
         rect,
         center,
     })
@@ -909,11 +924,15 @@ fn ghost_element(
     scale: Scale<f64>,
 ) -> PilaRenderElement {
     let snapshot = &ghost.snapshot;
-    let dst = ghost
-        .transform
-        .apply(snapshot.rect.to_f64(), snapshot.center);
+    let dst = match &ghost.frame {
+        Some(frame) => frame.apply(snapshot.rect.to_f64()),
+        None => ghost
+            .transform
+            .apply(snapshot.rect.to_f64(), snapshot.center),
+    };
     texture_element(
         &snapshot.buffer,
+        snapshot.size,
         dst,
         ghost.transform.alpha,
         output_location,

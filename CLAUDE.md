@@ -355,7 +355,16 @@ Key flows and invariants:
   the new workspace's windows into another per-output texture (`SlideTextures`) and
   shows both shifted sideways and cropped to their output (`slid_texture`), the carried
   window plainly in front; panels and wallpaper stay put; windows drawn that way are
-  paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`). Window and layer rules can turn them off
+  paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`). A size or place
+  change (maximize, fullscreen, snap, and back; not refits nor drags) runs
+  `animate_geometry` first (from `set_fill_state_on`, `snap_window`, `unsnap_window`;
+  `begin_move` cancels it): a `Resizing` keeps a snapshot and the old frame; until the
+  client commits a new size (`geometry_committed` from the commit handler, or
+  `RESIZE_WAIT`) the live window is hidden (alpha 0) and the snapshot stands at the old
+  rect; then both are stretched onto a rect moving to the new one (`FrameMap`), the
+  snapshot fading out in front. Textures are always drawn with their whole `src`
+  (`texture_element`): without it Smithay samples a destination-sized corner, which
+  crops a shrunk texture and repeats a stretched one. Window and layer rules can turn them off
   (`animates_window`, `animates_layer`; see "Window and layer rules"). Transient layer
   surfaces (Top/Overlay without an exclusive zone, `animates_layer`: launchers,
   notifications, shell panels; not bars or wallpapers) fade in when they first get a buffer (`layer_committed` from

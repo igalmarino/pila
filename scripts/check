@@ -4,7 +4,7 @@
 # if any failed). The scenarios: windows opening and closing, window rules
 # (animations, size, position, maximized, another workspace; X11 too, with
 # xterm; title bar, opacity and corner radius, by pixels with grim),
-# minimize and restore, switching workspaces, a launcher (layer surface), a layer rule added by a
+# minimize and restore, maximize and restore, switching workspaces, a launcher (layer surface), a layer rule added by a
 # config reload, Noctalia under a layer rule (if installed), and the
 # performance pillar's frame statistics (no missed refresh, CPU per frame).
 #
@@ -164,6 +164,18 @@ if [ "${1:-}" = "--workload" ]; then
             stop "$held"
             sleep 1
             mark "minimize end"
+
+            mark "maximize begin"
+            RED=1 run_terminal pila-check-grow sleep 8 &
+            held=$!
+            sleep 2
+            python3 -I scripts/toplevel-action max >/dev/null
+            sleep 1
+            python3 -I scripts/toplevel-action unmax >/dev/null
+            sleep 1
+            stop "$held"
+            sleep 1
+            mark "maximize end"
 
             mark "workspace begin"
             run_terminal "" sleep 8 &
@@ -500,6 +512,21 @@ else
                 fail "corner-radius = 24 cuts the corner ($corner, background $bg)"
         else
             skip "pixels $(grep -o 'check: pixels skip.*' <<<"$s" | sed 's/check: pixels skip //')"
+        fi
+    fi
+    if ran maximize; then
+        s=$(section maximize)
+        n=$(grep -c 'starts what="maximize" id="pila-check-grow"' <<<"$s" || true)
+        [ "$n" -eq 2 ] && pass "maximizing and restoring animate (2 of 2)" ||
+            fail "maximizing and restoring animate ($n of 2)"
+        # Its sizes, in order: normal, maximized, normal again.
+        sizes=$( (grep 'window size app_id="pila-check-grow"' <<<"$s" || true) |
+            sed -nE 's/.*w=([0-9]+) h=([0-9]+).*/\1x\2/p' | xargs)
+        if [ "$(wc -w <<<"$sizes")" -ge 3 ] &&
+            [ "$(awk '{ print $1 }' <<<"$sizes")" = "$(awk '{ print $NF }' <<<"$sizes")" ]; then
+            pass "the window grows and comes back to its size ($sizes)"
+        else
+            fail "the window grows and comes back to its size (${sizes:-none})"
         fi
     fi
     if ran workspace; then

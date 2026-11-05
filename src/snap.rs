@@ -163,6 +163,7 @@ impl Pila {
         let Some(before) = before else {
             return;
         };
+        self.animate_geometry(window);
         let (maximized, fullscreen) = fill_state(window);
         if maximized || fullscreen {
             self.clear_fill_state(window);
@@ -181,6 +182,10 @@ impl Pila {
             return;
         };
         set_snap_state(window, None);
+        // Dragged out (`at`): it follows the pointer, no animation.
+        if at.is_none() {
+            self.animate_geometry(window);
+        }
         let rect = Rectangle::new(at.unwrap_or(before.loc), before.size);
         self.apply_rect(window, rect, None);
     }

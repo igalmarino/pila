@@ -185,6 +185,8 @@ pub struct Ghost {
 #[derive(Clone)]
 pub struct Snapshot {
     pub buffer: TextureRenderBuffer<GlesTexture>,
+    /// The texture's size in pixels.
+    pub size: smithay::utils::Size<i32, smithay::utils::Physical>,
     pub rect: Rectangle<i32, Logical>,
     pub center: Point<f64, Logical>,
 }
@@ -195,6 +197,44 @@ pub struct SceneGhost {
     pub snapshot: Snapshot,
     pub before: usize,
     pub transform: Transform,
+    /// Instead of `transform`'s scaling: where its frame goes.
+    pub frame: Option<FrameMap>,
+}
+
+/// Maps a window's frame (geometry and title bar) onto another rectangle,
+/// stretching what it draws along: a window changing size and place.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameMap {
+    pub from: Rectangle<f64, Logical>,
+    pub to: Rectangle<f64, Logical>,
+}
+
+impl FrameMap {
+    /// Where `rect` (drawn relative to `from`) goes.
+    pub fn apply(&self, rect: Rectangle<f64, Logical>) -> Rectangle<f64, Logical> {
+        let sx = self.to.size.w / self.from.size.w.max(1.0);
+        let sy = self.to.size.h / self.from.size.h.max(1.0);
+        let loc = self.to.loc
+            + Point::from((
+                (rect.loc.x - self.from.loc.x) * sx,
+                (rect.loc.y - self.from.loc.y) * sy,
+            ));
+        Rectangle::new(loc, (rect.size.w * sx, rect.size.h * sy).into())
+    }
+}
+
+/// `a` to `b`, `t` of the way (0 to 1).
+fn lerp_rect(
+    a: Rectangle<i32, Logical>,
+    b: Rectangle<i32, Logical>,
+    t: f64,
+) -> Rectangle<f64, Logical> {
+    let (a, b) = (a.to_f64(), b.to_f64());
+    let mix = |x: f64, y: f64| x + (y - x) * t;
+    Rectangle::new(
+        (mix(a.loc.x, b.loc.x), mix(a.loc.y, b.loc.y)).into(),
+        (mix(a.size.w, b.size.w), mix(a.size.h, b.size.h)).into(),
+    )
 }
 
 /// How an animating window is drawn this frame (`SceneWindow::effect`).
@@ -207,7 +247,30 @@ pub struct WindowEffect {
     /// go by it, since a window drawn through a texture isn't in the
     /// output's render states.
     pub output: Option<Output>,
+    /// Instead of `transform`'s scaling: where its frame is drawn (a size
+    /// or place change, `animate_geometry`).
+    pub frame: Option<FrameMap>,
 }
+
+/// A window changing size or place (maximize, fullscreen, snap): shown from
+/// its snapshot at the old rect until its client commits the new size, then
+/// moving and stretching to the new rect while the snapshot fades out over
+/// the live window.
+struct Resizing {
+    window: Window,
+    snapshot: Snapshot,
+    /// Its frame (geometry and title bar) and geometry size before.
+    from: Rectangle<i32, Logical>,
+    from_size: smithay::utils::Size<i32, Logical>,
+    /// When it began, how long the move lasts, and the move once the
+    /// client has answered (or `RESIZE_WAIT` went by).
+    began: Duration,
+    duration: Duration,
+    progress: Option<Animation>,
+}
+
+/// How long a resize waits for its client's new size before moving anyway.
+const RESIZE_WAIT: Duration = Duration::from_millis(300);
 
 /// A layer surface showing up.
 struct LayerAppearing {
@@ -230,6 +293,7 @@ pub struct Animations {
     ghosts: Vec<Ghost>,
     layers: Vec<LayerAppearing>,
     layer_ghosts: Vec<LayerGhost>,
+    resizing: Vec<Resizing>,
 }
 
 /// A window's or layer surface's texture while it animates (`render.rs`),
@@ -532,11 +596,20 @@ impl Pila {
     /// Stop animating `window` (it's gone or hidden).
     pub fn forget_animations(&mut self, window: &Window) {
         self.animations.appearing.retain(|a| a.window != *window);
+        self.animations.resizing.retain(|r| r.window != *window);
         clear_textures(window.user_data());
     }
 
     /// How `window` is drawn this frame, if it's animating.
     pub fn window_effect(&self, window: &Window, now: Duration) -> Option<WindowEffect> {
+        if let Some(resizing) = self
+            .animations
+            .resizing
+            .iter()
+            .find(|r| r.window == *window)
+        {
+            return self.resizing_effect(resizing, now);
+        }
         let appearing = self
             .animations
             .appearing
@@ -549,11 +622,37 @@ impl Pila {
             transform: appearing.style.transform(appearing.visibility.value(now)),
             center: center(rect),
             output: self.window_output(window),
+            frame: None,
         })
     }
 
     /// The ghosts to draw this frame, placed among `windows` (front to back).
     pub fn scene_ghosts(&self, windows: &[Window], now: Duration) -> Vec<SceneGhost> {
+        let resizing = self.animations.resizing.iter().filter_map(|r| {
+            // Right in front of its window.
+            let before = windows.iter().position(|w| *w == r.window)?;
+            let (alpha, to) = match &r.progress {
+                None => (1.0, r.from.to_f64()),
+                Some(progress) => {
+                    let t = progress.value(now);
+                    (1.0 - t, lerp_rect(r.from, self.frame_rect(&r.window)?, t))
+                }
+            };
+            Some(SceneGhost {
+                snapshot: r.snapshot.clone(),
+                before,
+                transform: Transform {
+                    alpha: alpha as f32,
+                    scale: 1.0,
+                    offset: Point::default(),
+                },
+                frame: Some(FrameMap {
+                    from: r.from.to_f64(),
+                    to,
+                }),
+            })
+        });
+        let resizing: Vec<SceneGhost> = resizing.collect();
         self.animations
             .ghosts
             .iter()
@@ -567,8 +666,10 @@ impl Pila {
                     snapshot: ghost.snapshot.clone(),
                     before,
                     transform: ghost.style.transform(ghost.visibility.value(now)),
+                    frame: None,
                 }
             })
+            .chain(resizing)
             .collect()
     }
 
@@ -598,6 +699,25 @@ impl Pila {
             !done
         });
         animations.layer_ghosts.retain(|g| !g.visibility.done(now));
+        for resizing in &mut animations.resizing {
+            // The client didn't answer in time: move anyway.
+            if resizing.progress.is_none() && now >= resizing.began + RESIZE_WAIT {
+                resizing.progress = Some(Animation::new(
+                    now,
+                    resizing.duration,
+                    Curve::EaseOut,
+                    0.0,
+                    1.0,
+                ));
+            }
+        }
+        animations.resizing.retain(|r| {
+            let done = r.progress.as_ref().is_some_and(|p| p.done(now));
+            if done {
+                clear_textures(r.window.user_data());
+            }
+            !done
+        });
         let slide_ended = self.end_finished_slide(now);
         let left = self.animation_count() + usize::from(self.workspace_slide.is_some());
         let before = before + usize::from(slide_ended);
@@ -614,7 +734,11 @@ impl Pila {
     /// How many animations are in progress.
     fn animation_count(&self) -> usize {
         let a = &self.animations;
-        a.appearing.len() + a.ghosts.len() + a.layers.len() + a.layer_ghosts.len()
+        a.appearing.len()
+            + a.ghosts.len()
+            + a.layers.len()
+            + a.layer_ghosts.len()
+            + a.resizing.len()
     }
 
     /// Whether anything is still animating now, so frames are wanted back
@@ -627,6 +751,9 @@ impl Pila {
             || a.ghosts.iter().any(|x| running(&x.visibility))
             || a.layers.iter().any(|x| running(&x.visibility))
             || a.layer_ghosts.iter().any(|x| running(&x.visibility))
+            || a.resizing
+                .iter()
+                .any(|x| x.progress.as_ref().is_none_or(running))
             || self.sliding(now)
     }
 
@@ -638,9 +765,112 @@ impl Pila {
         for appearing in std::mem::take(&mut self.animations.layers) {
             clear_textures(appearing.layer.user_data());
         }
+        for resizing in std::mem::take(&mut self.animations.resizing) {
+            clear_textures(resizing.window.user_data());
+        }
         self.animations.ghosts.clear();
         self.animations.layer_ghosts.clear();
         self.workspace_slide = None;
+    }
+
+    // --- Size and place changes ---------------------------------------------
+
+    /// `window`'s frame: its geometry and title bar, in space coordinates.
+    fn frame_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        let geo = self.space.element_geometry(window)?;
+        let bar = crate::decoration::title_bar_rect(window, geo.loc);
+        Some(bar.map_or(geo, |bar| bar.merge(geo)))
+    }
+
+    /// `window` is about to change size and place (maximize, fullscreen,
+    /// snap, or back): keep how it looks now, to move from. Call before the
+    /// change; a second call before its client answers keeps the first.
+    pub fn animate_geometry(&mut self, window: &Window) {
+        if self
+            .animations
+            .resizing
+            .iter()
+            .any(|r| r.window == *window && r.progress.is_none())
+        {
+            return;
+        }
+        if !self.animates_window(window, AnimationKind::Maximize, true) {
+            return;
+        }
+        let Some(duration) = self.animation_duration(AnimationKind::Maximize) else {
+            return;
+        };
+        let Some(from) = self.frame_rect(window) else {
+            return;
+        };
+        let from_size = window.geometry().size;
+        self.forget_animations(window);
+        let Some(snapshot) = self.snapshot(window, Surfaces::Tree) else {
+            return;
+        };
+        log_event("maximize", &app_id(window), Outcome::Starts);
+        self.animations.resizing.push(Resizing {
+            window: window.clone(),
+            snapshot,
+            from,
+            from_size,
+            began: self.animation_time(),
+            duration,
+            progress: None,
+        });
+        self.queue_redraw();
+    }
+
+    /// `window` committed: if it was waiting for its new size and has it,
+    /// start moving.
+    pub fn geometry_committed(&mut self, window: &Window) {
+        let size = window.geometry().size;
+        let now = self.animation_time();
+        let Some(resizing) = self
+            .animations
+            .resizing
+            .iter_mut()
+            .find(|r| r.window == *window && r.progress.is_none())
+        else {
+            return;
+        };
+        if size.is_empty() || size == resizing.from_size {
+            return;
+        }
+        resizing.progress = Some(Animation::new(
+            now,
+            resizing.duration,
+            Curve::EaseOut,
+            0.0,
+            1.0,
+        ));
+        self.queue_redraw();
+    }
+
+    /// How a resizing window is drawn: not at all while it waits (its
+    /// snapshot stands in), then stretched from the old rect to the new.
+    fn resizing_effect(&self, resizing: &Resizing, now: Duration) -> Option<WindowEffect> {
+        let to = self.frame_rect(&resizing.window)?;
+        let (alpha, frame) = match &resizing.progress {
+            None => (0.0, None),
+            Some(progress) => (
+                1.0,
+                Some(FrameMap {
+                    from: to.to_f64(),
+                    to: lerp_rect(resizing.from, to, progress.value(now)),
+                }),
+            ),
+        };
+        Some(WindowEffect {
+            transform: Transform {
+                alpha,
+                scale: 1.0,
+                offset: Point::default(),
+            },
+            center: center(to),
+            output: self.window_output(&resizing.window),
+            frame,
+        })
     }
 
     // --- Layer surfaces ---------------------------------------------------
@@ -760,6 +990,7 @@ impl Pila {
             transform: Style::Layer.transform(appearing.visibility.value(now)),
             center: center(rect),
             output: self.layer_for_surface(layer.wl_surface()).map(|(o, _)| o),
+            frame: None,
         })
     }
 
@@ -772,6 +1003,7 @@ impl Pila {
                 snapshot: ghost.snapshot.clone(),
                 before: 0,
                 transform: Style::Layer.transform(ghost.visibility.value(now)),
+                frame: None,
             })
             .collect()
     }
@@ -803,6 +1035,27 @@ mod tests {
         assert!(anim.done(ms(300)));
         let instant = Animation::new(ms(100), Duration::ZERO, Curve::EaseOut, 0.0, 1.0);
         assert_eq!(instant.value(ms(100)), 1.0);
+    }
+
+    #[test]
+    fn frame_maps_stretch_what_they_carry() {
+        let map = FrameMap {
+            from: Rectangle::new((100.0, 100.0).into(), (200.0, 100.0).into()),
+            to: Rectangle::new((0.0, 0.0).into(), (400.0, 300.0).into()),
+        };
+        assert_eq!(map.apply(map.from), map.to);
+        // A popup sticking out 10 px to the left of the frame.
+        let popup = Rectangle::new((90.0, 150.0).into(), (50.0, 20.0).into());
+        assert_eq!(
+            map.apply(popup),
+            Rectangle::new((-20.0, 150.0).into(), (100.0, 60.0).into())
+        );
+        let a = Rectangle::new((0, 0).into(), (100, 100).into());
+        let b = Rectangle::new((100, 50).into(), (300, 100).into());
+        assert_eq!(
+            lerp_rect(a, b, 0.5),
+            Rectangle::new((50.0, 25.0).into(), (200.0, 100.0).into())
+        );
     }
 
     #[test]

@@ -50,6 +50,7 @@ impl CompositorHandler for Pila {
             if let Some(window) = self.window_for_surface(&root) {
                 window.on_commit();
                 log_size_change(&window);
+                self.geometry_committed(&window);
             }
         }
 
