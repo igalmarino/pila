@@ -269,28 +269,28 @@ impl HeadlessData {
             return Err(format!("{rect:?} is outside the output ({size:?})"));
         }
         let target = renderer.bind(texture).map_err(|e| format!("{e:?}"))?;
-        // GL reads rows bottom-up: the region is counted from the bottom.
-        let flipped_region = Rectangle::new(
-            (rect.loc.x, size.h - rect.loc.y - rect.size.h).into(),
-            (rect.size.w, rect.size.h).into(),
-        );
+        // The whole frame, read back as captures do (`capture::copy_to_shm`):
+        // rows bottom-up unless the mapping says they're flipped already.
+        // Then the rectangle is cut out of it.
+        let full_region = Rectangle::from_size((size.w, size.h).into());
         let mapping = renderer
-            .copy_framebuffer(&target, flipped_region, Fourcc::Abgr8888)
+            .copy_framebuffer(&target, full_region, Fourcc::Abgr8888)
             .map_err(|e| format!("{e:?}"))?;
         drop(target);
         let bottom_up = !mapping.flipped();
         let pixels = renderer
             .map_texture(&mapping)
             .map_err(|e| format!("{e:?}"))?;
-        let row = rect.size.w as usize * 4;
-        let rows = rect.size.h as usize;
-        if pixels.len() < row * rows {
+        let stride = size.w as usize * 4;
+        if pixels.len() < stride * size.h as usize {
             return Err("short read-back".into());
         }
-        let mut out = Vec::with_capacity(row * rows);
-        for y in 0..rows {
-            let src_y = if bottom_up { rows - 1 - y } else { y };
-            out.extend_from_slice(&pixels[src_y * row..][..row]);
+        let row = rect.size.w as usize * 4;
+        let mut out = Vec::with_capacity(row * rect.size.h as usize);
+        for y in rect.loc.y..rect.loc.y + rect.size.h {
+            let src_y = if bottom_up { size.h - 1 - y } else { y } as usize;
+            let start = src_y * stride + rect.loc.x as usize * 4;
+            out.extend_from_slice(&pixels[start..start + row]);
         }
         Ok(out)
     }

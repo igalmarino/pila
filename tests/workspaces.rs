@@ -122,7 +122,7 @@ fn a_window_being_dragged_comes_along() {
     pila.move_to(500.0, 300.0);
     pila.key_press("Super");
     pila.press("left");
-    pila.wait("a move grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move grab", |s| s["pointer"]["grab"] == "move");
     pila.key("2");
     let state = pila.wait("workspace 2", |s| s["workspace"] == 2);
     let a = window_in(&state, "a").unwrap();
@@ -144,7 +144,7 @@ fn a_dragged_window_cant_be_sent_away() {
     pila.move_to(500.0, 300.0);
     pila.key_press("Super");
     pila.press("left");
-    pila.wait("a move grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move grab", |s| s["pointer"]["grab"] == "move");
     pila.key_press("Shift");
     pila.key("2");
     pila.key_release("Shift");

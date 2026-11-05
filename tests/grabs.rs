@@ -40,7 +40,9 @@ fn mod_left_drag_moves_and_the_client_never_sees_the_click() {
     pila.move_to((x + 100) as f64, (y + 100) as f64);
     pila.key_press("Super");
     pila.press("left");
-    let state = pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    let state = pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     assert_eq!(state["pointer"]["cursor"], "grabbing");
     pila.move_by(-30.0, 20.0);
     pila.move_by(-30.0, 20.0);
@@ -62,7 +64,9 @@ fn mod_right_drag_resizes_from_the_nearest_corner() {
     pila.move_to((x + w - 50) as f64, (y + h - 50) as f64);
     pila.key_press("Super");
     pila.press("right");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(40.0, 30.0);
     let c = client.wait_configure(window, "resizing", |c| c.size == (440, 330));
     assert!(c.has(states::RESIZING));
@@ -81,7 +85,9 @@ fn resizing_from_the_top_left_moves_the_window_once_it_commits() {
     pila.move_to((x + 50) as f64, (y + 50) as f64);
     pila.key_press("Super");
     pila.press("right");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(-40.0, -30.0);
     client.wait_configure(window, "bigger", |c| c.size == (440, 330));
     // The bottom-right corner stays put.
@@ -106,7 +112,9 @@ fn a_resize_respects_the_minimum_size() {
     pila.move_to((x + w - 10) as f64, (y + h - 10) as f64);
     pila.key_press("Super");
     pila.press("right");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(-300.0, -200.0);
     client.wait_configure(window, "the minimum", |c| c.size == (300, 250));
     pila.release("right");
@@ -121,7 +129,9 @@ fn the_invisible_border_resizes() {
     let state = pila.wait("a resize cursor", |s| s["pointer"]["cursor"] == "w-resize");
     assert_eq!(state["pointer"]["focus"], Value::Null);
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(-50.0, 0.0);
     client.wait_configure(window, "wider", |c| c.size == (450, 300));
     pila.wait("resized leftwards", |s| {
@@ -167,7 +177,7 @@ fn a_client_can_start_a_move_while_its_button_is_held() {
     let serial = client.last_serial();
     let seat = client.seat();
     client.request(window, |t| t._move(&seat, serial));
-    pila.wait("a move grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move grab", |s| s["pointer"]["grab"] == "move");
     pila.move_by(25.0, 35.0);
     pila.wait("moved", |s| {
         rect(&window_in(s, "a").unwrap()["geometry"]) == (x + 25, y + 35, w, h)
@@ -190,7 +200,7 @@ fn a_client_cant_start_a_move_without_a_held_button() {
     client.request(window, |t| t._move(&seat, serial));
     client.roundtrip();
     pila.stays("no grab", std::time::Duration::from_millis(100), |s| {
-        s["pointer"]["grabbed"] == false
+        s["pointer"]["grab"] != "move"
     });
 }
 
@@ -207,7 +217,7 @@ fn a_client_can_start_a_resize() {
     let serial = client.last_serial();
     let seat = client.seat();
     client.request(window, |t| t.resize(&seat, serial, ResizeEdge::BottomRight));
-    pila.wait("a resize grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a resize grab", |s| s["pointer"]["grab"] == "resize");
     pila.move_by(20.0, 10.0);
     client.wait_configure(window, "bigger", |c| c.size == (420, 310));
     pila.release("left");
@@ -219,7 +229,9 @@ fn dragging_to_the_left_edge_snaps_with_a_preview() {
     pila.move_to((x + 100) as f64, (y + 100) as f64);
     pila.key_press("Super");
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_to(0.0, 400.0);
     let state = pila.wait("a preview", |s| !s["snap_preview"].is_null());
     // The left half, title bar included.
@@ -241,7 +253,9 @@ fn dragging_to_the_top_edge_maximizes() {
     pila.move_to((x + 100) as f64, (y + 100) as f64);
     pila.key_press("Super");
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_to(600.0, 0.0);
     let state = pila.wait("a preview", |s| !s["snap_preview"].is_null());
     assert_eq!(rect(&state["snap_preview"]), (0, 0, 1280, 800));
@@ -259,7 +273,9 @@ fn moving_away_from_the_edge_drops_the_preview() {
     pila.move_to((x + 100) as f64, (y + 100) as f64);
     pila.key_press("Super");
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_to(0.0, 400.0);
     pila.wait("a preview", |s| !s["snap_preview"].is_null());
     pila.move_to(300.0, 400.0);
@@ -279,7 +295,9 @@ fn dragging_a_maximized_window_restores_it_under_the_pointer() {
     });
     pila.move_to(640.0, (BAR / 2) as f64);
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(0.0, 100.0);
     let state = pila.wait("restored", |s| {
         let a = window_in(s, "a").unwrap();
@@ -303,7 +321,9 @@ fn dragging_a_snapped_window_restores_its_size() {
     });
     pila.move_to(320.0, (BAR / 2) as f64);
     pila.press("left");
-    pila.wait("a grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
     pila.move_by(50.0, 100.0);
     pila.wait("unsnapped", |s| {
         let a = window_in(s, "a").unwrap();

@@ -4,9 +4,12 @@
 
 use serde_json::{json, Value};
 use smithay::{
-    desktop::{layer_map_for_output, Window},
+    desktop::{
+        layer_map_for_output, utils::bbox_from_surface_tree, PopupManager, PopupPointerGrab, Window,
+    },
     input::pointer::CursorImageStatus,
-    utils::{Logical, Rectangle},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Point, Rectangle},
     wayland::{
         seat::WaylandFocus,
         shell::wlr_layer::{ExclusiveZone, KeyboardInteractivity, Layer},
@@ -74,7 +77,79 @@ impl Pila {
             "rule_title_bar": props.title_bar,
             "animating": self.window_effect(window, now).is_some(),
             "ghost": self.is_ghost(window),
+            "flashing": crate::bell::flash(window, location).is_some(),
         })
+    }
+
+    /// What has keyboard focus: a window's app id, `popup:<app id or
+    /// namespace>`, `layer:<namespace>`, `lock`, or `None`.
+    fn keyboard_focus_name(&self) -> Option<String> {
+        let focus = self.keyboard_focus()?;
+        let name_of_root = |root: &WlSurface| {
+            if let Some(window) = self.window_for_surface(root) {
+                Some(foreign_toplevel::title_and_app_id(&window).1)
+            } else {
+                self.layer_for_surface(root)
+                    .map(|(_, layer)| layer.namespace().to_string())
+            }
+        };
+        if let Some(root) = self.popup_root(&focus) {
+            return Some(format!("popup:{}", name_of_root(&root)?));
+        }
+        if self.space.outputs().any(|o| {
+            self.lock_surface(o)
+                .is_some_and(|s| s.wl_surface() == &focus)
+        }) {
+            return Some("lock".into());
+        }
+        if let Some(window) = self.window_for_surface(&focus) {
+            return Some(foreign_toplevel::title_and_app_id(&window).1);
+        }
+        self.layer_for_surface(&focus)
+            .map(|(_, layer)| format!("layer:{}", layer.namespace()))
+    }
+
+    /// Popups open on mapped windows and layer surfaces: their owner's name
+    /// and global geometry.
+    fn popups_json(&self) -> Vec<Value> {
+        let mut roots: Vec<(String, WlSurface, Point<i32, Logical>)> = Vec::new();
+        for window in self.space.elements() {
+            let (Some(surface), Some(loc)) =
+                (window.wl_surface(), self.space.element_location(window))
+            else {
+                continue;
+            };
+            let name = foreign_toplevel::title_and_app_id(window).1;
+            roots.push((name, surface.into_owned(), loc - window.geometry().loc));
+        }
+        for output in self.space.outputs() {
+            let map = layer_map_for_output(output);
+            let origin = self.space.output_geometry(output).unwrap_or_default().loc;
+            for layer in map.layers() {
+                if let Some(geo) = map.layer_geometry(layer) {
+                    roots.push((
+                        layer.namespace().to_string(),
+                        layer.wl_surface().clone(),
+                        origin + geo.loc,
+                    ));
+                }
+            }
+        }
+        let mut popups = Vec::new();
+        for (owner, root, origin) in roots {
+            for (popup, offset) in PopupManager::popups_for_surface(&root) {
+                // Without a window geometry, the surface tree's extent.
+                let mut geo = popup.geometry();
+                if geo.is_empty() {
+                    geo = bbox_from_surface_tree(popup.wl_surface(), (0, 0));
+                }
+                popups.push(json!({
+                    "owner": owner,
+                    "geometry": rect(Rectangle::new(origin + offset, geo.size)),
+                }));
+            }
+        }
+        popups
     }
 
     /// Everything a test may want to check, as one JSON object.
@@ -198,6 +273,8 @@ impl Pila {
             "windows": windows,
             "unmapped": unmapped,
             "focused": focused,
+            "keyboard_focus": self.keyboard_focus_name(),
+            "popups": self.popups_json(),
             "keyboard_focus_layer": self
                 .keyboard_focus()
                 .and_then(|s| self.layer_for_surface(&s))
@@ -213,6 +290,19 @@ impl Pila {
                 "y": pointer_loc.y,
                 "focus": pointer_focus,
                 "grabbed": pointer.as_ref().is_some_and(|p| p.is_grabbed()),
+                "grab": pointer.as_ref().and_then(|p| {
+                    p.with_grab(|_, grab| {
+                        if grab.downcast_ref::<crate::grabs::MoveSurfaceGrab>().is_some() {
+                            "move"
+                        } else if grab.downcast_ref::<crate::grabs::ResizeSurfaceGrab>().is_some() {
+                            "resize"
+                        } else if grab.downcast_ref::<PopupPointerGrab<Pila>>().is_some() {
+                            "popup"
+                        } else {
+                            "click"
+                        }
+                    })
+                }),
                 "cursor": cursor,
                 "constrained": self.constrained.is_some(),
             },

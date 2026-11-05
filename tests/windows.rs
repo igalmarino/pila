@@ -310,7 +310,7 @@ fn the_title_bar_drags_the_window() {
     let (x, y, _, _) = rect(&w["geometry"]);
     pila.move_to((x + 20) as f64, (y - 10) as f64);
     pila.press("left");
-    pila.wait("a move grab", |s| s["pointer"]["grabbed"] == true);
+    pila.wait("a move grab", |s| s["pointer"]["grab"] == "move");
     pila.move_by(-100.0, 50.0);
     pila.move_by(-10.0, 0.0);
     pila.release("left");

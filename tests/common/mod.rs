@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod client;
+pub mod protocols;
 
 use std::{
     io::{BufRead, BufReader, Write},

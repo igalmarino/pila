@@ -122,6 +122,7 @@ pub enum Decorations {
 }
 
 pub struct WindowData {
+    pub app_id: String,
     pub surface: WlSurface,
     pub xdg_surface: XdgSurface,
     pub toplevel: Option<XdgToplevel>,
@@ -165,16 +166,102 @@ pub struct Shared {
     /// The connection failed (protocol error, or pila went away).
     pub error: Option<String>,
     pub last_serial: u32,
+    pub registry: Option<WlRegistry>,
+    /// Events of the other protocols (`protocols.rs`), in order.
+    pub log: Vec<Logged>,
+    /// Layer, popup, lock and other surfaces (`protocols.rs`).
+    pub surfaces: Vec<SurfaceData>,
+    /// The name of the surface with keyboard / pointer focus: a window's
+    /// app id or another surface's name.
+    pub keyboard_name: Option<String>,
+    pub pointer_name: Option<String>,
+    /// The keymap pila sent (format, text).
+    pub keymap: Option<(u32, String)>,
+    /// The serial of the last pointer enter (for set_cursor).
+    pub pointer_enter_serial: u32,
+    /// The current selection offers: clipboard, primary, data-control's
+    /// clipboard and primary.
+    pub data_offer: Option<wayland_client::protocol::wl_data_offer::WlDataOffer>,
+    pub primary_offer: Option<
+        wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1,
+    >,
+    pub control_offer: Option<
+        wayland_protocols::ext::data_control::v1::client::ext_data_control_offer_v1::ExtDataControlOfferV1,
+    >,
+    pub control_primary_offer: Option<
+        wayland_protocols::ext::data_control::v1::client::ext_data_control_offer_v1::ExtDataControlOfferV1,
+    >,
+    /// Popups' xdg_surfaces and layer surfaces, by surface index (parents
+    /// of popups).
+    pub popup_xdg_surfaces: Vec<(usize, XdgSurface)>,
+    pub layer_surfaces: Vec<
+        (
+            usize,
+            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        ),
+    >,
+}
+
+/// An event of a protocol logged generically: the tag the object was
+/// created with, its protocol id and the event, as `Debug` prints it.
+#[derive(Debug, Clone)]
+pub struct Logged {
+    pub tag: String,
+    pub id: u32,
+    pub event: String,
+}
+
+/// A surface that isn't a toplevel: a layer surface, popup, lock surface.
+pub struct SurfaceData {
+    pub name: String,
+    pub surface: WlSurface,
+    /// ARGB.
+    pub color: [u8; 4],
+    pub default_size: (i32, i32),
+    pub size: (i32, i32),
+    /// Sizes configured (popups: x, y too), in order.
+    pub configures: Vec<(i32, i32, i32, i32)>,
+    pub pending: (i32, i32, i32, i32),
+    pub auto_draw: bool,
+    /// Closed (layer surface), done (popup), or finished.
+    pub closed: bool,
 }
 
 impl Shared {
     fn window_of(&self, surface: &WlSurface) -> Option<usize> {
         self.windows.iter().position(|w| w.surface == *surface)
     }
+
+    /// A window's app id or a surface's name.
+    pub fn name_of(&self, surface: &WlSurface) -> Option<String> {
+        if let Some(w) = self.windows.iter().find(|w| w.surface == *surface) {
+            return Some(w.app_id.clone());
+        }
+        self.surfaces
+            .iter()
+            .find(|s| s.surface == *surface)
+            .map(|s| s.name.clone())
+    }
+
+    /// The logged events with `tag`.
+    pub fn logged(&self, tag: &str) -> Vec<String> {
+        self.log
+            .iter()
+            .filter(|l| l.tag == tag)
+            .map(|l| l.event.clone())
+            .collect()
+    }
+
+    /// Whether an event with `tag` contains `text`.
+    pub fn has_logged(&self, tag: &str, text: &str) -> bool {
+        self.log
+            .iter()
+            .any(|l| l.tag == tag && l.event.contains(text))
+    }
 }
 
 pub struct Handler {
-    shared: Arc<Mutex<Shared>>,
+    pub(crate) shared: Arc<Mutex<Shared>>,
 }
 
 pub struct Client {
@@ -285,6 +372,7 @@ impl<'a> WindowBuilder<'a> {
         };
         surface.commit();
         shared.windows.push(WindowData {
+            app_id: self.app_id.clone(),
             surface,
             xdg_surface,
             toplevel: Some(toplevel),
@@ -322,6 +410,7 @@ impl Client {
         queue.roundtrip(&mut handler).expect("registry roundtrip");
         {
             let mut s = shared.lock().unwrap();
+            s.registry = Some(registry.clone());
             let globals = s.globals.clone();
             for (name, interface, version) in globals {
                 match interface.as_str() {
@@ -607,6 +696,18 @@ fn configured_size(w: &WindowData) -> (i32, i32) {
 
 /// Draw `w` in its color at `size` and commit.
 fn draw(shm: &WlShm, qh: &QueueHandle<Handler>, w: &mut WindowData, size: (i32, i32)) {
+    paint(shm, qh, &w.surface, w.color, size);
+    w.size = size;
+}
+
+/// Attach a buffer of `size` in `color` (ARGB) to `surface` and commit.
+pub fn paint(
+    shm: &WlShm,
+    qh: &QueueHandle<Handler>,
+    surface: &WlSurface,
+    color: [u8; 4],
+    size: (i32, i32),
+) {
     let (width, height) = size;
     let stride = width * 4;
     let len = (stride * height) as usize;
@@ -614,7 +715,7 @@ fn draw(shm: &WlShm, qh: &QueueHandle<Handler>, w: &mut WindowData, size: (i32, 
     let fd = unsafe { libc::memfd_create(c"pila-test".as_ptr(), libc::MFD_CLOEXEC) };
     assert!(fd >= 0, "memfd_create");
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-    let [a, r, g, b] = w.color;
+    let [a, r, g, b] = color;
     let pixel = [b, g, r, a];
     let mut data = Vec::with_capacity(len);
     for _ in 0..(width * height) {
@@ -629,16 +730,26 @@ fn draw(shm: &WlShm, qh: &QueueHandle<Handler>, w: &mut WindowData, size: (i32, 
     };
     let buffer = pool.create_buffer(0, width, height, stride, format, qh, ());
     pool.destroy();
-    w.surface.attach(Some(&buffer), 0, 0);
-    w.surface.damage_buffer(0, 0, width, height);
-    w.surface.commit();
-    w.size = size;
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, width, height);
+    surface.commit();
+}
+
+/// Read what an fd holds (a keymap, a selection's data).
+fn read_fd(fd: OwnedFd, size: usize) -> String {
+    use std::io::Read;
+    let mut file = std::fs::File::from(fd);
+    let mut data = Vec::with_capacity(size);
+    let _ = file.read_to_end(&mut data);
+    String::from_utf8_lossy(&data)
+        .trim_end_matches('\0')
+        .to_string()
 }
 
 // --- Dispatch ---------------------------------------------------------------
 
 impl Handler {
-    fn lock(&self) -> MutexGuard<'_, Shared> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Shared> {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
@@ -882,17 +993,25 @@ impl Dispatch<WlKeyboard, ()> for Handler {
     ) {
         let mut s = state.lock();
         let ev = match event {
-            wl_keyboard::Event::Keymap { fd, .. } => {
-                drop::<OwnedFd>(fd);
+            wl_keyboard::Event::Keymap { fd, format, size } => {
+                let format = match format {
+                    WEnum::Value(f) => f as u32,
+                    WEnum::Unknown(f) => f,
+                };
+                s.keymap = Some((format, read_fd(fd, size as usize)));
                 return;
             }
             wl_keyboard::Event::Enter {
                 surface, serial, ..
             } => {
                 s.last_serial = serial;
+                s.keyboard_name = s.name_of(&surface);
                 Ev::KeyboardEnter(s.window_of(&surface))
             }
-            wl_keyboard::Event::Leave { surface, .. } => Ev::KeyboardLeave(s.window_of(&surface)),
+            wl_keyboard::Event::Leave { surface, .. } => {
+                s.keyboard_name = None;
+                Ev::KeyboardLeave(s.window_of(&surface))
+            }
             wl_keyboard::Event::Key {
                 key,
                 state: key_state,
@@ -932,6 +1051,8 @@ impl Dispatch<WlPointer, ()> for Handler {
                 serial,
             } => {
                 s.last_serial = serial;
+                s.pointer_enter_serial = serial;
+                s.pointer_name = s.name_of(&surface);
                 Ev::PointerEnter {
                     window: s.window_of(&surface),
                     x: surface_x,
@@ -939,7 +1060,10 @@ impl Dispatch<WlPointer, ()> for Handler {
                     serial,
                 }
             }
-            wl_pointer::Event::Leave { surface, .. } => Ev::PointerLeave(s.window_of(&surface)),
+            wl_pointer::Event::Leave { surface, .. } => {
+                s.pointer_name = None;
+                Ev::PointerLeave(s.window_of(&surface))
+            }
             wl_pointer::Event::Motion {
                 surface_x,
                 surface_y,
