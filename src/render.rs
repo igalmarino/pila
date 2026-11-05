@@ -161,6 +161,8 @@ pub struct SceneWindow {
     pub flash: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
     /// Its rounded corners, if any (`rounded.rs`).
     pub rounding: Option<Rounding>,
+    /// Its opacity (a window rule's `opacity`), title bar included.
+    pub alpha: f32,
     /// While it animates: drawn through a texture (`animation.rs`).
     pub effect: Option<WindowEffect>,
 }
@@ -276,6 +278,7 @@ fn scene_elements_from(
             buffer,
             rect.loc - output_location,
             radius,
+            1.0,
             scale,
         ));
     }
@@ -348,7 +351,7 @@ fn single_layer_elements(
         Surfaces::Tree => AsRenderElements::<GlesRenderer>::render_elements::<PilaRenderElement>(
             layer, renderer, location, scale, 1.0,
         ),
-        Surfaces::MainOnly => main_surface_element(renderer, layer.wl_surface(), location)
+        Surfaces::MainOnly => main_surface_element(renderer, layer.wl_surface(), location, 1.0)
             .into_iter()
             .map(PilaRenderElement::Surface)
             .collect(),
@@ -449,6 +452,7 @@ fn single_window_elements(
             buffer,
             rect.loc - output_location,
             rounding.map(|r| r.radius),
+            entry.alpha,
             scale,
         ));
     }
@@ -459,7 +463,7 @@ fn single_window_elements(
             let main = entry
                 .window
                 .wl_surface()
-                .map(|surface| main_surface_element(renderer, &surface, location))
+                .map(|surface| main_surface_element(renderer, &surface, location, entry.alpha))
                 .unwrap_or_default();
             match (rounding, shaders) {
                 (Some(rounding), Some(shaders)) => elements.extend(
@@ -477,10 +481,13 @@ fn single_window_elements(
             shaders,
             output_location,
             scale,
+            entry.alpha,
         )),
         _ => elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
             PilaRenderElement,
-        >(&entry.window, renderer, location, scale, 1.0)),
+        >(
+            &entry.window, renderer, location, scale, entry.alpha
+        )),
     }
     if let Some(bar) = &entry.title_bar {
         let rect = Rectangle::new(bar.rect.loc - output_location, bar.rect.size);
@@ -491,6 +498,7 @@ fn single_window_elements(
             bar.focused,
             bar.hover,
             rounding.map(|r| r.radius),
+            entry.alpha,
             scale,
         ));
     }
@@ -503,6 +511,7 @@ fn main_surface_element(
     renderer: &mut GlesRenderer,
     surface: &WlSurface,
     location: Point<i32, Physical>,
+    alpha: f32,
 ) -> Vec<WaylandSurfaceRenderElement<GlesRenderer>> {
     with_states(surface, |states| {
         WaylandSurfaceRenderElement::from_surface(
@@ -510,7 +519,7 @@ fn main_surface_element(
             surface,
             states,
             location.to_f64(),
-            1.0,
+            alpha,
             Kind::Unspecified,
         )
     })
@@ -778,6 +787,7 @@ fn ghost_element(
 
 /// A window's elements, as `Window::render_elements` makes them (popups in
 /// front, unclipped), with its own surfaces clipped to `rounding`.
+#[allow(clippy::too_many_arguments)]
 fn rounded_window_elements(
     renderer: &mut GlesRenderer,
     window: &Window,
@@ -786,6 +796,7 @@ fn rounded_window_elements(
     shaders: &rounded::Shaders,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    alpha: f32,
 ) -> Vec<PilaRenderElement> {
     let Some(surface) = window.wl_surface() else {
         return Vec::new();
@@ -801,7 +812,7 @@ fn rounded_window_elements(
                 popup.wl_surface(),
                 location + offset,
                 scale,
-                1.0,
+                alpha,
                 Kind::Unspecified,
             ));
         }
@@ -811,7 +822,7 @@ fn rounded_window_elements(
         &surface,
         location,
         scale,
-        1.0,
+        alpha,
         Kind::Unspecified,
     );
     elements.extend(
@@ -828,10 +839,12 @@ fn solid_element(
     buffer: &SolidColorBuffer,
     loc: Point<i32, Logical>,
     radius: Option<f64>,
+    alpha: f32,
     scale: Scale<f64>,
 ) -> PilaRenderElement {
     let loc: Point<i32, Physical> = loc.to_physical_precise_round(scale);
-    let element = SolidColorRenderElement::from_buffer(buffer, loc, scale, 1.0, Kind::Unspecified);
+    let element =
+        SolidColorRenderElement::from_buffer(buffer, loc, scale, alpha, Kind::Unspecified);
     match radius.zip(radius.and_then(|_| rounded::Shaders::get(renderer))) {
         Some((radius, shaders)) => PilaRenderElement::RoundedSolid(RoundedSolid::new(
             element,

@@ -200,6 +200,12 @@ tap = true
 #                                  # top-left of the output's free area
 #
 # [[window-rule]]
+# app-id = "kitty"
+# title-bar = false                # pila draws no title bar (the app neither)
+# corner-radius = 12               # instead of the one above
+# opacity = 0.95                   # 0.1 to 1, title bar included
+#
+# [[window-rule]]
 # app-id = "thunderbird"
 # open-on-workspace = 3            # opens there, without switching to it
 # open-maximized = true            # or open-fullscreen = true

@@ -75,7 +75,13 @@ pub struct WindowRuleFile {
     open_fullscreen: Option<bool>,
     size: Option<[i32; 2]>,
     position: Option<[i32; 2]>,
+    title_bar: Option<bool>,
+    corner_radius: Option<u32>,
+    opacity: Option<f64>,
 }
+
+/// The range of `opacity`: never fully transparent.
+const OPACITIES: std::ops::RangeInclusive<f64> = 0.1..=1.0;
 
 /// The largest `size` a rule may give (logical pixels).
 const MAX_RULE_SIZE: i32 = 16384;
@@ -120,6 +126,12 @@ pub struct WindowProps {
     /// Where its top-left (title bar included) goes when it opens,
     /// relative to the usable area of the output it opens on.
     pub position: Option<(i32, i32)>,
+    /// `false`: pila draws no title bar (the client doesn't either).
+    pub title_bar: Option<bool>,
+    /// Instead of `corner-radius`.
+    pub corner_radius: Option<u32>,
+    /// Of everything it draws, title bar included.
+    pub opacity: Option<f64>,
 }
 
 impl WindowProps {
@@ -130,6 +142,9 @@ impl WindowProps {
         self.open_fullscreen = other.open_fullscreen.or(self.open_fullscreen);
         self.size = other.size.or(self.size);
         self.position = other.position.or(self.position);
+        self.title_bar = other.title_bar.or(self.title_bar);
+        self.corner_radius = other.corner_radius.or(self.corner_radius);
+        self.opacity = other.opacity.or(self.opacity);
     }
 
     /// Whether `kind` plays for this window.
@@ -191,6 +206,23 @@ impl WindowRuleFile {
                 ))
             }
         };
+        if let Some(opacity) = self.opacity {
+            if !OPACITIES.contains(&opacity) {
+                return Err(format!(
+                    "window-rule {index}: opacity = {opacity}: must be {} to {}",
+                    OPACITIES.start(),
+                    OPACITIES.end()
+                ));
+            }
+        }
+        if let Some(radius) = self.corner_radius {
+            if radius > crate::config::MAX_CORNER_RADIUS {
+                return Err(format!(
+                    "window-rule {index}: corner-radius = {radius}: must be 0 to {}",
+                    crate::config::MAX_CORNER_RADIUS
+                ));
+            }
+        }
         if let Some([w, h]) = self.size {
             if !(1..=MAX_RULE_SIZE).contains(&w) || !(1..=MAX_RULE_SIZE).contains(&h) {
                 return Err(format!(
@@ -223,6 +255,9 @@ impl WindowRuleFile {
                 open_fullscreen: self.open_fullscreen,
                 size: self.size.map(|[w, h]| (w, h)),
                 position: self.position.map(|[x, y]| (x, y)),
+                title_bar: self.title_bar,
+                corner_radius: self.corner_radius,
+                opacity: self.opacity,
             },
         })
     }
@@ -272,11 +307,16 @@ struct LayerRuleProps(RefCell<LayerProps>);
 
 /// What the rules set for `window`, as last resolved (nothing before).
 pub fn window_props(window: &Window) -> WindowProps {
-    window
-        .user_data()
-        .get::<WindowRuleProps>()
-        .map(|p| p.0.borrow().clone())
-        .unwrap_or_default()
+    with_window_props(window, WindowProps::clone)
+}
+
+/// `f` of what the rules set for `window`, without copying it (for what's
+/// asked often, e.g. per frame or pointer motion).
+pub fn with_window_props<R>(window: &Window, f: impl FnOnce(&WindowProps) -> R) -> R {
+    match window.user_data().get::<WindowRuleProps>() {
+        Some(props) => f(&props.0.borrow()),
+        None => f(&WindowProps::default()),
+    }
 }
 
 /// What the rules set for `layer`, as last resolved (nothing before).
@@ -375,6 +415,9 @@ impl Pila {
         for layer in &layers {
             self.resolve_layer_rules(layer);
         }
+        // A title bar shown or hidden changes where filled windows go.
+        self.refit_maximized();
+        self.queue_redraw();
     }
 }
 
@@ -496,6 +539,9 @@ mod tests {
         assert!(invalid("[[window-rule]]\nopen-on-workspace = 5").contains("1 to 4"));
         assert!(invalid("[[window-rule]]\nopen-on-workspace = 0").contains("1 to 4"));
         assert!(invalid("[[window-rule]]\nsize = [0, 300]").contains("size"));
+        assert!(invalid("[[window-rule]]\nopacity = 0").contains("opacity"));
+        assert!(invalid("[[window-rule]]\nopacity = 1.5").contains("opacity"));
+        assert!(invalid("[[window-rule]]\ncorner-radius = 100").contains("corner-radius"));
     }
 
     #[test]

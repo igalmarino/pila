@@ -391,7 +391,13 @@ Key flows and invariants:
   initial configure (`apply_initial_rules` from `handle_xdg_commit`; X11: size by
   `configure`, fill after placing, in `map_window_request`), `position` (from the
   usable area's top-left, title bar included) and `open-on-workspace` (`park`ed there,
-  unfocused, no animation) in `place_new_window`. Layer properties: `animations` and
+  unfocused, no animation) in `place_new_window`; live, like `animations`: `title-bar =
+  false` (`decoration::bar_hidden`: no bar drawn nor laid out, the window stays SSD),
+  `corner-radius` (over the global one, in `scene_window`) and `opacity`
+  (`SceneWindow::alpha`, passed to every element of the window, title bar and flash
+  included; Smithay's elements drop their opaque regions below 1). Hot paths read them
+  through `rules::with_window_props` (no copy); a reload also re-fits filled windows
+  (a bar shown or hidden moves them). Layer properties: `animations` and
   `blur` (`blur_rects`: `true` the whole surface, `false` none, unset the client's
   region). Each applied rule logs on `pila::rules` for `scripts/check`.
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root

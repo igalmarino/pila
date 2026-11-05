@@ -572,10 +572,16 @@ impl Pila {
         let loc = self.space.element_location(window)?;
         let bar_rect = decoration::title_bar_rect(window, loc);
         let (maximized, fullscreen) = fill_state(window);
+        let (radius, alpha) = crate::rules::with_window_props(window, |props| {
+            (
+                props.corner_radius.unwrap_or(self.config.corner_radius),
+                props.opacity.unwrap_or(1.0) as f32,
+            )
+        });
         let rounding = crate::rounded::Rounding::new(
             Rectangle::new(loc, window.geometry().size),
             bar_rect,
-            self.config.corner_radius,
+            radius,
             maximized || fullscreen,
         );
         let title_bar = bar_rect.map(|rect| SceneTitleBar {
@@ -589,6 +595,7 @@ impl Pila {
             title_bar,
             flash: crate::bell::flash(window, loc),
             rounding,
+            alpha,
             effect: now.and_then(|now| self.window_effect(window, now)),
         })
     }

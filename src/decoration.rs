@@ -94,9 +94,18 @@ pub fn is_ssd(window: &Window) -> bool {
     })
 }
 
-/// Whether a title bar is drawn: the client acked server-side decorations
-/// and isn't fullscreen.
+/// Whether a window rule hides pila's title bar (`title-bar = false`): the
+/// window stays server-side decorated, so the client draws none either.
+fn bar_hidden(window: &Window) -> bool {
+    crate::rules::with_window_props(window, |props| props.title_bar == Some(false))
+}
+
+/// Whether a title bar is drawn: the client acked server-side decorations,
+/// isn't fullscreen and no rule hides it.
 pub fn has_title_bar(window: &Window) -> bool {
+    if bar_hidden(window) {
+        return false;
+    }
     if let Some(x11) = window.x11_surface() {
         return is_ssd(window) && !x11.is_fullscreen();
     }
@@ -108,9 +117,10 @@ pub fn has_title_bar(window: &Window) -> bool {
 }
 
 /// Height taken above a window at `loc` (its geometry origin) by its title bar,
-/// for layout: 0 unless the window is server-side decorated and not fullscreen.
+/// for layout: 0 unless the window is server-side decorated, not fullscreen
+/// and its bar isn't hidden by a rule.
 pub fn layout_offset(window: &Window, fullscreen: bool) -> i32 {
-    if is_ssd(window) && !fullscreen {
+    if is_ssd(window) && !fullscreen && !bar_hidden(window) {
         TITLE_BAR_HEIGHT
     } else {
         0
@@ -295,6 +305,7 @@ fn window_title(window: &Window) -> Option<String> {
 /// scale rounded up (`scale::buffer_scale`), so they stay sharp on HiDPI
 /// outputs; a window spanning outputs of different scales re-rasterizes
 /// them for each.
+#[allow(clippy::too_many_arguments)]
 pub fn title_bar_elements(
     renderer: &mut GlesRenderer,
     window: &Window,
@@ -302,6 +313,7 @@ pub fn title_bar_elements(
     focused: bool,
     hover: Option<TitleBarPart>,
     radius: Option<f64>,
+    alpha: f32,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
     // Rounded top corners, if the shaders for them work (`rounded.rs`).
@@ -347,7 +359,7 @@ pub fn title_bar_elements(
                 renderer,
                 loc,
                 buffer,
-                None,
+                (alpha < 1.0).then_some(alpha),
                 None,
                 None,
                 Kind::Unspecified,
@@ -432,7 +444,7 @@ pub fn title_bar_elements(
 
     bar.update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
     let loc: Point<i32, Physical> = rect.loc.to_physical_precise_round(scale);
-    let bar = SolidColorRenderElement::from_buffer(bar, loc, scale, 1.0, Kind::Unspecified);
+    let bar = SolidColorRenderElement::from_buffer(bar, loc, scale, alpha, Kind::Unspecified);
     elements.push(match (radius, &shaders) {
         (Some(radius), Some(shaders)) => {
             RoundedSolid::new(bar, shaders, radius, Corners::Top, scale).into()

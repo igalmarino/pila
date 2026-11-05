@@ -49,6 +49,7 @@ impl CompositorHandler for Pila {
             }
             if let Some(window) = self.window_for_surface(&root) {
                 window.on_commit();
+                log_size_change(&window);
             }
         }
 
@@ -58,6 +59,29 @@ impl CompositorHandler for Pila {
         self.handle_lock_commit(surface);
         resize_grab::handle_commit(&mut self.space, surface);
         crate::cursor::handle_commit(&self.cursor_status, surface);
+    }
+}
+
+/// A window's size at its last commit, to log when it changes.
+#[derive(Default)]
+struct LastSize(std::cell::Cell<Option<smithay::utils::Size<i32, smithay::utils::Logical>>>);
+
+/// Log a window whose size changed with a commit (debug, `pila::state`):
+/// a client resizing itself, or answering a configure. `scripts/check`
+/// reads these.
+fn log_size_change(window: &smithay::desktop::Window) {
+    window.user_data().insert_if_missing(LastSize::default);
+    let Some(last) = window.user_data().get::<LastSize>() else {
+        return;
+    };
+    // Empty before the first buffer and after the last: not a size.
+    let size = window.geometry().size;
+    if size.is_empty() {
+        return;
+    }
+    if last.0.replace(Some(size)) != Some(size) {
+        let app_id = crate::foreign_toplevel::title_and_app_id(window).1;
+        tracing::debug!(target: "pila::state", app_id, w = size.w, h = size.h, "window size");
     }
 }
 

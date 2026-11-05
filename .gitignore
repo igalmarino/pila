@@ -3,3 +3,5 @@
 # Logs from test runs on the host (e.g. pila-tty.log)
 /*.log
 /*.log.old
+# Screenshot scripts/check takes
+/pila-check.png
