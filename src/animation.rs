@@ -304,6 +304,21 @@ pub struct Animations {
     geometry_held: bool,
 }
 
+impl Animations {
+    /// How many of each kind are kept (running or done but not yet pruned):
+    /// appearing, ghosts, layers appearing, layer ghosts, resizing. For the
+    /// headless state dump (`introspect.rs`).
+    pub(crate) fn counts(&self) -> [usize; 5] {
+        [
+            self.appearing.len(),
+            self.ghosts.len(),
+            self.layers.len(),
+            self.layer_ghosts.len(),
+            self.resizing.len(),
+        ]
+    }
+}
+
 /// A window's or layer surface's texture while it animates (`render.rs`),
 /// one per scale it's drawn at; kept in its user data and dropped when it
 /// stops animating.

@@ -180,6 +180,7 @@ impl Pila {
         match self.backend {
             Some(Backend::Udev(_)) => crate::udev::apply_output_config(self),
             Some(Backend::Winit(_)) => self.apply_nested_scale(),
+            Some(Backend::Headless(_)) => crate::headless::apply_output_config(self),
             None => {}
         }
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {

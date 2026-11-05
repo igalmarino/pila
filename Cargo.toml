@@ -21,6 +21,8 @@ cosmic-text = "0.19"
 libc = "0.2"
 # The config file (`config.rs`).
 serde = { version = "1", features = ["derive"] }
+# The headless backend's control socket (`test_control.rs`, `introspect.rs`).
+serde_json = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 # Connector scanning for the DRM backend; same source as the copy in Smithay
 # v0.7.0's tree. Its EDID support (`display-info`) is off: it binds
@@ -48,3 +50,11 @@ features = [
     # X11 apps (`xwayland.rs`)
     "xwayland",
 ]
+
+# Integration tests (`tests/`): synthetic Wayland clients driving a headless
+# pila (`--backend headless`).
+[dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }

@@ -1,5 +1,6 @@
 //! The backend pila runs on: nested in another session (`winit.rs`), or on
-//! bare metal (DRM/KMS + libinput, `udev.rs`). Code outside the backends goes
+//! bare metal (DRM/KMS + libinput, `udev.rs`), or headless for automated
+//! tests (`headless.rs`). Code outside the backends goes
 //! through these methods instead of matching on the variant.
 
 use smithay::{
@@ -8,11 +9,14 @@ use smithay::{
     output::Output,
 };
 
-use crate::{cursor::CursorTheme, output_management::HeadInfo, udev::UdevData};
+use crate::{
+    cursor::CursorTheme, headless::HeadlessData, output_management::HeadInfo, udev::UdevData,
+};
 
 pub enum Backend {
     Winit(Box<WinitGraphicsBackend<GlesRenderer>>),
     Udev(Box<UdevData>),
+    Headless(Box<HeadlessData>),
 }
 
 impl Backend {
@@ -21,6 +25,7 @@ impl Backend {
         match self {
             Backend::Winit(backend) => backend.renderer(),
             Backend::Udev(data) => &mut data.renderer,
+            Backend::Headless(data) => &mut data.renderer,
         }
     }
 
@@ -33,6 +38,7 @@ impl Backend {
                 let (renderer, theme) = data.renderer_and_cursor_theme();
                 (renderer, Some(theme))
             }
+            Backend::Headless(data) => (&mut data.renderer, None),
         }
     }
 
@@ -41,6 +47,7 @@ impl Backend {
         match self {
             Backend::Winit(backend) => backend.window().request_redraw(),
             Backend::Udev(data) => data.queue_redraw(),
+            Backend::Headless(data) => data.queue_redraw(),
         }
     }
 
@@ -50,6 +57,8 @@ impl Backend {
             // The host draws named shapes; pila draws client surfaces itself.
             Backend::Winit(backend) => crate::winit::apply_cursor(backend.window(), status),
             Backend::Udev(data) => data.cursor_changed(status),
+            // Nothing to show it on.
+            Backend::Headless(_) => {}
         }
     }
 
@@ -73,6 +82,7 @@ impl Backend {
         match self {
             Backend::Winit(_) => None,
             Backend::Udev(data) => Some(data.output_heads()),
+            Backend::Headless(data) => Some(data.output_heads()),
         }
     }
 
@@ -82,6 +92,7 @@ impl Backend {
         match self {
             Backend::Winit(_) => None,
             Backend::Udev(data) => data.gamma_size(output),
+            Backend::Headless(data) => data.gamma_size(output),
         }
     }
 
@@ -90,6 +101,7 @@ impl Backend {
         match self {
             Backend::Winit(_) => None,
             Backend::Udev(data) => data.output_power(output),
+            Backend::Headless(data) => data.output_power(output),
         }
     }
 
@@ -98,13 +110,16 @@ impl Backend {
         match self {
             Backend::Winit(_) => false,
             Backend::Udev(data) => data.set_output_power(output, on),
+            Backend::Headless(data) => data.set_output_power(output, on),
         }
     }
 
     /// Linear gamma everywhere, for exit.
     pub fn reset_gamma(&mut self) {
-        if let Backend::Udev(data) = self {
-            data.reset_gamma();
+        match self {
+            Backend::Udev(data) => data.reset_gamma(),
+            Backend::Headless(data) => data.reset_gamma(),
+            Backend::Winit(_) => {}
         }
     }
 
@@ -114,6 +129,7 @@ impl Backend {
         match self {
             Backend::Winit(_) => false,
             Backend::Udev(data) => data.set_gamma(output, ramp),
+            Backend::Headless(data) => data.set_gamma(output, ramp),
         }
     }
 }

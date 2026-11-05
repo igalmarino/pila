@@ -29,8 +29,10 @@ mod gamma_control;
 mod gestures;
 mod grabs;
 mod handlers;
+mod headless;
 mod idle;
 mod input;
+mod introspect;
 mod layers;
 mod minimize;
 mod output_management;
@@ -45,6 +47,7 @@ mod session_lock;
 mod snap;
 mod state;
 mod switcher;
+mod test_control;
 mod text;
 mod toplevel_management;
 mod udev;
@@ -61,7 +64,8 @@ use crate::config::{Config, ModKey};
 pub use crate::state::Pila;
 
 const USAGE: &str = "\
-Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev]
+Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev|headless]
+            [--headless-outputs <OUTPUTS>]
        pila --check-config [--config <FILE>]
 
 Options:
@@ -70,8 +74,13 @@ Options:
   --config <FILE>       Config file (default: $XDG_CONFIG_HOME/pila/config.toml
                         or ~/.config/pila/config.toml; see config.example.toml)
   --backend <BACKEND>   winit: a window in another Wayland/X11 session;
-                        udev: DRM/KMS on a TTY. Default: winit if
-                        WAYLAND_DISPLAY or DISPLAY is set, else udev
+                        udev: DRM/KMS on a TTY; headless: virtual outputs
+                        and a control socket, for automated tests
+                        ($XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.control). Default:
+                        winit if WAYLAND_DISPLAY or DISPLAY is set, else udev
+  --headless-outputs <OUTPUTS>
+                        The headless backend's outputs, NAME:WxH[@HZ] separated
+                        by commas (default: HEADLESS-1:1280x800@60)
   --check-config        Check the config file (as pila would read it, the
                         keymap included) and exit: 0 if it's valid, 1 if not
   -V, --version         Show the version
@@ -105,6 +114,7 @@ resources/xdg/xdg-desktop-portal-wlr/pila installed in /etc/xdg or ~/.config.";
 enum BackendKind {
     Winit,
     Udev,
+    Headless,
 }
 
 /// `--check-config`: read the config as pila would and say whether it's
@@ -171,6 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut check_config = false;
     let mut config_path = None;
     let mut backend = None;
+    let mut headless_outputs = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -191,8 +202,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--backend" => match args.next().as_deref() {
                 Some("winit") => backend = Some(BackendKind::Winit),
                 Some("udev") => backend = Some(BackendKind::Udev),
+                Some("headless") => backend = Some(BackendKind::Headless),
                 _ => {
-                    eprintln!("--backend needs winit or udev\n\n{USAGE}");
+                    eprintln!("--backend needs winit, udev or headless\n\n{USAGE}");
+                    std::process::exit(2);
+                }
+            },
+            "--headless-outputs" => match args.next().map(|s| headless::parse_output_specs(&s)) {
+                Some(Ok(specs)) if !specs.is_empty() => headless_outputs = Some(specs),
+                Some(Err(err)) => {
+                    eprintln!("--headless-outputs: {err}\n\n{USAGE}");
+                    std::process::exit(2);
+                }
+                _ => {
+                    eprintln!("--headless-outputs needs outputs\n\n{USAGE}");
                     std::process::exit(2);
                 }
             },
@@ -271,7 +294,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Nested, the host desktop (e.g. GNOME) grabs Super.
     let default_mod = match backend {
         BackendKind::Winit => ModKey::Alt,
-        BackendKind::Udev => ModKey::Super,
+        BackendKind::Udev | BackendKind::Headless => ModKey::Super,
     };
     let config_path = Config::path(config_path.as_deref());
     let config = Config::load(config_path.as_deref(), default_mod);
@@ -294,6 +317,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match backend {
         BackendKind::Winit => winit::init_winit(&mut event_loop, &mut state)?,
         BackendKind::Udev => udev::init_udev(&mut event_loop, &mut state)?,
+        BackendKind::Headless => {
+            let specs = headless_outputs.unwrap_or_else(|| {
+                headless::parse_output_specs(headless::DEFAULT_OUTPUTS).expect("valid")
+            });
+            headless::init_headless(&mut state, &specs)?;
+            test_control::init(&mut state)?;
+        }
     }
 
     // `-c`, else the config's autostart, else a terminal. They run once
@@ -301,6 +331,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let startup = match startup_command {
         Some(command) => vec![command],
         None if !state.config.autostart.is_empty() => state.config.autostart.clone(),
+        // Tests start their own clients.
+        None if backend == BackendKind::Headless => Vec::new(),
         None => state.config.terminal_command().into_iter().collect(),
     };
     state.start_xwayland(startup);

@@ -25,6 +25,13 @@ pub struct Switch {
     shown_minimized: Option<Window>,
 }
 
+impl Switch {
+    /// The candidates, most recent first, and the index of the pick.
+    pub(crate) fn order(&self) -> (&[Window], usize) {
+        (&self.order, self.index)
+    }
+}
+
 /// Whether `window` belongs in the switcher: X11 menus and tooltips don't.
 fn switchable(window: &Window) -> bool {
     window

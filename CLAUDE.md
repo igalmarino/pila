@@ -36,9 +36,19 @@ on **Smithay 0.7.x**.
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt`
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
-  logic only (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
-  `example_config_is_valid` for `config.example.toml`); anything
-  needing a `Window` or a client is tested nested.
+  logic (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
+  `example_config_is_valid` for `config.example.toml`). Integration tests (`tests/*.rs`,
+  harness in `tests/common/`) run a headless pila per test (`--backend headless`, see
+  "Backends"), in parallel: `TestPila` starts it with a config (animations off unless
+  the test sets `[animations]`), injects input and reads the state through its control
+  socket, and waits for conditions (`wait`, `wait_window`, `stays`; never sleeps);
+  `Client` (`tests/common/client.rs`) is a synthetic Wayland client on its own thread
+  that acks configures, draws its color at the configured size and records configures
+  and input events. A failing test prints the state and pila's log; `PILA_TEST_LOG`
+  sets its `RUST_LOG`, `PILA_TEST_KEEP=1` keeps a failed test's directory,
+  `PILA_HEADLESS_DEVICE=software` renders on llvmpipe as CI does. A pila that
+  panics fails its test. Every feature gets integration tests; only bare-metal
+  paths (`udev.rs`) and looks stay with `scripts/check` and the user.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
@@ -141,7 +151,7 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   or run in the background, like `text.rs` and `export_environment`); work proportional
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
-  timers; idle callbacks inserted outside an event source come with a `Pila::wake`
+  timers (the headless test backend, which has no vblank, is the one exception); idle callbacks inserted outside an event source come with a `Pila::wake`
   ping (see "Redraws are on demand"); one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
   an offscreen texture; `text::init` shapes and rasterizes common characters on its
@@ -210,11 +220,25 @@ Key flows and invariants:
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
   builds, to the lock).
 - **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,
-  `winit.rs`) or `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev.rs`), chosen by
-  `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY` is set. Code outside the backends
-  uses `Backend`'s methods (renderer for dmabuf imports, `queue_redraw`, `cursor_changed`,
-  LEDs, VT switch) rather than matching. Both feed the same `scene()`, `render.rs`,
-  `frame.rs` and `post_render`. `Pila::new` hard-codes a keyboard and pointer for both.
+  `winit.rs`), `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev.rs`) or `Headless`
+  (tests, `headless.rs`), chosen by `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY`
+  is set. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
+  imports, `queue_redraw`, `cursor_changed`, LEDs, VT switch) rather than matching. All
+  feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
+  hard-codes a keyboard and pointer for all.
+- **Headless (tests):** virtual outputs (`--headless-outputs NAME:WxH[@HZ],...`; each
+  also offers 1024x768 and 1920x1080) rendered into offscreen textures on a render node
+  or Mesa's software device, paced by a timer at their refresh rate while a redraw is
+  queued; `[[output]]` applies in full (`headless::apply_output_config`, with
+  wlr-output-management's overrides), gamma and power are kept in memory. Mod defaults
+  to Super and nothing starts without `-c`/autostart. The control socket
+  (`test_control.rs`, `$XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.control`, JSON lines; its
+  commands are in the module doc) injects `TestInput` events through
+  `process_input_event` (pointer moves are relative motion), reads pixels of the last
+  frame, adds/removes outputs, and answers `state` with `Pila::state_json`
+  (`introspect.rs`: windows with geometry, stacking, workspace, fill/snap state,
+  decorations and rule props; focus, Mod+Tab, layers, outputs, pointer, lock,
+  animations). A new feature exposes there what its tests need to check.
 - **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`);
   client cursor surfaces are drawn by pila (`cursor.rs`). Winit doesn't report the pointer
   leaving the window, so a drawn cursor lingers at the edge. Keys held when the host takes
