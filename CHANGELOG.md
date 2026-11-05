@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-05)
 
 - **Animations:** short and subtle, only where they help: windows rise and fade in and
   drop out when they open and close, shrink away when minimized, move and stretch when
@@ -24,7 +24,20 @@
   keyboard, window and output management, gamma.
 - **Fixes:** programs started by pila ignored `kill` and Ctrl+C (they inherited pila's
   blocked signals); a keyboard layout xkbcommon doesn't know is now shown in a
-  notification, not only in the log.
+  notification, not only in the log; a covered or off-screen animating app no longer
+  keeps the CPU busy; a window unmapped by its app (a null buffer) disappears and maps
+  again like a new one; a window's screen capture stops when it closes; a window that
+  asks to open maximized or fullscreen gets that size at once; a launcher or panel
+  holding the keyboard shows over a fullscreen window; a minimized window is no longer
+  shown as active; pointer locks and confinement end when keyboard focus goes, and a
+  confined pointer can reach its app's menus; a symlinked config file reloads when its
+  target changes; a stuck D-Bus or a gamma client can no longer freeze pila; pila
+  starts on a system with no fonts (title bars without text) and creates the X11
+  socket directory when it's missing; a monitor mode without a refresh rate no longer
+  crashes the DRM backend; the session log is capped at 50 MiB.
+- **Tests:** a headless backend (`--backend headless`) and an integration test suite
+  that runs a real pila per test, in CI too; `tests/FEATURES.md` maps every feature to
+  its tests. `scripts/check` runs real programs on bare metal and checks frame times.
 - **Workspaces:** a configurable number (`workspaces`, default 4) spanning all monitors.
   Mod+1..N (one per workspace, up to 9) / Mod+Page_Up/Page_Down switch, with Shift they move the focused window;
   four-finger swipes left/right switch. Mod+Tab stays on the current workspace, and
