@@ -18,6 +18,10 @@ GPU and distro, how pila was started, and the log).
   `cargo test` (CI runs them too, plus builds on Debian, Ubuntu and Fedora and
   `shellcheck` on the scripts). Unit tests cover pure logic; anything needing a client is
   tried nested (`cargo run`), and the DRM/KMS backend by hand on a TTY (`scripts/tty`).
+  `scripts/check` runs scripted scenarios (windows, rules, animations, workspaces, a
+  launcher, Noctalia if installed) inside a pila and judges them from its log, frame
+  statistics included: `--nested` from the dev container, plain from a TTY. A new feature
+  adds its scenario and checks there.
 - Small commits, each one building and passing the tests. Keep `config.example.toml`, the
   `USAGE` text in `src/main.rs` and the README in step with new settings and flags.
 

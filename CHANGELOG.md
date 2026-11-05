@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Animations:** short and subtle, only where they help: windows fade and grow in and
+  out when they open and close, shrink away when minimized, move and stretch when
+  maximized, made fullscreen or snapped; launchers and notifications fade; workspaces
+  slide sideways, each monitor on its own. `[animations]` turns them off, retimes them
+  (`speed`) or sets each one's duration.
+- **Window and layer rules:** `[[window-rule]]` matches windows by app id (WM_CLASS for
+  X11 apps) and title, `[[layer-rule]]` layer surfaces by namespace, with `*` wildcards.
+  Windows: animations, open on a workspace, open maximized or fullscreen, size, position,
+  title bar, corner radius, opacity. Layer surfaces: animations (for shells that animate
+  their own, e.g. `namespace = "noctalia-*"`) and blur.
+- **Smoothness:** pila never makes a monitor miss a refresh while something moves, at the
+  monitor's own rate; animations no longer stutter on bare metal, and the first one of a
+  session no longer costs a long frame. `RUST_LOG=pila::frames=debug` logs frame times
+  and missed refreshes per monitor.
+- **Rounded corners:** optional, `corner-radius`.
+- **Sandboxed apps** (Flatpak, through security-context) no longer see privileged
+  protocols: layer shell, session lock, clipboard managers, screen capture, virtual
+  keyboard, window and output management, gamma.
+- **Fixes:** programs started by pila ignored `kill` and Ctrl+C (they inherited pila's
+  blocked signals); a keyboard layout xkbcommon doesn't know is now shown in a
+  notification, not only in the log.
 - **Workspaces:** a configurable number (`workspaces`, default 4) spanning all monitors.
   Mod+1..N (one per workspace, up to 9) / Mod+Page_Up/Page_Down switch, with Shift they move the focused window;
   four-finger swipes left/right switch. Mod+Tab stays on the current workspace, and

@@ -35,6 +35,11 @@ connector names such as `eDP-1`).
   moving, resizing and centering from the keyboard; minimize; switching by recent use
   (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes); optional
   rounded corners (`corner-radius`).
+- **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
+  snapping; launchers and notifications; workspaces sliding. Configurable, or off.
+- **Window and layer rules** by app id, title or namespace: animations, workspace, size,
+  position, maximized or fullscreen, title bar, corner radius and opacity per app; blur
+  and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale; optionally, a laptop's built-in screen turns off while an
   external monitor is on.
@@ -203,7 +208,8 @@ pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`,
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
 pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
-and each monitor's mode, scale, rotation and position. A missing file means the defaults; an invalid
+each monitor's mode, scale, rotation and position, animations (`[animations]`) and
+per-app rules (`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid
 one is reported in the log and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.
 
