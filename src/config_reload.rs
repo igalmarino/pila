@@ -145,6 +145,11 @@ impl Pila {
         if old.workspaces != self.config.workspaces {
             self.apply_workspace_count();
         }
+        if old.window_rules != self.config.window_rules
+            || old.layer_rules != self.config.layer_rules
+        {
+            self.refresh_rule_props();
+        }
         let outputs_changed = old.outputs != self.config.outputs;
         if outputs_changed {
             // An edited [[output]] section takes over from what a display

@@ -809,6 +809,10 @@ struct ConfigFile {
     disable_internal_display: Option<String>,
     corner_radius: Option<u32>,
     animations: AnimationsFile,
+    #[serde(rename = "window-rule")]
+    window_rules: Vec<crate::rules::WindowRuleFile>,
+    #[serde(rename = "layer-rule")]
+    layer_rules: Vec<crate::rules::LayerRuleFile>,
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -844,6 +848,9 @@ pub struct Config {
     pub corner_radius: u32,
     /// Which animations play and how long they last (`animation.rs`).
     pub animations: AnimationsConfig,
+    /// `[[window-rule]]` and `[[layer-rule]]`, in order (`rules.rs`).
+    pub window_rules: Vec<crate::rules::WindowRule>,
+    pub layer_rules: Vec<crate::rules::LayerRule>,
 }
 
 /// `disable-internal-display`: whether a laptop's built-in screen (eDP,
@@ -987,6 +994,17 @@ impl Config {
         };
 
         let animations = file.animations.validate()?;
+        let window_rules = file
+            .window_rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, rule)| rule.validate(i + 1))
+            .collect::<Result<Vec<_>, _>>()?;
+        let layer_rules = file
+            .layer_rules
+            .into_iter()
+            .map(crate::rules::LayerRuleFile::validate)
+            .collect();
 
         // Defaults first, then the user's: a user binding replaces a default
         // one for the same combo, and "none" removes it. Mod+N and
@@ -1069,6 +1087,8 @@ impl Config {
             internal_display,
             corner_radius,
             animations,
+            window_rules,
+            layer_rules,
         })
     }
 
@@ -1458,6 +1478,34 @@ mod tests {
         assert!(err("[animations]\nspeed = 0").contains("outside"));
         assert!(err("[animations]\nlayer = { duration = 5000 }").contains("over"));
         assert!(err("[animations]\nfade = { duration = 1 }").contains("unknown field"));
+    }
+
+    #[test]
+    fn rules_are_read_in_order() {
+        use crate::rules::{resolve_layer, resolve_window};
+        let config = Config::from_toml(
+            r#"
+            [[window-rule]]
+            app-id = "foot"
+            animations = false
+
+            [[layer-rule]]
+            namespace = "noctalia-*"
+            blur = true
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        assert!(
+            !resolve_window(&config.window_rules, "foot", "").animates(AnimationKind::WindowOpen)
+        );
+        assert_eq!(
+            resolve_layer(&config.layer_rules, "noctalia-osd").blur,
+            Some(true)
+        );
+        let err = |text| Config::from_toml(text, &no_env).unwrap_err();
+        assert!(err("[[window-rule]]\nclass = \"x\"").contains("unknown field"));
+        assert!(err("[[layer-rule]]\nnamespace = 3").contains("invalid type"));
     }
 
     #[test]

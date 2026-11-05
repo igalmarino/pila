@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimize or unminimize every window, as a taskbar would: a minimal
 wlr-foreign-toplevel-management client (standard library only), for
-scripted tests such as scripts/tty-perf. Run it inside pila (it uses
+scripted tests such as scripts/check. Run it inside pila (it uses
 WAYLAND_DISPLAY).
 
     scripts/toplevel-action min|unmin

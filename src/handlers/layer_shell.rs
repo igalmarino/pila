@@ -53,8 +53,10 @@ impl WlrLayerShellHandler for Pila {
             "new layer surface"
         );
         crate::animation::watch_layer(surface.wl_surface());
+        let layer = LayerSurface::new(surface, namespace);
+        self.resolve_layer_rules(&layer);
         let mut map = layer_map_for_output(&output);
-        if let Err(err) = map.map_layer(&LayerSurface::new(surface, namespace)) {
+        if let Err(err) = map.map_layer(&layer) {
             warn!(?err, "failed to map layer surface");
         }
     }

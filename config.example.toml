@@ -173,3 +173,33 @@ tap = true
 #                           # flipped, flipped-90, flipped-180, flipped-270
 # adaptive-sync = true      # variable refresh rate, if the monitor supports it
 # enabled = false           # leave the monitor off (no windows go there)
+
+# Window and layer rules. A window rule matches windows by `app-id` (the
+# class of WM_CLASS for X11 apps) and `title`; a layer rule matches layer
+# surfaces (panels, launchers, notifications) by `namespace`. `*` stands for
+# any run of characters; a rule's matchers must all match, and a rule without
+# any matches everything. Every matching rule applies, in order, a later one
+# overriding an earlier one field by field. `RUST_LOG=pila=debug` logs each
+# new window's app id ("mapping window") and layer surface's namespace ("new
+# layer surface"). Rules are matched when a window or layer surface appears,
+# and again for all of them when this file is saved; a title changing later
+# doesn't re-match.
+#
+# [[window-rule]]
+# app-id = "steam_app_*"           # games: no open/close animation
+# animations = false               # or per animation: { open = false,
+#                                  #   close = false, minimize = false }
+#
+# [[window-rule]]
+# app-id = "firefox"
+# title = "*Picture-in-Picture*"
+# animations = { open = false }
+#
+# [[layer-rule]]
+# namespace = "noctalia-*"         # a shell that animates its own surfaces
+# animations = false
+#
+# [[layer-rule]]
+# namespace = "waybar"
+# blur = true                      # blur behind all of it (false: never;
+#                                  # unset: where the app asks for it)

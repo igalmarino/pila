@@ -57,6 +57,18 @@ on **Smithay 0.7.x**.
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
   (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
   Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
+- Automated checks: `scripts/check` runs scripted scenarios (windows, a window rule,
+  minimize, a launcher, a layer rule via reload, Noctalia if installed) inside a pila
+  with its own config and judges them from the log: events on `pila::animation`
+  (`starts` / `off by rule`, with `what` and the app id or namespace) and `pila::rules`,
+  plus the frame statistics (no missed refresh, CPU per frame on average within 4 ms).
+  It prints PASS/FAIL per check and exits 1 on a failure. `scripts/check --nested`
+  (release build, log in `pila-check.log`) is for you: run it before asking the user
+  to check anything; the user runs plain `scripts/check` from a TTY (log in
+  `pila-tty.log`) for bare metal. A new feature adds its scenario (a `mark "name
+  begin/end"` section in the workload) and its checks (`section`, `has`, `lacks`),
+  logging what it does on a debug target the checks can read; what only eyes can judge
+  (how it looks) is still asked of the user.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
@@ -122,8 +134,7 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
   show); `pila::frames=trace` logs every frame. Any change that touches rendering, input
   or the event loop is checked with it (release build) before it's committed; bare-metal
-  numbers come from the user with `scripts/tty-perf` (a scripted workload on a TTY, then
-  the statistics).
+  numbers come from the user with `scripts/check` (see Commands).
 - **Rules:** nothing blocking on the event loop (I/O, D-Bus, font loading go to threads
   or run in the background, like `text.rs` and `export_environment`); work proportional
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
@@ -174,7 +185,8 @@ Key flows and invariants:
   falls back to defaults on errors, and reloaded when the file changes
   (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
   `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
-  re-applies what changed: keyboard (`set_xkb_config`), `[input]` on connected devices
+  re-applies what changed: keyboard (`set_xkb_config`), rules (`refresh_rule_props`),
+  `[input]` on connected devices
   (`UdevData::apply_input_config`), `[[output]]` (`Pila::apply_outputs` →
   `udev::apply_output_config`: enabled, mode via `use_mode`, scale, transform, position,
   adaptive sync; nested only scale) with wlr-output-management's runtime overrides on
@@ -337,9 +349,10 @@ Key flows and invariants:
   fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
   when minimized (`animate_minimize` from `hide_window`, before the unmap) and back when
   restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`,
-  `Layer`) gives each its look. Transient layer surfaces (Top/Overlay without an
-  exclusive zone, `animates_layer`: launchers, notifications, shell panels; not bars or
-  wallpapers) fade in when they first get a buffer (`layer_committed` from
+  `Layer`) gives each its look. Window and layer rules can turn them off
+  (`animates_window`, `animates_layer`; see "Window and layer rules"). Transient layer
+  surfaces (Top/Overlay without an exclusive zone, `animates_layer`: launchers,
+  notifications, shell panels; not bars or wallpapers) fade in when they first get a buffer (`layer_committed` from
   `handle_layer_commit`) and out from a snapshot (`animate_layer_close`: `watch_layer`
   hooks, `layer_destroyed`), drawn in front of the upper layers (`Scene::layer_ghosts`);
   their rect comes from the layer map, which outlives the surface tree. A blurred
@@ -359,10 +372,23 @@ Key flows and invariants:
   so only the main surface is drawn, `Surfaces::MainOnly`, the tree being gone); X11
   windows are taken in `unmapped_window`. Windows leaving the space otherwise
   (workspaces) drop their animation (`forget_animations`). `scripts/toplevel-action`
-  (a stdlib Python taskbar client) minimizes/unminimizes for scripted tests; `wtype`
+  (a stdlib Python taskbar client) minimizes/unminimizes for scripted tests
+  (`scripts/check`); `wtype`
   can't, the virtual keyboard bypasses bindings. `step_animations` (from
   `after_frames`) prunes finished ones and requests the next frame; locking drops all.
   Animations are visual only: input sees the real geometry.
+- **Window and layer rules** (`rules.rs`, `[[window-rule]]` / `[[layer-rule]]`): match
+  windows by app id (`foreign_toplevel::title_and_app_id`: xdg `app_id` or X11
+  WM_CLASS class) and title, layer surfaces by namespace, with `*` wildcards
+  (`wildcard_match`); all of a rule's matchers must match, matching rules merge in order
+  (later wins per field). The result is resolved once and kept in user data
+  (`resolve_window_rules` from `place_new_window`, `resolve_layer_rules` from
+  `new_layer_surface`), read by `rules::window_props`/`layer_props`, and re-resolved for
+  every window and layer surface on a reload that changes the rules
+  (`refresh_rule_props` from `apply_config`): never matched per frame. A title change
+  doesn't re-match. So far: window `animations` (all or per kind), layer `animations`
+  and `blur` (`blur_rects`: `true` the whole surface, `false` none, unset the client's
+  region).
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
   window for a subsurface or popup; the focused window when the client names none) gets a
   short `BellFlash` in its user data, which `scene()` turns into a solid element drawn just

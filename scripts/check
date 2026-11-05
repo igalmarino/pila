@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# Automated checks of pila's behavior: run scripted scenarios inside a pila
+# and judge them from its log, then print PASS/FAIL per check (exit status 1
+# if any failed). The scenarios: windows opening and closing, a window rule,
+# minimize and restore, a launcher (layer surface), a layer rule added by a
+# config reload, Noctalia under a layer rule (if installed), and the
+# performance pillar's frame statistics (no missed refresh, CPU per frame).
+#
+#   scripts/check               on bare metal: run it from a TTY on the host
+#                               (Ctrl+Alt+F3, log in), through scripts/tty;
+#                               the log is pila-tty.log
+#   scripts/check --nested      nested, inside the current session (for
+#                               development; the release build); the log is
+#                               pila-check.log
+#   scripts/check --judge <log> judge an existing log again (no run)
+#   scripts/check [...] <config.toml>
+#                               start from that config (see below)
+#
+# pila quits by itself when the scenarios are done (about a minute). On a
+# TTY the base is your config (~/.config/pila/config.toml: monitors,
+# keyboard, input) without its [animations] and rules, so that what the
+# checks expect doesn't depend on them: animations on, their own rules.
+# Nested there's no base. Programs it uses when installed: kitty or foot
+# (needed), python3 (minimize), fuzzel (launcher), noctalia and notify-send
+# or gdbus (Noctalia).
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# The app id the window rule below matches.
+RULE_APP_ID=pila-check-rule
+
+# --- Inside pila (started with -c): the scenarios ----------------------------
+
+if [ "${1:-}" = "--workload" ]; then
+    # Written to pila's log (programs' output goes there): the analysis
+    # below finds each scenario's events between these.
+    mark() { echo "check: $*"; }
+
+    terminal="${PILA_CHECK_TERMINAL:-}"
+    if [ -z "$terminal" ]; then
+        for candidate in kitty foot; do
+            if command -v "$candidate" >/dev/null; then
+                terminal=$candidate
+                break
+            fi
+        done
+    fi
+    # A terminal running `$@`, with app id `$app_id` (empty: its own).
+    run_terminal() {
+        local app_id=$1
+        shift
+        case "$terminal" in
+            kitty) "$terminal" ${app_id:+--class "$app_id"} "$@" ;;
+            foot) "$terminal" ${app_id:+--app-id="$app_id"} "$@" ;;
+            *) "$terminal" "$@" ;;
+        esac
+    }
+
+    mark "terminal ${terminal:-none}"
+    sleep 3
+    if [ -z "$terminal" ]; then
+        mark "no terminal (kitty or foot)"
+    else
+        mark "window begin"
+        for _ in 1 2 3; do
+            # Closes by itself when its program exits, as after `exit`.
+            run_terminal "" sleep 1.5 || true
+            sleep 1
+        done
+        mark "window end"
+
+        mark "window-rule begin"
+        run_terminal "$RULE_APP_ID" sleep 1.5 || true
+        sleep 1
+        mark "window-rule end"
+
+        if command -v python3 >/dev/null; then
+            mark "minimize begin"
+            run_terminal "" sleep 60 &
+            held=$!
+            sleep 2
+            for _ in 1 2; do
+                python3 -I scripts/toplevel-action min >/dev/null
+                sleep 1
+                python3 -I scripts/toplevel-action unmin >/dev/null
+                sleep 1
+            done
+            kill "$held" 2>/dev/null || true
+            wait "$held" || true
+            sleep 1
+            mark "minimize end"
+        else
+            mark "minimize skip (no python3)"
+        fi
+    fi
+
+    if command -v fuzzel >/dev/null; then
+        mark "layer begin"
+        fuzzel &
+        launcher=$!
+        sleep 1
+        kill "$launcher" 2>/dev/null || true
+        wait "$launcher" || true
+        sleep 1
+        mark "layer end"
+
+        mark "layer-rule begin"
+        # Saved while pila runs: the reload must apply it to new surfaces.
+        printf '\n[[layer-rule]]\nnamespace = "launcher"\nanimations = false\n' \
+            >>"$PILA_CHECK_CONFIG"
+        sleep 1.5
+        fuzzel &
+        launcher=$!
+        sleep 1
+        kill "$launcher" 2>/dev/null || true
+        wait "$launcher" || true
+        sleep 1
+        mark "layer-rule end"
+    else
+        mark "layer skip (no fuzzel)"
+        mark "layer-rule skip (no fuzzel)"
+    fi
+
+    # A desktop notification: notify-send (package libnotify), else gdbus
+    # (glib2), straight to the notification server's D-Bus interface.
+    notify() {
+        if command -v notify-send >/dev/null; then
+            notify-send -t 2000 "$1" "$2"
+        else
+            gdbus call --session --dest org.freedesktop.Notifications \
+                --object-path /org/freedesktop/Notifications \
+                --method org.freedesktop.Notifications.Notify \
+                pila-check 0 "" "$1" "$2" "[]" "{}" 2000 >/dev/null
+        fi
+    }
+    if ! command -v noctalia >/dev/null; then
+        mark "noctalia skip (noctalia not installed)"
+    elif ! command -v notify-send >/dev/null && ! command -v gdbus >/dev/null; then
+        mark "noctalia skip (neither notify-send nor gdbus to send a notification)"
+    else
+        mark "noctalia begin"
+        noctalia &
+        shell=$!
+        sleep 6
+        notify "pila check" "a notification" || mark "noctalia: sending the notification failed"
+        sleep 4
+        kill "$shell" 2>/dev/null || true
+        wait "$shell" || true
+        sleep 1
+        mark "noctalia end"
+    fi
+
+    mark "done"
+    sleep 1
+    # Quit pila (SIGTERM quits cleanly): the nearest pila among this
+    # script's ancestors, never another one (the login session's).
+    pid=$PPID
+    while [ "$pid" -gt 1 ]; do
+        if [ "$(ps -o comm= -p "$pid")" = pila ]; then
+            kill -TERM "$pid"
+            exit 0
+        fi
+        pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+    done
+    mark "pila not found among the ancestors; quit it with Mod+Shift+E"
+    exit 0
+fi
+
+# --- Outside: start pila, then judge its log ---------------------------------
+
+judge_only=false
+if [ "${1:-}" = "--judge" ]; then
+    judge_only=true
+    log=${2:?usage: scripts/check --judge <log>}
+fi
+nested=false
+if [ "${1:-}" = "--nested" ]; then
+    nested=true
+    shift
+fi
+if ! $judge_only; then
+    base_config=${1:-}
+
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    config="$work/config.toml"
+    # On a TTY your own config is the base, for its monitors, keyboard and
+    # input; nested, none. Its [animations] and rules are left out: the
+    # checks expect animations on and only their own rules.
+    if [ -z "$base_config" ] && ! $nested; then
+        user_config="${XDG_CONFIG_HOME:-$HOME/.config}/pila/config.toml"
+        if [ -f "$user_config" ]; then
+            base_config=$user_config
+        fi
+    fi
+    if [ -n "$base_config" ]; then
+        awk '/^[ \t]*\[/ { skip = ($0 ~ /^[ \t]*\[(animations\]|\[window-rule\]\]|\[layer-rule\]\])/) }
+             !skip' "$base_config" >"$config"
+        echo "Base config: $base_config (without its [animations] and rules)."
+    fi
+    cat >>"$config" <<EOF
+
+    # Added by scripts/check.
+    [[window-rule]]
+    app-id = "$RULE_APP_ID"
+    animations = { open = false }
+
+    [[layer-rule]]
+    namespace = "noctalia-*"
+    animations = false
+EOF
+    export PILA_CHECK_CONFIG="$config"
+    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug"
+
+    echo "Runs pila with scripted scenarios for about a minute; it quits by itself."
+    echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
+    workload="$PWD/scripts/check --workload"
+    if $nested; then
+        bin=target/release/pila
+        if [ ! -x "$bin" ]; then
+            echo "$bin not found; build it first: cargo build --release" >&2
+            exit 1
+        fi
+        log=pila-check.log
+        timeout 300 "$bin" --config "$config" -c "$workload" 2>"$log" || true
+    else
+        log=pila-tty.log
+        scripts/tty "$config" -- -c "$workload" || true
+    fi
+fi
+
+# --- Judging -------------------------------------------------------------
+
+failed=0
+pass() { printf 'PASS  %s\n' "$*"; }
+fail() {
+    printf 'FAIL  %s\n' "$*"
+    failed=1
+}
+skip() { printf 'SKIP  %s\n' "$*"; }
+
+# The log lines of scenario $1 (between its marks).
+section() {
+    awk -v name="$1" '
+        $0 ~ "check: " name " begin" { on = 1; next }
+        $0 ~ "check: " name " end" { on = 0 }
+        on' "$log"
+}
+# Whether scenario $1 ran (else it was skipped, and why).
+ran() {
+    if grep -q "check: $1 begin" "$log"; then
+        return 0
+    fi
+    local why
+    why=$(grep -o "check: $1 skip.*" "$log" | sed "s/check: $1 skip //" || true)
+    skip "$1 ${why:-(did not run)}"
+    return 1
+}
+# Check that the section has (or, with !, lacks) an event.
+has() {
+    local text=$1 label=$2 pattern=$3
+    if grep -q -- "$pattern" <<<"$text"; then
+        pass "$label"
+    else
+        fail "$label (no '$pattern' in the log)"
+    fi
+}
+lacks() {
+    local text=$1 label=$2 pattern=$3
+    if grep -q -- "$pattern" <<<"$text"; then
+        fail "$label (found '$pattern')"
+    else
+        pass "$label"
+    fi
+}
+
+echo
+echo "== Checks ($log) =="
+if ! grep -q "check: done" "$log"; then
+    fail "the scenarios finished (pila quit or crashed before; see the log)"
+fi
+if grep -q "panicked" "$log"; then
+    fail "no panic"
+fi
+
+terminal=$(grep -o 'check: terminal [a-z]*' "$log" | head -1 | awk '{print $3}')
+if [ "${terminal:-none}" = none ]; then
+    skip "window scenarios (no kitty or foot)"
+else
+    if ran window; then
+        s=$(section window)
+        n=$(grep -c "starts what=\"window-open\" id=\"$terminal\"" <<<"$s" || true)
+        [ "$n" -eq 3 ] && pass "windows fade in (3 of 3)" || fail "windows fade in ($n of 3)"
+        n=$(grep -c "starts what=\"window-close\" id=\"$terminal\"" <<<"$s" || true)
+        [ "$n" -eq 3 ] && pass "windows fade out (3 of 3)" || fail "windows fade out ($n of 3)"
+    fi
+    if ran window-rule; then
+        s=$(section window-rule)
+        has "$s" "a window rule matches the app id" "window rules app_id=\"$RULE_APP_ID\""
+        has "$s" "the rule turns its open animation off" \
+            "off by rule what=\"window-open\" id=\"$RULE_APP_ID\""
+        has "$s" "and leaves its close animation on" \
+            "starts what=\"window-close\" id=\"$RULE_APP_ID\""
+    fi
+    if ran minimize; then
+        s=$(section minimize)
+        n=$(grep -c 'starts what="minimize"' <<<"$s" || true)
+        [ "$n" -eq 2 ] && pass "minimizing animates (2 of 2)" || fail "minimizing animates ($n of 2)"
+        n=$(grep -c 'starts what="restore"' <<<"$s" || true)
+        [ "$n" -eq 2 ] && pass "restoring animates (2 of 2)" || fail "restoring animates ($n of 2)"
+    fi
+fi
+if ran layer; then
+    s=$(section layer)
+    has "$s" "a launcher fades in" 'starts what="layer-in" id="launcher"'
+    has "$s" "and out" 'starts what="layer-out" id="launcher"'
+fi
+if ran layer-rule; then
+    s=$(section layer-rule)
+    has "$s" "the config is reloaded" "config reloaded"
+    has "$s" "a layer rule added by the reload applies" \
+        'off by rule what="layer-in" id="launcher"'
+    lacks "$s" "and the launcher no longer fades in" 'starts what="layer-in" id="launcher"'
+fi
+if ran noctalia; then
+    s=$(section noctalia)
+    has "$s" "Noctalia's surfaces match the noctalia-* rule" 'layer rules namespace="noctalia-'
+    has "$s" "the rule turns pila's animations off for them" 'off by rule what="layer-in" id="noctalia-'
+    lacks "$s" "pila doesn't animate any of them" 'starts what="layer-[a-z]*" id="noctalia-'
+fi
+
+# Frame statistics, over the whole run (the performance pillar).
+stats=$(grep 'pila::frames: frames' "$log" || true)
+if [ -z "$stats" ]; then
+    fail "frame statistics were logged"
+else
+    sum() { grep -o "$1=[0-9]*" <<<"$stats" | cut -d= -f2 | awk '{ s += $1 } END { print s + 0 }'; }
+    missed=$(sum missed)
+    frames=$(sum frames)
+    worst_avg=$(grep -o 'cpu_avg_ms=[0-9.]*' <<<"$stats" | cut -d= -f2 | sort -g | tail -1)
+    worst=$(grep -o 'cpu_max_ms=[0-9.]*' <<<"$stats" | cut -d= -f2 | sort -g | tail -1)
+    [ "$missed" -eq 0 ] && pass "no refresh missed ($frames frames)" ||
+        fail "no refresh missed ($missed missed in $frames frames)"
+    if awk -v v="$worst_avg" 'BEGIN { exit !(v <= 4) }'; then
+        pass "CPU per frame on average within 4 ms (worst average ${worst_avg} ms; worst frame ${worst} ms)"
+    else
+        fail "CPU per frame on average within 4 ms (worst average ${worst_avg} ms)"
+    fi
+fi
+
+echo
+if [ "$failed" -eq 0 ]; then
+    echo "All checks passed."
+else
+    echo "Some checks failed; the log is $log."
+fi
+exit "$failed"

@@ -244,15 +244,60 @@ fn clear_textures(user_data: &UserDataMap) {
     }
 }
 
-/// Whether a layer surface animates: launchers, notifications, menus of
-/// shells (Top or Overlay, no exclusive zone). Bars, docks with a zone,
-/// wallpapers and the Bottom layer just appear.
-pub fn animates_layer(layer: &LayerSurface) -> bool {
-    matches!(layer.layer(), Layer::Top | Layer::Overlay)
+/// Whether a layer surface animates (`what`: `layer-in` or `layer-out`, for
+/// the log): launchers, notifications, menus of shells (Top or Overlay, no
+/// exclusive zone), unless a layer rule says not to (a shell that animates
+/// its own). Bars, docks with a zone, wallpapers and the Bottom layer just
+/// appear.
+fn animates_layer(layer: &LayerSurface, what: &str) -> bool {
+    let transient = matches!(layer.layer(), Layer::Top | Layer::Overlay)
         && !matches!(
             layer.cached_state().exclusive_zone,
             ExclusiveZone::Exclusive(_)
-        )
+        );
+    if !transient {
+        return false;
+    }
+    if crate::rules::layer_props(layer).animations == Some(false) {
+        log_event(what, layer.namespace(), Outcome::OffByRule);
+        return false;
+    }
+    true
+}
+
+/// What happened to an animation, for the log.
+enum Outcome {
+    Starts,
+    OffByRule,
+}
+
+/// Log an animation starting or turned off by a rule (`what` it is, for the
+/// window with app id or layer surface with namespace `id`), at debug level
+/// on `pila::animation`: `scripts/check` reads these.
+fn log_event(what: &str, id: &str, outcome: Outcome) {
+    match outcome {
+        Outcome::Starts => debug!(target: "pila::animation", what, id, "starts"),
+        Outcome::OffByRule => debug!(target: "pila::animation", what, id, "off by rule"),
+    }
+}
+
+/// The name of a window animation in the log: `kind`, `coming` in or going.
+fn window_event(kind: AnimationKind, coming: bool) -> &'static str {
+    match (kind, coming) {
+        (AnimationKind::WindowOpen, _) => "window-open",
+        (AnimationKind::WindowClose, _) => "window-close",
+        (AnimationKind::Minimize, true) => "restore",
+        (AnimationKind::Minimize, false) => "minimize",
+        (AnimationKind::Maximize, _) => "maximize",
+        (AnimationKind::Layer, true) => "layer-in",
+        (AnimationKind::Layer, false) => "layer-out",
+        (AnimationKind::Workspace, _) => "workspace",
+    }
+}
+
+/// A window's app id, for the log.
+fn app_id(window: &Window) -> String {
+    crate::foreign_toplevel::title_and_app_id(window).1
 }
 
 /// Whether a layer surface had a buffer at its last commit, to tell when
@@ -334,6 +379,23 @@ impl Pila {
             .or_else(|| ghost.map(|g| g.visibility.value(now)))
     }
 
+    /// Whether `window` plays `kind` (coming in or going): not X11 menus and
+    /// tooltips (they're like popups), nor windows whose rules turn it off.
+    fn animates_window(&self, window: &Window, kind: AnimationKind, coming: bool) -> bool {
+        if crate::workspaces::is_override_redirect(window) {
+            return false;
+        }
+        if !crate::rules::window_props(window).animates(kind) {
+            log_event(
+                window_event(kind, coming),
+                &app_id(window),
+                Outcome::OffByRule,
+            );
+            return false;
+        }
+        true
+    }
+
     /// `window` was just mapped: fade it in.
     pub fn animate_open(&mut self, window: &Window) {
         self.appear(window, AnimationKind::WindowOpen, Style::Open);
@@ -351,7 +413,7 @@ impl Pila {
         let from = self.visibility(window, now).unwrap_or(0.0);
         self.forget_animations(window);
         self.animations.ghosts.retain(|g| g.window != *window);
-        if crate::workspaces::is_override_redirect(window) {
+        if !self.animates_window(window, kind, true) {
             return;
         }
         let Some(duration) = self.animation_duration(kind) else {
@@ -362,6 +424,7 @@ impl Pila {
             style,
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 1.0),
         });
+        log_event(window_event(kind, true), &app_id(window), Outcome::Starts);
         self.queue_redraw();
     }
 
@@ -405,7 +468,7 @@ impl Pila {
         let from = self.visibility(window, now).unwrap_or(1.0);
         self.forget_animations(window);
         self.animations.ghosts.retain(|g| g.window != *window);
-        if crate::workspaces::is_override_redirect(window) {
+        if !self.animates_window(window, kind, false) {
             return;
         }
         let Some(duration) = self.animation_duration(kind) else {
@@ -426,6 +489,7 @@ impl Pila {
             style,
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 0.0),
         });
+        log_event(window_event(kind, false), &app_id(window), Outcome::Starts);
         self.queue_redraw();
     }
 
@@ -586,7 +650,7 @@ impl Pila {
         let now = self.animation_time();
         let from = self.layer_visibility(layer, now).unwrap_or(0.0);
         self.forget_layer_animations(layer);
-        if !animates_layer(layer) {
+        if !animates_layer(layer, "layer-in") {
             return;
         }
         let Some(duration) = self.animation_duration(AnimationKind::Layer) else {
@@ -596,6 +660,7 @@ impl Pila {
             layer: layer.clone(),
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 1.0),
         });
+        log_event("layer-in", layer.namespace(), Outcome::Starts);
         self.queue_redraw();
     }
 
@@ -616,7 +681,7 @@ impl Pila {
         let now = self.animation_time();
         let from = self.layer_visibility(&layer, now).unwrap_or(1.0);
         self.forget_layer_animations(&layer);
-        if !animates_layer(&layer) {
+        if !animates_layer(&layer, "layer-out") {
             return;
         }
         let Some(duration) = self.animation_duration(AnimationKind::Layer) else {
@@ -633,6 +698,7 @@ impl Pila {
             debug!("no snapshot of a closing layer surface; it just goes");
             return;
         };
+        log_event("layer-out", layer.namespace(), Outcome::Starts);
         self.animations.layer_ghosts.push(LayerGhost {
             layer,
             snapshot,

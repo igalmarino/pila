@@ -837,8 +837,12 @@ impl Pila {
             loc
         };
 
-        debug!(?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
+        // The app id, for `exclude` in [animations].
+        let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
+        debug!(app_id, ?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
         self.space.map_element(window.clone(), location, true);
+        // Its app id and title are known by now (X11 too).
+        self.resolve_window_rules(&window);
         self.animate_open(&window);
         self.announce_toplevel(&window);
         self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());

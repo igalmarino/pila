@@ -89,6 +89,8 @@ pub fn init_global(dh: &DisplayHandle) {
 
 /// The parts of a layer surface to blur behind, surface-local, clipped to
 /// the surface. Empty without a region or a buffer.
+/// Layer rules may override the client: `blur = true` blurs behind all of
+/// it, `false` nowhere (`rules.rs`).
 pub fn blur_rects(layer: &LayerSurface) -> Vec<Rectangle<i32, Logical>> {
     let surface = layer.wl_surface();
     let (region, size) = with_states(surface, |states| {
@@ -99,13 +101,18 @@ pub fn blur_rects(layer: &LayerSurface) -> Vec<Rectangle<i32, Logical>> {
             .and_then(|s| s.lock().unwrap().surface_size());
         (region, size)
     });
-    let Some(region) = region else {
-        return Vec::new();
-    };
     let Some(size) = size else {
         return Vec::new();
     };
     let bounds = Rectangle::from_size(size);
+    let region = match crate::rules::layer_props(layer).blur {
+        Some(false) => return Vec::new(),
+        Some(true) => return vec![bounds],
+        None => region,
+    };
+    let Some(region) = region else {
+        return Vec::new();
+    };
     let mut rects: Vec<Rectangle<i32, Logical>> = Vec::new();
     for (kind, rect) in &region.rects {
         match kind {
