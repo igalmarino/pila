@@ -4,7 +4,7 @@
 # if any failed). The scenarios: windows opening and closing, window rules
 # (animations, size, position, maximized, another workspace; X11 too, with
 # xterm; title bar, opacity and corner radius, by pixels with grim),
-# minimize and restore, a launcher (layer surface), a layer rule added by a
+# minimize and restore, switching workspaces, a launcher (layer surface), a layer rule added by a
 # config reload, Noctalia under a layer rule (if installed), and the
 # performance pillar's frame statistics (no missed refresh, CPU per frame).
 #
@@ -164,8 +164,21 @@ if [ "${1:-}" = "--workload" ]; then
             stop "$held"
             sleep 1
             mark "minimize end"
+
+            mark "workspace begin"
+            run_terminal "" sleep 8 &
+            held=$!
+            sleep 2
+            python3 -I scripts/workspace-action 2 >/dev/null
+            sleep 1
+            python3 -I scripts/workspace-action 1 >/dev/null
+            sleep 1
+            stop "$held"
+            sleep 1
+            mark "workspace end"
         else
             mark "minimize skip (no python3)"
+            mark "workspace skip (no python3)"
         fi
     fi
 
@@ -488,6 +501,11 @@ else
         else
             skip "pixels $(grep -o 'check: pixels skip.*' <<<"$s" | sed 's/check: pixels skip //')"
         fi
+    fi
+    if ran workspace; then
+        s=$(section workspace)
+        has "$s" "switching to workspace 2 slides" 'starts what="workspace" id="2"'
+        has "$s" "and back to 1" 'starts what="workspace" id="1"'
     fi
     if ran minimize; then
         s=$(section minimize)

@@ -49,6 +49,7 @@ mod text;
 mod toplevel_management;
 mod udev;
 mod winit;
+mod workspace_slide;
 mod workspaces;
 mod xwayland;
 

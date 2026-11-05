@@ -281,6 +281,11 @@ fn log_event(what: &str, id: &str, outcome: Outcome) {
     }
 }
 
+/// Log a workspace slide to workspace `index` (from 0) starting.
+pub(crate) fn log_workspace_slide(index: usize) {
+    log_event("workspace", &(index + 1).to_string(), Outcome::Starts);
+}
+
 /// The name of a window animation in the log: `kind`, `coming` in or going.
 fn window_event(kind: AnimationKind, coming: bool) -> &'static str {
     match (kind, coming) {
@@ -593,7 +598,9 @@ impl Pila {
             !done
         });
         animations.layer_ghosts.retain(|g| !g.visibility.done(now));
-        let left = self.animation_count();
+        let slide_ended = self.end_finished_slide(now);
+        let left = self.animation_count() + usize::from(self.workspace_slide.is_some());
+        let before = before + usize::from(slide_ended);
         if left > 0 || left != before {
             // From an idle callback, with the loop woken so it runs right
             // away (calloop wouldn't): this runs after the event loop's
@@ -620,6 +627,7 @@ impl Pila {
             || a.ghosts.iter().any(|x| running(&x.visibility))
             || a.layers.iter().any(|x| running(&x.visibility))
             || a.layer_ghosts.iter().any(|x| running(&x.visibility))
+            || self.sliding(now)
     }
 
     /// Stop every animation (the session locked).
@@ -632,6 +640,7 @@ impl Pila {
         }
         self.animations.ghosts.clear();
         self.animations.layer_ghosts.clear();
+        self.workspace_slide = None;
     }
 
     // --- Layer surfaces ---------------------------------------------------

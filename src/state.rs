@@ -145,8 +145,10 @@ pub struct Pila {
     pub output_management: crate::output_management::OutputManagement,
     pub output_overrides: HashMap<String, crate::config::OutputConfig>,
     pub switch: Option<Switch>,
-    /// Animations in progress (`animation.rs`).
+    /// Animations in progress (`animation.rs`), and the workspace switch's
+    /// (`workspace_slide.rs`).
     pub animations: crate::animation::Animations,
+    pub workspace_slide: Option<crate::workspace_slide::WorkspaceSlide>,
     /// Each output's frame statistics, by name (`frame_stats.rs`).
     pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
@@ -330,6 +332,7 @@ impl Pila {
             output_overrides: HashMap::new(),
             switch: None,
             animations: Default::default(),
+            workspace_slide: None,
             frame_stats: HashMap::new(),
             swipe: None,
             xwayland_token: None,
@@ -502,7 +505,15 @@ impl Pila {
         }
         let (upper, lower) = self.layer_order();
         let now = self.animation_time();
-        let (windows, ghosts) = self.scene_windows(now);
+        let (mut windows, ghosts) = self.scene_windows(now);
+        let slide = self.scene_slide(now);
+        if let Some(slide) = &slide {
+            for entry in &mut windows {
+                if slide.carried.as_ref() != Some(&entry.window) {
+                    entry.slid = Some(self.window_output(&entry.window));
+                }
+            }
+        }
         let layers = |layers| {
             self.layer_surfaces(layers)
                 .into_iter()
@@ -517,6 +528,7 @@ impl Pila {
         Scene {
             upper: layers(upper),
             layer_ghosts: self.scene_layer_ghosts(now),
+            slide,
             snap_preview: self
                 .snap_preview
                 .map(|rect| (self.snap_preview_buffer.clone(), rect)),
@@ -528,7 +540,10 @@ impl Pila {
         }
     }
 
-    fn scene_windows(&self, now: std::time::Duration) -> (Vec<SceneWindow>, Vec<SceneGhost>) {
+    pub(crate) fn scene_windows(
+        &self,
+        now: std::time::Duration,
+    ) -> (Vec<SceneWindow>, Vec<SceneGhost>) {
         let focused = self.focused_window();
         let pointer = self
             .seat
@@ -597,6 +612,7 @@ impl Pila {
             rounding,
             alpha,
             effect: now.and_then(|now| self.window_effect(window, now)),
+            slid: None,
         })
     }
 

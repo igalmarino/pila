@@ -53,7 +53,11 @@ pub fn update_primary_outputs(
     };
     // An animating window is drawn through a texture, so it isn't in
     // `states`: it keeps the output it had (`send_frames` paces it).
-    for entry in scene.windows.iter().filter(|e| e.effect.is_none()) {
+    for entry in scene
+        .windows
+        .iter()
+        .filter(|e| e.offscreen_output().is_none())
+    {
         entry.window.with_surfaces(update);
     }
     for entry in scene.layers().filter(|e| e.effect.is_none()) {
@@ -79,14 +83,14 @@ pub fn presentation_feedback(
     for entry in &scene.windows {
         entry.window.take_presentation_feedback(
             &mut feedback,
-            |surface, data| paced_by(entry.effect.as_ref(), surface, data),
+            |surface, data| paced_by(entry.offscreen_output(), surface, data),
             flags,
         );
     }
     for entry in scene.layers() {
         entry.layer.take_presentation_feedback(
             &mut feedback,
-            |surface, data| paced_by(entry.effect.as_ref(), surface, data),
+            |surface, data| paced_by(layer_offscreen(entry.effect.as_ref()), surface, data),
             flags,
         );
     }
@@ -102,18 +106,23 @@ pub fn presentation_feedback(
 }
 
 /// The output a window's or layer surface's surface is paced by: its
-/// primary output, or while it animates (drawn through a texture, so absent
-/// from the render states), the output of the animation
-/// (`animation::WindowEffect::output`).
+/// primary output, or while it's drawn through a texture (an animation, a
+/// workspace slide; absent from the render states then) the one it's on
+/// (`offscreen`).
 fn paced_by(
-    effect: Option<&WindowEffect>,
+    offscreen: Option<Option<Output>>,
     surface: &WlSurface,
     data: &SurfaceData,
 ) -> Option<Output> {
-    match effect {
-        Some(effect) => effect.output.clone(),
+    match offscreen {
+        Some(output) => output,
         None => surface_primary_scanout_output(surface, data),
     }
+}
+
+/// A layer surface's `offscreen` output for `paced_by`.
+fn layer_offscreen(effect: Option<&WindowEffect>) -> Option<Option<Output>> {
+    effect.map(|effect| effect.output.clone())
 }
 
 /// How often a surface that isn't shown anywhere (covered, or off every
@@ -131,14 +140,14 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
         entry
             .window
             .send_frame(output, time, throttle, |surface, data| {
-                paced_by(entry.effect.as_ref(), surface, data)
+                paced_by(entry.offscreen_output(), surface, data)
             });
     }
     for entry in scene.layers() {
         entry
             .layer
             .send_frame(output, time, throttle, |surface, data| {
-                paced_by(entry.effect.as_ref(), surface, data)
+                paced_by(layer_offscreen(entry.effect.as_ref()), surface, data)
             });
     }
     for surface in other_trees(scene, cursor) {

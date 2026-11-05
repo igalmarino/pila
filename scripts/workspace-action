@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Switch to a workspace by name ("1", "2", ...), as a pager would: a
+minimal ext-workspace client (standard library only), for scripted tests
+such as scripts/check. Run it inside pila (it uses WAYLAND_DISPLAY).
+
+    scripts/workspace-action <name>
+"""
+import os
+import socket
+import struct
+import sys
+
+if len(sys.argv) != 2:
+    sys.exit(__doc__)
+wanted = sys.argv[1]
+path = os.path.join(os.environ["XDG_RUNTIME_DIR"], os.environ["WAYLAND_DISPLAY"])
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(path)
+
+
+def send(obj, opcode, payload=b""):
+    sock.sendall(struct.pack("<II", obj, ((8 + len(payload)) << 16) | opcode) + payload)
+
+
+def string(s):
+    data = s.encode() + b"\0"
+    pad = (4 - len(data) % 4) % 4
+    return struct.pack("<I", len(data)) + data + b"\0" * pad
+
+
+def read_string(body):
+    (length,) = struct.unpack("<I", body[:4])
+    return body[4:4 + length - 1].decode()
+
+
+buf = b""
+
+
+def events():
+    """The events the compositor sends, as (object, opcode, body)."""
+    global buf
+    while True:
+        while len(buf) >= 8:
+            obj, word = struct.unpack("<II", buf[:8])
+            size, opcode = word >> 16, word & 0xFFFF
+            if len(buf) < size:
+                break
+            body, buf = buf[8:size], buf[size:]
+            yield obj, opcode, body
+        data = sock.recv(65536)
+        if not data:
+            return
+        buf += data
+
+
+DISPLAY, REGISTRY = 1, 2
+send(DISPLAY, 1, struct.pack("<I", REGISTRY))  # get_registry
+send(DISPLAY, 0, struct.pack("<I", 3))  # sync -> callback 3
+manager_name = None
+for obj, op, body in events():
+    if obj == REGISTRY and op == 0:
+        (name,) = struct.unpack("<I", body[:4])
+        if read_string(body[4:]) == "ext_workspace_manager_v1":
+            manager_name = name
+    if obj == 3:
+        break
+if manager_name is None:
+    sys.exit("no ext_workspace_manager_v1")
+
+MANAGER = 4
+send(REGISTRY, 0, struct.pack("<I", manager_name) + string("ext_workspace_manager_v1")
+     + struct.pack("<II", 1, MANAGER))
+# Workspaces arrive as manager.workspace (opcode 1, a new id), then each
+# one's name (handle opcode 1); manager.done (opcode 2) ends the burst.
+handles = set()
+names = {}
+for obj, op, body in events():
+    if obj == MANAGER and op == 1:
+        handles.add(struct.unpack("<I", body[:4])[0])
+    elif obj in handles and op == 1:
+        names[read_string(body)] = obj
+    elif obj == MANAGER and op == 2:
+        break
+if wanted not in names:
+    sys.exit(f"no workspace named {wanted!r} (there are {sorted(names)})")
+send(names[wanted], 1)  # activate
+send(MANAGER, 0)  # commit
+send(DISPLAY, 0, struct.pack("<I", 5))
+for obj, op, body in events():
+    if obj == 5:
+        break
+print(f"workspace {wanted}")

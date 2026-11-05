@@ -349,7 +349,13 @@ Key flows and invariants:
   fades and shrinks out when it goes (`animate_close`), and shrinks away a little lower
   when minimized (`animate_minimize` from `hide_window`, before the unmap) and back when
   restored (`animate_restore` from `show_window`): a `Style` (`Open`, `Minimize`,
-  `Layer`) gives each its look. Window and layer rules can turn them off
+  `Layer`) gives each its look. A workspace switch slides (`workspace_slide.rs`):
+  `start_workspace_slide` (from `show_workspace`, before the windows are swapped) draws
+  each output's windows into a texture; while it runs `render::slide_elements` draws
+  the new workspace's windows into another per-output texture (`SlideTextures`) and
+  shows both shifted sideways and cropped to their output (`slid_texture`), the carried
+  window plainly in front; panels and wallpaper stay put; windows drawn that way are
+  paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`). Window and layer rules can turn them off
   (`animates_window`, `animates_layer`; see "Window and layer rules"). Transient layer
   surfaces (Top/Overlay without an exclusive zone, `animates_layer`: launchers,
   notifications, shell panels; not bars or wallpapers) fade in when they first get a buffer (`layer_committed` from
@@ -372,8 +378,8 @@ Key flows and invariants:
   so only the main surface is drawn, `Surfaces::MainOnly`, the tree being gone); X11
   windows are taken in `unmapped_window`. Windows leaving the space otherwise
   (workspaces) drop their animation (`forget_animations`). `scripts/toplevel-action`
-  (a stdlib Python taskbar client) minimizes/unminimizes for scripted tests
-  (`scripts/check`); `wtype`
+  (a stdlib Python taskbar client) minimizes/unminimizes and `scripts/workspace-action`
+  (ext-workspace) switches workspaces for scripted tests (`scripts/check`); `wtype`
   can't, the virtual keyboard bypasses bindings. `step_animations` (from
   `after_frames`) prunes finished ones and requests the next frame; locking drops all.
   Animations are visual only: input sees the real geometry.

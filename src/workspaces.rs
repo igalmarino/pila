@@ -179,6 +179,8 @@ impl Pila {
         self.end_switch();
         self.dismiss_popup_grab();
         let carried = self.grabbed_window();
+        // Each output's picture of the windows leaving, for the slide.
+        self.start_workspace_slide(index, carried.clone());
         let from = self.workspaces.active;
         let shown: Vec<Window> = self
             .space

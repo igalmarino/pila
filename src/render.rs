@@ -25,6 +25,7 @@ use smithay::{
     },
     desktop::{LayerSurface, PopupManager, Window},
     input::pointer::CursorIcon,
+    output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::{compositor::with_states, seat::WaylandFocus},
@@ -36,6 +37,7 @@ use crate::{
     cursor::{CursorTheme, NamedCursor},
     decoration::{self, TitleBarPart},
     rounded::{self, Corners, RoundedSolid, RoundedSurface, Rounding, ShapeDamage, SurfaceElement},
+    workspace_slide::SceneSlide,
 };
 
 smithay::backend::renderer::element::render_elements! {
@@ -120,6 +122,8 @@ pub struct Scene {
     pub windows: Vec<SceneWindow>,
     /// Closed windows fading out, among `windows` (`animation.rs`).
     pub ghosts: Vec<SceneGhost>,
+    /// A workspace switch sliding the windows (`workspace_slide.rs`).
+    pub slide: Option<SceneSlide>,
     /// Layer surfaces below the windows (Bottom, Background; also Top while
     /// a fullscreen window is on top).
     pub lower: Vec<SceneLayer>,
@@ -151,6 +155,7 @@ impl SceneLayer {
 }
 
 /// A mapped window as it should be drawn this frame.
+#[derive(Clone)]
 pub struct SceneWindow {
     pub window: Window,
     /// Where the window's surface tree is drawn (geometry origin minus the
@@ -165,9 +170,21 @@ pub struct SceneWindow {
     pub alpha: f32,
     /// While it animates: drawn through a texture (`animation.rs`).
     pub effect: Option<WindowEffect>,
+    /// While a workspace slide draws it into an output's texture, the
+    /// output it's on (`workspace_slide.rs`).
+    pub slid: Option<Option<Output>>,
 }
 
 impl SceneWindow {
+    /// The output it's paced by while it's drawn through a texture (absent
+    /// from the render states then; `frame.rs`), if it is.
+    pub fn offscreen_output(&self) -> Option<Option<Output>> {
+        self.effect
+            .as_ref()
+            .map(|effect| effect.output.clone())
+            .or_else(|| self.slid.clone())
+    }
+
     /// Everything it draws (surfaces, popups, title bar, flash), in space
     /// coordinates.
     fn content_rect(&self) -> Rectangle<i32, Logical> {
@@ -194,6 +211,7 @@ impl SceneWindow {
     }
 }
 
+#[derive(Clone)]
 pub struct SceneTitleBar {
     pub rect: Rectangle<i32, Logical>,
     pub focused: bool,
@@ -282,13 +300,20 @@ fn scene_elements_from(
             scale,
         ));
     }
-    elements.extend(window_elements(
-        renderer,
-        &scene.windows,
-        &scene.ghosts,
-        output_location,
-        scale,
-    ));
+    match scene
+        .slide
+        .as_ref()
+        .and_then(|slide| Some((slide, slide.output_rect(output_location)?)))
+    {
+        Some((slide, rect)) => elements.extend(slide_elements(renderer, scene, slide, rect, scale)),
+        None => elements.extend(window_elements(
+            renderer,
+            &scene.windows,
+            &scene.ghosts,
+            output_location,
+            scale,
+        )),
+    }
     elements.extend(layer_elements(
         renderer,
         &scene.lower,
@@ -699,6 +724,117 @@ fn animated_window_element(
         Some(element) => vec![element],
         None => draw(renderer, output_location, scale),
     }
+}
+
+/// The windows layer of the output at `rect` while a workspace slide runs:
+/// the carried window as usual, in front; the new workspace's windows drawn
+/// into the output's texture and coming in from one side; the old picture
+/// leaving on the other. Both are cropped to the output.
+fn slide_elements(
+    renderer: &mut GlesRenderer,
+    scene: &Scene,
+    slide: &SceneSlide,
+    rect: Rectangle<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let (carried, moving): (Vec<SceneWindow>, Vec<SceneWindow>) = scene
+        .windows
+        .iter()
+        .cloned()
+        .partition(|entry| Some(&entry.window) == slide.carried.as_ref());
+    let mut elements = window_elements(renderer, &carried, &[], rect.loc, scale);
+
+    let new = {
+        let mut textures = slide.textures.borrow_mut();
+        let size = texture_size(rect, scale);
+        textures.retain(|(r, t)| *r != rect || (t.scale == scale && t.size == size));
+        let index = match textures.iter().position(|(r, _)| *r == rect) {
+            Some(index) => Some(index),
+            None => OffscreenWindow::new(renderer, size, scale).map(|t| {
+                textures.push((rect, t));
+                textures.len() - 1
+            }),
+        };
+        index.and_then(|index| {
+            let target = &mut textures[index].1;
+            let windows = window_elements(renderer, &moving, &scene.ghosts, rect.loc, scale);
+            // An empty workspace draws nothing: the texture is just cleared.
+            target
+                .draw(renderer, &windows)
+                .then(|| target.buffer.clone())
+        })
+    };
+    let width = f64::from(rect.size.w);
+    let new_offset = slide.direction * width * (1.0 - slide.progress);
+    let old_offset = -slide.direction * width * slide.progress;
+    match new {
+        Some(buffer) => elements.extend(slid_texture(&buffer, rect, new_offset, scale)),
+        // No texture: the new windows as usual, unmoved.
+        None => elements.extend(window_elements(
+            renderer,
+            &moving,
+            &scene.ghosts,
+            rect.loc,
+            scale,
+        )),
+    }
+    if let Some(old) = slide.old_buffer(rect) {
+        elements.extend(slid_texture(old, rect, old_offset, scale));
+    }
+    elements
+}
+
+/// A texture of the output at `rect` drawn `offset` logical pixels to the
+/// side: only the part still on the output.
+fn slid_texture(
+    buffer: &TextureRenderBuffer<GlesTexture>,
+    rect: Rectangle<i32, Logical>,
+    offset: f64,
+    scale: Scale<f64>,
+) -> Option<PilaRenderElement> {
+    let offset = offset.round() as i32;
+    let visible = rect.size.w - offset.abs();
+    if visible <= 0 {
+        return None;
+    }
+    // Relative to the output; the texture's pixels are physical.
+    let dst_x = offset.max(0);
+    let src_x = (-offset).max(0);
+    let location: Point<f64, Physical> = Point::<i32, Logical>::from((dst_x, 0))
+        .to_f64()
+        .to_physical(scale);
+    let src = Rectangle::new(
+        (f64::from(src_x) * scale.x, 0.0).into(),
+        (
+            f64::from(visible) * scale.x,
+            f64::from(rect.size.h) * scale.y,
+        )
+            .into(),
+    );
+    Some(PilaRenderElement::Texture(
+        TextureRenderElement::from_texture_render_buffer(
+            location,
+            buffer,
+            None,
+            Some(src),
+            Some((visible, rect.size.h).into()),
+            Kind::Unspecified,
+        ),
+    ))
+}
+
+/// The windows (and ghosts) on the output at `rect`, as they look now,
+/// drawn into a texture (the picture a workspace slide moves away).
+pub fn snapshot_windows(
+    renderer: &mut GlesRenderer,
+    windows: &[SceneWindow],
+    ghosts: &[SceneGhost],
+    rect: Rectangle<i32, Logical>,
+    scale: Scale<f64>,
+) -> Option<TextureRenderBuffer<GlesTexture>> {
+    let elements = window_elements(renderer, windows, ghosts, rect.loc, scale);
+    let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
+    target.draw(renderer, &elements).then_some(target.buffer)
 }
 
 /// `elements` drawn into a new texture covering `rect` at `scale`.
