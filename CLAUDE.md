@@ -358,11 +358,17 @@ Key flows and invariants:
   the new workspace's windows into another per-output texture (`SlideTextures`) and
   shows both shifted sideways and cropped to their output (`slid_texture`), the carried
   window plainly in front; panels and wallpaper stay put; windows drawn that way are
-  paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`). A size or place
+  paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`; on no output, by
+  their primary output). A switch during a slide takes its leaving picture from what
+  the running slide shows (`snapshot_windows` with the slide). Close and minimize
+  ghosts belong to the workspace they left (`Ghost::workspace`): a switch carries them
+  off in the leaving picture. A size or place
   change (maximize, fullscreen, snap, and back; not refits nor drags) runs
   `animate_geometry` first (from `set_fill_state_on`, `snap_window`, `unsnap_window`;
-  `begin_move` cancels it): a `Resizing` keeps a snapshot and the old frame; until the
-  client commits a new size (`geometry_committed` from the commit handler, or
+  not while a window opens, nor inside `without_geometry_animation`, which
+  `begin_move` uses): a `Resizing` keeps a snapshot and the old frame; until the
+  client commits a new size (`geometry_committed` from the commit handler, by
+  `committed_size`: an X11 window's buffer, since X applies a configure at once; or
   `RESIZE_WAIT`) the live window is hidden (alpha 0) and the snapshot stands at the old
   rect; then both are stretched onto a rect moving to the new one (`FrameMap`), the
   snapshot fading out in front. Textures are always drawn with their whole `src`
@@ -383,7 +389,9 @@ Key flows and invariants:
   paces it by `WindowEffect::output`, since it's absent from the output's render states. A closed
   window is a `Ghost`: a snapshot (`render::snapshot_window`) drawn at its old place in
   the stacking order (`Scene::ghosts`) while it fades; its live window is skipped
-  meanwhile (`is_ghost`). The snapshot must be taken while the content exists:
+  meanwhile (`is_ghost`); one its client maps again before the fade ends is
+  dropped and the window opens again (`geometry_committed`). The snapshot must be
+  taken while the content exists:
   `watch_unmap` (added in `new_toplevel`) catches the commit that removes the buffer
   (pre-commit hook; most clients unmap before destroying) and the surface's destruction
   (a dead client: a destruction hook added before Smithay's, which drops the textures,

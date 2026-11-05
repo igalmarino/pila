@@ -176,7 +176,7 @@ impl XwmHandler for Pila {
         // focused), then X is told where it ended up. A window that asked to
         // be maximized or fullscreen before mapping (or whose rules say so)
         // gets that size now.
-        self.place_new_window(window.clone());
+        self.place_new_window_with(window.clone(), props.clone());
         let (maximized, fullscreen) = fill_state(&window);
         if maximized || fullscreen {
             self.set_fill_state(&window, maximized, fullscreen);

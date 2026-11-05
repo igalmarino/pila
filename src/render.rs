@@ -305,7 +305,14 @@ fn scene_elements_from(
         .as_ref()
         .and_then(|slide| Some((slide, slide.output_rect(output_location)?)))
     {
-        Some((slide, rect)) => elements.extend(slide_elements(renderer, scene, slide, rect, scale)),
+        Some((slide, rect)) => elements.extend(slide_elements(
+            renderer,
+            &scene.windows,
+            &scene.ghosts,
+            slide,
+            rect,
+            scale,
+        )),
         None => elements.extend(window_elements(
             renderer,
             &scene.windows,
@@ -767,16 +774,31 @@ fn animated_window_element(
 /// leaving on the other. Both are cropped to the output.
 fn slide_elements(
     renderer: &mut GlesRenderer,
-    scene: &Scene,
+    windows: &[SceneWindow],
+    ghosts: &[SceneGhost],
     slide: &SceneSlide,
     rect: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    let (carried, moving): (Vec<SceneWindow>, Vec<SceneWindow>) = scene
-        .windows
+    let carried_index = windows
+        .iter()
+        .position(|entry| Some(&entry.window) == slide.carried.as_ref());
+    let (carried, moving): (Vec<SceneWindow>, Vec<SceneWindow>) = windows
         .iter()
         .cloned()
         .partition(|entry| Some(&entry.window) == slide.carried.as_ref());
+    // Ghosts are placed by index among all the windows: shift those behind
+    // the carried window, which isn't among the moving ones.
+    let ghosts: Vec<SceneGhost> = ghosts
+        .iter()
+        .map(|ghost| SceneGhost {
+            before: match carried_index {
+                Some(carried) if ghost.before > carried => ghost.before - 1,
+                _ => ghost.before,
+            },
+            ..ghost.clone()
+        })
+        .collect();
     let mut elements = window_elements(renderer, &carried, &[], rect.loc, scale);
 
     let new = {
@@ -792,7 +814,7 @@ fn slide_elements(
         };
         index.and_then(|index| {
             let target = &mut textures[index].1;
-            let windows = window_elements(renderer, &moving, &scene.ghosts, rect.loc, scale);
+            let windows = window_elements(renderer, &moving, &ghosts, rect.loc, scale);
             // An empty workspace draws nothing: the texture is just cleared.
             target
                 .draw(renderer, &windows)
@@ -805,13 +827,7 @@ fn slide_elements(
     match new {
         Some(buffer) => elements.extend(slid_texture(&buffer, rect, new_offset, scale)),
         // No texture: the new windows as usual, unmoved.
-        None => elements.extend(window_elements(
-            renderer,
-            &moving,
-            &scene.ghosts,
-            rect.loc,
-            scale,
-        )),
+        None => elements.extend(window_elements(renderer, &moving, &ghosts, rect.loc, scale)),
     }
     if let Some(old) = slide.old_buffer(rect) {
         elements.extend(slid_texture(old, rect, old_offset, scale));
@@ -859,15 +875,21 @@ fn slid_texture(
 }
 
 /// The windows (and ghosts) on the output at `rect`, as they look now,
-/// drawn into a texture (the picture a workspace slide moves away).
+/// drawn into a texture (the picture a workspace slide moves away): as a
+/// slide in progress (`slide`) shows them, if one is running there, so a
+/// new one starts from what's on screen.
 pub fn snapshot_windows(
     renderer: &mut GlesRenderer,
     windows: &[SceneWindow],
     ghosts: &[SceneGhost],
+    slide: Option<&SceneSlide>,
     rect: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Option<TextureRenderBuffer<GlesTexture>> {
-    let elements = window_elements(renderer, windows, ghosts, rect.loc, scale);
+    let elements = match slide.filter(|slide| slide.output_rect(rect.loc).is_some()) {
+        Some(slide) => slide_elements(renderer, windows, ghosts, slide, rect, scale),
+        None => window_elements(renderer, windows, ghosts, rect.loc, scale),
+    };
     let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
     target.draw(renderer, &elements).then_some(target.buffer)
 }

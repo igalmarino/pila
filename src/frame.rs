@@ -115,8 +115,10 @@ fn paced_by(
     data: &SurfaceData,
 ) -> Option<Output> {
     match offscreen {
-        Some(output) => output,
-        None => surface_primary_scanout_output(surface, data),
+        Some(Some(output)) => Some(output),
+        // Drawn through a texture but on no output (or drawn as usual):
+        // whatever it was last shown on.
+        _ => surface_primary_scanout_output(surface, data),
     }
 }
 

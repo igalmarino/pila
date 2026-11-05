@@ -176,6 +176,9 @@ pub struct Ghost {
     pub snapshot: Snapshot,
     /// The window just in front of it when it went (`None`: it was in front).
     above: Option<Window>,
+    /// The workspace it went from: it's drawn only there (a switch takes it
+    /// along in the leaving picture).
+    workspace: usize,
     style: Style,
     visibility: Animation,
 }
@@ -193,6 +196,7 @@ pub struct Snapshot {
 
 /// A ghost as it's drawn this frame: in front of `Scene::windows[before]`
 /// (or behind every window if that's past the end).
+#[derive(Clone)]
 pub struct SceneGhost {
     pub snapshot: Snapshot,
     pub before: usize,
@@ -294,6 +298,8 @@ pub struct Animations {
     layers: Vec<LayerAppearing>,
     layer_ghosts: Vec<LayerGhost>,
     resizing: Vec<Resizing>,
+    /// Size and place changes don't animate (`without_geometry_animation`).
+    geometry_held: bool,
 }
 
 /// A window's or layer surface's texture while it animates (`render.rs`),
@@ -362,6 +368,26 @@ fn window_event(kind: AnimationKind, coming: bool) -> &'static str {
         (AnimationKind::Layer, false) => "layer-out",
         (AnimationKind::Workspace, _) => "workspace",
     }
+}
+
+/// The size of what `window`'s client last drew: its geometry, except for
+/// an X11 window, whose geometry is what pila last configured (X applies it
+/// at once), so it's the size of its surface's buffer.
+fn committed_size(window: &Window) -> smithay::utils::Size<i32, Logical> {
+    if window.x11_surface().is_some() {
+        if let Some(surface) = window.wl_surface() {
+            let size = with_states(&surface, |states| {
+                states
+                    .data_map
+                    .get::<smithay::backend::renderer::utils::RendererSurfaceStateUserData>()
+                    .and_then(|state| state.lock().ok()?.surface_size())
+            });
+            if let Some(size) = size {
+                return size;
+            }
+        }
+    }
+    window.geometry().size
 }
 
 /// A window's app id, for the log.
@@ -555,6 +581,7 @@ impl Pila {
             window: window.clone(),
             snapshot,
             above,
+            workspace: self.workspaces.active,
             style,
             visibility: Animation::new(now, duration, Curve::EaseOut, from, 0.0),
         });
@@ -653,9 +680,11 @@ impl Pila {
             })
         });
         let resizing: Vec<SceneGhost> = resizing.collect();
+        let active = self.workspaces.active;
         self.animations
             .ghosts
             .iter()
+            .filter(|ghost| ghost.workspace == active)
             .map(|ghost| {
                 let before = ghost
                     .above
@@ -775,6 +804,15 @@ impl Pila {
 
     // --- Size and place changes ---------------------------------------------
 
+    /// Run `f` without size and place animations: a change it makes goes
+    /// straight to the new rect (e.g. a drag taking a maximized window out:
+    /// it follows the pointer, and no snapshot is taken for nothing).
+    pub fn without_geometry_animation(&mut self, f: impl FnOnce(&mut Self)) {
+        let held = std::mem::replace(&mut self.animations.geometry_held, true);
+        f(self);
+        self.animations.geometry_held = held;
+    }
+
     /// `window`'s frame: its geometry and title bar, in space coordinates.
     fn frame_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let geo = self.space.element_geometry(window)?;
@@ -786,12 +824,19 @@ impl Pila {
     /// snap, or back): keep how it looks now, to move from. Call before the
     /// change; a second call before its client answers keeps the first.
     pub fn animate_geometry(&mut self, window: &Window) {
-        if self
+        let waiting = self
             .animations
             .resizing
             .iter()
-            .any(|r| r.window == *window && r.progress.is_none())
-        {
+            .any(|r| r.window == *window && r.progress.is_none());
+        // Its open animation shows it at the new size already (e.g. an X11
+        // window a rule maximizes as it maps): leave that one be.
+        let opening = self
+            .animations
+            .appearing
+            .iter()
+            .any(|a| a.window == *window);
+        if waiting || opening || self.animations.geometry_held {
             return;
         }
         if !self.animates_window(window, AnimationKind::Maximize, true) {
@@ -803,7 +848,7 @@ impl Pila {
         let Some(from) = self.frame_rect(window) else {
             return;
         };
-        let from_size = window.geometry().size;
+        let from_size = committed_size(window);
         self.forget_animations(window);
         let Some(snapshot) = self.snapshot(window, Surfaces::Tree) else {
             return;
@@ -824,7 +869,19 @@ impl Pila {
     /// `window` committed: if it was waiting for its new size and has it,
     /// start moving.
     pub fn geometry_committed(&mut self, window: &Window) {
-        let size = window.geometry().size;
+        // Unmapped by its client (attach(null), now a ghost) and shown
+        // again before the fade ended: drop the ghost and open it again.
+        if self.is_ghost(window)
+            && self.space.element_location(window).is_some()
+            && window
+                .wl_surface()
+                .is_some_and(|surface| crate::state::has_buffer(&surface))
+        {
+            self.animations.ghosts.retain(|g| g.window != *window);
+            self.animate_open(window);
+            return;
+        }
+        let size = committed_size(window);
         let now = self.animation_time();
         let Some(resizing) = self
             .animations

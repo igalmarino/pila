@@ -840,8 +840,14 @@ impl Pila {
     /// client asked for maximize/fullscreen before mapping. Window rules may
     /// give it a position, or another workspace (it opens there, unfocused).
     pub fn place_new_window(&mut self, window: Window) {
-        // Its app id and title are known by now (X11 too).
+        // Its app id and title are known by now.
         let props = self.resolve_window_rules(&window);
+        self.place_new_window_with(window, props);
+    }
+
+    /// `place_new_window` with its window rules already resolved (an X11
+    /// window's, whose size had to be set before).
+    pub fn place_new_window_with(&mut self, window: Window, props: crate::rules::WindowProps) {
         let pointer_location = self
             .seat
             .get_pointer()
@@ -1124,9 +1130,8 @@ impl Pila {
             let width = restore_geometry(&window)
                 .map(|r| r.size.w)
                 .unwrap_or(window.geometry().size.w);
-            self.set_fill_state(&window, false, false);
             // It follows the pointer at once, no animation in the way.
-            self.forget_animations(&window);
+            self.without_geometry_animation(|state| state.set_fill_state(&window, false, false));
             // Keep the grab point on the title bar if pila draws one,
             // otherwise near the top of the client's own.
             let y_offset = if decoration::is_ssd(&window) {

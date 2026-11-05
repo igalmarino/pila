@@ -82,6 +82,8 @@ impl Pila {
     /// picture of the windows now, for them to slide out. Call before the
     /// windows are swapped; `carried` stays out of the picture.
     pub fn start_workspace_slide(&mut self, index: usize, carried: Option<Window>) {
+        // A slide still running: the new one starts from what it shows.
+        let running = self.scene_slide(self.animation_time());
         self.workspace_slide = None;
         let Some(duration) = self
             .config
@@ -111,7 +113,14 @@ impl Pila {
         let old: Vec<_> = outputs
             .into_iter()
             .filter_map(|(rect, scale)| {
-                let buffer = render::snapshot_windows(renderer, &windows, &ghosts, rect, scale);
+                let buffer = render::snapshot_windows(
+                    renderer,
+                    &windows,
+                    &ghosts,
+                    running.as_ref(),
+                    rect,
+                    scale,
+                );
                 if buffer.is_none() {
                     debug!(?rect, "no picture of an output's windows; no slide there");
                 }
@@ -137,7 +146,7 @@ impl Pila {
         self.queue_redraw();
     }
 
-    /// The slide to draw this frame, if one is running.
+    /// The slide to draw this frame, if one is running (and not over).
     pub fn scene_slide(&self, now: Duration) -> Option<SceneSlide> {
         let slide = self.workspace_slide.as_ref()?;
         Some(SceneSlide {
