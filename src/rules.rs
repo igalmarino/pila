@@ -375,6 +375,11 @@ impl Pila {
                 "opens filled"
             );
             self.set_fill_state(window, wanted.0, wanted.1);
+        } else if maximized || fullscreen {
+            // Asked for by the client before its initial commit: the size
+            // was worked out then, maybe before it asked for server-side
+            // decorations (a title bar). Again, now that it's all known.
+            self.set_fill_state(window, maximized, fullscreen);
         }
     }
 
