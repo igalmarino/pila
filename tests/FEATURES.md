@@ -6,8 +6,9 @@ file::test (in tests/FILE.rs, on the headless backend), unit tests as
 src/FILE.rs::test. `tests/features_inventory.rs` checks that every test
 named here exists and that every integration test is named here, so this
 file can't fall behind. A feature without a test says why: it runs only
-on bare metal (`udev.rs`: covered by `scripts/check` on a TTY, by the
-user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
+on bare metal (`udev.rs`: `scripts/check` on a TTY runs the DRM/KMS
+backend through real programs and checks frame times; what it doesn't
+exercise, the user checks by hand) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 (`cargo test -- --ignored` runs them); they're listed at the end.
 
 ## Harness
@@ -34,7 +35,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 | Every default binding | `bindings::mod_shift_q_closes_and_the_client_never_sees_q`, `bindings::mod_m_and_mod_up_maximize_and_toggle_back`, `bindings::mod_f_toggles_fullscreen_over_the_whole_output`, `bindings::mod_n_minimizes`, `bindings::mod_left_and_right_snap_to_halves_and_again_restores`, `bindings::mod_down_undoes_a_snap`, `bindings::mod_shift_arrows_move_by_40`, `bindings::mod_ctrl_arrows_resize_by_40`, `bindings::keyboard_resizes_stop_at_40`, `bindings::mod_c_centers`, `bindings::mod_return_runs_the_terminal`, `bindings::mod_d_without_a_launcher_does_nothing`, `switcher::mod_j_switches_too`, `workspaces::page_keys_step_without_wrapping`, `workspaces::mod_shift_page_keys_move_the_window`, `smoke::quit_binding_exits` |
 | Exact modifiers, locks ignored, release kept from the client, unbinding, keys without Mod, Mod setting | `bindings::modifiers_must_match_exactly`, `bindings::caps_lock_and_num_lock_dont_stop_bindings`, `bindings::plain_keys_reach_the_focused_client`, `bindings::a_binding_set_to_none_is_removed`, `bindings::a_key_without_mod_can_be_bound`, `bindings::mod_can_be_alt`, `bindings::digits_past_the_workspaces_reach_the_client`, `bindings::bindings_ignore_unfocused_state_without_a_window`, `bindings::moving_or_resizing_a_filled_window_does_nothing` |
 | Shortcuts inhibitor (Quit exempt) | `input_protocols::an_inhibitor_gets_the_bindings_keys_but_not_quit`, `input_protocols::quit_still_works_with_an_inhibitor`, `input_protocols::an_inhibitor_only_counts_while_its_surface_has_focus` |
-| Ctrl+Alt+F*n* VT switch | bare metal (`scripts/check`) |
+| Ctrl+Alt+F*n* VT switch | bare metal, by hand (the user) |
 
 ## Windows
 
@@ -69,7 +70,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 | Virtual keyboard | `input_protocols::a_virtual_keyboard_types_into_the_focused_window_past_the_bindings` |
 | xdg-activation | `input_protocols::a_focused_client_can_activate_another_window`, `input_protocols::an_unfocused_client_cant_steal_focus`, `input_protocols::activation_brings_a_window_from_another_workspace_or_minimized` |
 | Gestures | `gestures::a_three_finger_swipe_left_switches_windows_and_stays_with_pila`, `gestures::a_long_swipe_steps_through_more_windows`, `gestures::three_fingers_up_maximize_and_down_restore`, `gestures::four_fingers_change_workspace`, `gestures::a_short_swipe_does_nothing`, `gestures::unbound_swipes_pinches_and_holds_reach_the_client`, `gestures::a_shortcuts_inhibitor_gets_the_swipe`, `gestures::gestures_do_nothing_while_locked`, `gestures::a_gesture_config_rebinds_swipes`, `src/gestures.rs` unit tests |
-| libinput device settings (`[input]`), keyboard LEDs | bare metal (`scripts/check`) |
+| libinput device settings (`[input]`), keyboard LEDs | bare metal, by hand (the user) |
 
 ## Surfaces and clients
 
@@ -91,7 +92,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 | wlr-output-management | `outputs::heads_describe_the_outputs`, `outputs::applying_a_configuration_changes_the_outputs`, `outputs::testing_a_configuration_changes_nothing`, `outputs::bad_configurations_fail`, `outputs::a_configuration_for_an_old_serial_is_cancelled`, `outputs::disabling_a_head_removes_the_output_but_keeps_the_head`, `outputs::editing_an_outputs_config_section_drops_its_override` |
 | Output power and gamma (protocol side) | `outputs::an_output_can_be_turned_off_and_on`, `outputs::gamma_ramps_are_set_and_reset`, `outputs::a_second_gamma_control_or_a_short_ramp_fails`, `src/gamma_control.rs` unit tests |
 | `disable-internal-display` | `src/udev.rs::the_built_in_screen_goes_off_only_for_an_external_one_that_is_on`, `src/udev.rs::built_in_screens_are_recognized_by_connector`; the rest on bare metal |
-| DRM/KMS: modes, CRTCs, vblank pacing, VRR, gamma ioctl, power, VT switching | bare metal (`scripts/check`); `src/udev.rs::linear_ramps_are_recognized` |
+| DRM/KMS: modes, CRTCs, vblank pacing, VRR, gamma ioctl, power, VT switching | bare metal: `scripts/check` (modes, CRTCs, vblank pacing), the rest by hand (the user); `src/udev.rs::linear_ramps_are_recognized` |
 
 ## Taskbars and capture
 

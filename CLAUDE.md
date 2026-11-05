@@ -48,7 +48,7 @@ on **Smithay 0.7.x**.
   sets its `RUST_LOG`, `PILA_TEST_KEEP=1` keeps a failed test's directory,
   `PILA_HEADLESS_DEVICE=software` renders on llvmpipe as CI does. A pila that
   panics fails its test. Every feature gets integration tests; only bare-metal
-  paths (`udev.rs`) and looks stay with `scripts/check` and the user.
+  paths (`udev.rs`), real frame times (`scripts/check`) and looks stay with the user.
   `tests/FEATURES.md` maps every feature to its tests (or says why it has
   none), and `features_inventory_is_complete` fails if a test it names is gone
   or an integration test isn't named there: a new test goes into it. Known
@@ -78,18 +78,20 @@ on **Smithay 0.7.x**.
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
   (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
   Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
-- Automated checks: `scripts/check` runs scripted scenarios (windows, a window rule,
-  minimize, a launcher, a layer rule via reload, Noctalia if installed) inside a pila
-  with its own config and judges them from the log: events on `pila::animation`
-  (`starts` / `off by rule`, with `what` and the app id or namespace) and `pila::rules`,
-  plus the frame statistics (no missed refresh, CPU per frame on average within 4 ms).
-  It prints PASS/FAIL per check and exits 1 on a failure. `scripts/check --nested`
-  (release build, log in `pila-check.log`) is for you: run it before asking the user
-  to check anything; the user runs plain `scripts/check` from a TTY (log in
-  `pila-tty.log`) for bare metal. A new feature adds its scenario (a `mark "name
-  begin/end"` section in the workload) and its checks (`section`, `has`, `lacks`),
-  logging what it does on a debug target the checks can read; what only eyes can judge
-  (how it looks) is still asked of the user.
+- Bare-metal smoke and performance run: `scripts/check` drives a real pila with real
+  programs (a terminal, xterm, fuzzel, grim, Noctalia if installed: windows opening and
+  closing, minimize, maximize, workspace switches, a launcher, a capture) and judges
+  the log: the scenarios finished without a panic, animations ran (`starts` on
+  `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a picture,
+  and the frame statistics (no missed refresh, CPU per frame on average within 4 ms).
+  It prints PASS/FAIL per check and exits 1 on a failure. It doesn't test behavior:
+  that's the integration tests' job. `scripts/check --nested` (release build, log in
+  `pila-check.log`) is for you: run it before asking the user to check anything; the
+  user runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. A
+  feature adds a scenario there (a `mark "name begin/end"` section in the workload,
+  checks with `section`, `has`, `lacks` on a debug log target) only if it's bare-metal
+  only or puts load on rendering; what only eyes can judge (how it looks) is still
+  asked of the user.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
