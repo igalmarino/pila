@@ -249,7 +249,7 @@ trailer. The instructions it works under are public, in [CLAUDE.md](CLAUDE.md).
 
 The AI doesn't make the decisions. The important ones, on technology, architecture,
 security, testing and more, are mine; I'm a software developer with over 30 years of
-experience.
+experience. I review the code that goes in and I answer for it.
 
 ## Contributing
 
