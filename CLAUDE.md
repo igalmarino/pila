@@ -160,7 +160,8 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   or run in the background, like `text.rs` and `export_environment`); work proportional
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
-  timers (the headless test backend, which has no vblank, is the one exception); idle callbacks inserted outside an event source come with a `Pila::wake`
+  timers (the headless test backend, which has no vblank, is the one exception;
+  `schedule_hidden_frames`' once-a-second wake for hidden surfaces isn't pacing); idle callbacks inserted outside an event source come with a `Pila::wake`
   ping (see "Redraws are on demand"); one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
   an offscreen texture; `text::init` shapes and rasterizes common characters on its
@@ -304,7 +305,9 @@ Key flows and invariants:
   drawn surface's primary output from the render states, sends presentation-time feedback
   once the frame is submitted, and sends frame callbacks only to surfaces whose primary
   output it is (surfaces shown nowhere: once a second, `HIDDEN_FRAME_THROTTLE`, so a
-  covered animating client doesn't spin); frame callback times and
+  covered animating client doesn't spin; `schedule_hidden_frames`, from `after_frames`,
+  asks for a redraw after that second while such a surface waits, since nothing
+  else may redraw); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
   iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs captures,
   screencopies, `space.refresh()`, taskbar updates and `popups.cleanup()`, then a flush. Buffer age (for partial repaints) needs the window's EGL
@@ -331,7 +334,10 @@ Key flows and invariants:
   A popup grab ignores focus changes, so `focus_window` dismisses it first
   (`dismiss_popup_grab`), and `focused_window` resolves a focused popup to its window.
 - **Window lifecycle:** `new_toplevel` pushes the window onto `Pila::unmapped` (not the
-  space). `handle_xdg_commit` sends the initial configure, then on the first commit with a
+  space). A client unmapping it (a null-buffer commit, `unmap_if_buffer_removed`) takes it
+  out of the space, taskbars (`remove_foreign_toplevel`, which also stops its capture
+  sessions), Mod+Tab and focus, and puts a new `Window` for the toplevel in `unmapped`:
+  it maps again like a new window. `handle_xdg_commit` sends the initial configure, then on the first commit with a
   buffer moves it into `space` via `place_new_window` (centered on the pointer's output,
   cascaded by `CASCADE_STEP` if the spot is taken). Lookups that must find unmapped windows
   use `window_for_surface`, which searches both.

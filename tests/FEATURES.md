@@ -42,7 +42,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 |---|---|
 | Mapping, placement, cascade, output under the pointer | `windows::a_window_opens_centered_below_its_title_bar`, `windows::windows_on_the_same_spot_cascade`, `windows::a_window_opens_on_the_output_under_the_pointer`, `windows::a_window_larger_than_the_output_starts_at_its_top_left`, `src/state.rs::centered_location_centers_window_and_title_bar` |
 | Focus, raise, click to focus, stacking | `windows::a_new_window_takes_focus_and_goes_on_top`, `windows::clicking_a_window_focuses_and_raises_it_and_the_click_reaches_it`, `windows::clicking_the_background_clears_focus`, `windows::the_pointer_enters_the_window_under_it_at_surface_coordinates`, `windows::closing_the_focused_window_focuses_the_one_below` |
-| Lifecycle: unmap, dead clients, titles | `windows::a_window_unmapped_by_its_client_leaves_and_maps_again` (bug), `windows::a_dead_client_takes_its_windows_along`, `windows::title_and_app_id_changes_show_in_the_state` |
+| Lifecycle: unmap, dead clients, titles | `windows::a_window_unmapped_by_its_client_leaves_and_maps_again`, `windows::an_unmapped_window_leaves_taskbars_and_comes_back_as_a_new_one`, `windows::a_dead_client_takes_its_windows_along`, `windows::title_and_app_id_changes_show_in_the_state` |
 | Decorations: negotiation, title bar buttons, drag | `windows::a_client_side_decorated_window_has_no_bar`, `windows::a_window_asking_for_client_side_gets_it`, `windows::server_side_decorations_are_confirmed`, `windows::the_title_bar_close_button_asks_the_window_to_close`, `windows::the_title_bar_maximize_button_toggles_maximized`, `windows::the_title_bar_minimize_button_minimizes`, `windows::the_title_bar_drags_the_window`, `src/decoration.rs` unit tests |
 | Maximize / fullscreen, restore geometry, refits | `fill_states::a_client_can_maximize_and_unmaximize_itself`, `fill_states::a_client_can_go_fullscreen_and_back`, `fill_states::fullscreen_over_maximized_comes_back_maximized`, `fill_states::a_window_that_opens_maximized_is_restored_to_two_thirds_centered`, `fill_states::a_window_that_opens_fullscreen_fills_the_output`, `fill_states::fullscreen_on_a_named_output`, `fill_states::maximized_windows_refit_when_the_output_changes_mode`, `fill_states::a_maximized_window_keeps_its_restore_geometry_across_workspaces`, `fill_states::maximizing_a_snapped_window_restores_to_before_the_snap`, `fill_states::toplevel_bounds_are_the_usable_area` |
 | Snapping and keyboard moves | `bindings::mod_left_and_right_snap_to_halves_and_again_restores`, `grabs::dragging_to_the_left_edge_snaps_with_a_preview`, `grabs::dragging_to_the_top_edge_maximizes`, `grabs::moving_away_from_the_edge_drops_the_preview`, `grabs::dragging_a_snapped_window_restores_its_size`, `grabs::resizing_a_snapped_window_forgets_the_snap`, `src/snap.rs` unit tests |
@@ -81,7 +81,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 | Output scale, fractional scale, viewporter | `surface_protocols::a_fractional_output_scale_reaches_the_window`, `surface_protocols::a_window_moved_to_another_output_gets_its_scale`, `surface_protocols::a_viewport_sets_the_window_size_and_single_pixel_buffers_fill_it` |
 | Cursors | `surface_protocols::a_client_sets_named_hidden_and_surface_cursors`, `surface_protocols::a_stale_serial_cant_set_the_cursor`, `src/cursor.rs` unit test; xcursor themes on bare metal |
 | Subsurfaces | `surface_protocols::a_subsurface_is_drawn_and_gets_the_pointer` |
-| Frame callbacks and presentation feedback | `surface_protocols::frame_callbacks_and_presentation_feedback_follow_a_commit`, `surface_protocols::a_covered_window_gets_frame_callbacks_about_once_a_second` (bug) |
+| Frame callbacks and presentation feedback | `surface_protocols::frame_callbacks_and_presentation_feedback_follow_a_commit`, `surface_protocols::a_covered_window_gets_frame_callbacks_about_once_a_second` |
 
 ## Outputs
 
@@ -100,7 +100,7 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 | ext-foreign-toplevel-list | `taskbar::the_list_announces_windows_their_changes_and_their_end`, `taskbar::windows_opened_later_are_announced` |
 | wlr-foreign-toplevel-management | `taskbar::handles_report_titles_states_and_outputs`, `taskbar::activate_focuses_a_window`, `taskbar::minimize_and_unminimize`, `taskbar::maximize_fullscreen_and_close`, `taskbar::activating_a_window_elsewhere_switches_workspace`, `taskbar::requests_are_ignored_while_locked` |
 | ext-workspace | `taskbar::workspaces_are_listed_with_the_active_one`, `taskbar::a_client_activates_a_workspace_on_commit`, `taskbar::a_binding_switch_is_reported`, `taskbar::a_new_workspace_count_adds_and_removes_workspaces` |
-| ext-image-copy-capture | `capture::an_output_capture_has_the_screens_pixels`, `capture::a_window_capture_has_only_the_window`, `capture::a_later_frame_waits_for_damage`, `capture::a_buffer_of_the_wrong_size_fails`, `capture::closing_the_window_stops_its_session`, `capture::closing_the_window_stops_an_idle_session` (bug), `capture::unplugging_the_output_stops_its_session`, `capture::a_scaled_output_is_captured_at_its_pixel_size`, `capture::window_captures_wait_while_locked`, `capture::an_output_capture_while_locked_shows_the_lock` |
+| ext-image-copy-capture | `capture::an_output_capture_has_the_screens_pixels`, `capture::a_window_capture_has_only_the_window`, `capture::a_later_frame_waits_for_damage`, `capture::a_buffer_of_the_wrong_size_fails`, `capture::closing_the_window_stops_its_session`, `capture::closing_the_window_stops_an_idle_session`, `capture::unplugging_the_output_stops_its_session`, `capture::a_scaled_output_is_captured_at_its_pixel_size`, `capture::window_captures_wait_while_locked`, `capture::an_output_capture_while_locked_shows_the_lock` |
 | wlr-screencopy | `capture::screencopy_copies_an_output`, `capture::screencopy_of_a_region`, `capture::screencopy_with_damage_waits_for_a_change`, `capture::screencopy_of_an_unplugged_output_fails` |
 | Capture into dma-bufs | bare metal and nested (`scripts/check`: grim) |
 
@@ -123,9 +123,4 @@ user) or only eyes can judge it. Known bugs are tests marked `#[ignore]`
 
 ## Known bugs (ignored tests)
 
-- `windows::a_window_unmapped_by_its_client_leaves_and_maps_again`: a
-  null-buffer commit leaves the window in the `Space`.
-- `surface_protocols::a_covered_window_gets_frame_callbacks_about_once_a_second`:
-  the throttled callback only goes out when something else redraws.
-- `capture::closing_the_window_stops_an_idle_session`: a window capture
-  session with no frame pending isn't told its window is gone.
+None at the moment.
