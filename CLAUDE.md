@@ -17,6 +17,9 @@ on **Smithay 0.7.x**.
   (`/run/host-wayland/wayland-0`, a hard link `scripts/link-wayland` makes to the socket of
   whichever session the container was entered from: pila, or GNOME); the compositor
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
+- The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
+  `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session links
+  its Wayland socket again.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
   the host, from a TTY. Write that code, but ask the user to test it.
@@ -35,6 +38,10 @@ on **Smithay 0.7.x**.
   `scripts/install` use.
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt`
+- CI (`.github/workflows/ci.yml`) also runs `cargo fmt --check`, builds with `--locked`
+  (on `rust-version` too, and on Debian, Ubuntu and Fedora), does a staged install and
+  runs `shellcheck --severity=warning --external-sources` on the scripts: run that after
+  editing one.
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
   logic (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
   `example_config_is_valid` for `config.example.toml`). Integration tests (`tests/*.rs`,
@@ -559,6 +566,10 @@ Key flows and invariants:
   programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`); the
   signal source is created first thing in `main`, before any thread, so no thread can
   take the signal instead.
+- **Activation** (`handlers/xdg_activation.rs`, xdg-activation): a token is issued only
+  to the client holding keyboard focus, for a serial newer than that focus's enter. Tokens
+  are single-use and expire after `TOKEN_TIMEOUT`. A request switches to the window's
+  workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.
