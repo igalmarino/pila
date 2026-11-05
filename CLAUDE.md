@@ -183,7 +183,10 @@ pila prefers **standard protocols**: Wayland core and the official `wayland-prot
 `ext-`/staging protocol over an older unstable or vendor one (e.g. `ext-data-control`, not
 `zwlr_data_control`). A standard protocol that Smithay doesn't implement (e.g.
 `ext-image-copy-capture`) is implemented in pila on the bindings from the
-`wayland-protocols` crate, not swapped for a vendor one.
+`wayland-protocols` crate, not swapped for a vendor one. (One temporary exception:
+xdg-session-management's XML is in that crate's release but no module yet, so
+`session_protocol.rs` generates its bindings with `wayland-scanner`; delete it, its
+client copy in `tests/common/` and the XML when a release has them.)
 
 A **wlroots protocol** is accepted when there's no standard equivalent yet and a desktop
 tool the user runs needs it; each is replaced as soon as an `ext-` version lands in

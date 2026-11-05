@@ -58,6 +58,7 @@ const PUBLIC: &[&str] = &[
     "zxdg_exporter_v2",
     "zxdg_importer_v2",
     "zxdg_output_manager_v1",
+    "xdg_session_manager_v1",
 ];
 
 /// Hidden from sandboxed clients (`state::is_privileged`).

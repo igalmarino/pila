@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod protocols;
+pub mod session_protocol;
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -123,6 +124,7 @@ impl TestPila {
         }
         cmd.env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_CONFIG_HOME", dir.join("xdg-config"))
+            .env("XDG_STATE_HOME", dir.join("state"))
             .env(
                 "RUST_LOG",
                 std::env::var("PILA_TEST_LOG").unwrap_or_else(|_| "debug,smithay=info".into()),

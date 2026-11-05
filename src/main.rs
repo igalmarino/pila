@@ -44,6 +44,8 @@ mod rules;
 mod scale;
 mod screencopy;
 mod session_lock;
+mod session_management;
+mod session_protocol;
 mod snap;
 mod state;
 mod switcher;
@@ -313,6 +315,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = Pila::new(&mut event_loop, display, config);
     state.config_path = config_path;
     state.watch_config();
+    // Nested, a pila on the side mustn't touch the login session's file.
+    if backend != BackendKind::Winit {
+        state.session_management.load_and_persist();
+    }
 
     match backend {
         BackendKind::Winit => winit::init_winit(&mut event_loop, &mut state)?,
@@ -346,6 +352,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     state.report_frames();
+    state.finish_sessions();
     state.stop_xwayland();
     // Leave the monitors as found: no night-light ramps for the next
     // compositor on this seat.

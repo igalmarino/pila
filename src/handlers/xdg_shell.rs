@@ -57,6 +57,7 @@ impl XdgShellHandler for Pila {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         let wl_surface = surface.wl_surface();
+        self.forget_session_toplevel(wl_surface);
         self.unmapped
             .retain(|w| w.toplevel().is_some_and(|t| t.wl_surface() != wl_surface));
 
@@ -278,7 +279,8 @@ impl Pila {
             let window = self.unmapped[index].clone();
             let toplevel = window.toplevel().unwrap();
             if !toplevel.is_initial_configure_sent() {
-                self.send_initial_scale(surface, None);
+                self.send_initial_scale(surface, self.session_output(&window));
+                self.begin_session_restore(&window);
                 self.apply_initial_rules(&window);
                 toplevel.send_configure();
             } else if has_buffer(surface) {

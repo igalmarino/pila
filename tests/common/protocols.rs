@@ -167,7 +167,14 @@ use wayland_protocols_wlr::{
     },
 };
 
-use super::client::{paint, Client, Handler, Logged, SurfaceData, Window};
+use super::{
+    client::{paint, Client, Handler, Logged, SurfaceData, Window},
+    session_protocol::{
+        xdg_session_manager_v1::{Reason, XdgSessionManagerV1},
+        xdg_session_v1::XdgSessionV1,
+        xdg_toplevel_session_v1::XdgToplevelSessionV1,
+    },
+};
 
 /// Implement `Dispatch<$iface, String>` by logging every event with the
 /// object's tag; children created by events get the tags given.
@@ -954,4 +961,59 @@ pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
     file.read_exact_at(&mut px, ((y * width + x) * 4) as u64)
         .unwrap();
     [px[2], px[1], px[0]]
+}
+
+// --- xdg-session-management -----------------------------------------------------
+
+logged!(XdgSessionManagerV1, XdgSessionV1);
+
+/// Logged with how many configures the client's windows got by then.
+impl Dispatch<XdgToplevelSessionV1, String> for Handler {
+    fn event(
+        state: &mut Self,
+        proxy: &XdgToplevelSessionV1,
+        event: <XdgToplevelSessionV1 as Proxy>::Event,
+        tag: &String,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let configures: usize = state
+            .lock()
+            .windows
+            .iter()
+            .map(|w| w.configures.len())
+            .sum();
+        log(
+            state,
+            tag,
+            proxy.id(),
+            format!("{event:?} configures={configures}"),
+        );
+    }
+}
+
+impl Client {
+    /// A session (`id`: an existing one), its events logged with `tag`.
+    pub fn session(&self, id: Option<&str>, tag: &str) -> XdgSessionV1 {
+        let manager: XdgSessionManagerV1 = self.bind("xdg_session_manager_v1", 1);
+        let session = manager.get_session(
+            Reason::Launch,
+            id.map(str::to_string),
+            &self.qh,
+            tag.to_string(),
+        );
+        self.flush();
+        session
+    }
+
+    /// The id of the session logged with `tag`, once created.
+    pub fn session_id(&self, tag: &str) -> String {
+        self.wait_logged(tag, "Created");
+        let event = self
+            .logged(tag)
+            .into_iter()
+            .find(|e| e.contains("Created"))
+            .unwrap();
+        event.split('"').nth(1).expect("a quoted id").to_string()
+    }
 }

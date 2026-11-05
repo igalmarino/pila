@@ -27,7 +27,7 @@ use smithay::{
     desktop::{layer_map_for_output, utils::surface_primary_scanout_output},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Scale, Transform},
+    utils::{Logical, Rectangle, Scale, Transform},
     wayland::{
         compositor::{
             get_parent, send_surface_state, with_surface_tree_downward, SurfaceData,
@@ -94,7 +94,12 @@ impl Pila {
     /// most (shadows of client-side decorations don't count), the first of
     /// equal ones. `None` if it's not mapped or on no output.
     pub fn window_output(&self, window: &smithay::desktop::Window) -> Option<Output> {
-        let geo = self.space.element_geometry(window)?;
+        self.output_overlapping(self.space.element_geometry(window)?)
+    }
+
+    /// The output `geo` overlaps most, the first of equal ones; `None` if
+    /// it's on no output.
+    pub fn output_overlapping(&self, geo: Rectangle<i32, Logical>) -> Option<Output> {
         self.space
             .outputs()
             .filter_map(|output| {
@@ -110,7 +115,8 @@ impl Pila {
     }
 
     /// The output a new toplevel will be mapped on (`place_new_window`
-    /// centers it on the pointer's output).
+    /// centers it on the pointer's output), unless its session restores it
+    /// elsewhere (`session_management.rs`).
     pub fn output_for_new_window(&self) -> Option<Output> {
         let pointer = self.seat.get_pointer()?.current_location();
         self.output_at(pointer)

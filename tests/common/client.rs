@@ -277,6 +277,8 @@ pub struct Client {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Window(pub usize);
 
+type BeforeCommit<'a> = Box<dyn FnOnce(&XdgToplevel) + 'a>;
+
 pub struct WindowBuilder<'a> {
     client: &'a Client,
     app_id: String,
@@ -288,9 +290,16 @@ pub struct WindowBuilder<'a> {
     max_size: Option<(i32, i32)>,
     maximized: bool,
     fullscreen: bool,
+    before_commit: Option<BeforeCommit<'a>>,
 }
 
 impl<'a> WindowBuilder<'a> {
+    /// Run requests on the new toplevel before its first commit. (It must
+    /// not call the client: it holds its lock.)
+    pub fn before_commit(mut self, f: impl FnOnce(&XdgToplevel) + 'a) -> Self {
+        self.before_commit = Some(Box::new(f));
+        self
+    }
     pub fn size(mut self, w: i32, h: i32) -> Self {
         self.size = (w, h);
         self
@@ -371,6 +380,9 @@ impl<'a> WindowBuilder<'a> {
                 Some(decoration)
             }
         };
+        if let Some(before_commit) = self.before_commit {
+            before_commit(&toplevel);
+        }
         surface.commit();
         shared.windows.push(WindowData {
             app_id: self.app_id.clone(),
@@ -476,6 +488,7 @@ impl Client {
             max_size: None,
             maximized: false,
             fullscreen: false,
+            before_commit: None,
         }
     }
 

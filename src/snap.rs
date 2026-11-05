@@ -48,6 +48,11 @@ pub enum SnapTarget {
 #[derive(Default)]
 struct SnapState(Cell<Option<(Side, Rectangle<i32, Logical>)>>);
 
+/// Where a snapped window was before snapping; `None` if it isn't snapped.
+pub fn snapped_from(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    snap_state(window).map(|(_, before)| before)
+}
+
 fn snap_state(window: &Window) -> Option<(Side, Rectangle<i32, Logical>)> {
     window
         .user_data()

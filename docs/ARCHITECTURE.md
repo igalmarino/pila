@@ -147,8 +147,9 @@ Key flows and invariants:
   out of the space, taskbars (`remove_foreign_toplevel`, which also stops its capture
   sessions), Mod+Tab and focus, and puts a new `Window` for the toplevel in `unmapped`:
   it maps again like a new window. `handle_xdg_commit` sends the initial configure, then on the first commit with a
-  buffer moves it into `space` via `place_new_window` (centered on the pointer's output,
-  cascaded by `CASCADE_STEP` if the spot is taken). Lookups that must find unmapped windows
+  buffer moves it into `space` via `place_new_window` (centered on the pointer's output, or
+  where its session restores it, see "Session management"; cascaded by `CASCADE_STEP` if
+  the spot is taken). Lookups that must find unmapped windows
   use `window_for_surface`, which searches both.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises and sets keyboard focus, then flushes pending configures.
@@ -370,6 +371,19 @@ Key flows and invariants:
   to the client holding keyboard focus, for a serial newer than that focus's enter. Tokens
   are single-use and expire after `TOKEN_TIMEOUT`. A request switches to the window's
   workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped.
+- **Session management** (`session_management.rs`, xdg-session-management-v1, on bindings
+  in `session_protocol.rs` until a wayland-protocols release has them): a client keeps its
+  toplevels in a session (a random id it stores) and asks to restore them. For windows in
+  a session in use (`SessionManagement::tracked`), `refresh_sessions` (every `after_frames`,
+  before its early return) keeps their floating rect (before a snap or fill), maximized and
+  fullscreen. `restore_toplevel` of a known name applies them at the initial commit
+  (`begin_session_restore`, before window rules, which win) and in `place_new_window`
+  (`take_session_restore`: inside the usable area, `fit_in_area`; output gone: as usual).
+  Until placed, `session_output` is the window's output for its scale and fill size. Saved
+  to `$XDG_STATE_HOME/pila/sessions.json` by a thread (a second after a change, and at exit,
+  `finish_sessions`), at most `MAX_SESSIONS`; nested only in memory (`load_and_persist`).
+  Not `is_privileged`: it only touches the client's own windows. X11 windows and clients
+  that don't use it open centered.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.

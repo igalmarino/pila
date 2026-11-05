@@ -141,6 +141,8 @@ pub struct Pila {
     /// (`ext_workspace.rs`).
     pub workspaces: crate::workspaces::Workspaces,
     pub ext_workspaces: crate::ext_workspace::ExtWorkspaces,
+    /// Saved window states of clients' sessions (`session_management.rs`).
+    pub session_management: crate::session_management::SessionManagement,
     /// The client controlling each output's gamma (`gamma_control.rs`).
     pub gamma_controls: crate::gamma_control::GammaControls,
     /// Clients watching or setting outputs' power (`output_power.rs`).
@@ -277,6 +279,7 @@ impl Pila {
         crate::screencopy::init_global(&dh);
         crate::toplevel_management::init_global(&dh);
         crate::ext_workspace::init_global(&dh);
+        crate::session_management::init_global(&dh);
         crate::gamma_control::init_global(&dh);
         crate::output_power::init_global(&dh);
         crate::output_management::init_global(&dh);
@@ -352,6 +355,7 @@ impl Pila {
             toplevel_management: Default::default(),
             workspaces: Default::default(),
             ext_workspaces: Default::default(),
+            session_management: Default::default(),
             gamma_controls: Default::default(),
             output_powers: Default::default(),
             output_management: Default::default(),
@@ -697,7 +701,7 @@ impl Pila {
     }
 
     /// All of `output`, or only the `usable` part (see `usable_geometry_at`).
-    fn output_area(&self, output: &Output, usable: bool) -> Option<Rectangle<i32, Logical>> {
+    pub fn output_area(&self, output: &Output, usable: bool) -> Option<Rectangle<i32, Logical>> {
         let output_geo = self.space.output_geometry(output)?;
         if !usable {
             return Some(output_geo);
@@ -799,7 +803,7 @@ impl Pila {
     /// Where a window is: its place in the `Space`, or for one off it
     /// (another workspace, minimized) where it comes back to. `None` for an
     /// unmapped window.
-    fn window_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
+    pub fn window_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
         self.space.element_location(window).or_else(|| {
             self.off_space_windows()
                 .any(|w| w == window)
@@ -826,7 +830,14 @@ impl Pila {
     ) -> Option<Rectangle<i32, Logical>> {
         let pos = match self.window_location(window) {
             Some(loc) => (loc + window.geometry().size.downscale(2).to_point()).to_f64(),
-            None => self.seat.get_pointer()?.current_location(),
+            // Not placed yet: where its session puts it, or at the pointer.
+            None => match self
+                .session_output(window)
+                .and_then(|output| self.space.output_geometry(&output))
+            {
+                Some(geo) => geo.loc.to_f64(),
+                None => self.seat.get_pointer()?.current_location(),
+            },
         };
         if usable {
             self.usable_geometry_at(pos)
@@ -840,8 +851,10 @@ impl Pila {
     // ---------------------------------------------------------------------
 
     /// Map a window the first time it has content: centered on the pointer's
-    /// output (cascaded if that spot is taken), or filling the output if the
-    /// client asked for maximize/fullscreen before mapping. Window rules may
+    /// output, or where its session says if the client restored one
+    /// (`session_management.rs`), cascaded if that spot is taken; or filling
+    /// the output if the client asked for maximize/fullscreen before mapping
+    /// or its session has it filled. Window rules may
     /// give it a position, or another workspace (it opens there, unfocused).
     pub fn place_new_window(&mut self, window: Window) {
         // Its app id and title are known by now.
@@ -858,10 +871,19 @@ impl Pila {
             .map(|p| p.current_location())
             .unwrap_or_default();
         let (maximized, fullscreen) = fill_state(&window);
+        // A position rule wins over the session, and is from the pointer's
+        // output like any other.
+        let restored = self
+            .take_session_restore(&window)
+            .filter(|_| props.position.is_none());
+        let restored_rect = restored.as_ref().map(|(rect, _)| *rect);
+        let anchor = restored
+            .and_then(|(_, output)| self.space.output_geometry(&output))
+            .map_or(pointer_location, |geo| geo.loc.to_f64());
         let output_geo = if fullscreen {
-            self.output_geometry_at(pointer_location)
+            self.output_geometry_at(anchor)
         } else {
-            self.usable_geometry_at(pointer_location)
+            self.usable_geometry_at(anchor)
         }
         .unwrap_or_else(|| Rectangle::from_size((800, 600).into()));
 
@@ -883,7 +905,12 @@ impl Pila {
                 let end = output_geo.loc + output_geo.size.to_point();
                 loc.x + size.w <= end.x && loc.y + size.h <= end.y
             };
-            let mut loc = centered_location(output_geo, size, bar);
+            let mut loc = match restored_rect {
+                Some(rect) => {
+                    crate::session_management::fit_in_area(rect.loc, size, bar, output_geo)
+                }
+                None => centered_location(output_geo, size, bar),
+            };
             // Each window takes at most one spot, so this many steps find a
             // free one unless wrapping comes back to taken spots.
             for _ in 0..self.space.elements().count() {
@@ -898,6 +925,10 @@ impl Pila {
             }
             loc
         };
+
+        if let (Some(rect), true) = (restored_rect, maximized || fullscreen) {
+            set_restore_geometry(&window, rect);
+        }
 
         // The app id, for window rules.
         let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
@@ -1236,6 +1267,8 @@ impl Pila {
     /// popups, taskbar listeners and idle inhibitors. Nothing if no output
     /// was drawn.
     pub fn after_frames(&mut self) {
+        // Every iteration: a window can close before its last move is drawn.
+        self.refresh_sessions();
         if !std::mem::take(&mut self.frame_drawn) {
             return;
         }
