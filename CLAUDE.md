@@ -386,9 +386,14 @@ Key flows and invariants:
   `new_layer_surface`), read by `rules::window_props`/`layer_props`, and re-resolved for
   every window and layer surface on a reload that changes the rules
   (`refresh_rule_props` from `apply_config`): never matched per frame. A title change
-  doesn't re-match. So far: window `animations` (all or per kind), layer `animations`
-  and `blur` (`blur_rects`: `true` the whole surface, `false` none, unset the client's
-  region).
+  doesn't re-match. Window properties: `animations` (all or per kind), and, only when
+  it opens: `size` and `open-maximized`/`open-fullscreen` before an xdg toplevel's
+  initial configure (`apply_initial_rules` from `handle_xdg_commit`; X11: size by
+  `configure`, fill after placing, in `map_window_request`), `position` (from the
+  usable area's top-left, title bar included) and `open-on-workspace` (`park`ed there,
+  unfocused, no animation) in `place_new_window`. Layer properties: `animations` and
+  `blur` (`blur_rects`: `true` the whole surface, `false` none, unset the client's
+  region). Each applied rule logs on `pila::rules` for `scripts/check`.
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
   window for a subsurface or popup; the focused window when the client names none) gets a
   short `BellFlash` in its user data, which `scene()` turns into a solid element drawn just

@@ -998,7 +998,7 @@ impl Config {
             .window_rules
             .into_iter()
             .enumerate()
-            .map(|(i, rule)| rule.validate(i + 1))
+            .map(|(i, rule)| rule.validate(i + 1, workspaces))
             .collect::<Result<Vec<_>, _>>()?;
         let layer_rules = file
             .layer_rules
@@ -1644,6 +1644,30 @@ mod tests {
         if let Err(err) = Config::from_toml(include_str!("../config.example.toml"), &no_env) {
             panic!("config.example.toml: {err}");
         }
+    }
+
+    #[test]
+    fn example_rules_are_valid() {
+        // The commented-out rules at the end of config.example.toml, with
+        // their `# ` taken off.
+        let example = include_str!("../config.example.toml");
+        let start = example
+            .find("# [[window-rule]]")
+            .expect("the example has rules");
+        let rules: String = example[start..]
+            .lines()
+            .map(|line| {
+                line.strip_prefix("# ")
+                    .unwrap_or(line.trim_start_matches('#'))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config = match Config::from_toml(&rules, &no_env) {
+            Ok(config) => config,
+            Err(err) => panic!("config.example.toml's rules: {err}"),
+        };
+        assert!(config.window_rules.len() >= 3);
+        assert!(config.layer_rules.len() >= 2);
     }
 
     #[test]

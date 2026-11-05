@@ -70,7 +70,15 @@ pub struct WindowRuleFile {
     app_id: Option<String>,
     title: Option<String>,
     animations: Option<AnimationsFile>,
+    open_on_workspace: Option<usize>,
+    open_maximized: Option<bool>,
+    open_fullscreen: Option<bool>,
+    size: Option<[i32; 2]>,
+    position: Option<[i32; 2]>,
 }
+
+/// The largest `size` a rule may give (logical pixels).
+const MAX_RULE_SIZE: i32 = 16384;
 
 /// `[[layer-rule]]` as written.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -103,11 +111,25 @@ impl WindowAnimations {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowProps {
     pub animations: WindowAnimations,
+    /// The workspace it opens on (from 0).
+    pub open_on_workspace: Option<usize>,
+    pub open_maximized: Option<bool>,
+    pub open_fullscreen: Option<bool>,
+    /// Its size when it opens (logical; the client may adjust it).
+    pub size: Option<(i32, i32)>,
+    /// Where its top-left (title bar included) goes when it opens,
+    /// relative to the usable area of the output it opens on.
+    pub position: Option<(i32, i32)>,
 }
 
 impl WindowProps {
     fn merge(&mut self, other: &WindowProps) {
         self.animations.merge(&other.animations);
+        self.open_on_workspace = other.open_on_workspace.or(self.open_on_workspace);
+        self.open_maximized = other.open_maximized.or(self.open_maximized);
+        self.open_fullscreen = other.open_fullscreen.or(self.open_fullscreen);
+        self.size = other.size.or(self.size);
+        self.position = other.position.or(self.position);
     }
 
     /// Whether `kind` plays for this window.
@@ -158,8 +180,24 @@ pub struct LayerRule {
 
 impl WindowRuleFile {
     /// The rule, or what's wrong with it (`index` counts from 1, for the
-    /// message).
-    pub fn validate(self, _index: usize) -> Result<WindowRule, String> {
+    /// message; `workspaces`: how many there are).
+    pub fn validate(self, index: usize, workspaces: usize) -> Result<WindowRule, String> {
+        let open_on_workspace = match self.open_on_workspace {
+            None => None,
+            Some(n @ 1..) if n <= workspaces => Some(n - 1),
+            Some(n) => {
+                return Err(format!(
+                    "window-rule {index}: open-on-workspace = {n}: workspaces are 1 to {workspaces}"
+                ))
+            }
+        };
+        if let Some([w, h]) = self.size {
+            if !(1..=MAX_RULE_SIZE).contains(&w) || !(1..=MAX_RULE_SIZE).contains(&h) {
+                return Err(format!(
+                    "window-rule {index}: size = [{w}, {h}]: each must be 1 to {MAX_RULE_SIZE}"
+                ));
+            }
+        }
         let animations = match self.animations {
             None => WindowAnimations::default(),
             Some(AnimationsFile::All(on)) => WindowAnimations {
@@ -178,7 +216,14 @@ impl WindowRuleFile {
         Ok(WindowRule {
             app_id: self.app_id,
             title: self.title,
-            props: WindowProps { animations },
+            props: WindowProps {
+                animations,
+                open_on_workspace,
+                open_maximized: self.open_maximized,
+                open_fullscreen: self.open_fullscreen,
+                size: self.size.map(|[w, h]| (w, h)),
+                position: self.position.map(|[x, y]| (x, y)),
+            },
         })
     }
 }
@@ -258,6 +303,41 @@ impl Pila {
         props
     }
 
+    /// A new xdg toplevel is about to get its first configure: give it the
+    /// size and fill state its rules ask for, so it draws that way from its
+    /// first buffer. (A window placed on another workspace or at a position
+    /// is handled when it's mapped, `place_new_window`.)
+    pub fn apply_initial_rules(&mut self, window: &Window) {
+        let props = self.resolve_window_rules(window);
+        let app_id = crate::foreign_toplevel::title_and_app_id(window).1;
+        if let (Some((w, h)), Some(toplevel)) = (props.size, window.toplevel()) {
+            debug!(target: "pila::rules", app_id, w, h, "initial size");
+            toplevel.with_pending_state(|state| state.size = Some((w, h).into()));
+        }
+        self.apply_open_fill(window, &props);
+    }
+
+    /// Maximize or fullscreen a window opening, if its rules say so (on top
+    /// of what the client asked for).
+    pub fn apply_open_fill(&mut self, window: &Window, props: &WindowProps) {
+        let (maximized, fullscreen) = crate::state::fill_state(window);
+        let wanted = (
+            maximized || props.open_maximized == Some(true),
+            fullscreen || props.open_fullscreen == Some(true),
+        );
+        if wanted != (maximized, fullscreen) {
+            let app_id = crate::foreign_toplevel::title_and_app_id(window).1;
+            debug!(
+                target: "pila::rules",
+                app_id,
+                maximized = wanted.0,
+                fullscreen = wanted.1,
+                "opens filled"
+            );
+            self.set_fill_state(window, wanted.0, wanted.1);
+        }
+    }
+
     /// Match `layer` against the layer rules again and keep the result.
     pub fn resolve_layer_rules(&self, layer: &LayerSurface) -> LayerProps {
         let props = resolve_layer(&self.config.layer_rules, layer.namespace());
@@ -312,7 +392,7 @@ mod tests {
         file.rules
             .into_iter()
             .enumerate()
-            .map(|(i, r)| r.validate(i + 1).unwrap())
+            .map(|(i, r)| r.validate(i + 1, 4).unwrap())
             .collect()
     }
 
@@ -370,6 +450,52 @@ mod tests {
         assert!(!foot.animates(AnimationKind::Minimize));
         // No rules: everything plays.
         assert!(resolve_window(&[], "foot", "").animates(AnimationKind::Minimize));
+    }
+
+    #[test]
+    fn open_properties_merge_and_are_checked() {
+        let rules = window_rules(
+            r#"
+            [[window-rule]]
+            app-id = "mpv"
+            open-on-workspace = 3
+            size = [800, 450]
+            position = [20, 30]
+
+            [[window-rule]]
+            app-id = "mpv"
+            title = "*fullscreen*"
+            open-fullscreen = true
+            size = [1280, 720]
+            "#,
+        );
+        let mpv = resolve_window(&rules, "mpv", "film");
+        assert_eq!(mpv.open_on_workspace, Some(2));
+        assert_eq!(mpv.size, Some((800, 450)));
+        assert_eq!(mpv.position, Some((20, 30)));
+        assert_eq!(mpv.open_fullscreen, None);
+        let full = resolve_window(&rules, "mpv", "fullscreen film");
+        assert_eq!(full.size, Some((1280, 720)));
+        assert_eq!(full.open_fullscreen, Some(true));
+        assert_eq!(full.open_on_workspace, Some(2));
+
+        let invalid = |text: &str| {
+            #[derive(Deserialize)]
+            struct File {
+                #[serde(rename = "window-rule")]
+                rules: Vec<WindowRuleFile>,
+            }
+            let file: File = toml::from_str(text).unwrap();
+            file.rules
+                .into_iter()
+                .next()
+                .unwrap()
+                .validate(1, 4)
+                .unwrap_err()
+        };
+        assert!(invalid("[[window-rule]]\nopen-on-workspace = 5").contains("1 to 4"));
+        assert!(invalid("[[window-rule]]\nopen-on-workspace = 0").contains("1 to 4"));
+        assert!(invalid("[[window-rule]]\nsize = [0, 300]").contains("size"));
     }
 
     #[test]

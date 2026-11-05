@@ -278,6 +278,7 @@ impl Pila {
             let toplevel = window.toplevel().unwrap();
             if !toplevel.is_initial_configure_sent() {
                 self.send_initial_scale(surface, None);
+                self.apply_initial_rules(&window);
                 toplevel.send_configure();
             } else if has_buffer(surface) {
                 self.unmapped.remove(index);

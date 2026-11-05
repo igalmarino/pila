@@ -164,14 +164,24 @@ impl XwmHandler for Pila {
             warn!(?err, "failed to map X11 window");
             return;
         }
-        let window = Window::new_x11_window(surface);
+        let window = Window::new_x11_window(surface.clone());
+        // A size from window rules first: placing it uses its size.
+        let props = self.resolve_window_rules(&window);
+        if let Some((w, h)) = props.size {
+            let loc = surface.geometry().loc;
+            debug!(target: "pila::rules", app_id = surface.class(), w, h, "initial size");
+            let _ = surface.configure(Rectangle::new(loc, (w, h).into()));
+        }
         // Placed like a Wayland window (centered on the pointer's output,
         // focused), then X is told where it ended up. A window that asked to
-        // be maximized or fullscreen before mapping gets that size now.
+        // be maximized or fullscreen before mapping (or whose rules say so)
+        // gets that size now.
         self.place_new_window(window.clone());
         let (maximized, fullscreen) = fill_state(&window);
         if maximized || fullscreen {
             self.set_fill_state(&window, maximized, fullscreen);
+        } else if props.open_maximized == Some(true) || props.open_fullscreen == Some(true) {
+            self.apply_open_fill(&window, &props);
         } else {
             self.x11_window_moved(&window);
         }

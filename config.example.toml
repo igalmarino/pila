@@ -183,7 +183,8 @@ tap = true
 # new window's app id ("mapping window") and layer surface's namespace ("new
 # layer surface"). Rules are matched when a window or layer surface appears,
 # and again for all of them when this file is saved; a title changing later
-# doesn't re-match.
+# doesn't re-match. The open-* properties, size and position only apply when
+# a window opens.
 #
 # [[window-rule]]
 # app-id = "steam_app_*"           # games: no open/close animation
@@ -194,6 +195,14 @@ tap = true
 # app-id = "firefox"
 # title = "*Picture-in-Picture*"
 # animations = { open = false }
+# size = [480, 270]                # logical pixels; the app may round it
+# position = [20, 20]              # top-left (title bar included) from the
+#                                  # top-left of the output's free area
+#
+# [[window-rule]]
+# app-id = "thunderbird"
+# open-on-workspace = 3            # opens there, without switching to it
+# open-maximized = true            # or open-fullscreen = true
 #
 # [[layer-rule]]
 # namespace = "noctalia-*"         # a shell that animates its own surfaces

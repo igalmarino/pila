@@ -791,8 +791,11 @@ impl Pila {
 
     /// Map a window the first time it has content: centered on the pointer's
     /// output (cascaded if that spot is taken), or filling the output if the
-    /// client asked for maximize/fullscreen before mapping.
+    /// client asked for maximize/fullscreen before mapping. Window rules may
+    /// give it a position, or another workspace (it opens there, unfocused).
     pub fn place_new_window(&mut self, window: Window) {
+        // Its app id and title are known by now (X11 too).
+        let props = self.resolve_window_rules(&window);
         let pointer_location = self
             .seat
             .get_pointer()
@@ -810,6 +813,9 @@ impl Pila {
         let bar = decoration::layout_offset(&window, fullscreen);
         let location = if maximized || fullscreen {
             output_geo.loc + Point::from((0, bar))
+        } else if let Some((x, y)) = props.position {
+            debug!(target: "pila::rules", x, y, "placed by rule");
+            output_geo.loc + Point::from((x, y + bar))
         } else {
             let size = window.geometry().size;
             let taken = |loc| {
@@ -837,14 +843,21 @@ impl Pila {
             loc
         };
 
-        // The app id, for `exclude` in [animations].
+        // The app id, for window rules.
         let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
         debug!(app_id, ?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
         self.space.map_element(window.clone(), location, true);
-        // Its app id and title are known by now (X11 too).
-        self.resolve_window_rules(&window);
-        self.animate_open(&window);
         self.announce_toplevel(&window);
+        if let Some(index) = props
+            .open_on_workspace
+            .filter(|index| *index != self.workspaces.active)
+        {
+            debug!(target: "pila::rules", app_id, workspace = index + 1, "opens on workspace");
+            self.park(&window, index);
+            self.refresh_pointer_focus();
+            return;
+        }
+        self.animate_open(&window);
         self.focus_window(Some(window), smithay::utils::SERIAL_COUNTER.next_serial());
     }
 

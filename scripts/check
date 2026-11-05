@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Automated checks of pila's behavior: run scripted scenarios inside a pila
 # and judge them from its log, then print PASS/FAIL per check (exit status 1
-# if any failed). The scenarios: windows opening and closing, a window rule,
-# minimize and restore, a launcher (layer surface), a layer rule added by a
+# if any failed). The scenarios: windows opening and closing, window rules
+# (animations, size, position, maximized, another workspace; X11 too, with
+# xterm), minimize and restore, a launcher (layer surface), a layer rule added by a
 # config reload, Noctalia under a layer rule (if installed), and the
 # performance pillar's frame statistics (no missed refresh, CPU per frame).
 #
@@ -74,6 +75,23 @@ if [ "${1:-}" = "--workload" ]; then
         run_terminal "$RULE_APP_ID" sleep 1.5 || true
         sleep 1
         mark "window-rule end"
+
+        mark "open-rules begin"
+        run_terminal pila-check-size sleep 1.5 || true
+        run_terminal pila-check-max sleep 1.5 || true
+        # Opens on workspace 2, out of sight; its program ends meanwhile.
+        run_terminal pila-check-ws sleep 1.5 || true
+        sleep 1
+        mark "open-rules end"
+
+        if command -v xterm >/dev/null; then
+            mark "x11-rules begin"
+            xterm -class PilaCheckX -e sleep 1.5 || true
+            sleep 1
+            mark "x11-rules end"
+        else
+            mark "x11-rules skip (no xterm)"
+        fi
 
         if command -v python3 >/dev/null; then
             mark "minimize begin"
@@ -206,12 +224,30 @@ if ! $judge_only; then
     app-id = "$RULE_APP_ID"
     animations = { open = false }
 
+    [[window-rule]]
+    app-id = "pila-check-size"
+    size = [640, 400]
+    position = [50, 60]
+
+    [[window-rule]]
+    app-id = "pila-check-max"
+    open-maximized = true
+
+    [[window-rule]]
+    app-id = "pila-check-ws"
+    open-on-workspace = 2
+
+    [[window-rule]]
+    app-id = "PilaCheckX"
+    size = [500, 300]
+    open-fullscreen = true
+
     [[layer-rule]]
     namespace = "noctalia-*"
     animations = false
 EOF
     export PILA_CHECK_CONFIG="$config"
-    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug"
+    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::state=debug"
 
     echo "Runs pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
@@ -303,6 +339,28 @@ else
         has "$s" "and leaves its close animation on" \
             "starts what=\"window-close\" id=\"$RULE_APP_ID\""
     fi
+    if ran open-rules; then
+        s=$(section open-rules)
+        # Its size as mapped, "W H" (the client may round it to its cells).
+        mapped_size() {
+            grep "mapping window app_id=\"$1\"" <<<"$s" | head -1 |
+                sed -nE 's/.*size=[^{]*\{ w: ([0-9]+), h: ([0-9]+) \}.*/\1 \2/p'
+        }
+        near() { awk -v a="$1" -v b="$2" 'BEGIN { d = a - b; exit !(d <= 40 && d >= -40) }'; }
+        read -r w h <<<"$(mapped_size pila-check-size)" || true
+        if [ -n "${w:-}" ] && near "$w" 640 && near "$h" 400; then
+            pass "a rule's size is the window's size (${w}x${h} for 640x400)"
+        else
+            fail "a rule's size is the window's size (${w:-?}x${h:-?} for 640x400)"
+        fi
+        has "$s" "a rule places the window" 'placed by rule x=50 y=60'
+        has "$s" "a rule opens a window maximized" \
+            'mapping window app_id="pila-check-max".*maximized=true'
+        has "$s" "a rule opens a window on another workspace" \
+            'opens on workspace app_id="pila-check-ws" workspace=2'
+        lacks "$s" "which doesn't fade in where it isn't shown" \
+            'starts what="window-open" id="pila-check-ws"'
+    fi
     if ran minimize; then
         s=$(section minimize)
         n=$(grep -c 'starts what="minimize"' <<<"$s" || true)
@@ -310,6 +368,13 @@ else
         n=$(grep -c 'starts what="restore"' <<<"$s" || true)
         [ "$n" -eq 2 ] && pass "restoring animates (2 of 2)" || fail "restoring animates ($n of 2)"
     fi
+fi
+if ran x11-rules; then
+    s=$(section x11-rules)
+    has "$s" "an X11 window's rules match its WM_CLASS" 'window rules app_id="PilaCheckX"'
+    has "$s" "a rule sizes an X11 window" 'initial size app_id="PilaCheckX" w=500 h=300'
+    has "$s" "a rule opens an X11 window fullscreen" \
+        'opens filled app_id="PilaCheckX" maximized=false fullscreen=true'
 fi
 if ran layer; then
     s=$(section layer)

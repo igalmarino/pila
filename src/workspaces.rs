@@ -201,7 +201,7 @@ impl Pila {
     }
 
     /// Take a mapped window off the `Space` onto workspace `index`.
-    fn park(&mut self, window: &Window, index: usize) {
+    pub(crate) fn park(&mut self, window: &Window, index: usize) {
         let Some(loc) = self.space.element_location(window) else {
             return;
         };
