@@ -40,7 +40,17 @@ impl X11 {
             eprintln!("Xwayland not installed: skipped");
             return None;
         }
-        let state = pila.wait("Xwayland", |s| s["xwayland"].is_number());
+        let started = Instant::now();
+        while !pila.state()["xwayland"].is_number() {
+            assert!(
+                !pila.log().contains("X11 apps won't run"),
+                "Xwayland is installed but didn't start:\n{}",
+                pila.log_tail()
+            );
+            assert!(started.elapsed() < TIMEOUT, "Xwayland never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let state = pila.state();
         let display = format!(":{}", state["xwayland"].as_u64().unwrap());
         let (conn, screen) = x11rb::connect(Some(&display)).expect("connect to Xwayland");
         let root = conn.setup().roots[screen].root;

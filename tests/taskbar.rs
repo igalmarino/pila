@@ -111,8 +111,17 @@ fn taskbar_with(names: &[&str]) -> (TestPila, Client, Client) {
 fn handles_report_titles_states_and_outputs() {
     let (_pila, _app, taskbar) = taskbar_with(&["a", "b"]);
     let b = handle(&taskbar, "b");
-    taskbar.wait("b's state", |_| true);
-    taskbar.roundtrip();
+    // The outputs come with the next frame's refresh.
+    let id = wayland_client::Proxy::id(&b);
+    taskbar.wait("b's output and done", |s| {
+        let events: Vec<&str> = s
+            .log
+            .iter()
+            .filter(|l| l.object == id)
+            .map(|l| l.event.as_str())
+            .collect();
+        events.iter().any(|e| e.starts_with("OutputEnter")) && events.contains(&"Done")
+    });
     assert!(
         has_state(&last_state(&taskbar, &b), ACTIVATED),
         "{:?}",
@@ -120,11 +129,6 @@ fn handles_report_titles_states_and_outputs() {
     );
     let a = handle(&taskbar, "a");
     assert!(!has_state(&last_state(&taskbar, &a), ACTIVATED));
-    assert!(taskbar
-        .events_of(&b)
-        .iter()
-        .any(|e| e.starts_with("OutputEnter")));
-    assert!(taskbar.events_of(&b).iter().any(|e| e == "Done"));
 }
 
 #[test]

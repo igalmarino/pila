@@ -149,7 +149,13 @@ fn nothing_is_drawn_while_nothing_changes() {
         assert!(started.elapsed() < TIMEOUT, "fonts never loaded");
         std::thread::sleep(Duration::from_millis(10));
     }
-    pila.wait_log("Xwayland ready");
+    while !pila.log().contains("Xwayland ready") && !pila.log().contains("X11 apps won't run") {
+        assert!(
+            started.elapsed() < TIMEOUT,
+            "Xwayland never started nor failed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     std::thread::sleep(Duration::from_millis(100));
     let before = frames(&pila.settle());
     std::thread::sleep(Duration::from_millis(300));
