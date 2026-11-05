@@ -170,7 +170,7 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
   timers (the headless test backend, which has no vblank, is the one exception;
-  `schedule_hidden_frames`' once-a-second wake for hidden surfaces isn't pacing); idle callbacks inserted outside an event source come with a `Pila::wake`
+  `schedule_hidden_frames`' and `commit_pacing.rs`'s once-a-second wakes for hidden surfaces and the wake for a timestamp a client asked for aren't pacing); idle callbacks inserted outside an event source come with a `Pila::wake`
   ping (see "Architecture"); one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
   an offscreen texture; `text::init` shapes and rasterizes common characters on its

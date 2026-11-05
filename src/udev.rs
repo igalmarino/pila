@@ -139,6 +139,9 @@ struct OutputSurface {
     /// whether pila wanted a new frame at every vblank after it (an
     /// animation was running; `frame_stats.rs`).
     last_vblank: Option<u64>,
+    /// When the last frame was shown (the kernel's timestamp, on the
+    /// presentation clock, if it gives one).
+    last_vblank_time: Option<Duration>,
     back_to_back: bool,
     /// Something changed since the last frame.
     redraw_needed: bool,
@@ -415,6 +418,14 @@ impl UdevData {
                 }
             }
         }
+    }
+
+    /// When `output`'s last frame was shown.
+    pub fn last_vblank_time(&self, output: &Output) -> Option<Duration> {
+        self.outputs
+            .values()
+            .find(|surface| surface.output == *output)?
+            .last_vblank_time
     }
 
     pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, &mut CursorTheme) {
@@ -1090,6 +1101,7 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
             global: None,
             frame_pending: false,
             last_vblank: None,
+            last_vblank_time: None,
             back_to_back: false,
             redraw_needed: true,
             lock_frame: LockFrame::None,
@@ -1441,6 +1453,7 @@ fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: bool) {
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.alive()) {
         state.cursor_status = CursorImageStatus::default_named();
     }
+    state.signal_commit_timers(&output);
     // Everything taken from `state` is collected before borrowing the backend.
     let input = state.frame_input();
     let scene = &input.scene;
@@ -1573,6 +1586,7 @@ fn frame_finish(state: &mut Pila, crtc: crtc::Handle, metadata: &mut Option<DrmE
         _ => 0,
     };
     surface.last_vblank = metadata.is_some().then_some(seq);
+    surface.last_vblank_time = Some(hw_time.unwrap_or_else(|| now.into()));
     tracing::trace!(target: "pila::frames", output = surface.output.name(), seq, missed, "shown");
     let output = surface.output.clone();
     let (time, flags) = match hw_time {

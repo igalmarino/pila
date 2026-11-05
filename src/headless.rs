@@ -635,6 +635,7 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
         state.cursor_status = CursorImageStatus::default_named();
     }
+    state.signal_commit_timers(&output);
     let input = state.frame_input();
     let scene = &input.scene;
     let scale = crate::scale::output_scale(&output);

@@ -7,6 +7,7 @@ use smithay::{
     backend::{renderer::gles::GlesRenderer, winit::WinitGraphicsBackend},
     input::{keyboard::LedState, pointer::CursorImageStatus},
     output::Output,
+    utils::{Monotonic, Time},
 };
 
 use crate::{
@@ -39,6 +40,21 @@ impl Backend {
                 (renderer, Some(theme))
             }
             Backend::Headless(data) => (&mut data.renderer, None),
+        }
+    }
+
+    /// When a frame of `output` built `now` would show, for commits that ask
+    /// to appear no earlier than a given moment (`commit_pacing.rs`). Nested
+    /// and headless have no vblank to go by.
+    pub fn next_frame_time(&self, output: &Output, now: Time<Monotonic>) -> Time<Monotonic> {
+        let period = crate::frame_stats::refresh_period(output);
+        let vblank = match self {
+            Backend::Udev(data) => data.last_vblank_time(output),
+            Backend::Winit(_) | Backend::Headless(_) => None,
+        };
+        match vblank {
+            Some(last) => crate::commit_pacing::next_vblank(last, now.into(), period).into(),
+            None => (std::time::Duration::from(now) + period).into(),
         }
     }
 

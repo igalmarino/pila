@@ -86,6 +86,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Subsurfaces | `surface_protocols::a_subsurface_is_drawn_and_gets_the_pointer` |
 | Dmabuf buffers wait for the client's rendering (a real wait: the acquire points of linux-drm-syncobj; an implicit fence can't be made to stay pending headless) | `surface_protocols::a_dmabuf_buffer_ready_to_read_applies_at_once` |
 | wp-fifo: one content update per frame; hidden clients go on | `surface_protocols::fifo_commits_reach_the_screen_one_per_frame`, `surface_protocols::a_commit_without_fifo_isnt_held_back`, `surface_protocols::a_fifo_client_on_another_workspace_keeps_going`, `surface_protocols::a_minimized_fifo_client_keeps_going`, `surface_protocols::a_fifo_client_keeps_going_while_the_session_is_locked`, `surface_protocols::a_fifo_client_going_away_with_commits_held_back_harms_nothing` |
+| wp-commit-timing: a commit waits for its timestamp | `surface_protocols::a_commit_with_a_timestamp_waits_for_it_on_an_idle_screen`, `surface_protocols::a_commit_with_a_past_timestamp_applies_at_once`, `surface_protocols::a_timestamp_in_the_far_future_harms_nothing`, `surface_protocols::commits_with_timestamps_apply_in_order`, `src/commit_pacing.rs::the_next_vblank_is_always_after_now` |
 | Frame callbacks and presentation feedback | `surface_protocols::frame_callbacks_and_presentation_feedback_follow_a_commit`, `surface_protocols::a_covered_window_gets_frame_callbacks_about_once_a_second` |
 
 ## Outputs

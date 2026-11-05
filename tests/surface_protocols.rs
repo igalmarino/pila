@@ -6,6 +6,10 @@
 mod common;
 
 use std::os::{fd::AsFd, unix::net::UnixListener};
+use std::time::Duration;
+use wayland_protocols::wp::commit_timing::v1::client::{
+    wp_commit_timer_v1::WpCommitTimerV1, wp_commit_timing_manager_v1::WpCommitTimingManagerV1,
+};
 use wayland_protocols::wp::fifo::v1::client::{
     wp_fifo_manager_v1::WpFifoManagerV1, wp_fifo_v1::WpFifoV1,
 };
@@ -61,6 +65,7 @@ const PUBLIC: &[&str] = &[
     "zxdg_exporter_v2",
     "zxdg_importer_v2",
     "zxdg_output_manager_v1",
+    "wp_commit_timing_manager_v1",
     "wp_fifo_manager_v1",
     "xdg_session_manager_v1",
     "xdg_toplevel_tag_manager_v1",
@@ -713,6 +718,98 @@ fn a_fifo_client_going_away_with_commits_held_back_harms_nothing() {
     fifo_commit(&client, window, &fifo, (150, 100));
     fifo_commit(&client, window, &fifo, (160, 100));
     client.flush();
+    client.disconnect();
+    pila.wait("the window gone", |s| window_in(s, "a").is_none());
+    let other = pila.client();
+    other.window("b").create();
+    pila.wait_focus("b");
+}
+
+// --- wp-commit-timing (`commit_pacing.rs`) ---
+
+/// CLOCK_MONOTONIC, the clock wp_presentation announces, as pila reads it.
+fn monotonic_now() -> Duration {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid pointer to a timespec.
+    assert_eq!(
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) },
+        0
+    );
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+fn commit_timer_of(client: &Client, window: common::client::Window) -> WpCommitTimerV1 {
+    let manager: WpCommitTimingManagerV1 = client.bind("wp_commit_timing_manager_v1", 1);
+    manager.get_timer(&client.surface(window), &client.qh, "timer".to_string())
+}
+
+fn set_timestamp(timer: &WpCommitTimerV1, at: Duration) {
+    let secs = at.as_secs();
+    timer.set_timestamp((secs >> 32) as u32, secs as u32, at.subsec_nanos());
+}
+
+#[test]
+fn a_commit_with_a_timestamp_waits_for_it_on_an_idle_screen() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let timer = commit_timer_of(&client, window);
+    let target = monotonic_now() + Duration::from_millis(400);
+    set_timestamp(&timer, target);
+    client.draw(window, Some((150, 100)));
+    client.flush();
+    pila.stays("held back", Duration::from_millis(250), |s| {
+        !width_is(s, 150)
+    });
+    pila.wait("applied", |s| width_is(s, 150));
+    // Applied for the frame that shows it: at most a refresh ahead.
+    let period = Duration::from_micros(16_667);
+    assert!(monotonic_now() + period >= target, "applied too early");
+}
+
+#[test]
+fn a_commit_with_a_past_timestamp_applies_at_once() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let timer = commit_timer_of(&client, window);
+    set_timestamp(&timer, monotonic_now() - Duration::from_secs(1));
+    client.draw(window, Some((150, 100)));
+    client.flush();
+    pila.wait("applied", |s| width_is(s, 150));
+}
+
+#[test]
+fn commits_with_timestamps_apply_in_order() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let timer = commit_timer_of(&client, window);
+    let now = monotonic_now();
+    set_timestamp(&timer, now + Duration::from_millis(100));
+    client.draw(window, Some((150, 100)));
+    set_timestamp(&timer, now + Duration::from_millis(200));
+    client.draw(window, Some((160, 100)));
+    client.flush();
+    pila.wait("the last commit", |s| width_is(s, 160));
+}
+
+#[test]
+fn a_timestamp_in_the_far_future_harms_nothing() {
+    let mut pila = TestPila::start();
+    let mut client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let timer = commit_timer_of(&client, window);
+    // The largest second count there is (one more would be negative: past).
+    timer.set_timestamp(i32::MAX as u32, u32::MAX, 0);
+    client.draw(window, Some((150, 100)));
+    client.flush();
+    pila.stays("held back", Duration::from_millis(100), |s| {
+        !width_is(s, 150)
+    });
     client.disconnect();
     pila.wait("the window gone", |s| window_in(s, "a").is_none());
     let other = pila.client();

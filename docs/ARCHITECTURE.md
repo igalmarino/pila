@@ -164,6 +164,12 @@ Key flows and invariants:
   timer (`signal_old_barriers`) wherever the surface is, so hidden clients and clients on an
   output turned off carry on, once a second. No damage means no flip, so a commit that changes
   nothing frees its barrier without waiting for a refresh, as with frame callbacks.
+  wp-commit-timing: `hold_commit_until_timestamp` (pre-commit hook; Smithay's unmanaged mode)
+  blocks a commit with a timestamp and arms one timer for the earliest deadline, a period
+  before it. The redraw that wakes builds a frame, and before building it
+  `signal_commit_timers` applies what will be due when it shows (`Backend::next_frame_time`:
+  the next vblank from the kernel's timestamps, nested and headless a period from now).
+  At the deadline itself anything left applies whether a frame came or not.
 - **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
   `focus_window` both raises (with its family, see "Transient windows") and sets keyboard
   focus, then flushes pending configures.

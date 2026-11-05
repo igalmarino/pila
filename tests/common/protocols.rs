@@ -1037,6 +1037,10 @@ pub fn read_pixel(file: &std::fs::File, width: i32, x: i32, y: i32) -> [u8; 3] {
 
 logged!(XdgSessionManagerV1, XdgSessionV1);
 logged!(
+    wayland_protocols::wp::commit_timing::v1::client::wp_commit_timing_manager_v1::WpCommitTimingManagerV1,
+    wayland_protocols::wp::commit_timing::v1::client::wp_commit_timer_v1::WpCommitTimerV1,
+);
+logged!(
     wayland_protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1,
     wayland_protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1,
 );

@@ -148,6 +148,7 @@ fn redraw(
         state.set_cursor(CursorImageStatus::default_named());
     }
 
+    state.signal_commit_timers(output);
     // Everything taken from `state` is collected before borrowing the backend.
     let input = state.frame_input();
     let scene = &input.scene;
