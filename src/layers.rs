@@ -129,11 +129,8 @@ impl Pila {
         if self.is_locked() || self.exclusive_layer().is_some_and(|l| l != *layer) {
             return;
         }
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return;
-        };
         self.dismiss_popup_grab();
-        keyboard.set_focus(self, Some(layer.wl_surface().clone().into()), serial);
+        self.set_keyboard_focus(Some(layer.wl_surface().clone().into()), serial);
     }
 
     /// Called on every `wl_surface.commit`: lays out the surface's output,

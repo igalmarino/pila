@@ -917,9 +917,6 @@ impl Pila {
     /// layer surface holds exclusive focus (`exclusive_layer`), the window is
     /// only raised and the keyboard stays with the layer surface.
     pub fn focus_window(&mut self, window: Option<Window>, serial: Serial) {
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return;
-        };
         if self.is_locked() {
             self.focus_lock_surface(serial);
             return;
@@ -935,13 +932,13 @@ impl Pila {
                 self.space.raise_element(&window, true);
                 self.x11_window_raised(&window);
                 let target = focus_target(&window);
-                keyboard.set_focus(self, exclusive.or(target), serial);
+                self.set_keyboard_focus(exclusive.or(target), serial);
             }
             None => {
                 for w in self.space.elements() {
                     w.set_activated(false);
                 }
-                keyboard.set_focus(self, exclusive, serial);
+                self.set_keyboard_focus(exclusive, serial);
             }
         }
         for w in self.space.elements() {

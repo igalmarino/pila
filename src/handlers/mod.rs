@@ -73,6 +73,28 @@ impl SeatHandler for Pila {
         set_primary_focus(dh, seat, client);
     }
 }
+
+impl Pila {
+    /// Give the keyboard to `focus`, or to nothing. Smithay calls
+    /// `focus_changed` when focus moves to a surface but not when it's
+    /// cleared; then this does it, so a pointer constraint is released and
+    /// selection offers stop going to the client that had focus.
+    pub fn set_keyboard_focus(
+        &mut self,
+        focus: Option<KeyboardFocus>,
+        serial: smithay::utils::Serial,
+    ) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let cleared = focus.is_none();
+        keyboard.set_focus(self, focus, serial);
+        if cleared {
+            let seat = self.seat.clone();
+            self.focus_changed(&seat, None);
+        }
+    }
+}
 delegate_seat!(Pila);
 
 // wp_cursor_shape_v1 (server-side cursors): shape requests arrive through
