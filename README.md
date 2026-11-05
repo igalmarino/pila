@@ -241,6 +241,16 @@ Open an [issue](https://github.com/igalmarino/pila/issues/new/choose) with:
 Questions, ideas and "does X work with pila?" go to
 [Discussions](https://github.com/igalmarino/pila/discussions).
 
+## Use of AI
+
+pila is developed with AI assistance: [Claude Code](https://claude.com/claude-code) helps
+with programming and testing, and the commits it worked on carry a `Co-Authored-By`
+trailer. The instructions it works under are public, in [CLAUDE.md](CLAUDE.md).
+
+The AI doesn't make the decisions. The important ones, on technology, architecture,
+security, testing and more, are mine; I'm a software developer with over 30 years of
+experience.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the development environment (a
