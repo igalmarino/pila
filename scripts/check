@@ -264,6 +264,15 @@ EOF
             echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
             exit 1
         fi
+        # A build older than the sources would test old code without saying
+        # so. A binary given by hand isn't this checkout's.
+        if [ -z "${PILA_BIN:-}" ]; then
+            newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null || true)"
+            if [ -n "$newer" ]; then
+                echo "$bin is older than the sources (e.g. $newer); rebuild it: cargo build --release" >&2
+                exit 1
+            fi
+        fi
         log=pila-check.log
         timeout 300 "$bin" --config "$config" -c "$workload" 2>"$log" || true
     else

@@ -315,6 +315,32 @@ fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
 }
 
 #[test]
+fn scripts_check_refuses_a_build_older_than_the_sources() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scripts_copy("stale");
+    let release = dir.join("target/release");
+    std::fs::create_dir_all(&release).unwrap();
+    let bin = release.join("pila");
+    let ran = dir.join("ran");
+    std::fs::write(&bin, format!("#!/bin/sh\ntouch {}\n", ran.display())).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Newer than the build, whatever the clock's granularity.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/main.rs"), "").unwrap();
+    let out = copied_script(&dir, "check")
+        .arg("--nested")
+        .env_remove("PILA_BIN")
+        .env("XDG_CONFIG_HOME", &dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("older than the sources"), "{stderr}");
+    assert!(!ran.exists(), "it ran the old build");
+}
+
+#[test]
 fn scripts_check_finds_the_monitors_in_a_bare_metal_log() {
     // As the log says it, from where the code logs it: moving that code once
     // made every bare-metal run fail this check.
