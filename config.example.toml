@@ -213,6 +213,8 @@ tap = true
 # title-bar = false                # pila draws no title bar (the app neither)
 # corner-radius = 12               # instead of the one above
 # opacity = 0.95                   # 0.1 to 1, title bar included
+#                                  # (only lowers what the app draws: a translucent
+#                                  # terminal stays so with opacity = 1)
 #
 # [[window-rule]]
 # app-id = "thunderbird"

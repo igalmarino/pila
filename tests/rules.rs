@@ -312,6 +312,25 @@ fn blur_in_a_window_rule_says_where_it_works() {
 }
 
 #[test]
+fn opacity_can_only_lower_what_a_window_draws() {
+    // A clear window with `opacity = 1`: still clear, not filled in.
+    let mut pila = TestPila::with_config(
+        "[[window-rule]]\napp-id = \"clear\"\nopacity = 1.0\ntitle-bar = false\n",
+    );
+    let client = pila.client();
+    client
+        .window("clear")
+        .size(400, 300)
+        .color([0, 0, 0, 0])
+        .decorations(Decorations::Client)
+        .create();
+    pila.wait_window("clear");
+    let state = pila.settle();
+    let (x, y, ..) = rect(&window_in(&state, "clear").unwrap()["geometry"]);
+    assert_eq!(pila.pixel((x + 200) as f64, (y + 150) as f64), [31, 33, 38, 255]);
+}
+
+#[test]
 fn a_rule_matches_the_tag_a_window_set() {
     let mut pila = TestPila::with_config(
         "[[window-rule]]\ntag = \"settings\"\nsize = [640, 400]\n\
