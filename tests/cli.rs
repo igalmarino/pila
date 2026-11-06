@@ -221,3 +221,57 @@ fn a_missing_egl_library_is_an_error_not_a_crash() {
     assert!(stderr.contains("LD_LIBRARY_PATH"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A copy of scripts/check and scripts/tty, which work from where they are and
+/// leave their logs there.
+fn scripts_copy(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("pila-scripts-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("scripts")).unwrap();
+    for script in ["check", "tty"] {
+        let from = format!("{}/scripts/{script}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::copy(from, dir.join("scripts").join(script)).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn scripts_check_runs_the_binary_it_is_given() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scripts_copy("given");
+    let fake = dir.join("fake-pila");
+    let ran = dir.join("ran");
+    std::fs::write(
+        &fake,
+        format!("#!/bin/sh\necho \"$@\" > {}\n", ran.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // It finds nothing to judge afterwards: only what it started matters here.
+    Command::new(dir.join("scripts/check"))
+        .arg("--nested")
+        .env("PILA_BIN", &fake)
+        .env("XDG_CONFIG_HOME", &dir)
+        .output()
+        .unwrap();
+    let args = std::fs::read_to_string(&ran).expect("it didn't run the given binary");
+    assert!(args.contains("--config"), "{args}");
+}
+
+#[test]
+fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
+    let dir = scripts_copy("missing");
+    for args in [&["check", "--nested"][..], &["tty"][..]] {
+        let out = Command::new(dir.join("scripts").join(args[0]))
+            .args(&args[1..])
+            .env("PILA_BIN", "/no/such/pila")
+            .env("XDG_CONFIG_HOME", &dir)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?}: {stderr}");
+        assert!(stderr.contains("/no/such/pila"), "{args:?}: {stderr}");
+    }
+}

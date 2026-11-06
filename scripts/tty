@@ -17,6 +17,7 @@
 #   scripts/tty <config.toml>          another config
 #   scripts/tty --debug [config.toml]  the debug build (scripts/dev cargo build)
 #   scripts/tty [...] -- <pila args>   pass arguments on to pila (e.g. -c CMD)
+#   PILA_BIN=<path> scripts/tty [...]  another binary, such as an installed one
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -43,12 +44,17 @@ if [ "${1:-}" = "--" ]; then
     pila_args=("$@")
 fi
 
+bin="${PILA_BIN:-$bin}"
 if [ ! -x "$bin" ]; then
-    echo "$bin not found; build it first: $build" >&2
+    echo "$bin not found; build it first: $build, or set PILA_BIN" >&2
     exit 1
 fi
-# A build older than the sources would test old code without saying so.
-newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null)"
+# A build older than the sources would test old code without saying so. A binary
+# given by hand isn't this checkout's.
+newer=""
+if [ -z "${PILA_BIN:-}" ]; then
+    newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null || true)"
+fi
 if [ -n "$newer" ]; then
     echo "$bin is older than the sources (e.g. $newer); rebuild it: $build" >&2
     if [ -t 0 ]; then

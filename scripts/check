@@ -22,6 +22,9 @@
 #   scripts/check [...] <config.toml>
 #                               start from that config (see below)
 #
+# PILA_BIN runs another binary than target/release/pila, such as an installed
+# one or Nix's result/bin/pila, for what's run from a checkout anyway.
+#
 # pila quits by itself when the scenarios are done (about 40 seconds). On a
 # TTY the base is your config (~/.config/pila/config.toml: monitors,
 # keyboard, input) without its [animations] and rules, so that what the
@@ -256,9 +259,9 @@ EOF
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
     workload="$PWD/scripts/check --workload"
     if $nested; then
-        bin=target/release/pila
+        bin="${PILA_BIN:-target/release/pila}"
         if [ ! -x "$bin" ]; then
-            echo "$bin not found; build it first: cargo build --release" >&2
+            echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
             exit 1
         fi
         log=pila-check.log
