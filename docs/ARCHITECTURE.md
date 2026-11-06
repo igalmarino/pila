@@ -19,7 +19,8 @@ Key flows and invariants:
 - **Configuration** (`config.rs`): a TOML file (`~/.config/pila/config.toml` or
   `--config`, documented in `config.example.toml`) parsed by `Config::from_toml` (pure,
   unit-tested; `PILA_*` env vars override it), loaded at startup by `Config::load`, which
-  falls back to defaults on errors, and reloaded when the file changes
+  falls back to defaults on errors (`main` notifies of them once the session has had time to
+  start a notification daemon, `state::notify_after_startup`), and reloaded when the file changes
   (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
   `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
   re-applies what changed: keyboard (`set_xkb_config`), rules (`refresh_rule_props`),

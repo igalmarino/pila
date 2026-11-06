@@ -331,7 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         BackendKind::Udev | BackendKind::Headless => ModKey::Super,
     };
     let config_path = Config::path(config_path.as_deref());
-    let config = Config::load(config_path.as_deref(), default_mod);
+    let (config, config_error) = Config::load(config_path.as_deref(), default_mod);
     tracing::info!(
         mod_key = ?config.mod_key,
         terminal = ?config.terminal_command(),
@@ -351,6 +351,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = Pila::new(&mut event_loop, display, config);
     state.config_path = config_path;
     state.watch_config();
+    if let Some(err) = config_error {
+        state::notify_after_startup(
+            &state.loop_handle,
+            "Invalid config, using the defaults",
+            err,
+        );
+    }
     // Nested, a pila on the side mustn't touch the login session's file.
     if backend != BackendKind::Winit {
         state.session_management.load_and_persist();

@@ -295,6 +295,23 @@ fn invalid_rules_are_refused() {
 }
 
 #[test]
+fn blur_in_a_window_rule_says_where_it_works() {
+    let dir = std::env::temp_dir().join(format!("pila-blur-rule-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "[[window-rule]]\nblur = true\n").unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+        .args(["--check-config", "--config"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("[[layer-rule]]"), "{text}");
+}
+
+#[test]
 fn a_rule_matches_the_tag_a_window_set() {
     let mut pila = TestPila::with_config(
         "[[window-rule]]\ntag = \"settings\"\nsize = [640, 400]\n\

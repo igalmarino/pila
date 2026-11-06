@@ -75,6 +75,23 @@ use crate::{
 /// (the session's notification daemon starts with the autostart programs).
 const STARTUP_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_secs(6);
 
+/// Show a problem found at startup as a notification, once the session has had
+/// time to start its notification daemon.
+pub fn notify_after_startup(
+    loop_handle: &LoopHandle<'static, Pila>,
+    summary: &'static str,
+    body: String,
+) {
+    let timer = Timer::from_duration(STARTUP_NOTICE_DELAY);
+    let inserted = loop_handle.insert_source(timer, move |_, _, state: &mut Pila| {
+        state.notify(summary, &body);
+        TimeoutAction::Drop
+    });
+    if let Err(err) = inserted {
+        warn!(?err, summary, "can't schedule the notification");
+    }
+}
+
 /// Offset applied to each new window that would land exactly on top of another.
 const CASCADE_STEP: i32 = 32;
 
@@ -314,20 +331,12 @@ impl Pila {
             keymap_failed = true;
         }
         if keymap_failed {
-            // Only in the log otherwise: say so on screen too, once the
-            // session's notification daemon has had time to start.
+            // Only in the log otherwise: say so on screen too.
             let what = crate::config::keymap_description(kb);
-            let _ = loop_handle.insert_source(
-                Timer::from_duration(STARTUP_NOTICE_DELAY),
-                move |_, _, state: &mut Pila| {
-                    state.notify(
-                        "Keyboard layout not found",
-                        &format!(
-                            "{what}: using the default keymap. Check [keyboard] in the config."
-                        ),
-                    );
-                    TimeoutAction::Drop
-                },
+            notify_after_startup(
+                &loop_handle,
+                "Keyboard layout not found",
+                format!("{what}: using the default keymap. Check [keyboard] in the config."),
             );
         }
         seat.add_pointer();

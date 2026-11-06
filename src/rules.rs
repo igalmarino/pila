@@ -84,6 +84,8 @@ pub struct WindowRuleFile {
     title_bar: Option<bool>,
     corner_radius: Option<u32>,
     opacity: Option<f64>,
+    /// Only here to say where it works: see `validate`.
+    blur: Option<toml::Value>,
 }
 
 /// The range of `opacity`: never fully transparent.
@@ -204,6 +206,12 @@ impl WindowRuleFile {
     /// The rule, or what's wrong with it (`index` counts from 1, for the
     /// message; `workspaces`: how many there are).
     pub fn validate(self, index: usize, workspaces: usize) -> Result<WindowRule, String> {
+        if self.blur.is_some() {
+            return Err(format!(
+                "window-rule {index}: blur: pila has no blur behind windows; \
+                 it only works in a [[layer-rule]]"
+            ));
+        }
         let open_on_workspace = match self.open_on_workspace {
             None => None,
             Some(n @ 1..) if n <= workspaces => Some(n - 1),

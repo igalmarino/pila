@@ -32,6 +32,16 @@ fn an_invalid_file_keeps_the_running_config() {
 }
 
 #[test]
+fn an_invalid_file_at_startup_is_notified() {
+    // pila still starts, on the defaults, and says so on screen as well as in
+    // the log: `workspaces` would be 2 if the file had been used.
+    let mut pila = TestPila::with_config("workspaces = 2\n[[window-rule]]\nno-such-field = 1\n");
+    assert_ne!(pila.state()["workspaces"], 2);
+    pila.wait_log("summary=\"Invalid config, using the defaults\"");
+    assert!(pila.log().contains("no-such-field"));
+}
+
+#[test]
 fn a_syntax_error_keeps_the_running_config() {
     let mut pila = TestPila::with_config("workspaces = 2\n");
     pila.write_config("workspaces = = 6\n");

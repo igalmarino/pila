@@ -987,13 +987,18 @@ impl Config {
         Self::parse(&text, &env_override, default_mod)
     }
 
-    /// `read` at startup: an invalid file is reported and ignored, since a
-    /// typo shouldn't leave you without a desktop.
-    pub fn load(path: Option<&Path>, default_mod: ModKey) -> Self {
-        Self::read(path, default_mod).unwrap_or_else(|err| {
-            warn!(%err, "invalid config; using defaults");
-            Self::parse("", &env_override, default_mod).unwrap_or_default()
-        })
+    /// `read` at startup: an invalid file is logged and ignored, since a typo
+    /// shouldn't leave you without a desktop. The error comes back too, to be
+    /// shown once there's a desktop to show it on.
+    pub fn load(path: Option<&Path>, default_mod: ModKey) -> (Self, Option<String>) {
+        match Self::read(path, default_mod) {
+            Ok(config) => (config, None),
+            Err(err) => {
+                warn!(%err, "invalid config; using defaults");
+                let config = Self::parse("", &env_override, default_mod).unwrap_or_default();
+                (config, Some(err))
+            }
+        }
     }
 
     /// Parse a config file's contents with Alt as the default Mod; `env`
