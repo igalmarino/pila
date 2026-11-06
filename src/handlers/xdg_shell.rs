@@ -40,11 +40,7 @@ impl XdgShellHandler for Pila {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Tell the client how much room it has before it picks a size.
-        let pointer_location = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer_location = self.pointer_location();
         if let Some(output_geo) = self.usable_geometry_at(pointer_location) {
             surface.with_pending_state(|state| {
                 state.bounds = Some(output_geo.size);

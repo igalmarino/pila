@@ -197,11 +197,7 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
         "move" => {
             let x = f64_field(request, "x", None)?;
             let y = f64_field(request, "y", None)?;
-            let current = state
-                .seat
-                .get_pointer()
-                .map(|p| p.current_location())
-                .unwrap_or_default();
+            let current = state.pointer_location();
             motion(state, (x - current.x, y - current.y));
             json!({})
         }

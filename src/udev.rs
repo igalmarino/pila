@@ -753,19 +753,19 @@ fn apply_gamma(device: &DrmDevice, crtc: crtc::Handle, ramp: &[u16], size: u32) 
 
 /// Identity ramps (red, green, blue) of `size` entries each.
 fn linear_ramp(size: u32) -> Vec<u16> {
-    let one: Vec<u16> = (0..size)
-        .map(|i| (u64::from(i) * 0xffff / u64::from(size - 1).max(1)) as u16)
-        .collect();
+    let one: Vec<u16> = (0..size).map(|i| linear_value(i, size)).collect();
     [one.clone(), one.clone(), one].concat()
+}
+
+/// Entry `i` of a linear ramp of `size` entries.
+fn linear_value(i: u32, size: u32) -> u16 {
+    (u64::from(i) * 0xffff / u64::from(size - 1).max(1)) as u16
 }
 
 /// The ramp to remember: none if it's the linear one.
 fn ramp_if_set(ramp: &[u16], size: u32) -> Option<Vec<u16>> {
     let n = size as usize;
-    let linear = (0..3 * n).all(|i| {
-        let j = (i % n) as u64;
-        ramp[i] as u64 == j * 0xffff / u64::from(size - 1).max(1)
-    });
+    let linear = (0..3 * n).all(|i| ramp[i] == linear_value((i % n) as u32, size));
     (!linear).then(|| ramp.to_vec())
 }
 

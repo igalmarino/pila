@@ -29,7 +29,7 @@ use smithay::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{backend::Backend, config::Config, Pila};
+use crate::{config::Config, Pila};
 
 /// How long after the last change to reload.
 const SETTLE: Duration = Duration::from_millis(250);
@@ -138,8 +138,8 @@ impl Pila {
             self.apply_keyboard_config();
         }
         if old.input != self.config.input {
-            if let Some(Backend::Udev(data)) = &mut self.backend {
-                data.apply_input_config(&self.config.input);
+            if let Some(backend) = &mut self.backend {
+                backend.apply_input_config(&self.config.input);
             }
         }
         if old.workspaces != self.config.workspaces {
@@ -181,15 +181,7 @@ impl Pila {
     /// overrides on top) and fit everything to the result. Whether the
     /// backend could do all of it.
     pub(crate) fn apply_outputs(&mut self) -> bool {
-        let applied = match self.backend {
-            Some(Backend::Udev(_)) => crate::udev::apply_output_config(self),
-            Some(Backend::Winit(_)) => {
-                self.apply_nested_scale();
-                true
-            }
-            Some(Backend::Headless(_)) => crate::headless::apply_output_config(self),
-            None => true,
-        };
+        let applied = crate::backend::apply_output_config(self);
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {
             layer_map_for_output(&output).arrange();
         }
@@ -224,7 +216,7 @@ impl Pila {
     }
 
     /// Nested: only the scale of the `winit` output applies.
-    fn apply_nested_scale(&mut self) {
+    pub(crate) fn apply_nested_scale(&mut self) {
         let file = self.config.output("winit", None).and_then(|c| c.scale);
         let scale = self
             .output_overrides

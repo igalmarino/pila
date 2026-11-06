@@ -412,7 +412,6 @@ impl Pila {
         });
     }
 
-    /// Stop the sessions of an output that went away.
     /// The window with foreign-toplevel `identifier` is gone: stop its
     /// sessions now, whether or not a frame is waiting.
     pub fn stop_window_captures(&mut self, identifier: &str) {
@@ -423,6 +422,7 @@ impl Pila {
         }
     }
 
+    /// Stop the sessions of an output that went away.
     pub fn stop_captures_of(&mut self, output: &Output) {
         for session in &mut self.captures {
             if matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output))
@@ -535,7 +535,7 @@ fn copy_failure(err: CopyError) -> FailureReason {
 }
 
 fn render_error(err: &dyn std::fmt::Debug) -> CopyError {
-    CopyError::Render(format!("{err:?}"))
+    CopyError::Render(render::error_text(err))
 }
 
 /// Render `elements` into the client's dma-buf: no copy through the CPU.

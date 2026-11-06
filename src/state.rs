@@ -517,13 +517,17 @@ impl Pila {
         })
     }
 
-    /// The scene and the cursor, for a frame or a capture (`render::FrameInput`).
-    pub fn frame_input(&self) -> FrameInput {
-        let pointer = self
-            .seat
+    /// Where the pointer is, in global logical coordinates.
+    pub fn pointer_location(&self) -> Point<f64, Logical> {
+        self.seat
             .get_pointer()
             .map(|p| p.current_location())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// The scene and the cursor, for a frame or a capture (`render::FrameInput`).
+    pub fn frame_input(&self) -> FrameInput {
+        let pointer = self.pointer_location();
         FrameInput {
             scene: self.scene(),
             pointer,
@@ -596,11 +600,7 @@ impl Pila {
         now: std::time::Duration,
     ) -> (Vec<SceneWindow>, Vec<SceneGhost>) {
         let focused = self.focused_window();
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer = self.pointer_location();
         let hovered = match self.under(pointer) {
             Some(Under::Window(window, Hit::Decoration(Decoration::TitleBar(part)))) => {
                 Some((window, part))
@@ -761,11 +761,7 @@ impl Pila {
     /// output (centered), including where they return to after maximize or
     /// fullscreen, then refit maximized and fullscreen windows.
     pub fn fixup_windows(&mut self) {
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer = self.pointer_location();
         let on_an_output = |space: &Space<Window>, rect: Rectangle<i32, Logical>| {
             space
                 .outputs()
@@ -888,11 +884,7 @@ impl Pila {
     /// `place_new_window` with its window rules already resolved (an X11
     /// window's, whose size had to be set before).
     pub fn place_new_window_with(&mut self, window: Window, props: crate::rules::WindowProps) {
-        let pointer_location = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer_location = self.pointer_location();
         let (maximized, fullscreen) = fill_state(&window);
         // A position rule wins over the session, and is from the pointer's
         // output like any other.
@@ -1450,7 +1442,7 @@ impl Pila {
     /// `run_pending_startup` follows when it's done or after
     /// `EXPORT_TIMEOUT`. Returns false if nothing was started.
     fn export_environment(&mut self) -> bool {
-        if !matches!(self.backend, Some(Backend::Udev(_))) {
+        if !self.backend.as_ref().is_some_and(Backend::is_session) {
             return false;
         }
         let Some(bus) = std::env::var_os("DBUS_SESSION_BUS_ADDRESS") else {

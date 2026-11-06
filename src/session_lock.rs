@@ -96,11 +96,7 @@ impl Pila {
     /// While locked, keyboard focus goes to the lock surface of the
     /// pointer's output (or any lock surface), never to anything else.
     pub fn focus_lock_surface(&mut self, serial: Serial) {
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer = self.pointer_location();
         let surface = self
             .output_at(pointer)
             .and_then(|output| self.lock_surface(&output).cloned())

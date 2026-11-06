@@ -148,4 +148,37 @@ impl Backend {
             Backend::Headless(data) => data.set_gamma(output, ramp),
         }
     }
+
+    /// Nested in another session's window: the host owns the display, so
+    /// only the scale is pila's to change.
+    pub fn is_nested(&self) -> bool {
+        matches!(self, Backend::Winit(_))
+    }
+
+    /// Whether pila is the session (bare metal), whose environment the
+    /// session bus and its services should get.
+    pub fn is_session(&self) -> bool {
+        matches!(self, Backend::Udev(_))
+    }
+
+    /// Re-apply `[input]` to the connected devices. Nested, the host owns them.
+    pub fn apply_input_config(&mut self, input: &crate::config::InputConfig) {
+        if let Backend::Udev(data) = self {
+            data.apply_input_config(input);
+        }
+    }
+}
+
+/// Apply the outputs' settings (`[[output]]` with the runtime overrides on
+/// top) as the backend can. Whether it could do all of it.
+pub fn apply_output_config(state: &mut crate::Pila) -> bool {
+    match state.backend {
+        Some(Backend::Udev(_)) => crate::udev::apply_output_config(state),
+        Some(Backend::Winit(_)) => {
+            state.apply_nested_scale();
+            true
+        }
+        Some(Backend::Headless(_)) => crate::headless::apply_output_config(state),
+        None => true,
+    }
 }

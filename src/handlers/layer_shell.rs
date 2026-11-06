@@ -31,11 +31,7 @@ impl WlrLayerShellHandler for Pila {
     ) {
         // The requested output if it's in use (a client may still hold the
         // wl_output of one that was disabled), else the one under the pointer.
-        let pointer = self
-            .seat
-            .get_pointer()
-            .map(|p| p.current_location())
-            .unwrap_or_default();
+        let pointer = self.pointer_location();
         let output = output
             .as_ref()
             .and_then(Output::from_resource)

@@ -344,14 +344,20 @@ impl TestPila {
     /// draws on its own schedule, e.g. through Xwayland).
     #[track_caller]
     pub fn wait_pixel(&mut self, x: f64, y: f64, color: [u8; 4]) {
+        self.wait_pixel_is(x, y, &format!("{color:?}"), |px| px == color);
+    }
+
+    /// Wait until the pixel at (x, y) is `what`, as `is` tells.
+    #[track_caller]
+    pub fn wait_pixel_is(&mut self, x: f64, y: f64, what: &str, is: impl Fn([u8; 4]) -> bool) {
         let started = Instant::now();
         loop {
             let px = self.pixel(x, y);
-            if px == color {
+            if is(px) {
                 return;
             }
             if started.elapsed() > TIMEOUT {
-                panic!("the pixel at {x},{y} is {px:?}, not {color:?}");
+                panic!("the pixel at {x},{y} is {px:?}, not {what}");
             }
             std::thread::sleep(Duration::from_millis(10));
         }

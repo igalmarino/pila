@@ -1161,3 +1161,8 @@ pub fn output_elements(
         blur.element(i, origin, scale, scene.upper[i].alpha())
     })
 }
+
+/// A renderer error, as it's logged.
+pub fn error_text(err: &dyn std::fmt::Debug) -> String {
+    format!("{err:?}")
+}

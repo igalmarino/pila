@@ -212,9 +212,7 @@ pub struct BlurCache {
     blurred: u32,
 }
 
-fn render_error(err: &dyn std::fmt::Debug) -> String {
-    format!("{err:?}")
-}
+use crate::render::error_text as render_error;
 
 /// An offscreen texture that samples its edges, not black, past them.
 fn blur_texture(

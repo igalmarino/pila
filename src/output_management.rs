@@ -120,6 +120,15 @@ fn adaptive_sync(on: bool) -> AdaptiveSyncState {
     }
 }
 
+/// A head's mode as `[[output]]` would ask for it.
+fn mode_spec(mode: &ModeInfo) -> ModeSpec {
+    ModeSpec {
+        width: mode.size.0,
+        height: mode.size.1,
+        refresh_hz: Some(mode.refresh_mhz as f64 / 1000.0),
+    }
+}
+
 fn send_mode(mode: &ZwlrOutputModeV1, info: &ModeInfo) {
     mode.size(info.size.0, info.size.1);
     mode.refresh(info.refresh_mhz);
@@ -402,7 +411,7 @@ impl Pila {
         {
             return Err("every head would be disabled".into());
         }
-        if matches!(self.backend, Some(Backend::Winit(_))) {
+        if self.backend.as_ref().is_some_and(Backend::is_nested) {
             // Nested, the host decides everything but the scale.
             for info in &om.heads {
                 let config = &heads[&info.name];
@@ -434,11 +443,7 @@ impl Pila {
         for (name, config) in heads {
             let info = self.output_management.heads.iter().find(|h| h.name == name);
             let mode = match config.mode {
-                Some(ModeChoice::Index(i)) => info.and_then(|h| h.modes.get(i)).map(|m| ModeSpec {
-                    width: m.size.0,
-                    height: m.size.1,
-                    refresh_hz: Some(m.refresh_mhz as f64 / 1000.0),
-                }),
+                Some(ModeChoice::Index(i)) => info.and_then(|h| h.modes.get(i)).map(mode_spec),
                 Some(ModeChoice::Custom { size, refresh_mhz }) => Some(ModeSpec {
                     width: size.0,
                     height: size.1,
@@ -452,11 +457,7 @@ impl Pila {
                 name: name.clone(),
                 mode: mode.or_else(|| {
                     info.and_then(|h| h.current_mode.and_then(|i| h.modes.get(i)))
-                        .map(|m| ModeSpec {
-                            width: m.size.0,
-                            height: m.size.1,
-                            refresh_hz: Some(m.refresh_mhz as f64 / 1000.0),
-                        })
+                        .map(mode_spec)
                 }),
                 scale: config
                     .scale
@@ -593,7 +594,7 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
         _: &Client,
         resource: &ZwlrOutputConfigurationV1,
         request: configuration::Request,
-        _serial: &u32,
+        serial: &u32,
         _: &DisplayHandle,
         data_init: &mut DataInit<'_, Self>,
     ) {
@@ -654,7 +655,7 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                 let Some(configuration) = state.output_management.configurations.remove(resource)
                 else {
                     // Cancelled ones were told so; a used one is an error.
-                    if *_serial == state.output_management.serial {
+                    if *serial == state.output_management.serial {
                         resource.post_error(
                             configuration::Error::AlreadyUsed,
                             "configuration applied or tested twice",

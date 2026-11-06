@@ -7,6 +7,11 @@ mod common;
 use common::client::Decorations;
 use common::protocols::{LayerSpec, Surf};
 use common::*;
+use wayland_client::protocol::{wl_compositor::WlCompositor, wl_surface::WlSurface};
+use wayland_protocols::ext::background_effect::v1::client::{
+    ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1,
+    ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::Layer, zwlr_layer_surface_v1::Anchor,
 };
@@ -197,15 +202,7 @@ fn a_blur_rule_blurs_whats_behind_a_layer() {
     halves_and_a_glass(&mut pila, &client, "glass");
     // Just left of the red/green edge, under the glass: a mix (once the
     // glass has been drawn with what's behind it).
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(636.0, 400.0);
-        if px[1] > 20 && px[0] > 20 {
-            break;
-        }
-        assert!(started.elapsed() < TIMEOUT, "not blurred: {px:?}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_mixed(&mut pila, 636.0, 400.0);
     // Outside the glass: sharp.
     assert_eq!(pila.pixel(636.0, 100.0), [255, 0, 0, 255]);
 }
@@ -220,30 +217,11 @@ fn without_blur_the_glass_is_clear() {
 
 #[test]
 fn a_client_can_ask_for_blur_behind_a_region() {
-    use wayland_client::protocol::wl_compositor::WlCompositor;
-    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
     let mut pila = TestPila::start();
     let client = pila.client();
     halves_and_a_glass(&mut pila, &client, "glass");
-    let surface = client.wl_surface_of(common::protocols::Surf(2));
-    let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
-    let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
-    let compositor: WlCompositor = client.lock().compositor.clone().unwrap();
-    let region = compositor.create_region(&client.qh, "region".into());
-    region.add(0, 0, 200, 200);
-    effect.set_blur_region(Some(&region));
-    surface.commit();
-    client.flush();
-    pila.settle();
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(636.0, 400.0);
-        if px[1] > 20 && px[0] > 20 {
-            break;
-        }
-        assert!(started.elapsed() < TIMEOUT, "not blurred: {px:?}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    set_blur_region(&mut pila, &client, Surf(2), &[(0, 0, 200, 200)]);
+    wait_mixed(&mut pila, 636.0, 400.0);
 }
 
 const BLUE: [u8; 4] = [255, 0, 0, 255];
@@ -280,18 +258,18 @@ fn red_wallpaper_and_a_glass(pila: &mut TestPila, client: &Client, output: Optio
 /// Wait until the pixel is `color`, more or less: a blur takes a frame.
 #[track_caller]
 fn wait_near(pila: &mut TestPila, x: f64, y: f64, color: [u8; 4]) {
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(x, y);
-        if near(px, color, 3) {
-            return;
-        }
-        assert!(
-            started.elapsed() < TIMEOUT,
-            "the pixel is {px:?}, not {color:?}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    pila.wait_pixel_is(x, y, &format!("near {color:?}"), |px| near(px, color, 3));
+}
+
+/// Wait until the pixel is a mix of red and green: blurred across the edge
+/// between them.
+#[track_caller]
+fn wait_mixed(pila: &mut TestPila, x: f64, y: f64) {
+    pila.wait_pixel_is(x, y, "a mix of red and green", mixed);
+}
+
+fn mixed(px: [u8; 4]) -> bool {
+    px[0] > 20 && px[1] > 20
 }
 
 const GLASS_RULE: &str = "[[layer-rule]]\nnamespace = \"glass\"\nblur = true\n";
@@ -349,54 +327,31 @@ fn a_blur_on_a_second_output_shows_its_window() {
 
 #[test]
 fn a_blur_keeps_to_the_clients_region() {
-    use wayland_client::protocol::wl_compositor::WlCompositor;
-    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
     let mut pila = TestPila::start();
     let client = pila.client();
     halves_and_a_glass(&mut pila, &client, "glass");
     // The glass is at 540,300. Two strips, as a client tessellates a rounded
     // shape: their bounding box covers the whole glass, they don't.
-    let surface = client.wl_surface_of(common::protocols::Surf(2));
-    let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
-    let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
-    let compositor: WlCompositor = client.lock().compositor.clone().unwrap();
-    let region = compositor.create_region(&client.qh, "region".into());
-    region.add(150, 0, 50, 20);
-    region.add(0, 20, 200, 180);
-    effect.set_blur_region(Some(&region));
-    surface.commit();
-    client.flush();
-    pila.settle();
+    let (surface, effect) = set_blur_region(
+        &mut pila,
+        &client,
+        Surf(2),
+        &[(150, 0, 50, 20), (0, 20, 200, 180)],
+    );
     // Inside the region, by the red/green edge: mixed.
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(636.0, 400.0);
-        if px[1] > 20 && px[0] > 20 {
-            break;
-        }
-        assert!(started.elapsed() < TIMEOUT, "not blurred: {px:?}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_mixed(&mut pila, 636.0, 400.0);
     // The cut corner, in the strips' bounding box and by the same edge: sharp.
     assert_eq!(pila.pixel(636.0, 305.0), [255, 0, 0, 255]);
     // Another shape, with nothing changed behind it: the corner is covered,
     // the one at the bottom is cut.
-    let region = compositor.create_region(&client.qh, "region2".into());
-    region.add(0, 0, 200, 180);
-    region.add(150, 180, 50, 20);
-    effect.set_blur_region(Some(&region));
-    surface.commit();
-    client.flush();
-    pila.settle();
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(636.0, 305.0);
-        if px[1] > 20 && px[0] > 20 {
-            break;
-        }
-        assert!(started.elapsed() < TIMEOUT, "not reshaped: {px:?}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    reshape_blur(
+        &mut pila,
+        &client,
+        &surface,
+        &effect,
+        &[(0, 0, 200, 180), (150, 180, 50, 20)],
+    );
+    wait_mixed(&mut pila, 636.0, 305.0);
     assert_eq!(pila.pixel(636.0, 495.0), [255, 0, 0, 255]);
 }
 
@@ -449,18 +404,29 @@ fn blurs_on_two_outputs_keep_their_backdrops() {
     assert_eq!(state["blur"]["allocated"], 2, "backdrops allocated");
 }
 
-/// Ask for blur behind `rects` of a surface, in this order.
+/// Ask for blur behind `rects` of a surface, in this order: its background
+/// effect object, for later changes (`reshape_blur`).
 fn set_blur_region(
     pila: &mut TestPila,
     client: &Client,
     glass: Surf,
     rects: &[(i32, i32, i32, i32)],
-) {
-    use wayland_client::protocol::wl_compositor::WlCompositor;
-    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
+) -> (WlSurface, ExtBackgroundEffectSurfaceV1) {
     let surface = client.wl_surface_of(glass);
     let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
     let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
+    reshape_blur(pila, client, &surface, &effect, rects);
+    (surface, effect)
+}
+
+/// Give a surface's blur a new region, `rects`.
+fn reshape_blur(
+    pila: &mut TestPila,
+    client: &Client,
+    surface: &WlSurface,
+    effect: &ExtBackgroundEffectSurfaceV1,
+    rects: &[(i32, i32, i32, i32)],
+) {
     let compositor: WlCompositor = client.lock().compositor.clone().unwrap();
     let region = compositor.create_region(&client.qh, "region".into());
     for (x, y, w, h) in rects {
@@ -508,15 +474,10 @@ fn a_blur_has_no_gaps_at_a_fractional_scale() {
     let rows: Vec<_> = (0..200).map(|y| (0, y, 200, 1)).collect();
     set_blur_region(&mut pila, &client, glass, &rows);
     // By the red/green edge, every physical row of the glass is mixed.
-    let mix = |px: [u8; 4]| px[0] > 20 && px[1] > 20;
-    let started = std::time::Instant::now();
-    while !mix(pila.pixel(510.0, 320.0)) {
-        assert!(started.elapsed() < TIMEOUT, "not blurred");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_mixed(&mut pila, 510.0, 320.0);
     for row in 276..524 {
         let px = pila.pixel(510.0, row as f64 / 1.25);
-        assert!(mix(px), "the physical row {row} is sharp: {px:?}");
+        assert!(mixed(px), "the physical row {row} is sharp: {px:?}");
     }
 }
 
@@ -618,8 +579,6 @@ fn an_output_turned_off_gives_its_backdrops_up() {
 
 #[test]
 fn a_blur_keeps_to_the_clients_region_on_a_scaled_output() {
-    use wayland_client::protocol::wl_compositor::WlCompositor;
-    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
     // 640x400 logical: red and green halves, the glass at 220,100.
     let mut pila = TestPila::with_config("[[output]]\nname = \"HEADLESS-1\"\nscale = 2\n");
     let client = pila.client();
@@ -649,25 +608,12 @@ fn a_blur_keeps_to_the_clients_region_on_a_scaled_output() {
         [0, 0, 0, 0],
     );
     client.wait_surface_configured(glass);
-    let surface = client.wl_surface_of(glass);
-    let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
-    let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
-    let compositor: WlCompositor = client.lock().compositor.clone().unwrap();
-    let region = compositor.create_region(&client.qh, "region".into());
-    region.add(150, 0, 50, 20);
-    region.add(0, 20, 200, 180);
-    effect.set_blur_region(Some(&region));
-    surface.commit();
-    client.flush();
-    pila.settle();
-    let started = std::time::Instant::now();
-    loop {
-        let px = pila.pixel(318.0, 200.0);
-        if px[1] > 20 && px[0] > 20 {
-            break;
-        }
-        assert!(started.elapsed() < TIMEOUT, "not blurred: {px:?}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    set_blur_region(
+        &mut pila,
+        &client,
+        glass,
+        &[(150, 0, 50, 20), (0, 20, 200, 180)],
+    );
+    wait_mixed(&mut pila, 318.0, 200.0);
     assert_eq!(pila.pixel(318.0, 105.0), [255, 0, 0, 255]);
 }
