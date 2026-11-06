@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2 (2026-11-06)
+
+- **Packages:** each release now has a `.deb` (Ubuntu 24.04 or newer, Debian 13 or newer) and
+  a `.rpm` (Fedora). They're installed on clean systems and started headless before they're
+  attached, but a real session on these distros hasn't been tried yet.
+- **Nix:** the repository is a flake: `nix run github:igalmarino/pila`, confirmed on a NixOS
+  system by a tester. It can also be a login session on NixOS (not tried yet), and `nix develop`
+  gives a build environment.
+- **`pila-report`** gathers what a bug or test report needs into a file you can read first:
+  version, system, GPU, monitors, whether the config is valid, and the end of the log, without
+  your home directory, user name and host name. It sends nothing anywhere.
+- **Fixes:** a missing `libEGL.so.1` is now a clear error that says what to do, not a crash.
+- **Tests:** a test that failed now and then under load, seen once when building `pila-git`, now
+  clicks where a snapped window can't be.
+
 ## 0.2.1 (2026-11-05)
 
 - **New protocols:** xdg-session-management (apps restore their windows' place, size and
