@@ -114,7 +114,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: cachix/install-nix-action@2126ae7fc54c9df00dd18f7f18754393182c73cd # v31.9.1
       - run: nix flake check --no-build
-      - run: cat flake.lock
       - run: nix build --print-build-logs
       - name: The package says which commit it is
         run: ./result/bin/pila --version | tee /dev/stderr | grep -F "$(git rev-parse --short=7 HEAD)"
@@ -124,7 +123,7 @@ jobs:
       # it starts, it's still running when its time is up.
       - name: Smoke test
         run: |
-          mesa="$(nix build --no-link --print-out-paths nixpkgs#mesa)"
+          mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa)"
           status=0
           XDG_RUNTIME_DIR="$(mktemp -d)" PILA_HEADLESS_DEVICE=software \
             __EGL_VENDOR_LIBRARY_DIRS="$mesa/share/glvnd/egl_vendor.d" \

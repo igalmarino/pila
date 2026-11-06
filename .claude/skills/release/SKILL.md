@@ -10,7 +10,8 @@ description: How to cut a pila release and maintain the Arch package (PKGBUILD, 
 3. A GitHub release with the changelog's section as its text.
 4. A commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`).
 
-The user publishes it to the AUR.
+The user publishes it to the AUR. The Nix flake (`flake.nix`) takes its version from
+`Cargo.toml` and needs nothing.
 
 # Arch package
 
