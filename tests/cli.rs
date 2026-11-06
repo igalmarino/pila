@@ -275,3 +275,34 @@ fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
         assert!(stderr.contains("/no/such/pila"), "{args:?}: {stderr}");
     }
 }
+
+#[test]
+fn scripts_check_finds_the_monitors_in_a_bare_metal_log() {
+    // As the log says it, from where the code logs it: moving that code once
+    // made every bare-metal run fail this check.
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/src/udev/outputs.rs");
+    let code = std::fs::read_to_string(source).unwrap();
+    assert!(
+        code.contains("\"monitor\""),
+        "it's not logged there anymore"
+    );
+    let dir = scripts_copy("monitors");
+    let log = dir.join("bare-metal.log");
+    std::fs::write(
+        &log,
+        "INFO pila: starting pila backend=Udev\n\
+         INFO pila::udev::outputs: monitor name=\"eDP-1\" make=\"AUO\" model=\"B140HTN02.4\"\n\
+         check: done\n",
+    )
+    .unwrap();
+    let out = Command::new(dir.join("scripts/check"))
+        .arg("--judge")
+        .arg(&log)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("PASS  monitors were identified (1)"),
+        "{stdout}"
+    );
+}
