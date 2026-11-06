@@ -85,6 +85,23 @@ section_gpu() {
     if [ -r /proc/driver/nvidia/version ]; then
         head -n 1 /proc/driver/nvidia/version
     fi
+    gpu_in_use
+}
+
+# With two GPUs (a hybrid laptop), which of them pila draws with. Searched in the
+# whole log: it's logged once, at the start. Only a TTY session logs it.
+gpu_in_use() {
+    local log gpu driver
+    log="$(find_log)"
+    [ -n "$log" ] || return 0
+    gpu="$(grep -a 'using GPU' "$log" | tail -n 1 | sed -n 's/.*gpu=\([^[:space:]]*\).*/\1/p')"
+    gpu="${gpu%$'\033'*}"
+    if [ -z "$gpu" ]; then
+        echo "In use by pila: not in the log"
+        return 0
+    fi
+    driver="$(basename "$(readlink -f "/sys/class/drm/${gpu##*/}/device/driver" 2>/dev/null)" 2>/dev/null)"
+    echo "In use by pila: $gpu${driver:+ (driver $driver)}"
 }
 
 # Only what the kernel lists: no EDID, which has the monitor's serial number.

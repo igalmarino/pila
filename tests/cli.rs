@@ -191,6 +191,19 @@ fn the_report_has_the_system_and_the_log_without_private_names() {
 }
 
 #[test]
+fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
+    let home = report_home("gpu");
+    // More than the report takes from the end of the log.
+    let mut log = String::from("2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n");
+    log.push_str(&"something else\n".repeat(1000));
+    std::fs::write(home.join("state/pila/pila.log"), log).unwrap();
+    let out = report(&home);
+    assert!(out.status.success(), "{out:?}");
+    let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
+    assert!(text.contains("In use by pila: /dev/dri/card1"), "{text}");
+}
+
+#[test]
 fn the_report_works_with_no_log() {
     let home = report_home("nolog");
     let out = report(&home);
