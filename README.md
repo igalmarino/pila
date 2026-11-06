@@ -116,11 +116,15 @@ GitHub and installs the same files as `scripts/install` with `PREFIX=/usr` (plus
 and `config.example.toml` in `/usr/share/doc/pila`):
 
 ```bash
-yay -S pila-git    # or any AUR helper
+git clone https://aur.archlinux.org/pila-git.git
+cd pila-git
+less PKGBUILD    # read what you're about to build and install
+makepkg -si
 ```
 
-Its `PKGBUILD` is kept in `packaging/aur/pila-git`, where `makepkg -si` builds it too. Remove
-a hand install first (`scripts/uninstall`). To update the AUR package, regenerate `.SRCINFO`
+To update it, `git pull` there and run `makepkg -si` again. Its `PKGBUILD` is kept in
+`packaging/aur/pila-git`, where `makepkg -si` builds it too. Remove a hand install first
+(`scripts/uninstall`). To publish a new version of the AUR package, regenerate `.SRCINFO`
 and copy both files into the AUR repository:
 
 ```bash
