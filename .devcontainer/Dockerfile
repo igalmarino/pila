@@ -25,7 +25,7 @@ ENV TZ="${TZ}" \
 #   - firewall tooling (ipset, dig, ip) for init-firewall.sh
 RUN pacman -Syu --noconfirm --needed \
         git openssh github-cli less vim nano jq ripgrep fd unzip \
-        rustup clang mold pkgconf gdb shellcheck \
+        rustup clang mold pkgconf gdb shellcheck cargo-audit \
         wayland wayland-protocols libxkbcommon libinput systemd-libs seatd \
         mesa libglvnd libdisplay-info pixman \
         foot kitty weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
