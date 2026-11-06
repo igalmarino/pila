@@ -187,8 +187,8 @@ fn a_fullscreen_window_only_covers_the_top_layer_of_its_own_output() {
         BLUE,
     );
     client.wait_surface_configured(panel);
-    pila.settle();
-    assert_eq!(pila.pixel((x + 10) as f64, (y + 10) as f64), rgba(BLUE));
+    // Once the client has drawn it, after that configure.
+    pila.wait_pixel((x + 10) as f64, (y + 10) as f64, rgba(BLUE));
 
     pila.move_to(300.0, 300.0);
     client.window("a").size(400, 300).color(GREEN).create();
