@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.3 (2026-11-06)
+
+- **Blur behind windows:** a translucent window can show what's behind it blurred, when the app
+  asks for it through ext-background-effect or a `[[window-rule]]` sets `blur = true`;
+  `blur = false` refuses an app's request. The blur keeps the window's rounded corners, follows
+  its animations and workspace switches, and appears in captures of the screen but not of the
+  window alone. Measured on one AMD laptop (no refresh missed); other GPUs are untried.
+- **Opening links and files:** programs such as kitty do it with `xdg-open`. Without it a click on
+  a link does nothing and leaves no error anywhere, so `xdg-utils` is now a recommended package and
+  `pila-report` says whether `xdg-open` is installed.
+- **Notifications:** an invalid config is now notified at startup, not only on a reload. A problem
+  stays on screen for 10 s, not 3. `libnotify` is a recommended package, and the log says once if
+  `notify-send` is missing.
+- **Session log:** written as it happens, so `tail -f` follows it and the end of a run isn't lost.
+- **`pila-report`** says which GPU pila draws with, however long the log.
+- **Docs:** a rule's `opacity` can only lower what a window draws: `opacity = 1` won't make a
+  translucent terminal opaque.
+- **Tests:** tests that depended on the machine's speed now hold on a slow one.
+
 ## 0.2.2 (2026-11-06)
 
 - **Packages:** each release now has a `.deb` (Ubuntu 24.04 or newer, Debian 13 or newer) and
