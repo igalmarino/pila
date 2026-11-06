@@ -213,6 +213,53 @@ impl X11 {
     }
 }
 
+/// The Xwayland that `pila` started.
+fn xwayland_pid(pila: &TestPila) -> u32 {
+    let wanted = format!("PPid:\t{}\n", pila.pid());
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .find(|pid| {
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status"));
+            status.is_ok_and(|s| s.starts_with("Name:\tXwayland\n") && s.contains(&wanted))
+        })
+        .expect("pila's Xwayland")
+}
+
+#[test]
+fn xwayland_starts_with_no_signals_blocked() {
+    let mut pila = TestPila::start();
+    if X11::connect(&mut pila).is_none() {
+        return;
+    }
+    let status = std::fs::read_to_string(format!("/proc/{}/status", xwayland_pid(&pila))).unwrap();
+    let blocked = status.lines().find(|l| l.starts_with("SigBlk:")).unwrap();
+    assert!(blocked.ends_with("0000000000000000"), "{blocked}");
+}
+
+#[test]
+fn xwayland_comes_back_after_a_crash() {
+    let mut pila = TestPila::start();
+    let Some(x11) = X11::connect(&mut pila) else {
+        return;
+    };
+    x11.window("old", (200, 200), 0xff0000);
+    pila.wait("the window", |s| x11_window(s, "old").is_some());
+    let pid = xwayland_pid(&pila);
+    // SAFETY: only a signal, to a process of this test's.
+    assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+    pila.wait("its windows gone and a new Xwayland", |s| {
+        x11_window(s, "old").is_none() && s["xwayland"].is_number()
+    });
+    let x11 = X11::connect(&mut pila).unwrap();
+    x11.window("new", (200, 200), 0xff0000);
+    pila.wait("a window on the new one", |s| {
+        x11_window(s, "new").is_some()
+    });
+    assert_ne!(xwayland_pid(&pila), pid);
+}
+
 fn x11_window<'a>(state: &'a Value, class: &str) -> Option<&'a Value> {
     window_in(state, class).filter(|w| w["x11"] == true)
 }

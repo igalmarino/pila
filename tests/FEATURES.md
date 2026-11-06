@@ -116,7 +116,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 
 | Feature | Tests |
 |---|---|
-| Xwayland windows | `x11::an_x11_window_is_managed_by_its_wm_class`, `x11::keys_reach_the_focused_x11_window`, `x11::mod_shift_q_asks_an_x11_window_to_close`, `x11::net_wm_state_requests_maximize_and_fullscreen`, `x11::pila_maximizing_an_x11_window_sets_its_state`, `x11::an_iconify_request_minimizes`, `x11::clicking_an_x11_window_focuses_it`, `x11::an_override_redirect_window_goes_where_x_puts_it_and_isnt_switched_to`, `x11::rules_size_and_fill_x11_windows`, `x11::an_x11_window_on_another_workspace_is_hidden_from_x_too`, `x11::a_moved_x11_window_is_told_where_it_is` |
+| Xwayland windows | `x11::xwayland_starts_with_no_signals_blocked`, `x11::xwayland_comes_back_after_a_crash`, `x11::an_x11_window_is_managed_by_its_wm_class`, `x11::keys_reach_the_focused_x11_window`, `x11::mod_shift_q_asks_an_x11_window_to_close`, `x11::net_wm_state_requests_maximize_and_fullscreen`, `x11::pila_maximizing_an_x11_window_sets_its_state`, `x11::an_iconify_request_minimizes`, `x11::clicking_an_x11_window_focuses_it`, `x11::an_override_redirect_window_goes_where_x_puts_it_and_isnt_switched_to`, `x11::rules_size_and_fill_x11_windows`, `x11::an_x11_window_on_another_workspace_is_hidden_from_x_too`, `x11::a_moved_x11_window_is_told_where_it_is` |
 | Selections with X11 | `x11::the_clipboard_goes_from_wayland_to_a_focused_x11_app`, `x11::the_clipboard_goes_from_x11_to_a_wayland_client`, `x11::an_unfocused_x11_app_cant_read_the_clipboard` |
 
 ## Drawing, animations, performance

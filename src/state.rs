@@ -59,7 +59,7 @@ use smithay::{
     },
     xwayland::{X11Wm, XWaylandClientData},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     animation::SceneGhost,
@@ -107,6 +107,8 @@ pub struct Pila {
     pub children: Vec<std::process::Child>,
     /// Xwayland's event source, removed on exit (`stop_xwayland`).
     pub xwayland_token: Option<RegistrationToken>,
+    /// When Xwayland was started again lately (`xwayland::may_restart`).
+    pub xwayland_restarts: Vec<std::time::Instant>,
 
     /// Where a dragged window would snap to, shown above the windows
     /// (`snap.rs`), and the buffer it's drawn with.
@@ -382,6 +384,7 @@ impl Pila {
             frame_stats: HashMap::new(),
             swipe: None,
             xwayland_token: None,
+            xwayland_restarts: Vec::new(),
             space: Space::default(),
             unmapped: Vec::new(),
             suppressed_keys: HashSet::new(),
@@ -437,8 +440,11 @@ impl Pila {
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state| {
                     // SAFETY: the display is never dropped while the source is alive.
-                    unsafe {
-                        display.get_mut().dispatch_clients(state).unwrap();
+                    let dispatched = unsafe { display.get_mut().dispatch_clients(state) };
+                    if let Err(err) = dispatched {
+                        // Nothing works without it: out, with the usual cleanup.
+                        error!(?err, "can't talk to the clients; quitting");
+                        state.loop_signal.stop();
                     }
                     // Whatever the clients asked for may change the screen.
                     state.queue_redraw();

@@ -385,7 +385,9 @@ Key flows and invariants:
   configuration is checked against the snapshot (`check_output_configuration`: known
   modes only, ≥ 1 head enabled, scale 0.5..8) and applied as `[[output]]`-style overrides
   in `Pila::output_overrides`, which `udev::effective_output_config` layers over the file
-  for `connector_connected` and `apply_output_config`. Disabling a head
+  for `connector_connected` and `apply_output_config`. If the backend can't do it
+  (`apply_outputs` returns false: a failed modeset) the overrides go back to what they were
+  and the client gets `failed`. Disabling a head
   (`disable_output`) clears its CRTC, removes its global and runs `output_removed`; the
   `OutputSurface` stays so the head is still listed; `enable_output` is the reverse (also
   used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`.
@@ -434,7 +436,10 @@ Key flows and invariants:
   (`take_session_restore`: inside the usable area, `fit_in_area`; output gone: as usual).
   Until placed, `session_output` is the window's output for its scale and fill size. Saved
   to `$XDG_STATE_HOME/pila/sessions.json` by a thread (a second after a change, and at exit,
-  `finish_sessions`), at most `MAX_SESSIONS`; nested only in memory (`load_and_persist`).
+  `finish_sessions`), at most `MAX_SESSIONS`, empty ones going first; nested, and in a second
+  pila on the same state (`take_sessions_lock`, a `scripts/tty` next to the login session),
+  only in memory (`load_and_persist`). What a client can leave there is bounded
+  (`MAX_TOPLEVELS`, `MAX_NAME_BYTES`, `MAX_CLIENT_SESSIONS`).
   Not `is_privileged`: it only touches the client's own windows. X11 windows and clients
   that don't use it open centered.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
@@ -461,7 +466,8 @@ Key flows and invariants:
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::host_pointer`); a DRM backend sends real relative motion through the same
   checks.
-- **X11** (`xwayland.rs`, `focus.rs`): pila starts Xwayland at launch and runs Smithay's
+- **X11** (`xwayland.rs`, `focus.rs`): if it dies (`XwmHandler::disconnected`) its windows go, nothing else gets its `DISPLAY`
+  and it's started again, at most `MAX_RESTARTS` times in `RESTART_WINDOW` (`xwayland_gone`). pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
   waits for X (`pending_startup`). X11 windows are `Window::new_x11_window` in the same
   `Space`, so code that handles windows must not assume `window.toplevel()` is `Some`: use

@@ -10,7 +10,11 @@
 //! The startup command waits until X is ready (or failed), so `pila -c xterm`
 //! works.
 
-use std::{os::fd::OwnedFd, process::Stdio};
+use std::{
+    os::fd::OwnedFd,
+    process::Stdio,
+    time::{Duration, Instant},
+};
 
 use smithay::{
     delegate_xwayland_shell,
@@ -47,10 +51,25 @@ use crate::{focus::KeyboardFocus, state::fill_state, Pila};
 /// the sticky bit.
 const X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
 
+/// Whether a directory of `owner` is safe for this user's X sockets: it should
+/// be root's, or this user's own. Anyone else's could listen in.
+fn trusted_owner(owner: u32, me: u32) -> bool {
+    owner == 0 || owner == me
+}
+
 fn ensure_x11_socket_dir() {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let dir = std::path::Path::new(X11_SOCKET_DIR);
-    if dir.exists() {
+    if let Ok(metadata) = std::fs::symlink_metadata(dir) {
+        // SAFETY: getuid has no failure modes or preconditions.
+        let me = unsafe { libc::getuid() };
+        if !trusted_owner(metadata.uid(), me) {
+            warn!(
+                dir = X11_SOCKET_DIR,
+                owner = metadata.uid(),
+                "the X11 socket directory belongs to another user, who can reach X11 apps"
+            );
+        }
         return;
     }
     let created = std::fs::create_dir(dir)
@@ -67,20 +86,58 @@ fn ensure_x11_socket_dir() {
     }
 }
 
+/// How many times Xwayland is started again within `RESTART_WINDOW`: one that
+/// can't stay up mustn't be started forever.
+const MAX_RESTARTS: usize = 3;
+const RESTART_WINDOW: Duration = Duration::from_secs(60);
+
+/// Whether Xwayland may be started again `now`, given when it was lately.
+fn may_restart(restarts: &mut Vec<Instant>, now: Instant) -> bool {
+    restarts.retain(|at| now.duration_since(*at) < RESTART_WINDOW);
+    if restarts.len() >= MAX_RESTARTS {
+        return false;
+    }
+    restarts.push(now);
+    true
+}
+
+/// `f` with the signals of pila's signal source unblocked, for what starts a
+/// program pila can't reach into (`Pila::session_env` does it for the others):
+/// a blocked mask survives exec. One arriving meanwhile acts as if pila had no
+/// source for it, so this is only for what takes as little as starting a program.
+fn with_signals_unblocked<T>(f: impl FnOnce() -> T) -> T {
+    // SAFETY: the sets are initialized by sigemptyset and sigaddset, or written
+    // by pthread_sigmask, before they're read.
+    unsafe {
+        let mut signals = std::mem::zeroed::<libc::sigset_t>();
+        let mut previous = std::mem::zeroed::<libc::sigset_t>();
+        libc::sigemptyset(&mut signals);
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGCHLD] {
+            libc::sigaddset(&mut signals, signal);
+        }
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &signals, &mut previous);
+        let result = f();
+        libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+        result
+    }
+}
+
 impl Pila {
     /// Start Xwayland; the `startup` commands run once X is ready (or failed
     /// to start).
     pub fn start_xwayland(&mut self, startup: Vec<String>) {
         ensure_x11_socket_dir();
-        let spawned = XWayland::spawn(
-            &self.display_handle,
-            None,
-            std::iter::empty::<(String, String)>(),
-            true,
-            Stdio::null(),
-            Stdio::null(),
-            |_| (),
-        );
+        let spawned = with_signals_unblocked(|| {
+            XWayland::spawn(
+                &self.display_handle,
+                None,
+                std::iter::empty::<(String, String)>(),
+                true,
+                Stdio::null(),
+                Stdio::null(),
+                |_| (),
+            )
+        });
         let (xwayland, client) = match spawned {
             Ok(spawned) => spawned,
             Err(err) => {
@@ -136,6 +193,49 @@ impl Pila {
         }
     }
 
+    /// The window manager's connection to X closed: Xwayland died. Its windows
+    /// are gone, and what's started from now on mustn't get its `DISPLAY`. It
+    /// starts again, unless it keeps dying.
+    fn xwayland_gone(&mut self) {
+        let was_focused = matches!(
+            self.seat.get_keyboard().and_then(|k| k.current_focus()),
+            Some(KeyboardFocus::X11(_))
+        );
+        let windows: Vec<Window> = self
+            .space
+            .elements()
+            .chain(self.off_space_windows())
+            .filter(|w| w.x11_surface().is_some())
+            .cloned()
+            .collect();
+        for window in &windows {
+            self.remove_foreign_toplevel(window);
+            self.forget_focus_history(window);
+            self.forget_in_switch(window);
+            self.forget_off_space(window);
+            self.forget_animations(window);
+            self.space.unmap_elem(window);
+        }
+        self.x11_cleared_selection(SelectionTarget::Clipboard);
+        self.x11_cleared_selection(SelectionTarget::Primary);
+        self.stop_xwayland();
+        self.xdisplay = None;
+        if was_focused {
+            self.focus_recent_window();
+        }
+        self.refresh_pointer_focus();
+        self.queue_redraw();
+
+        if may_restart(&mut self.xwayland_restarts, Instant::now()) {
+            warn!("Xwayland died; starting it again");
+            self.loop_handle
+                .insert_idle(|state| state.start_xwayland(Vec::new()));
+            self.wake.ping();
+        } else {
+            warn!("Xwayland keeps dying; X11 apps won't run until pila restarts");
+        }
+    }
+
     /// The managed window (mapped, minimized or on another workspace) for
     /// an X11 surface.
     pub fn window_for_x11(&self, surface: &X11Surface) -> Option<Window> {
@@ -181,6 +281,12 @@ impl XwmHandler for Pila {
         self.xwm
             .as_mut()
             .expect("X11 event without a window manager")
+    }
+
+    fn disconnected(&mut self, xwm: XwmId) {
+        if self.xwm.as_ref().is_some_and(|wm| wm.id() == xwm) {
+            self.xwayland_gone();
+        }
     }
 
     fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
@@ -471,4 +577,27 @@ fn x11_grab(state: &Pila, surface: &X11Surface) -> Option<PointerGrabStartData<P
     let start = pointer.grab_start_data()?;
     let (focus, _) = start.focus.as_ref()?;
     (Some(focus) == surface.wl_surface().as_ref() && !state.is_locked()).then_some(start)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xwayland_stops_restarting_if_it_keeps_dying() {
+        let start = Instant::now();
+        let mut restarts = Vec::new();
+        for _ in 0..MAX_RESTARTS {
+            assert!(may_restart(&mut restarts, start));
+        }
+        assert!(!may_restart(&mut restarts, start + Duration::from_secs(1)));
+        assert!(may_restart(&mut restarts, start + RESTART_WINDOW));
+    }
+
+    #[test]
+    fn x11_sockets_are_only_trusted_in_a_directory_of_root_or_the_user() {
+        assert!(trusted_owner(0, 1000));
+        assert!(trusted_owner(1000, 1000));
+        assert!(!trusted_owner(1001, 1000));
+    }
 }

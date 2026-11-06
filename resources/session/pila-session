@@ -33,6 +33,9 @@ fi
 
 dir="${XDG_STATE_HOME:-$HOME/.local/state}/pila"
 mkdir -p "$dir"
+# The log has what programs print and the commands pila runs: only for the
+# user. Not with umask, which everything pila starts would inherit.
+chmod 700 "$dir"
 [ -f "$dir/pila.log" ] && mv -f "$dir/pila.log" "$dir/pila.log.old"
 
 # Copies the log to the system log. If the logger fails, the rest is drained
