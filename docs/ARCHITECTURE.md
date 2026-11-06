@@ -39,7 +39,7 @@ Key flows and invariants:
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
   builds, to the lock).
 - **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,
-  `winit.rs`), `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev.rs`) or `Headless`
+  `winit.rs`), `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev/`) or `Headless`
   (tests, `headless.rs`), chosen by `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY`
   is set. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
   imports, `queue_redraw`, `cursor_changed`, LEDs, VT switch) rather than matching. All
@@ -66,7 +66,7 @@ Key flows and invariants:
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
 - **Monitors** (`edid.rs`, `Pila::monitors` by output name): on a connector connecting,
-  `udev.rs` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
+  `udev/` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
   and serial from the base block; a missing or invalid one leaves "Unknown". They go to
   `wl_output` and `xdg-output` through `PhysicalProperties`, and to wlr-output-management
   in `output_heads`. An `[[output]]` section may name the monitor instead of the connector
@@ -75,7 +75,8 @@ Key flows and invariants:
   `output_overrides` and `is_internal` go by the connector. Set before the output's settings
   are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
   their spec.
-- **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
+- **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
+  connectors and outputs, `draw.rs` frames and vblanks, `input.rs` and `gamma.rs` the rest. one GPU (the seat's primary), outputs placed by their
   `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle

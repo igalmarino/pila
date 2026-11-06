@@ -1,5 +1,5 @@
 //! The backend pila runs on: nested in another session (`winit.rs`), or on
-//! bare metal (DRM/KMS + libinput, `udev.rs`), or headless for automated
+//! bare metal (DRM/KMS + libinput, `udev/`), or headless for automated
 //! tests (`headless.rs`). Code outside the backends goes
 //! through these methods instead of matching on the variant.
 

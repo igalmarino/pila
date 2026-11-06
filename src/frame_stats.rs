@@ -8,7 +8,7 @@
 //! CPU time runs from collecting the scene to queuing the frame; the GPU's
 //! work isn't in it, but shows up as missed refreshes: vblanks without a new
 //! frame while an animation runs. Those are exact on bare metal (by the DRM
-//! sequence numbers of the vblanks that showed frames; `udev.rs`) and an
+//! sequence numbers of the vblanks that showed frames; `udev/`) and an
 //! estimate nested (a gap of more than 1.5 periods between frames;
 //! `winit.rs`), where the host decides when frames are shown. At trace level
 //! every frame is logged: when it was queued (at a vblank or not) and the

@@ -897,7 +897,7 @@ pub struct Config {
     pub input: InputConfig,
     /// How many workspaces there are (`workspaces.rs`).
     pub workspaces: usize,
-    /// When the built-in screen goes off for an external one (`udev.rs`).
+    /// When the built-in screen goes off for an external one (`udev/`).
     pub internal_display: InternalDisplay,
     /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
     pub corner_radius: u32,

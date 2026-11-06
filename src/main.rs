@@ -5,7 +5,7 @@
 //! focus management, keybindings, modifier-drag move/resize, and
 //! maximize/fullscreen.
 //!
-//! Runs on a TTY (DRM/KMS + libinput, `udev.rs`), as a login session or by
+//! Runs on a TTY (DRM/KMS + libinput, `udev/`), as a login session or by
 //! hand, or nested as a window inside another Wayland or X11 session
 //! (`winit.rs`).
 

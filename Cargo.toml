@@ -44,7 +44,7 @@ features = [
     "backend_winit",
     "wayland_frontend",
     "desktop",
-    # DRM/KMS backend (`udev.rs`)
+    # DRM/KMS backend (`udev/`)
     "backend_drm",
     "backend_gbm",
     "backend_libinput",

@@ -1,0 +1,706 @@
+//! Bare-metal backend: DRM/KMS outputs, libinput input, libseat session.
+//! Run from a TTY (`pila --backend udev`, the default without a host session).
+//!
+//! Deliberately smaller than anvil's: one GPU (the seat's primary one, which
+//! renders and scans out), no direct scan-out tuning, no DRM leasing. Outputs
+//! are placed left to right in connector order.
+//!
+//! Redraws stay on demand (`Backend::queue_redraw`): one idle callback per
+//! loop iteration renders every output that needs it. An output with a frame
+//! in flight renders again at its next vblank (`frame_finish`) instead, so
+//! redraws are paced by the display. A session lock is confirmed only after a
+//! locked frame has been shown on every output.
+
+use std::{collections::HashMap, time::Duration};
+
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
+
+use crate::edid::Monitor;
+
+use smithay::{
+    backend::{
+        allocator::{
+            gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+            Fourcc,
+        },
+        drm::VrrSupport,
+        drm::{
+            compositor::FrameFlags,
+            exporter::gbm::GbmFramebufferExporter,
+            output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
+        },
+        egl::{EGLContext, EGLDevice, EGLDisplay},
+        input::InputEvent,
+        libinput::{LibinputInputBackend, LibinputSessionInterface},
+        renderer::{gles::GlesRenderer, ImportDma, ImportMemWl},
+        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
+        udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
+    },
+    desktop::{layer_map_for_output, utils::OutputPresentationFeedback},
+    input::{keyboard::LedState, pointer::CursorImageStatus},
+    output::{Mode as WlMode, Output, PhysicalProperties, Scale as OutputScale},
+    reexports::{
+        calloop::{
+            timer::{TimeoutAction, Timer},
+            EventLoop, LoopHandle,
+        },
+        drm::{
+            control::{connector, crtc, Device as _, Mode as DrmMode, ModeTypeFlags},
+            Device as _,
+        },
+        input::{self as libinput, Libinput},
+        rustix::fs::OFlags,
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
+        wayland_server::backend::GlobalId,
+    },
+    utils::{DeviceFd, IsAlive, Logical, Point, Transform},
+    wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
+};
+use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
+use tracing::{debug, error, info, warn};
+
+mod draw;
+mod gamma;
+mod input;
+mod outputs;
+
+use self::{draw::*, gamma::*, input::*, outputs::*};
+pub use outputs::{apply_output_config, is_internal};
+
+use crate::{
+    backend::Backend,
+    config::{
+        AccelProfile, ClickMethod, InputConfig, InternalDisplay, OutputConfig, PointerConfig,
+    },
+    cursor::CursorTheme,
+    frame,
+    output_management::{HeadInfo, ModeInfo},
+    render::{self, PilaRenderElement},
+    Pila,
+};
+
+/// How long to wait before trying to draw again after a DRM-level failure.
+const RECOVERY_DELAY: Duration = Duration::from_millis(100);
+
+/// 8-bit formats only: widely supported, and what clients expect.
+const COLOR_FORMATS: [Fourcc; 4] = [
+    Fourcc::Argb8888,
+    Fourcc::Abgr8888,
+    Fourcc::Xrgb8888,
+    Fourcc::Xbgr8888,
+];
+
+type PilaDrmOutput = DrmOutput<
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    Option<OutputPresentationFeedback>,
+    DrmDeviceFd,
+>;
+type PilaDrmOutputManager = DrmOutputManager<
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    Option<OutputPresentationFeedback>,
+    DrmDeviceFd,
+>;
+
+/// Fields drop in declaration order, which matters here: the outputs go
+/// before the DRM device, and the DRM device (which restores the previous
+/// display state when dropped) before the session that grants access to it.
+pub struct UdevData {
+    outputs: HashMap<crtc::Handle, OutputSurface>,
+    drm: PilaDrmOutputManager,
+    scanner: DrmScanner,
+    pub renderer: GlesRenderer,
+    libinput: Libinput,
+    /// Keyboards, for the Caps/Num/Scroll Lock LEDs.
+    keyboards: Vec<libinput::Device>,
+    /// Touchpads and mice, to re-apply `[input]` when the config changes.
+    pointers: Vec<libinput::Device>,
+    cursor_theme: CursorTheme,
+    /// A render pass is already queued for this loop iteration.
+    redraw_scheduled: bool,
+    /// A frame failed at the DRM level (typically: not DRM master yet after
+    /// a VT switch); rendering waits for `recover` instead of retrying on
+    /// every event.
+    recovering: bool,
+    loop_handle: LoopHandle<'static, Pila>,
+    /// Connectors found connected by the scan in progress and not set up
+    /// yet: an external one among them already turns the built-in screen
+    /// off, so it isn't lit for a moment while the scan goes on.
+    scan_pending: Vec<String>,
+    /// Last: see the struct docs.
+    pub session: LibSeatSession,
+}
+
+struct OutputSurface {
+    output: Output,
+    /// The CRTC's surface: `None` while the output is powered off
+    /// (`set_output_power`), which clears the CRTC.
+    drm_output: Option<PilaDrmOutput>,
+    connector: connector::Handle,
+    /// The mode in use, to set the CRTC up again.
+    mode: DrmMode,
+    /// Disabled (`[[output]]` or a display tool): no surface, no global,
+    /// not mapped; still listed as a head.
+    enabled: bool,
+    global: Option<GlobalId>,
+    /// A frame was queued and its vblank hasn't arrived yet.
+    frame_pending: bool,
+    /// The sequence number of the vblank that showed the last frame, and
+    /// whether pila wanted a new frame at every vblank after it (an
+    /// animation was running; `frame_stats.rs`).
+    last_vblank: Option<u64>,
+    /// When the last frame was shown (the kernel's timestamp, on the
+    /// presentation clock, if it gives one).
+    last_vblank_time: Option<Duration>,
+    back_to_back: bool,
+    /// Something changed since the last frame.
+    redraw_needed: bool,
+    /// Progress of the frame that confirms a session lock.
+    lock_frame: LockFrame,
+    /// The connector's modes, for `[[output]]` mode changes on reload.
+    modes: Vec<DrmMode>,
+    /// The gamma ramps a client set (`gamma_control.rs`), re-applied
+    /// whenever the CRTC is set up again.
+    gamma: Option<Vec<u16>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LockFrame {
+    None,
+    Queued,
+    Shown,
+}
+
+impl UdevData {
+    /// Ask every output for a new frame (see the module docs).
+    pub fn queue_redraw(&mut self) {
+        for surface in self.outputs.values_mut() {
+            surface.redraw_needed = true;
+        }
+        if !self.redraw_scheduled {
+            self.redraw_scheduled = true;
+            self.loop_handle.insert_idle(render_all);
+        }
+    }
+
+    /// Take DRM master (again). logind grants it to the active session's
+    /// fd, but after a switch between two compositors on one seat it has
+    /// been seen missing; the kernel lets a process that was master once
+    /// take it back without privileges.
+    fn take_master(&self) {
+        if let Err(err) = self.drm.device().acquire_master_lock() {
+            debug!(?err, "couldn't take DRM master");
+        }
+    }
+
+    /// A frame failed at the DRM level: try again shortly, once, instead of
+    /// on every client event until it works.
+    fn schedule_recovery(&mut self) {
+        if self.recovering {
+            return;
+        }
+        self.recovering = true;
+        let timer = Timer::from_duration(RECOVERY_DELAY);
+        let _ = self.loop_handle.insert_source(timer, |_, _, state| {
+            if let Some(Backend::Udev(data)) = &mut state.backend {
+                data.recovering = false;
+                data.take_master();
+                for surface in data.outputs.values_mut() {
+                    surface.redraw_needed = true;
+                }
+            }
+            state.queue_redraw();
+            TimeoutAction::Drop
+        });
+    }
+
+    pub fn update_leds(&mut self, leds: LedState) {
+        for keyboard in &mut self.keyboards {
+            keyboard.led_update(leds.into());
+        }
+    }
+
+    pub fn change_vt(&mut self, vt: i32) {
+        if let Err(err) = self.session.change_vt(vt) {
+            warn!(vt, ?err, "failed to switch VT");
+        }
+    }
+
+    /// Re-apply `[input]` to the connected touchpads and mice.
+    pub fn apply_input_config(&mut self, input: &InputConfig) {
+        for device in &mut self.pointers {
+            if let Some(config) = pointer_config(device, input) {
+                configure_pointer(device, config);
+            }
+        }
+    }
+
+    fn crtc_of(&self, output: &Output) -> Option<crtc::Handle> {
+        self.outputs
+            .iter()
+            .find(|(_, s)| &s.output == output)
+            .map(|(crtc, _)| *crtc)
+    }
+
+    /// The length of the output's gamma ramps (0 = no gamma support).
+    pub fn gamma_size(&self, output: &Output) -> Option<u32> {
+        let crtc = self.crtc_of(output)?;
+        self.drm
+            .device()
+            .get_crtc(crtc)
+            .ok()
+            .map(|info| info.gamma_length())
+            .filter(|n| *n > 0)
+    }
+
+    /// Set the output's gamma ramps (`None`: linear) and remember them.
+    pub fn set_gamma(&mut self, output: &Output, ramp: Option<&[u16]>) -> bool {
+        let Some(crtc) = self.crtc_of(output) else {
+            return false;
+        };
+        let Some(size) = self.gamma_size(output) else {
+            return false;
+        };
+        let linear;
+        let ramp = match ramp {
+            Some(ramp) if ramp.len() == size as usize * 3 => ramp,
+            Some(_) => return false,
+            None => {
+                linear = linear_ramp(size);
+                &linear
+            }
+        };
+        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+            return false;
+        }
+        if let Some(surface) = self.outputs.get_mut(&crtc) {
+            surface.gamma = ramp_if_set(ramp, size);
+            info!(
+                name = surface.output.name(),
+                custom = surface.gamma.is_some(),
+                "gamma set"
+            );
+        }
+        true
+    }
+
+    /// Whether the output is powered on; `None` for an unknown output.
+    pub fn output_power(&self, output: &Output) -> Option<bool> {
+        let crtc = self.crtc_of(output)?;
+        Some(self.outputs[&crtc].drm_output.is_some())
+    }
+
+    /// Turn an output's display off (its CRTC is cleared, so the monitor
+    /// goes to sleep) or back on (the CRTC is set up again with the same
+    /// mode). The output stays mapped: windows and the pointer keep their
+    /// places. `false` if it couldn't be done.
+    pub fn set_output_power(&mut self, output: &Output, on: bool) -> bool {
+        let Some(crtc) = self.crtc_of(output) else {
+            return false;
+        };
+        let UdevData {
+            outputs,
+            drm,
+            renderer,
+            ..
+        } = self;
+        let surface = outputs.get_mut(&crtc).expect("found above");
+        let name = surface.output.name();
+        if on == surface.drm_output.is_some() {
+            return true;
+        }
+        let elements = DrmOutputRenderElements::<_, PilaRenderElement>::default();
+        if !on {
+            surface.drm_output = None;
+            surface.frame_pending = false;
+            surface.lock_frame = LockFrame::None;
+            if let Err(err) = drm.try_to_restore_modifiers(renderer, &elements) {
+                debug!(?err, "couldn't restore modifiers after powering off");
+            }
+            info!(name, "output powered off");
+            return true;
+        }
+        let planes = drm.device().planes(&crtc).ok();
+        match drm.initialize_output(
+            crtc,
+            surface.mode,
+            &[surface.connector],
+            &surface.output,
+            planes,
+            renderer,
+            &elements,
+        ) {
+            Ok(drm_output) => {
+                surface.drm_output = Some(drm_output);
+                surface.frame_pending = false;
+                surface.redraw_needed = true;
+                info!(name, "output powered on");
+            }
+            Err(err) => {
+                warn!(name, ?err, "failed to power the output on");
+                return false;
+            }
+        }
+        self.reapply_gamma(crtc);
+        self.queue_redraw();
+        true
+    }
+
+    /// The monitors as wlr-output-management describes them, disabled ones
+    /// included, left to right.
+    pub fn output_heads(&self) -> Vec<HeadInfo> {
+        let mut heads: Vec<HeadInfo> = self
+            .outputs
+            .values()
+            .map(|surface| {
+                let props = surface.output.physical_properties();
+                let loc = surface.output.current_location();
+                let modes: Vec<ModeInfo> = surface
+                    .modes
+                    .iter()
+                    .map(|&mode| {
+                        let wl = WlMode::from(mode);
+                        ModeInfo {
+                            size: (wl.size.w, wl.size.h),
+                            refresh_mhz: wl.refresh,
+                            preferred: mode.mode_type().contains(ModeTypeFlags::PREFERRED),
+                        }
+                    })
+                    .collect();
+                let adaptive_sync = surface.drm_output.as_ref().and_then(|o| {
+                    o.with_compositor(|c| match c.vrr_supported(surface.connector) {
+                        Ok(VrrSupport::NotSupported) | Err(_) => None,
+                        Ok(_) => Some(c.vrr_enabled()),
+                    })
+                });
+                HeadInfo {
+                    name: surface.output.name(),
+                    make: props.make,
+                    model: props.model,
+                    serial: None,
+                    physical: (props.size.w, props.size.h),
+                    current_mode: surface.modes.iter().position(|m| *m == surface.mode),
+                    modes,
+                    enabled: surface.enabled,
+                    position: (loc.x, loc.y),
+                    transform: surface.output.current_transform(),
+                    scale: surface.output.current_scale().fractional_scale(),
+                    adaptive_sync,
+                }
+            })
+            .collect();
+        heads.sort_by(|a, b| a.position.cmp(&b.position).then(a.name.cmp(&b.name)));
+        heads
+    }
+
+    /// Put the output's gamma back after the CRTC was set up again or
+    /// another compositor had the device (VT switch back, mode change,
+    /// power on): the remembered ramps, or linear when no client set any
+    /// (whoever had the CRTC may have left theirs).
+    fn reapply_gamma(&self, crtc: crtc::Handle) {
+        let Some(surface) = self.outputs.get(&crtc) else {
+            return;
+        };
+        let Some(size) = self.gamma_size(&surface.output) else {
+            return;
+        };
+        let linear;
+        let ramp = match &surface.gamma {
+            Some(ramp) => ramp,
+            None => {
+                linear = linear_ramp(size);
+                &linear
+            }
+        };
+        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+            warn!(name = surface.output.name(), "failed to re-apply gamma");
+        }
+    }
+
+    /// Linear gamma on every output: on exit, so the next compositor on
+    /// the seat doesn't inherit a client's ramps.
+    pub fn reset_gamma(&mut self) {
+        let crtcs: Vec<_> = self.outputs.keys().copied().collect();
+        for crtc in crtcs {
+            if let Some(surface) = self.outputs.get_mut(&crtc) {
+                if surface.gamma.take().is_some() {
+                    self.reapply_gamma(crtc);
+                }
+            }
+        }
+    }
+
+    /// When `output`'s last frame was shown.
+    pub fn last_vblank_time(&self, output: &Output) -> Option<Duration> {
+        self.outputs
+            .values()
+            .find(|surface| surface.output == *output)?
+            .last_vblank_time
+    }
+
+    pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, &mut CursorTheme) {
+        (&mut self.renderer, &mut self.cursor_theme)
+    }
+
+    pub fn cursor_changed(&mut self, _status: &CursorImageStatus) {
+        // Drawn by pila in `render_output`; the redraw is queued by the caller.
+    }
+}
+
+/// Set up the session, the GPU, outputs and input, and make pila run on them.
+pub fn init_udev(
+    event_loop: &mut EventLoop<'static, Pila>,
+    state: &mut Pila,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (mut session, notifier) = LibSeatSession::new()
+        .map_err(|err| format!("could not start a session (run pila from a TTY): {err}"))?;
+    let seat = session.seat();
+    info!(seat, "session started");
+
+    // The seat's primary GPU, or any GPU.
+    let path = primary_gpu(&seat)?
+        .or_else(|| all_gpus(&seat).ok()?.into_iter().next())
+        .ok_or("no GPU found")?;
+    let node = DrmNode::from_path(&path)?;
+    let node = node
+        .node_with_type(NodeType::Primary)
+        .and_then(Result::ok)
+        .unwrap_or(node);
+    info!(gpu = %path.display(), "using GPU");
+
+    let fd = session.open(
+        &path,
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+    )?;
+    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    if supports_syncobj_eventfd(&fd) {
+        state.syncobj_state = Some(DrmSyncobjState::new::<Pila>(
+            &state.display_handle,
+            fd.clone(),
+        ));
+    }
+    let (drm, drm_notifier) = DrmDevice::new(fd.clone(), true)?;
+    let gbm = GbmDevice::new(fd)?;
+
+    // SAFETY: the GBM device outlives the display (both live in `UdevData`
+    // via the renderer and output manager).
+    let display = unsafe { EGLDisplay::new(gbm.clone())? };
+    let render_node = EGLDevice::device_for_display(&display)?
+        .try_get_render_node()
+        .ok()
+        .flatten()
+        .unwrap_or(node);
+    let context = EGLContext::new(&display)?;
+    // SAFETY: the context was just created for this renderer only.
+    let mut renderer = unsafe { GlesRenderer::new(context)? };
+    crate::render::warm_up(&mut renderer);
+    state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(
+        render_node.dev_id(),
+        &renderer,
+    ));
+
+    let allocator = GbmAllocator::new(
+        gbm.clone(),
+        GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+    );
+    let exporter = GbmFramebufferExporter::new(gbm.clone(), Some(render_node));
+    let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
+    let drm = DrmOutputManager::new(
+        drm,
+        allocator,
+        exporter,
+        Some(gbm),
+        COLOR_FORMATS,
+        render_formats,
+    );
+
+    // Client buffers: shm in the formats the renderer reads, dmabuf on this GPU.
+    state.shm_state.update_formats(renderer.shm_formats());
+    let feedback =
+        DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()?;
+    state
+        .dmabuf_state
+        .create_global_with_default_feedback::<Pila>(&state.display_handle, &feedback);
+
+    // Input.
+    let mut libinput =
+        Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
+    libinput
+        .udev_assign_seat(&seat)
+        .map_err(|()| "failed to assign the libinput seat")?;
+    event_loop.handle().insert_source(
+        LibinputInputBackend::new(libinput.clone()),
+        |mut event, _, state| {
+            on_input_device(state, &mut event);
+            state.process_input_event(event);
+            // Input moves the cursor and changes hover state even when no
+            // client reacts; coalesced into one render pass per iteration.
+            state.queue_redraw();
+        },
+    )?;
+
+    // VT switches.
+    event_loop
+        .handle()
+        .insert_source(notifier, |event, _, state| match event {
+            SessionEvent::PauseSession => {
+                info!("session paused");
+                // Keys held for the VT switch never get a release otherwise.
+                state.release_all_keys();
+                if let Some(Backend::Udev(data)) = &mut state.backend {
+                    data.libinput.suspend();
+                    data.drm.pause();
+                }
+            }
+            SessionEvent::ActivateSession => {
+                info!("session resumed");
+                if let Some(Backend::Udev(data)) = &mut state.backend {
+                    if let Err(err) = data.libinput.resume() {
+                        error!(?err, "failed to resume libinput");
+                    }
+                    // Take master first: resetting the device needs it.
+                    data.take_master();
+                    // Start from a clean device: another compositor on the
+                    // seat may have left the connectors on other CRTCs than
+                    // pila's, and moving them over piecemeal fails
+                    // (EINVAL). Disabling everything costs one modeset.
+                    if let Err(err) = data.drm.activate(true) {
+                        error!(?err, "failed to resume the DRM device");
+                    }
+                    data.recovering = false;
+                    let crtcs: Vec<_> = data.outputs.keys().copied().collect();
+                    for crtc in crtcs {
+                        data.outputs.get_mut(&crtc).expect("listed").frame_pending = false;
+                        // Another VT may have changed the LUTs.
+                        data.reapply_gamma(crtc);
+                    }
+                }
+                // Monitors plugged or unplugged while away. Those it found
+                // then couldn't come on without DRM master: they do here.
+                scan_connectors(state);
+                state.apply_outputs();
+                state.queue_redraw();
+            }
+        })?;
+
+    // Vblanks.
+    event_loop
+        .handle()
+        .insert_source(drm_notifier, |event, metadata, state| match event {
+            DrmEvent::VBlank(crtc) => frame_finish(state, crtc, metadata),
+            DrmEvent::Error(err) => error!(?err, "DRM error"),
+        })?;
+
+    // Monitor hotplug on this GPU.
+    let udev = UdevBackend::new(&seat)?;
+    event_loop
+        .handle()
+        .insert_source(udev, move |event, _, state| match event {
+            UdevEvent::Changed { device_id } if device_id == node.dev_id() => {
+                scan_connectors(state)
+            }
+            UdevEvent::Added { device_id, path } => {
+                debug!(device_id, path = %path.display(), "ignoring additional GPU");
+            }
+            _ => {}
+        })?;
+
+    state.backend = Some(Backend::Udev(Box::new(UdevData {
+        session,
+        loop_handle: event_loop.handle(),
+        libinput,
+        renderer,
+        drm,
+        scanner: DrmScanner::new(),
+        outputs: HashMap::new(),
+        redraw_scheduled: false,
+        recovering: false,
+        cursor_theme: CursorTheme::load(),
+        keyboards: Vec::new(),
+        pointers: Vec::new(),
+        scan_pending: Vec::new(),
+    })));
+
+    scan_connectors(state);
+    // Start with the pointer in the middle of the first output.
+    if let (Some(geo), Some(pointer)) = (
+        state.output_geometry_at((0.0, 0.0).into()),
+        state.seat.get_pointer(),
+    ) {
+        pointer.set_location((geo.loc + geo.size.downscale(2).to_point()).to_f64());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_screens_are_recognized_by_connector() {
+        for name in ["eDP-1", "LVDS-1", "DSI-2"] {
+            assert!(is_internal(name), "{name}");
+        }
+        for name in ["HDMI-A-1", "DP-2", "DVI-D-1", "eDP"] {
+            assert!(!is_internal(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_screen_goes_off_only_for_an_external_one_that_is_on() {
+        let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let all_on = |_: &str| true;
+        // An external monitor on: off.
+        assert!(internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+        // The rule not set: on.
+        assert!(!internal_off(
+            false,
+            "eDP-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+        // Alone: on.
+        assert!(!internal_off(true, "eDP-1", names(&["eDP-1"]), all_on));
+        // The external one off by its config: on.
+        assert!(!internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "DP-1"]),
+            |n| n != "DP-1"
+        ));
+        // Another built-in screen doesn't count.
+        assert!(!internal_off(
+            true,
+            "eDP-1",
+            names(&["eDP-1", "eDP-2"]),
+            all_on
+        ));
+        // An external monitor is never turned off by the rule.
+        assert!(!internal_off(
+            true,
+            "HDMI-A-1",
+            names(&["eDP-1", "HDMI-A-1"]),
+            all_on
+        ));
+    }
+
+    #[test]
+    fn linear_ramps_are_recognized() {
+        let linear = linear_ramp(256);
+        assert_eq!(linear.len(), 3 * 256);
+        assert_eq!((linear[0], linear[255], linear[256]), (0, 0xffff, 0));
+        assert_eq!(ramp_if_set(&linear, 256), None);
+        let mut dimmed = linear.clone();
+        dimmed[100] /= 2;
+        assert_eq!(ramp_if_set(&dimmed, 256), Some(dimmed.clone()));
+        // A size of one doesn't divide by zero.
+        assert_eq!(linear_ramp(1), vec![0, 0, 0]);
+    }
+}
