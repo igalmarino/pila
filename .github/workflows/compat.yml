@@ -1,0 +1,141 @@
+# What rarely breaks but must not stay broken: pila on other distros with the
+# packages README.md lists, the minimum Rust version, the Nix package and the
+# RustSec advisories. pila-git and the flake build the latest main, so this
+# doesn't wait for a release: it runs when something it depends on changes,
+# every week (distros' images and advisories change without a commit), and by
+# hand before a release (gh workflow run compat.yml).
+name: Compatibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - package.nix
+      - flake.nix
+      - flake.lock
+      - scripts/install
+      - scripts/install-paths
+      - resources/**
+      - .github/workflows/compat.yml
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - package.nix
+      - flake.nix
+      - flake.lock
+      - scripts/install
+      - scripts/install-paths
+      - resources/**
+      - .github/workflows/compat.yml
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Read-only: nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed git rustup gcc pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Toolchain from rust-version
+        run: |
+          msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
+          rustup toolchain install "$msrv" --profile minimal
+          rustup default "$msrv"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo build --locked
+
+  distros:
+    name: Build on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The package lists from README.md's build table, plus a C compiler
+          # and curl for rustup.
+          - image: debian:trixie
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends
+              build-essential curl ca-certificates git
+              libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libegl1 xwayland pkg-config
+          - image: ubuntu:24.04
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends
+              build-essential curl ca-certificates git
+              libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libegl1 xwayland pkg-config
+          - image: fedora:latest
+            install: >-
+              dnf install -y gcc curl git
+              libseat-devel libinput-devel systemd-devel mesa-libgbm-devel
+              libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland
+              pkgconf-pkg-config
+    steps:
+      - name: Packages
+        run: ${{ matrix.install }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Rust (rustup, stable)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: ${{ matrix.image }}
+      - run: cargo build --locked
+      - run: ./target/debug/pila --version
+
+  nix:
+    name: Nix (package, smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: cachix/install-nix-action@2126ae7fc54c9df00dd18f7f18754393182c73cd # v31.9.1
+      - run: nix flake check --no-build
+      - run: nix build --print-build-logs
+      - name: The package says which commit it is
+        run: ./result/bin/pila --version | tee /dev/stderr | grep -F "$(git rev-parse --short=7 HEAD)"
+      - run: ./result/bin/pila-report --help
+      - run: nix develop --command cargo --version
+      # EGL's drivers, which a NixOS system provides, come from Mesa here. If
+      # it starts, it's still running when its time is up.
+      - name: Smoke test
+        run: |
+          mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa)"
+          status=0
+          XDG_RUNTIME_DIR="$(mktemp -d)" PILA_HEADLESS_DEVICE=software \
+            __EGL_VENDOR_LIBRARY_DIRS="$mesa/share/glvnd/egl_vendor.d" \
+            timeout 5 ./result/bin/pila --backend headless >pila.log 2>&1 || status=$?
+          tail -n 20 pila.log
+          test "$status" = 124
+          grep -F 'Xwayland ready' pila.log
+
+  audit:
+    name: Dependencies (cargo audit)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: pacman -Syu --noconfirm --needed git rust cargo-audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: cargo audit

@@ -38,10 +38,11 @@ on **Smithay 0.7.x**.
 ## Commands
 
 - Lint: `cargo clippy --all-targets -- -D warnings`
-- CI (`.github/workflows/ci.yml`) also runs `cargo fmt --check`, builds with `--locked`
-  (on `rust-version` too, and on Debian, Ubuntu and Fedora), does a staged install and
-  runs `shellcheck --severity=warning --external-sources` on the scripts: run that after
-  editing one.
+- CI (`.github/workflows/ci.yml`, every push) also runs `cargo fmt --check`, builds with
+  `--locked`, does a staged install and runs `shellcheck --severity=warning
+  --external-sources` on the scripts: run that after editing one. `compat.yml` (`rust-version`,
+  Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when dependencies or packaging change, weekly
+  and by hand before a release. `packages.yml` builds the `.deb` and `.rpm` of a release.
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Every feature gets
   integration tests (`tests/*.rs`; how they work is in `tests/CLAUDE.md`) and a new test
   goes into `tests/FEATURES.md`; only bare-metal paths (`udev/`), real frame times
@@ -87,7 +88,7 @@ on **Smithay 0.7.x**.
   libraries pila links (`readelf -d`) and README's package table. Packaging and releases:
   the `release` skill.
 - Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file added
-  to `install_files` is added there too). No Nix in this container: CI's Nix job builds it and
+  to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix job builds it and
   starts pila from it. `flake.lock` pins nixpkgs; a dependency on a new system library goes in
   `buildInputs` there too.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build

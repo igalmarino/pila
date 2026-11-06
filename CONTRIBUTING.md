@@ -15,8 +15,8 @@ GPU and distro, how pila was started, and the log).
 - **No distro assumptions**: the code and the host-side scripts must work without systemd
   (elogind or seatd), on any distro, with configurable install paths.
 - Before sending a change: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and
-  `cargo test` (CI runs them too, plus builds on Debian, Ubuntu and Fedora and
-  `shellcheck` on the scripts). Every feature gets integration tests (`tests/*.rs`, on a
+  `cargo test` (CI runs them too, plus `shellcheck` on the scripts; builds on Debian, Ubuntu
+  and Fedora run when dependencies or packaging change, and weekly). Every feature gets integration tests (`tests/*.rs`, on a
   headless pila; a new test goes into `tests/FEATURES.md`), and unit tests cover pure
   logic. What those can't reach is tried by hand: how things look nested (`cargo run`),
   and the DRM/KMS backend on a TTY (`scripts/tty`). `scripts/check` is a smoke and
