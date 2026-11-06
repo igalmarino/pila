@@ -470,7 +470,9 @@ fn moving_a_parent_keeps_its_child_above() {
     assert_eq!(stacking(&state), vec!["parent", "child"]);
     // The parent moved, this time, with the child still above it.
     let parent = rect(&window_in(&state, "parent").unwrap()["geometry"]);
-    pila.click_at(parent.0 as f64 + 5.0, parent.1 as f64 + 5.0);
+    // At its far end: the child, on top, fills the left half once it takes
+    // its new size, which covers the parent's left end.
+    pila.click_at((parent.0 + parent.2) as f64 - 5.0, parent.1 as f64 + 5.0);
     pila.wait_focus("parent");
     pila.combo("Super+Right");
     let state = pila.wait("the parent snapped", |s| {
