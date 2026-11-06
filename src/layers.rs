@@ -3,10 +3,11 @@
 //! Layer surfaces live in each output's `LayerMap` (`layer_map_for_output`),
 //! not in the `Space`. Stacking, front to back: Overlay, Top, windows, Bottom,
 //! Background, except that a fullscreen window at the top of the stack also
-//! covers the Top layer (`Pila::layer_order`), unless a Top surface takes the
-//! keyboard (a launcher: it's shown, and the rest of Top with it, while it's
-//! up). Rendering and hit testing both
-//! follow that order (`Pila::scene`, `Pila::under`).
+//! covers the Top layer of its output (`Pila::top_layer_covered`), unless a Top
+//! surface there takes the keyboard (a launcher: it's shown, and the rest of
+//! Top with it, while it's up). Rendering and hit testing both follow that
+//! order (`Pila::upper_layers`, `Pila::lower_layers`; `Pila::scene`,
+//! `Pila::under`).
 
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType},
@@ -21,6 +22,7 @@ use smithay::{
 
 use crate::{
     state::{fill_state, has_buffer},
+    workspaces::is_override_redirect,
     Pila,
 };
 
@@ -30,71 +32,86 @@ fn takes_keyboard(layer: &LayerSurface) -> bool {
         && has_buffer(layer.wl_surface())
 }
 
-/// Layers drawn above and below the windows, each front to back.
-pub type LayerOrder = (&'static [Layer], &'static [Layer]);
+/// Layer surfaces with their global locations, front to back.
+pub type LayerSurfaces = Vec<(LayerSurface, Point<i32, Logical>)>;
+
+/// The topmost surface (incl. popups) of `layers` under `pos`, with its origin
+/// in global coordinates.
+pub fn layer_surface_under(
+    layers: LayerSurfaces,
+    pos: Point<f64, Logical>,
+) -> Option<(LayerSurface, WlSurface, Point<f64, Logical>)> {
+    layers.into_iter().find_map(|(layer, loc)| {
+        let (surface, origin) = layer.surface_under(pos - loc.to_f64(), WindowSurfaceType::ALL)?;
+        Some((layer, surface, (origin + loc).to_f64()))
+    })
+}
 
 impl Pila {
-    /// Which layers go above the windows and which below. A Top surface
-    /// that takes the keyboard (a launcher) stays above a fullscreen
-    /// window, so what gets the keys is shown.
-    pub fn layer_order(&self) -> LayerOrder {
-        let fullscreen_on_top = self
+    /// Whether a fullscreen window on top of `output`'s windows covers its Top
+    /// layer. A Top surface that takes the keyboard (a launcher) stays above
+    /// it, so what gets the keys is shown.
+    fn top_layer_covered(&self, output: &Output) -> bool {
+        let top = self
             .space
             .elements()
-            .next_back()
-            .is_some_and(|w| fill_state(w).1);
-        let exclusive_top = || {
-            self.layer_surfaces(&[Layer::Top])
-                .iter()
-                .any(|(layer, _)| takes_keyboard(layer))
+            .rev()
+            .filter(|w| !is_override_redirect(w))
+            .find(|w| self.window_output(w).as_ref() == Some(output));
+        top.is_some_and(|w| fill_state(w).1)
+            && !layer_map_for_output(output)
+                .layers_on(Layer::Top)
+                .any(takes_keyboard)
+    }
+
+    /// The surfaces on `output`'s `layer`, front to back.
+    fn push_layer(&self, surfaces: &mut LayerSurfaces, output: &Output, layer: Layer) {
+        let Some(output_geo) = self.space.output_geometry(output) else {
+            return;
         };
-        if fullscreen_on_top && !exclusive_top() {
-            (
-                &[Layer::Overlay],
-                &[Layer::Top, Layer::Bottom, Layer::Background],
-            )
-        } else {
-            (
-                &[Layer::Overlay, Layer::Top],
-                &[Layer::Bottom, Layer::Background],
-            )
+        let map = layer_map_for_output(output);
+        for surface in map.layers_on(layer).rev() {
+            if let Some(geo) = map.layer_geometry(surface) {
+                surfaces.push((surface.clone(), output_geo.loc + geo.loc));
+            }
         }
     }
 
-    /// The surfaces on `layers` (in that order, each front to back) with their
-    /// global locations.
-    pub fn layer_surfaces(&self, layers: &[Layer]) -> Vec<(LayerSurface, Point<i32, Logical>)> {
-        let mut surfaces = Vec::new();
-        for &layer in layers {
-            for output in self.space.outputs() {
-                let Some(output_geo) = self.space.output_geometry(output) else {
-                    continue;
-                };
-                let map = layer_map_for_output(output);
-                for surface in map.layers_on(layer).rev() {
-                    if let Some(geo) = map.layer_geometry(surface) {
-                        surfaces.push((surface.clone(), output_geo.loc + geo.loc));
-                    }
-                }
+    /// What's drawn above the windows, front to back: Overlay, and Top where
+    /// no fullscreen window covers it.
+    pub fn upper_layers(&self) -> LayerSurfaces {
+        let mut surfaces = self.layer_surfaces(&[Layer::Overlay]);
+        for output in self.space.outputs() {
+            if !self.top_layer_covered(output) {
+                self.push_layer(&mut surfaces, output, Layer::Top);
             }
         }
         surfaces
     }
 
-    /// The topmost surface (incl. popups) of a layer surface on `layers` under
-    /// `pos`, with its origin in global coordinates.
-    pub fn layer_surface_under(
-        &self,
-        layers: &[Layer],
-        pos: Point<f64, Logical>,
-    ) -> Option<(LayerSurface, WlSurface, Point<f64, Logical>)> {
-        self.layer_surfaces(layers)
-            .into_iter()
-            .find_map(|(layer, loc)| {
-                let (surface, origin) =
-                    layer.surface_under(pos - loc.to_f64(), WindowSurfaceType::ALL)?;
-                Some((layer, surface, (origin + loc).to_f64()))
-            })
+    /// What's drawn below the windows, front to back: Top where a fullscreen
+    /// window covers it, Bottom and Background.
+    pub fn lower_layers(&self) -> LayerSurfaces {
+        let mut surfaces = Vec::new();
+        for output in self.space.outputs() {
+            if self.top_layer_covered(output) {
+                self.push_layer(&mut surfaces, output, Layer::Top);
+            }
+        }
+        surfaces.extend(self.layer_surfaces(&[Layer::Bottom, Layer::Background]));
+        surfaces
+    }
+
+    /// The surfaces on `layers` (in that order, each front to back) with their
+    /// global locations.
+    pub fn layer_surfaces(&self, layers: &[Layer]) -> LayerSurfaces {
+        let mut surfaces = Vec::new();
+        for &layer in layers {
+            for output in self.space.outputs() {
+                self.push_layer(&mut surfaces, output, layer);
+            }
+        }
+        surfaces
     }
 
     /// The layer surface whose main surface is `surface`, and its output.

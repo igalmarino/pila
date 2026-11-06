@@ -51,6 +51,24 @@ fn press_in(pila: &mut TestPila, client: &Client, x: i64, y: i64) {
 }
 
 #[test]
+fn a_popup_over_the_title_bar_gets_the_pointer() {
+    let (mut pila, client, window, (x, y, ..)) = window_at_its_place();
+    let placement = Placement {
+        anchor_rect: (10, -20, 1, 1),
+        ..Placement::default()
+    };
+    let (menu, _) = client.popup("menu", Ok(window), &placement, false, BLUE);
+    client.wait_surface_configured(menu);
+    pila.wait("the popup", |s| mapped_popup(s, "a"));
+    pila.settle();
+    // Drawn over the title bar, so that's what the pointer is on.
+    pila.move_to((x + 20) as f64, (y - 10) as f64);
+    client.wait("the pointer on the menu", |s| {
+        s.pointer_name.as_deref() == Some("menu")
+    });
+}
+
+#[test]
 fn a_popup_goes_where_its_positioner_says() {
     let (mut pila, client, window, (x, y, ..)) = window_at_its_place();
     let (menu, _) = client.popup("menu", Ok(window), &Placement::default(), false, BLUE);

@@ -480,37 +480,37 @@ impl Pila {
     /// What's under `pos`, in stacking order: layer surfaces above the
     /// windows, the windows, then layer surfaces below them.
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
-        let (upper, lower) = self.layer_order();
         let layer = |layers| {
-            self.layer_surface_under(layers, pos)
+            crate::layers::layer_surface_under(layers, pos)
                 .map(|(layer, surface, origin)| Under::Layer(layer, surface, origin))
         };
-        layer(upper)
+        layer(self.upper_layers())
             .or_else(|| {
                 self.window_under(pos)
                     .map(|(window, hit)| Under::Window(window, hit))
             })
-            .or_else(|| layer(lower))
+            .or_else(|| layer(self.lower_layers()))
     }
 
     /// The topmost window under `pos` and what part of it was hit. Per window,
-    /// front to back: title bar, client surfaces (incl. popups), resize border.
+    /// front to back as it's drawn: client surfaces (incl. popups), title bar,
+    /// resize border.
     /// Ignores layer surfaces; use `under` for anything input-related.
     fn window_under(&self, pos: Point<f64, Logical>) -> Option<(Window, Hit)> {
         self.space.elements().rev().find_map(|window| {
             let loc = self.space.element_location(window)?;
-            if let Some(bar) = decoration::title_bar_rect(window, loc) {
-                if bar.to_f64().contains(pos) {
-                    let part = decoration::title_bar_part(bar, pos);
-                    return Some((window.clone(), Hit::Decoration(Decoration::TitleBar(part))));
-                }
-            }
             let render_loc = loc - window.geometry().loc;
             if let Some((surface, origin)) =
                 window.surface_under(pos - render_loc.to_f64(), WindowSurfaceType::ALL)
             {
                 let origin = (origin + render_loc).to_f64();
                 return Some((window.clone(), Hit::Surface(surface, origin)));
+            }
+            if let Some(bar) = decoration::title_bar_rect(window, loc) {
+                if bar.to_f64().contains(pos) {
+                    let part = decoration::title_bar_part(bar, pos);
+                    return Some((window.clone(), Hit::Decoration(Decoration::TitleBar(part))));
+                }
             }
             decoration::border_edges(window, loc, pos)
                 .map(|edges| (window.clone(), Hit::Decoration(Decoration::Border(edges))))
@@ -555,7 +555,6 @@ impl Pila {
                 ..Default::default()
             };
         }
-        let (upper, lower) = self.layer_order();
         let now = self.animation_time();
         let (mut windows, ghosts) = self.scene_windows(now);
         let slide = self.scene_slide(now);
@@ -566,8 +565,8 @@ impl Pila {
                 }
             }
         }
-        let layers = |layers| {
-            self.layer_surfaces(layers)
+        let layers = |layers: Vec<(LayerSurface, Point<i32, Logical>)>| {
+            layers
                 .into_iter()
                 .map(|(layer, location)| SceneLayer {
                     blur: crate::blur::blur_rects(&layer),
@@ -578,7 +577,7 @@ impl Pila {
                 .collect()
         };
         Scene {
-            upper: layers(upper),
+            upper: layers(self.upper_layers()),
             layer_ghosts: self.scene_layer_ghosts(now),
             slide,
             snap_preview: self
@@ -586,7 +585,7 @@ impl Pila {
                 .map(|rect| (self.snap_preview_buffer.clone(), rect)),
             windows,
             ghosts,
-            lower: layers(lower),
+            lower: layers(self.lower_layers()),
             corner_radius: self.config.corner_radius,
             ..Default::default()
         }

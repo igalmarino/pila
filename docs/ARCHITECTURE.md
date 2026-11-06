@@ -233,7 +233,8 @@ Key flows and invariants:
   on a client's `wl_output` bind via `OutputHandler::output_bound`).
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
-  Background; a fullscreen window on top also covers Top (`layer_order`), unless a
+  Background; a fullscreen window on top of an output's windows also covers that output's Top
+  (`top_layer_covered`, `upper_layers`, `lower_layers`), unless a
   mapped Top surface takes the keyboard exclusively (`takes_keyboard`). All pointer
   hit testing goes through `Pila::under` (layers and windows in that order; `window_under`
   is windows only), and `Pila::scene` renders the same order. Placement, maximize and
@@ -466,10 +467,11 @@ Key flows and invariants:
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::host_pointer`); a DRM backend sends real relative motion through the same
   checks.
-- **X11** (`xwayland.rs`, `focus.rs`): if it dies (`XwmHandler::disconnected`) its windows go, nothing else gets its `DISPLAY`
-  and it's started again, at most `MAX_RESTARTS` times in `RESTART_WINDOW` (`xwayland_gone`). pila starts Xwayland at launch and runs Smithay's
+- **X11** (`xwayland.rs`, `focus.rs`): pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
-  waits for X (`pending_startup`). X11 windows are `Window::new_x11_window` in the same
+  waits for X (`pending_startup`). If it dies (`XwmHandler::disconnected`, `xwayland_gone`) its
+  windows go, nothing else gets its `DISPLAY` and it's started again, at most `MAX_RESTARTS`
+  times in `RESTART_WINDOW`. X11 windows are `Window::new_x11_window` in the same
   `Space`, so code that handles windows must not assume `window.toplevel()` is `Some`: use
   `wl_surface()`, `fill_state`, `close_window`, `focus_target`, and branch on
   `x11_surface()` where X11 differs. Keyboard focus is `focus::KeyboardFocus` (Wayland

@@ -163,6 +163,45 @@ fn layers_stack_around_windows() {
 }
 
 #[test]
+fn a_fullscreen_window_only_covers_the_top_layer_of_its_own_output() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    pila.move_to(1500.0, 300.0);
+    client.window("b").size(400, 300).color(RED).create();
+    let w = pila.wait_window("b");
+    assert_eq!(w["output"], "B");
+    let (x, y, ..) = rect(&w["geometry"]);
+    let (panel, _) = client.layer_surface(
+        "panel",
+        &LayerSpec {
+            layer: Layer::Top,
+            output: Some("B".into()),
+            anchor: Anchor::Top | Anchor::Left,
+            size: (100, 100),
+            margin: (y as i32, 0, 0, x as i32 - 1280),
+            ..LayerSpec::default()
+        },
+        BLUE,
+    );
+    client.wait_surface_configured(panel);
+    pila.settle();
+    assert_eq!(pila.pixel((x + 10) as f64, (y + 10) as f64), rgba(BLUE));
+
+    pila.move_to(300.0, 300.0);
+    client.window("a").size(400, 300).color(GREEN).create();
+    pila.wait_focus("a");
+    pila.combo("Super+f");
+    pila.wait("fullscreen", |s| {
+        window_in(s, "a").unwrap()["geometry"]["h"] == 800
+    });
+    pila.settle();
+    assert_eq!(pila.pixel((x + 10) as f64, (y + 10) as f64), rgba(BLUE));
+}
+
+#[test]
 fn an_exclusive_keyboard_layer_keeps_the_keyboard() {
     let mut pila = TestPila::start();
     let client = pila.client();
