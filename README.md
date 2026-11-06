@@ -23,8 +23,30 @@ develops it from inside itself), but so far tested on one machine: an AMD laptop
 is untested), distros and setups are exactly what testing is needed for: please
 [report](#reporting-bugs) what works and what doesn't.
 
-Known gaps: touchscreens, input methods (IME), several GPUs (pila uses the seat's primary
-one).
+Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs (pila uses the
+seat's primary one), blur behind windows (only behind panels and other layer surfaces).
+
+## Help test pila
+
+The biggest unknown is how pila behaves away from its author's laptop. Most useful right
+now, in this order:
+
+- **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs;
+- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building;
+- **display managers** other than GDM (SDDM, greetd, LightDM);
+- **monitors:** high refresh rates, 4K, mixed scales, several at once;
+- **other shells and apps:** bars, launchers, games, Steam, Electron.
+
+A short report helps even if everything works:
+
+1. [Try it nested first](#try-it-nested-first): it changes nothing on your system.
+   [Getting out](#getting-out) says how to leave a real session.
+2. For your real hardware, from a built checkout (`cargo build --release`), run `scripts/check`
+   on a spare TTY, which leaves your session running. It starts real programs for about 40
+   seconds, quits by itself and prints PASS or FAIL per check, with frame times. Its log is
+   `pila-tty.log`.
+3. Send a [test report](https://github.com/igalmarino/pila/issues/new?template=test_report.yml)
+   with what you tried and what worked, or a [bug report](#reporting-bugs) for what didn't.
 
 ## Features
 
@@ -244,6 +266,9 @@ Open an [issue](https://github.com/igalmarino/pila/issues/new/choose) with:
   terminal for nested. `RUST_LOG=debug` makes it detailed; after a crash,
   `RUST_BACKTRACE=1` adds where it happened;
 - your config file, if you have one, and the steps to reproduce.
+
+Look through logs and configs before posting them: they can hold window titles, commands,
+file paths and monitor details.
 
 Questions, ideas and "does X work with pila?" go to
 [Discussions](https://github.com/igalmarino/pila/discussions).

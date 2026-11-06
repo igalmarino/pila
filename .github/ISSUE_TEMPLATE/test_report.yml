@@ -1,0 +1,73 @@
+name: Test report
+description: How pila did on your machine, whether it worked or not
+labels: [test report]
+body:
+  - type: markdown
+    attributes:
+      value: Reports where everything worked are welcome. They show which setups are known to be good.
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall
+      options:
+        - Works, I could use it day to day
+        - Works, with problems (listed below)
+        - Doesn't start or isn't usable
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pila version
+      description: The output of `pila --version`.
+      placeholder: pila 0.2.1 (v0.2.1)
+    validations:
+      required: true
+  - type: dropdown
+    id: started
+    attributes:
+      label: How pila was started
+      multiple: true
+      options:
+        - Nested, in another desktop
+        - By hand on a TTY (scripts/tty or pila)
+        - Login session (display manager)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distro, init system and session
+      description: For example "Void, runit, seatd". Add the display manager if you used one.
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: '`lspci -k | grep -A3 VGA` shows them. For example "NVIDIA RTX 3060, nvidia 570".'
+    validations:
+      required: true
+  - type: input
+    id: monitors
+    attributes:
+      label: Monitors
+      description: Resolution, refresh rate and scale of each.
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: Shell or bar, apps, games, screen sharing, suspend, hotplug, ...
+    validations:
+      required: true
+  - type: textarea
+    id: problems
+    attributes:
+      label: What didn't work
+      description: In short; a separate bug report for anything serious helps.
+  - type: textarea
+    id: check
+    attributes:
+      label: scripts/check output
+      description: The PASS and FAIL lines, if you ran it on a TTY.
+      render: text
