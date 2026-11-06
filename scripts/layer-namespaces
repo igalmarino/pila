@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# List the namespaces of the layer surfaces (bars, launchers, notifications,
+# panels) your desktop tools open, to write `[[layer-rule]]` sections for them
+# (blur, animations). Run it from a TTY, like scripts/tty: it starts pila
+# there with what it says about layer rules in the log. Open what you want
+# a rule for (the bar, the launcher, a panel, a notification), quit pila with
+# Mod+Shift+E, and the namespaces are listed.
+#
+#   scripts/layer-namespaces [config.toml]
+#
+# With no argument, your own config (~/.config/pila/config.toml). The log is
+# pila-tty.log, as scripts/tty leaves it.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# What scripts/tty runs pila with, plus the rules' debug log.
+export RUST_LOG="${RUST_LOG:-info},pila::rules=debug"
+status=0
+scripts/tty "$@" || status=$?
+
+if [ ! -f pila-tty.log ]; then
+    exit "$status"
+fi
+namespaces="$(grep -o 'layer rules namespace="[^"]*"' pila-tty.log \
+    | sed 's/.*namespace="\(.*\)"/\1/' | sort -u || true)"
+echo
+if [ -z "$namespaces" ]; then
+    echo "No layer surface was seen. Was anything open (a bar, a launcher)?"
+    exit "$status"
+fi
+echo "Layer surfaces seen (namespace):"
+while IFS= read -r namespace; do
+    echo "  $namespace"
+done <<<"$namespaces"
+echo
+echo "A rule for one of them, in ~/.config/pila/config.toml:"
+echo
+echo "  [[layer-rule]]"
+echo "  namespace = \"$(head -n 1 <<<"$namespaces")\"   # or a pattern, e.g. \"noctalia-*\""
+echo "  blur = true"
+exit "$status"

@@ -114,7 +114,8 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --severity=warning --external-sources \
-            scripts/coverage scripts/dev scripts/install scripts/link-wayland scripts/tty \
+            scripts/coverage scripts/dev scripts/install scripts/layer-namespaces scripts/link-wayland \
+            scripts/tty \
             scripts/uninstall resources/session/pila-session \
             .devcontainer/post-start.sh .devcontainer/init-firewall.sh
       - name: Python scripts
