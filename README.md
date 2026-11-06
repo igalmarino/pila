@@ -32,7 +32,8 @@ The biggest unknown is how pila behaves away from its author's laptop. Most usef
 now, in this order:
 
 - **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs;
-- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building;
+- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building,
+  [NixOS](#nixos) among them;
 - **display managers** other than GDM (SDDM, greetd, LightDM);
 - **monitors:** high refresh rates, 4K, mixed scales, several at once;
 - **other shells and apps:** bars, launchers, games, Steam, Electron.
@@ -130,6 +131,25 @@ differ between releases):
 | Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev xwayland pkgconf` |
 
 Then `cargo build --release`.
+
+### NixOS
+
+These steps follow how nixpkgs packages niri, also on Smithay, but **pila hasn't been tried
+this way yet**: please [report](#help-test-pila) how it goes. It needs a nixpkgs with Rust 1.89
+or newer, and graphics drivers on the system (`hardware.graphics.enable = true`).
+
+```bash
+nix-shell -p cargo rustc pkg-config seatd libinput systemdLibs libgbm libxkbcommon libglvnd \
+    wayland xwayland
+export RUSTFLAGS="-C link-arg=-Wl,--push-state,--no-as-needed -C link-arg=-lEGL \
+    -C link-arg=-lwayland-client -C link-arg=-Wl,--pop-state"
+cargo build --release
+```
+
+`RUSTFLAGS` links `libEGL` and `libwayland-client`, which pila loads at runtime, so they're
+found outside the standard library paths. Run it from that shell, which has `Xwayland`: nested
+with `cargo run --release`, or from a TTY with `scripts/tty`. `scripts/install` isn't for NixOS:
+it writes to paths NixOS doesn't read its session entries from, and there's no NixOS module yet.
 
 ### Arch Linux (AUR)
 
