@@ -9,7 +9,7 @@ chmod 0700 "$runtime_dir"
 
 # Sanity checks for nested compositor development.
 if [ -S /run/host-wayland/wayland-0 ]; then
-    echo "OK: host Wayland socket mounted"
+    echo "OK: host Wayland socket mounted (sandboxed on pila: scripts/link-wayland)"
 else
     echo "WARNING: host Wayland socket not found at /run/host-wayland/wayland-0." >&2
     echo "         Start the container from inside your desktop session (pila or GNOME) so" >&2

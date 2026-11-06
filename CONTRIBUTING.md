@@ -170,7 +170,13 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
 
 - **`Cannot connect to Wayland display` / socket missing.** The host compositor restarted
   (you logged out and back in, or restarted pila), so its socket is new. Run any
-  `scripts/dev` command from the session to link it again (`scripts/link-wayland`).
+  `scripts/dev` command from the session to make it again (`scripts/link-wayland`).
+- **A tool in the container can't find a protocol of the host session.** On pila, the
+  container's socket is sandboxed through wp-security-context, as a Flatpak's is: no screen
+  capture, virtual keyboard, layer shell or the like, so that nothing in the container can
+  read the screen or type into your windows. Nested pila needs none of that, and tools run
+  inside it see all of its protocols. `PILA_DEV_PRIVILEGED=1 scripts/link-wayland` shares the
+  session's own socket instead, and everything in the container gets those powers.
 - **Nested pila opens on the wrong desktop.** The container uses the session `scripts/dev`
   last ran from. Run `scripts/dev` in a terminal of the session you want.
 - **`Permission denied` on the socket.** Your host UID isn't the one the container user got.

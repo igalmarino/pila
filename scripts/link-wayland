@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Point the dev container at the Wayland session this runs from (GNOME, or
-# pila on a TTY): hard-links that session's socket into a directory of its
-# own, which the container mounts as /run/host-wayland (see devcontainer.json).
-# Only that socket is shared, not the rest of $XDG_RUNTIME_DIR (D-Bus,
-# PipeWire, ...). A hard link, not a symlink, because the container can't
-# follow a link out of its mount. Run by devcontainer's initializeCommand and
-# by scripts/dev before every command, so it follows the current session; a
-# compositor that restarted makes a new socket, so run it again after that.
+# Give the dev container a Wayland socket for the session this runs from (GNOME,
+# or pila on a TTY), in a directory of its own, which the container mounts as
+# /run/host-wayland (see devcontainer.json). Only that socket is shared, not the
+# rest of $XDG_RUNTIME_DIR (D-Bus, PipeWire, ...).
+#
+# A plain connection to pila can capture the screen and type into any window,
+# so the container gets a wp-security-context socket instead, which hides that
+# (scripts/sandbox-socket, like Flatpak's). A compositor without that protocol
+# gets a hard link to its socket: GNOME, which has no such protocols to hide. A
+# hard link, not a symlink, because the container can't follow a link out of its
+# mount. PILA_DEV_PRIVILEGED=1 forces the hard link, also on pila.
+#
+# Run by devcontainer's initializeCommand and by scripts/dev before every
+# command, so it follows the current session; a compositor that restarted makes
+# a new socket, so run it again after that.
 set -euo pipefail
 
 : "${XDG_RUNTIME_DIR:?not set; run this from your desktop session}"
@@ -23,4 +30,30 @@ fi
 dir="$XDG_RUNTIME_DIR/pila-devcontainer"
 mkdir -p "$dir"
 chmod 700 "$dir"
+
+sandbox="$(dirname "$0")/sandbox-socket"
+if [ "${PILA_DEV_PRIVILEGED:-}" != 1 ]; then
+    if command -v python3 >/dev/null; then
+        status=0
+        "$sandbox" "$socket" "$dir/wayland-0" || status=$?
+        case "$status" in
+            0) exit 0 ;;
+            3) ;; # No wp-security-context: the hard link below.
+            *)
+                echo "link-wayland: couldn't make a sandboxed socket; see above." >&2
+                echo "PILA_DEV_PRIVILEGED=1 shares the session's own socket instead." >&2
+                exit 1
+                ;;
+        esac
+    elif [ "${XDG_CURRENT_DESKTOP:-}" = pila ]; then
+        echo "link-wayland: python3 not found (package python), and without it the" >&2
+        echo "container would get pila's own socket: screen capture and a virtual" >&2
+        echo "keyboard. Install it, or accept that with PILA_DEV_PRIVILEGED=1." >&2
+        exit 1
+    fi
+fi
+
+if command -v python3 >/dev/null; then
+    "$sandbox" --stop "$dir/wayland-0"
+fi
 ln -f "$socket" "$dir/wayland-0"

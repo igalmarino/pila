@@ -78,7 +78,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 
 | Feature | Tests |
 |---|---|
-| Globals offered; hidden from sandboxed clients | `surface_protocols::pila_offers_exactly_these_globals`, `surface_protocols::sandboxed_clients_dont_see_privileged_globals`, `outputs::binding_an_output_as_it_goes_away_doesnt_kill_the_client` |
+| Globals offered; hidden from sandboxed clients | `surface_protocols::pila_offers_exactly_these_globals`, `surface_protocols::sandboxed_clients_dont_see_privileged_globals`, `surface_protocols::the_dev_containers_socket_is_sandboxed`, `outputs::binding_an_output_as_it_goes_away_doesnt_kill_the_client` |
 | System bell | `surface_protocols::the_bell_flashes_the_window_that_rang`, `surface_protocols::a_bell_without_a_surface_flashes_the_focused_window`, `surface_protocols::a_subsurfaces_bell_flashes_its_window`, `render::the_bell_flash_lightens_the_window` |
 | Selections: clipboard, primary, data-control | `surface_protocols::the_clipboard_goes_from_one_client_to_another`, `surface_protocols::an_unfocused_client_gets_no_offer`, `surface_protocols::data_control_reads_and_sets_the_clipboard`, `surface_protocols::the_primary_selection_goes_between_clients` |
 | Output scale, fractional scale, viewporter | `surface_protocols::a_fractional_output_scale_reaches_the_window`, `surface_protocols::a_window_moved_to_another_output_gets_its_scale`, `surface_protocols::a_viewport_sets_the_window_size_and_single_pixel_buffers_fill_it` |

@@ -167,6 +167,50 @@ fn sandboxed_clients_dont_see_privileged_globals() {
     sandboxed.window("flatpak").create();
 }
 
+/// Run `scripts/sandbox-socket` for `pila`, making `listen`. `None` without
+/// a `python3`.
+fn sandbox_socket(pila: &TestPila, listen: &std::path::Path) -> Option<std::process::ExitStatus> {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/sandbox-socket");
+    let python = std::process::Command::new("python3")
+        .arg("--version")
+        .output();
+    python.ok().filter(|output| output.status.success())?;
+    Some(
+        std::process::Command::new(script)
+            .arg(pila.dir.join(&pila.display))
+            .arg(listen)
+            .status()
+            .unwrap(),
+    )
+}
+
+#[test]
+fn the_dev_containers_socket_is_sandboxed() {
+    let pila = TestPila::start();
+    let path = pila.dir.join("container");
+    let Some(status) = sandbox_socket(&pila, &path) else {
+        eprintln!("no python3: skipped");
+        return;
+    };
+    assert!(status.success(), "scripts/sandbox-socket: {status}");
+    let seen = interfaces(&Client::connect(&path));
+    for name in PRIVILEGED {
+        assert!(
+            !seen.contains(&name.to_string()),
+            "the container sees {name}"
+        );
+    }
+    assert!(seen.contains(&"xdg_wm_base".to_string()), "{seen:?}");
+
+    // Run again (every `scripts/dev` does): the socket stays, and so does a
+    // client on it.
+    let client = Client::connect(&path);
+    assert!(sandbox_socket(&pila, &path).unwrap().success());
+    client.roundtrip();
+    let seen = interfaces(&Client::connect(&path));
+    assert!(seen.contains(&"xdg_wm_base".to_string()), "{seen:?}");
+}
+
 // --- Bell -----------------------------------------------------------------------
 
 #[test]

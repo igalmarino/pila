@@ -21,7 +21,7 @@ if [ -z "${WAYLAND_DISPLAY:-}" ] || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 fi
 
 # The container reaches the session this runs from (GNOME or pila) through
-# a hard link to its Wayland socket; refresh it so it follows that session.
+# a socket of its own; refresh it so it follows that session.
 scripts/link-wayland
 
 up() { devcontainer up --workspace-folder . >/dev/null; }

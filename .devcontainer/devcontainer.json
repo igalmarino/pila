@@ -22,8 +22,10 @@
   ],
 
   "mounts": [
-    // Only the host compositor's Wayland socket, not the whole XDG_RUNTIME_DIR
-    // (which would also expose D-Bus, PipeWire, the keyring, ...).
+    // Only a Wayland socket to the host compositor, not the whole
+    // XDG_RUNTIME_DIR (which would also expose D-Bus, PipeWire, the keyring,
+    // ...). On pila it's sandboxed: no screen capture or virtual keyboard
+    // (scripts/link-wayland).
     "source=${localEnv:XDG_RUNTIME_DIR}/pila-devcontainer,target=/run/host-wayland,type=bind",
     // The pila login session's log (resources/session/pila-session), so Claude
     // can read it: /run/host-pila/pila.log and pila.log.old.
@@ -49,7 +51,7 @@
     "ENABLE_FIREWALL": "${localEnv:DEVCONTAINER_FIREWALL:1}"
   },
 
-  // Links the current session's Wayland socket into the mounted directory
+  // Makes a socket for the current session in the mounted directory
   // (scripts/link-wayland; scripts/dev refreshes it before every command), and
   // makes sure the log directory exists before Docker mounts it (a missing
   // bind source would be created as root).

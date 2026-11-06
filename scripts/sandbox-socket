@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Make a Wayland socket for the dev container that hides the compositor's
+privileged protocols (screen capture, virtual keyboard, layer shell, ...):
+wp-security-context, as Flatpak uses. A minimal client (standard library only).
+
+    scripts/sandbox-socket COMPOSITOR-SOCKET LISTEN-PATH
+    scripts/sandbox-socket --stop LISTEN-PATH
+
+It stays in the background while the compositor runs, holding the pipe that
+keeps the socket listening. Running it again keeps a socket that still works
+for that compositor, and replaces any other. Exits 0 once LISTEN-PATH is ready,
+3 if the compositor has no wp-security-context (GNOME) and 1 on an error.
+"""
+import os
+import signal
+import socket
+import stat
+import struct
+import sys
+
+NO_PROTOCOL = 3
+MANAGER_INTERFACE = "wp_security_context_manager_v1"
+DISPLAY, REGISTRY = 1, 2
+
+
+def holder_path(listen):
+    return listen + ".holder"
+
+
+def read_holder(listen):
+    """The pid of the holder of LISTEN-PATH and the compositor socket's inode."""
+    try:
+        with open(holder_path(listen)) as file:
+            pid, inode = file.read().split()
+        return int(pid), int(inode)
+    except (OSError, ValueError):
+        return None
+
+
+def running(pid):
+    """Whether `pid` is a holder, not another program that got its pid."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as file:
+            return b"sandbox-socket" in file.read()
+    except OSError:
+        return False
+
+
+def stop(listen):
+    holder = read_holder(listen)
+    if holder and running(holder[0]):
+        os.kill(holder[0], signal.SIGTERM)
+    try:
+        os.unlink(holder_path(listen))
+    except FileNotFoundError:
+        pass
+
+
+def still_good(listen, compositor_inode):
+    """Whether LISTEN-PATH is a live holder's, for this compositor, and answers."""
+    holder = read_holder(listen)
+    if not holder or holder[1] != compositor_inode or not running(holder[0]):
+        return False
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.connect(listen)
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+class Connection:
+    def __init__(self, path):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(path)
+        self.buf = b""
+
+    def send(self, obj, opcode, payload=b"", fds=()):
+        message = struct.pack("<II", obj, ((8 + len(payload)) << 16) | opcode) + payload
+        if fds:
+            socket.send_fds(self.sock, [message], list(fds))
+        else:
+            self.sock.sendall(message)
+
+    def events(self):
+        """The events the compositor sends, as (object, opcode, body)."""
+        while True:
+            while len(self.buf) >= 8:
+                obj, word = struct.unpack("<II", self.buf[:8])
+                size, opcode = word >> 16, word & 0xFFFF
+                if len(self.buf) < size:
+                    break
+                body, self.buf = self.buf[8:size], self.buf[size:]
+                yield obj, opcode, body
+            data = self.sock.recv(65536)
+            if not data:
+                return
+            self.buf += data
+
+    def sync(self, callback):
+        """Wait for the compositor to have handled everything sent so far."""
+        self.send(DISPLAY, 0, struct.pack("<I", callback))
+        for obj, opcode, body in self.events():
+            if obj == DISPLAY and opcode == 0:
+                sys.exit(f"sandbox-socket: protocol error: {body!r}")
+            if obj == callback:
+                return
+        sys.exit("sandbox-socket: the compositor closed the connection")
+
+
+def string(text):
+    data = text.encode() + b"\0"
+    pad = (4 - len(data) % 4) % 4
+    return struct.pack("<I", len(data)) + data + b"\0" * pad
+
+
+def find_manager(connection):
+    """The registry name of the manager, or `None`."""
+    connection.send(DISPLAY, 1, struct.pack("<I", REGISTRY))  # get_registry
+    callback = 3
+    connection.send(DISPLAY, 0, struct.pack("<I", callback))  # sync
+    found = None
+    for obj, opcode, body in connection.events():
+        if obj == REGISTRY and opcode == 0:
+            name, length = struct.unpack("<II", body[:8])
+            if body[8 : 8 + length - 1].decode() == MANAGER_INTERFACE:
+                found = name
+        if obj == callback:
+            return found
+    sys.exit("sandbox-socket: the compositor closed the connection")
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    if sys.argv[1] == "--stop":
+        stop(sys.argv[2])
+        return
+    compositor, listen = sys.argv[1:]
+
+    inode = os.stat(compositor).st_ino
+    if still_good(listen, inode):
+        return
+    connection = Connection(compositor)
+    manager_name = find_manager(connection)
+    if manager_name is None:
+        sys.exit(NO_PROTOCOL)
+
+    stop(listen)
+    # A hard link left by another session, or a socket nothing listens on.
+    # (Unlinking one that's still used doesn't touch its clients.)
+    try:
+        os.unlink(listen)
+    except FileNotFoundError:
+        pass
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    old_umask = os.umask(0o177)
+    listener.bind(listen)
+    os.umask(old_umask)
+    listener.listen()
+    listen_inode = os.stat(listen).st_ino
+    close_read, close_write = os.pipe()
+
+    manager, context = 4, 5
+    connection.send(
+        REGISTRY,
+        0,
+        struct.pack("<I", manager_name)
+        + string(MANAGER_INTERFACE)
+        + struct.pack("<II", 1, manager),
+    )
+    connection.send(
+        manager, 1, struct.pack("<I", context), fds=(listener.fileno(), close_read)
+    )
+    connection.send(context, 1, string("org.pila.devcontainer"))  # set_sandbox_engine
+    connection.send(context, 2, string("org.pila.devcontainer"))  # set_app_id
+    connection.send(context, 3, string(str(os.getpid())))  # set_instance_id
+    connection.send(context, 4)  # commit
+    connection.sync(6)
+    os.close(close_read)
+    listener.close()
+
+    # The rest is in the background, off the terminal and whatever captures
+    # this program's output. Ready once the holder is known, so that running
+    # this again right away finds it.
+    ready_read, ready_write = os.pipe()
+    if os.fork():
+        os.close(ready_write)
+        os.read(ready_read, 1)
+        os._exit(0)
+    os.close(ready_read)
+    os.setsid()
+    devnull = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(devnull, fd)
+    os.close(devnull)
+    temporary = holder_path(listen) + ".tmp"
+    with open(temporary, "w") as file:
+        file.write(f"{os.getpid()} {inode}\n")
+    os.replace(temporary, holder_path(listen))
+    os.close(ready_write)
+
+    def finish(*_):
+        # Only ours: `scripts/link-wayland` may have put another one there.
+        try:
+            if os.stat(listen).st_ino == listen_inode and stat.S_ISSOCK(
+                os.stat(listen).st_mode
+            ):
+                os.unlink(listen)
+        except OSError:
+            pass
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, finish)
+    # Until the compositor goes away. `close_write` stays open until then.
+    for _ in connection.events():
+        pass
+    os.close(close_write)
+    finish()
+
+
+if __name__ == "__main__":
+    main()
