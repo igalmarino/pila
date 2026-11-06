@@ -1,5 +1,7 @@
 # Lint, test and build pila, check the minimum Rust version, build it on
-# other distros with the packages README.md lists, and check the scripts.
+# other distros with the packages README.md lists, check the scripts and look
+# up the dependencies in the RustSec advisory database. Actions are pinned by
+# commit, so a moved tag can't change what runs here.
 name: CI
 
 on:
@@ -11,6 +13,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Read-only: nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   arch:
     name: Arch (fmt, clippy, test, staged install)
@@ -21,10 +27,10 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git rust gcc pkgconf \
             seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
@@ -48,13 +54,13 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git rustup gcc pkgconf \
             seatd libinput systemd-libs mesa libxkbcommon
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Toolchain from rust-version
         run: |
           msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)"
           rustup toolchain install "$msrv" --profile minimal
           rustup default "$msrv"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo build --locked
 
   distros:
@@ -88,13 +94,13 @@ jobs:
     steps:
       - name: Packages
         run: ${{ matrix.install }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Rust (rustup, stable)
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: ${{ matrix.image }}
       - run: cargo build --locked
@@ -104,10 +110,24 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: shellcheck
         run: |
           shellcheck --severity=warning --external-sources \
             scripts/coverage scripts/dev scripts/install scripts/link-wayland scripts/tty \
             scripts/uninstall resources/session/pila-session \
             .devcontainer/post-start.sh .devcontainer/init-firewall.sh
+      - name: Python scripts
+        run: |
+          python3 -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' \
+            scripts/sandbox-socket scripts/toplevel-action scripts/workspace-action
+
+  audit:
+    name: Dependencies (cargo audit)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: pacman -Syu --noconfirm --needed git rust cargo-audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: cargo audit
