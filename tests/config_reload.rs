@@ -42,6 +42,31 @@ fn an_invalid_file_at_startup_is_notified() {
 }
 
 #[test]
+fn a_missing_notify_send_is_logged_once() {
+    let mut pila = TestPila::start_with(Options {
+        env: vec![("PATH".into(), "/nonexistent".into())],
+        ..Default::default()
+    });
+    // Whatever level the log is at: a session's has no debug lines.
+    let warning = "WARN pila::config_reload: can't run notify-send";
+    pila.write_config("workspaces = = 6\n");
+    pila.wait_log(warning);
+    pila.write_config("workspaces = = 7\n");
+    let reloads = |log: &str| log.matches("config not reloaded").count();
+    let started = std::time::Instant::now();
+    while reloads(&pila.log()) < 2 {
+        assert!(started.elapsed() < common::TIMEOUT, "{}", pila.log_tail());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        pila.log().matches(warning).count(),
+        1,
+        "{}",
+        pila.log_tail()
+    );
+}
+
+#[test]
 fn a_syntax_error_keeps_the_running_config() {
     let mut pila = TestPila::with_config("workspaces = 2\n");
     pila.write_config("workspaces = = 6\n");

@@ -347,3 +347,100 @@ fn scripts_check_gives_a_verdict_on_a_log_that_stops_early() {
     assert!(stdout.contains("Some checks failed"), "{stdout}");
     assert_eq!(out.status.code(), Some(1), "{stdout}");
 }
+
+/// A copy of `pila-session` next to a fake pila running `body`, with no real
+/// system log: (the session script, the directory it logs to).
+fn session_copy(name: &str, body: &str) -> (Command, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("pila-session-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = dir.join("pila-session");
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/session/pila-session"
+        ),
+        &script,
+    )
+    .unwrap();
+    for (path, text) in [
+        // Only the session's run does anything: see `wait_until_executable`.
+        (
+            dir.join("pila"),
+            format!("#!/bin/sh\n[ \"$1\" = --backend ] || exit 0\n{body}\n"),
+        ),
+        (
+            bin.join("systemd-cat"),
+            "#!/bin/sh\nexec cat >/dev/null\n".to_string(),
+        ),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_executable(&path);
+    }
+    let mut command = Command::new("bash");
+    command
+        .arg(&script)
+        .env(
+            "PATH",
+            format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .env("XDG_STATE_HOME", dir.join("state"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    (command, dir.join("state/pila"))
+}
+
+/// Wait for `text` in the session log; whether it came in time.
+fn session_log_has(log: &std::path::Path, text: &str, timeout: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if std::fs::read(log).is_ok_and(|log| String::from_utf8_lossy(&log).contains(text)) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
+#[test]
+fn the_session_log_is_written_as_it_happens() {
+    let (mut command, dir) = session_copy("live", "echo the first line >&2\nexec sleep 30");
+    let mut session = command.spawn().unwrap();
+    // While the session runs, or a crash that takes the logger along loses it.
+    let written = session_log_has(
+        &dir.join("pila.log"),
+        "the first line",
+        std::time::Duration::from_secs(5),
+    );
+    session.kill().unwrap();
+    session.wait().unwrap();
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap());
+    assert!(written, "the log is held back in a buffer");
+}
+
+#[test]
+fn the_session_log_stops_at_its_limit() {
+    const LIMIT: u64 = 50 * 1024 * 1024;
+    let (mut command, dir) = session_copy(
+        "limit",
+        &format!(
+            "yes \"$(printf %1000s)\" | head -c {} >&2",
+            LIMIT + 1024 * 1024
+        ),
+    );
+    assert!(command.status().unwrap().success());
+    let log = dir.join("pila.log");
+    let said = session_log_has(
+        &log,
+        "the rest is only in the system log",
+        std::time::Duration::from_secs(30),
+    );
+    let size = std::fs::metadata(&log).unwrap().len();
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap());
+    assert!(said, "no word of the limit in a log of {size} bytes");
+    assert!((LIMIT..LIMIT + 4096).contains(&size), "{size} bytes");
+}

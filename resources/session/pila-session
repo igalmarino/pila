@@ -51,11 +51,19 @@ syslog() {
 }
 
 # Writes the log file, up to a size (clients chatty over a long session
-# would fill the disk), then keeps reading so pila's stderr never breaks.
+# would fill the disk), then keeps reading so pila's stderr never breaks. Each
+# line reaches the file at once: cat doesn't buffer (head does, and loses what
+# it holds if it's killed), and the size limit stops it where a read-and-count
+# loop in bash could hold pila back. Ignoring the limit's signal means no core
+# dump from cat, which just exits.
 log_limit=$((50 * 1024 * 1024))
 logfile() {
     {
-        head -c "$log_limit"
+        (
+            trap '' XFSZ
+            ulimit -f $((log_limit / 1024)) || true
+            exec cat
+        ) 2>/dev/null || true
         echo
         echo "pila-session: $1 reached $log_limit bytes; the rest is only in the system log"
         cat >/dev/null

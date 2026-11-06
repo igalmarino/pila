@@ -12,7 +12,8 @@
 //! scale). `autostart` only runs at startup.
 
 use std::{
-    ffi::OsString, mem::MaybeUninit, os::unix::ffi::OsStrExt, process::Command, time::Duration,
+    ffi::OsString, mem::MaybeUninit, os::unix::ffi::OsStrExt, process::Command, sync::Once,
+    time::Duration,
 };
 
 use smithay::{
@@ -27,7 +28,7 @@ use smithay::{
         rustix::{fs::inotify, io::Errno},
     },
 };
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::{config::Config, Pila};
 
@@ -231,7 +232,8 @@ impl Pila {
     }
 
     /// A desktop notification (through `notify-send`, if there's a
-    /// notification daemon such as mako); also in the log.
+    /// notification daemon such as mako); also in the log. Without
+    /// `notify-send` they silently don't show, so the log says why, once.
     pub(crate) fn notify(&mut self, summary: &str, body: &str) {
         info!(summary, body, "notification");
         let mut cmd = Command::new("notify-send");
@@ -242,7 +244,15 @@ impl Pila {
         self.session_env(&mut cmd);
         match cmd.spawn() {
             Ok(child) => self.adopt_child(child),
-            Err(err) => debug!(?err, "no notify-send"),
+            Err(err) => {
+                static WARNED: Once = Once::new();
+                WARNED.call_once(|| {
+                    warn!(
+                        ?err,
+                        "can't run notify-send: no desktop notifications (package libnotify)"
+                    )
+                });
+            }
         }
     }
 }
