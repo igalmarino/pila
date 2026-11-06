@@ -365,6 +365,11 @@ impl TestPila {
         std::fs::rename(&tmp, &self.config_path).unwrap();
     }
 
+    /// The process id of this pila.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Connect a synthetic client.
     pub fn client(&self) -> Client {
         Client::connect(&self.dir.join(&self.display))

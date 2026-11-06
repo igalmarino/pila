@@ -10,6 +10,8 @@ use common::session_protocol::{
     xdg_session_v1::XdgSessionV1, xdg_toplevel_session_v1::XdgToplevelSessionV1,
 };
 use common::*;
+use serde_json::Value;
+use std::time::Duration;
 
 /// Centered on 1280x800: (1280 - 400) / 2, (800 - 300 - 28) / 2 + 28.
 const CENTER: (i64, i64, i64, i64) = (440, 264, 400, 300);
@@ -519,6 +521,129 @@ fn sessions_are_saved_soon_and_only_for_the_user() {
     assert!(text.contains(&id), "{text}");
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
+}
+
+/// The toplevels of session `id` in the saved file, once it has `until`.
+fn saved_toplevels(pila: &TestPila, id: &str, until: &str) -> usize {
+    let path = pila.dir.join("state/pila/sessions.json");
+    let started = std::time::Instant::now();
+    loop {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        if text.contains(until) {
+            let saved: Value = serde_json::from_str(&text).unwrap();
+            return saved[id]["toplevels"].as_object().unwrap().len();
+        }
+        assert!(started.elapsed() < TIMEOUT, "{until} never saved: {text}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_session_keeps_a_limited_number_of_toplevels() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let session = client.session(None, "session");
+    let id = client.session_id("session");
+    // Windows that go away leave their state behind.
+    for i in 0..140 {
+        let window = add(&client, &session, &format!("w{i}"));
+        client.roundtrip();
+        client.destroy(window);
+    }
+    client.roundtrip();
+    pila.settle();
+    assert!(saved_toplevels(&pila, &id, "w139") <= 128);
+}
+
+#[test]
+fn a_toplevel_name_has_a_limited_length() {
+    let pila = TestPila::start();
+    let client = pila.client();
+    let session = client.session(None, "session");
+    client.session_id("session");
+    client.expect_error();
+    add(&client, &session, &"x".repeat(1000));
+    assert!(
+        client.wait_error().contains("xdg_session_v1"),
+        "{:?}",
+        client.error()
+    );
+    drop(pila);
+}
+
+#[test]
+fn a_client_has_a_limited_number_of_sessions_in_use() {
+    let pila = TestPila::start();
+    let client = pila.client();
+    let mut live = Vec::new();
+    for i in 0..32 {
+        let tag = format!("s{i}");
+        live.push(client.session(None, &tag));
+        client.session_id(&tag);
+    }
+    // One too many is inert: it never becomes a session.
+    client.session(None, "extra");
+    client.roundtrip();
+    client.roundtrip();
+    assert!(client.logged("extra").is_empty());
+    drop(pila);
+}
+
+#[test]
+fn empty_sessions_are_forgotten_before_ones_with_windows() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let session = client.session(None, "session");
+    let id = client.session_id("session");
+    add(&client, &session, "main");
+    pila.wait_focus("a");
+    client.roundtrip();
+    session.destroy();
+    client.flush();
+    // More than fit, none with a window: they push each other out.
+    for i in 0..300 {
+        let tag = format!("s{i}");
+        let other = client.session(None, &tag);
+        client.session_id(&tag);
+        other.destroy();
+    }
+    client.flush();
+    let last = client.session_id("s299");
+    client.roundtrip();
+    assert_eq!(saved_toplevels(&pila, &id, &last), 1);
+}
+
+#[test]
+fn a_second_pila_on_the_same_state_leaves_the_file_alone() {
+    let state = StateDir::new("second");
+    let mut first = state.start_pila();
+    let client = first.client();
+    let session = client.session(None, "session");
+    let id = client.session_id("session");
+    add(&client, &session, "main");
+    first.wait_focus("a");
+    let path = state.0.join("pila/sessions.json");
+    let started = std::time::Instant::now();
+    while !std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .contains(&id)
+    {
+        assert!(started.elapsed() < TIMEOUT, "the first pila never saved");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let mut second = state.start_pila();
+    second.wait_log("sessions won't be saved");
+    let other = second.client();
+    other.session(None, "other");
+    let other_id = other.session_id("other");
+    other.roundtrip();
+    second.settle();
+    // Its own one-second delay, had it been saving.
+    std::thread::sleep(Duration::from_millis(1300));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains(&id), "{text}");
+    assert!(!text.contains(&other_id), "{text}");
 }
 
 #[test]

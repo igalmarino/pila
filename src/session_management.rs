@@ -19,8 +19,10 @@
 //! Sessions are saved in `$XDG_STATE_HOME/pila/sessions.json`, by a thread, a
 //! second after the last change and at exit; never on the event loop. Nested,
 //! they stay in memory (`load_and_persist`), so that a pila on the side leaves
-//! the login session's alone. At most `MAX_SESSIONS`: the least recently used
-//! not in use go.
+//! the login session's alone, and so they do in a second pila on the same state
+//! (`take_sessions_lock`; `scripts/tty`). At most `MAX_SESSIONS`: the least
+//! recently used not in use go, empty ones first. What a client can leave there
+//! is bounded (`MAX_TOPLEVELS`, `MAX_NAME_BYTES`, `MAX_CLIENT_SESSIONS`).
 //!
 //! It only touches the client's own windows, and a session id is secret and
 //! unguessable, so sandboxed apps get it too (no `is_privileged`). X11 windows
@@ -50,7 +52,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Size},
     wayland::shell::xdg::ToplevelSurface,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     session_protocol::{
@@ -65,6 +67,12 @@ use crate::{
 
 const VERSION: u32 = 1;
 const MAX_SESSIONS: usize = 256;
+/// The saved state a client can leave behind is bounded, since it's on disk
+/// and a sandboxed app may ask for it: toplevels per session, the bytes of
+/// their names, and sessions a client can have in use at once.
+const MAX_TOPLEVELS: usize = 128;
+const MAX_NAME_BYTES: usize = 256;
+const MAX_CLIENT_SESSIONS: usize = 32;
 /// How long after a change sessions are saved.
 const SAVE_DELAY: Duration = Duration::from_secs(1);
 
@@ -118,6 +126,8 @@ struct Tracked {
 struct Writer {
     texts: Sender<String>,
     thread: JoinHandle<()>,
+    /// Held while this pila saves (`take_sessions_lock`).
+    _lock: Option<std::fs::File>,
 }
 
 /// Create the global. Called once from `Pila::new`.
@@ -152,6 +162,30 @@ fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
     std::fs::rename(&temporary, path)
+}
+
+/// Only one pila at a time saves sessions (`scripts/tty` runs one next to the
+/// login session's): the lock on a file next to them, held until it exits, or
+/// `None` if another pila has it.
+fn take_sessions_lock(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    use smithay::reexports::rustix::{
+        fs::{flock, FlockOperation},
+        io::Errno,
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path.with_extension("lock"))?;
+    match flock(&file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => Ok(Some(file)),
+        Err(Errno::WOULDBLOCK) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// 128 random bits, in hex.
@@ -203,6 +237,18 @@ impl SessionManagement {
             Err(err) => warn!(?path, %err, "can't read the sessions file"),
         }
         debug!(sessions = self.sessions.len(), "sessions loaded");
+        let lock = match take_sessions_lock(&path) {
+            Ok(Some(lock)) => Some(lock),
+            Ok(None) => {
+                info!("another pila saves the sessions: this one's sessions won't be saved");
+                return;
+            }
+            // A filesystem that can't lock: saving matters more.
+            Err(err) => {
+                warn!(?path, %err, "can't lock the sessions file");
+                None
+            }
+        };
         let (texts, received) = mpsc::channel::<String>();
         let thread = std::thread::Builder::new()
             .name("pila-sessions".into())
@@ -217,7 +263,13 @@ impl SessionManagement {
                 }
             });
         match thread {
-            Ok(thread) => self.writer = Some(Writer { texts, thread }),
+            Ok(thread) => {
+                self.writer = Some(Writer {
+                    texts,
+                    thread,
+                    _lock: lock,
+                })
+            }
             Err(err) => warn!(%err, "no thread to save the sessions"),
         }
     }
@@ -235,14 +287,15 @@ impl SessionManagement {
         }
     }
 
-    /// Make room for a new session.
+    /// Make room for a new session: the least recently used not in use, those
+    /// with no windows to restore first.
     fn evict(&mut self) {
         while self.sessions.len() >= MAX_SESSIONS {
             let oldest = self
                 .sessions
                 .iter()
                 .filter(|(_, session)| session.owner.is_none())
-                .min_by_key(|(_, session)| session.last_used)
+                .min_by_key(|(_, session)| (!session.toplevels.is_empty(), session.last_used))
                 .map(|(id, _)| id.clone());
             let Some(oldest) = oldest else {
                 return;
@@ -250,6 +303,43 @@ impl SessionManagement {
             debug!(session = oldest, "forgetting the oldest session");
             self.sessions.remove(&oldest);
         }
+    }
+
+    /// Make room for toplevel `name` in session `id`: one no window is using
+    /// goes if it's full. Whether it can go in.
+    fn room_for_toplevel(&mut self, id: &str, name: &str) -> bool {
+        let tracked = &self.tracked;
+        let Some(session) = self.sessions.get_mut(id) else {
+            return false;
+        };
+        if session.toplevels.len() < MAX_TOPLEVELS || session.toplevels.contains_key(name) {
+            return true;
+        }
+        let unused = session
+            .toplevels
+            .keys()
+            .filter(|known| !tracked.iter().any(|t| t.session == id && t.name == **known))
+            .min()
+            .cloned();
+        match unused {
+            Some(unused) => {
+                debug!(session = id, toplevel = unused, "forgetting a toplevel");
+                session.toplevels.remove(&unused);
+                true
+            }
+            None => {
+                debug!(session = id, "a session with too many toplevels");
+                false
+            }
+        }
+    }
+
+    /// The sessions `client` has in use.
+    fn client_sessions(&self, client: &Client) -> usize {
+        self.sessions
+            .values()
+            .filter(|s| s.owner.as_ref().and_then(|o| o.client()).as_ref() == Some(client))
+            .count()
     }
 
     /// The session `object` uses; `None` if it's inert.
@@ -291,7 +381,7 @@ impl Pila {
         if self.session_management.save_scheduled {
             self.session_management.save();
         }
-        if let Some(Writer { texts, thread }) = self.session_management.writer.take() {
+        if let Some(Writer { texts, thread, .. }) = self.session_management.writer.take() {
             drop(texts);
             let _ = thread.join();
         }
@@ -437,6 +527,13 @@ impl Pila {
             session.post_error(xdg_session_v1::Error::InvalidName, "an empty toplevel name");
             return false;
         }
+        if name.len() > MAX_NAME_BYTES {
+            session.post_error(
+                xdg_session_v1::Error::InvalidName,
+                "a too long toplevel name",
+            );
+            return false;
+        }
         if sessions.tracked_for(toplevel.wl_surface()).is_some() {
             session.post_error(
                 xdg_session_v1::Error::AlreadyAdded,
@@ -519,6 +616,10 @@ impl Dispatch<XdgSessionManagerV1, ()> for Pila {
         if session_id.is_empty() {
             return;
         }
+        if state.session_management.client_sessions(client) >= MAX_CLIENT_SESSIONS {
+            debug!("a client with too many sessions: this one is inert");
+            return;
+        }
         if is_known {
             let owner = state.session_management.sessions[&session_id].owner.clone();
             if let Some(owner) = owner {
@@ -592,6 +693,9 @@ impl Dispatch<XdgSessionV1, String> for Pila {
                     );
                     return;
                 }
+                if !sessions.room_for_toplevel(id, &name) {
+                    return;
+                }
                 if let Some(owned) = sessions.owned_by(session, id) {
                     owned.toplevels.insert(name.clone(), Saved::default());
                 }
@@ -625,6 +729,9 @@ impl Dispatch<XdgSessionV1, String> for Pila {
                     return;
                 }
                 let sessions = &mut state.session_management;
+                if !sessions.room_for_toplevel(id, &name) {
+                    return;
+                }
                 let Some(owned) = sessions.owned_by(session, id) else {
                     return;
                 };
@@ -691,6 +798,15 @@ impl Dispatch<XdgToplevelSessionV1, ()> for Pila {
             return;
         };
         if name == tracked.name {
+            return;
+        }
+        if name.len() > MAX_NAME_BYTES {
+            if let Some(owner) = &session.owner {
+                owner.post_error(
+                    xdg_session_v1::Error::InvalidName,
+                    "a too long toplevel name",
+                );
+            }
             return;
         }
         if session.toplevels.contains_key(&name) {
