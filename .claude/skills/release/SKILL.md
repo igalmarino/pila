@@ -14,7 +14,8 @@ description: How to cut a pila release and maintain the Arch package (PKGBUILD, 
    passes.
 4. A commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`).
 
-The user publishes it to the AUR. The Nix flake (`flake.nix`) takes its version from
+Pushing that commit starts `aur.yml`, which publishes it to the AUR once the user approves it in
+GitHub (the `aur` environment). The Nix flake (`flake.nix`) takes its version from
 `Cargo.toml` and needs nothing.
 
 # Arch package
@@ -26,5 +27,5 @@ The user publishes it to the AUR. The Nix flake (`flake.nix`) takes its version 
 - Keep `depends` in step with the libraries pila links (`readelf -d`) and README's package
   table.
 - Regenerate `.SRCINFO` (`makepkg --printsrcinfo`) after editing the `PKGBUILD`.
-
-The user publishes it to the AUR.
+- Committing them to `main` starts `aur.yml`: it checks that `.SRCINFO` matches and, once the user
+  approves it, publishes them. Its key is the `aur` environment's `AUR_SSH_KEY`.

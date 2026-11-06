@@ -203,14 +203,8 @@ makepkg -si
 To update it, `git pull` there and run `makepkg -si` again. Its `PKGBUILD` is kept in
 `packaging/aur/pila-git`, where `makepkg -si` builds it too. Remove a hand install first
 (`scripts/uninstall`). To publish a new version of the AUR package, regenerate `.SRCINFO`
-and copy both files into the AUR repository:
-
-```bash
-makepkg --printsrcinfo > .SRCINFO
-git clone ssh://aur@aur.archlinux.org/pila-git.git /tmp/aur-pila-git
-cp PKGBUILD .SRCINFO /tmp/aur-pila-git/
-cd /tmp/aur-pila-git && git add PKGBUILD .SRCINFO && git commit -m "Update" && git push
-```
+(`makepkg --printsrcinfo > .SRCINFO`) and commit both files: a workflow (`aur.yml`) checks them
+and, once the maintainer approves it, publishes them.
 
 A `-git` package only needs updating when the `PKGBUILD` changes (dependencies, files);
 `makepkg` picks up new commits by itself.
