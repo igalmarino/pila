@@ -650,9 +650,20 @@ impl Pila {
             focused: focused == Some(window),
             hover: hovered.filter(|(w, _)| w == window).map(|(_, part)| *part),
         });
+        let render_location = loc - window.geometry().loc;
+        let frame = bar_rect.map_or(Rectangle::new(loc, window.geometry().size), |bar| {
+            bar.merge(Rectangle::new(loc, window.geometry().size))
+        });
+        let opaque = alpha >= 1.0 && crate::blur::is_opaque(window);
         Some(SceneWindow {
             window: window.clone(),
-            render_location: loc - window.geometry().loc,
+            render_location,
+            blur: if opaque {
+                Vec::new()
+            } else {
+                crate::blur::window_blur_rects(window, render_location, frame)
+            },
+            opaque,
             title_bar,
             flash: crate::bell::flash(window, loc),
             rounding,

@@ -82,7 +82,7 @@ impl Rounding {
 
     /// `rect` relative to an output at `origin`, in physical pixels, and the
     /// radius scaled to match.
-    fn physical(&self, origin: Point<i32, Logical>, scale: Scale<f64>) -> PhysicalShape {
+    pub(crate) fn physical(&self, origin: Point<i32, Logical>, scale: Scale<f64>) -> PhysicalShape {
         PhysicalShape {
             rect: Rectangle::new(self.rect.loc - origin, self.rect.size)
                 .to_physical_precise_round(scale),
@@ -93,9 +93,9 @@ impl Rounding {
 
 /// A rounded rect in an output's physical coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct PhysicalShape {
-    rect: Rectangle<i32, Physical>,
-    radius: f32,
+pub(crate) struct PhysicalShape {
+    pub rect: Rectangle<i32, Physical>,
+    pub radius: f32,
 }
 
 impl PhysicalShape {
@@ -148,7 +148,7 @@ fn without_corners(
 /// a rounded corner, anti-aliased over a physical pixel. `p` and `size` are
 /// in physical pixels; `radii` are top-left, top-right, bottom-right,
 /// bottom-left. Outside the rect it's 1: clipping stops at the geometry.
-const ROUNDING_FN: &str = "
+pub(crate) const ROUNDING_FN: &str = "
 float rounding_alpha(vec2 p, vec2 size, vec4 radii) {
     float r;
     vec2 center;

@@ -1,12 +1,13 @@
 //! What's drawn, by pixels: title bars (focused or not, buttons on hover),
 //! rounded corners with a bar and when maximized, the bell flash, the snap
-//! preview, blur behind layer surfaces.
+//! preview, blur behind layer surfaces and windows.
 
 mod common;
 
-use common::client::Decorations;
+use common::client::{Decorations, Window};
 use common::protocols::{LayerSpec, Surf};
 use common::*;
+use std::time::Duration;
 use wayland_client::protocol::{wl_compositor::WlCompositor, wl_surface::WlSurface};
 use wayland_protocols::ext::background_effect::v1::client::{
     ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1,
@@ -158,6 +159,22 @@ fn the_snap_preview_is_drawn_while_dragging_to_an_edge() {
 /// Two Bottom layers, red on the left half and green on the right; a
 /// transparent Top layer of 200x200 across the middle, named `namespace`.
 fn halves_and_a_glass(pila: &mut TestPila, client: &Client, namespace: &str) {
+    two_halves(client);
+    let (glass, _) = client.layer_surface(
+        namespace,
+        &LayerSpec {
+            layer: Layer::Top,
+            size: (200, 200),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    pila.settle();
+}
+
+/// A red left half and a green right half of a 1280x800 output, below windows.
+fn two_halves(client: &Client) {
     for (name, anchor, color) in [
         (
             "left",
@@ -182,17 +199,6 @@ fn halves_and_a_glass(pila: &mut TestPila, client: &Client, namespace: &str) {
         );
         client.wait_surface_configured(surf);
     }
-    let (glass, _) = client.layer_surface(
-        namespace,
-        &LayerSpec {
-            layer: Layer::Top,
-            size: (200, 200),
-            ..LayerSpec::default()
-        },
-        [0, 0, 0, 0],
-    );
-    client.wait_surface_configured(glass);
-    pila.settle();
 }
 
 #[test]
@@ -412,7 +418,16 @@ fn set_blur_region(
     glass: Surf,
     rects: &[(i32, i32, i32, i32)],
 ) -> (WlSurface, ExtBackgroundEffectSurfaceV1) {
-    let surface = client.wl_surface_of(glass);
+    set_blur_region_of(pila, client, client.wl_surface_of(glass), rects)
+}
+
+/// `set_blur_region` on a surface of any kind.
+fn set_blur_region_of(
+    pila: &mut TestPila,
+    client: &Client,
+    surface: WlSurface,
+    rects: &[(i32, i32, i32, i32)],
+) -> (WlSurface, ExtBackgroundEffectSurfaceV1) {
     let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
     let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
     reshape_blur(pila, client, &surface, &effect, rects);
@@ -616,4 +631,381 @@ fn a_blur_keeps_to_the_clients_region_on_a_scaled_output() {
     );
     wait_mixed(&mut pila, 318.0, 200.0);
     assert_eq!(pila.pixel(318.0, 105.0), [255, 0, 0, 255]);
+}
+
+/// A rule for a 200x200 window with no title bar, at `x`,`y`; `rest` are more
+/// lines of it.
+fn glass_window_rule(x: i32, y: i32, rest: &str) -> String {
+    format!(
+        "[[window-rule]]\napp-id = \"glass\"\ntitle-bar = false\nsize = [200, 200]\n\
+         position = [{x}, {y}]\n{rest}\n"
+    )
+}
+
+/// The red and green halves and, over the edge between them at `x`,`y`, a
+/// clear window `glass`.
+fn halves_and_a_glass_window(pila: &mut TestPila, client: &Client) -> Window {
+    two_halves(client);
+    let window = client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.settle();
+    window
+}
+
+const CLEAR: [u8; 4] = [255, 0, 0, 255];
+
+#[test]
+fn a_blur_rule_blurs_whats_behind_a_window() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    wait_mixed(&mut pila, 636.0, 400.0);
+    // Outside it: sharp.
+    assert_eq!(pila.pixel(636.0, 100.0), CLEAR);
+}
+
+#[test]
+fn without_blur_a_clear_window_is_clear() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, ""));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    assert_eq!(pila.pixel(636.0, 400.0), CLEAR);
+    assert_eq!(pila.state()["blur"]["entries"], 0);
+}
+
+#[test]
+fn a_window_can_ask_for_blur_behind_a_region() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, ""));
+    let client = pila.client();
+    let window = halves_and_a_glass_window(&mut pila, &client);
+    // Only its upper half.
+    set_blur_region_of(
+        &mut pila,
+        &client,
+        client.surface(window),
+        &[(0, 0, 200, 100)],
+    );
+    wait_mixed(&mut pila, 636.0, 350.0);
+    assert_eq!(pila.pixel(636.0, 450.0), CLEAR);
+}
+
+#[test]
+fn a_rule_can_refuse_a_window_its_blur() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = false"));
+    let client = pila.client();
+    let window = halves_and_a_glass_window(&mut pila, &client);
+    set_blur_region_of(
+        &mut pila,
+        &client,
+        client.surface(window),
+        &[(0, 0, 200, 200)],
+    );
+    assert_eq!(pila.pixel(636.0, 400.0), CLEAR);
+    assert_eq!(pila.state()["blur"]["entries"], 0);
+}
+
+#[test]
+fn a_reload_takes_a_windows_blur_away() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    wait_mixed(&mut pila, 636.0, 400.0);
+    pila.write_config(&glass_window_rule(540, 300, ""));
+    pila.wait_log("config reloaded");
+    pila.wait_pixel(636.0, 400.0, CLEAR);
+    pila.wait("no backdrop kept", |s| s["blur"]["entries"] == 0);
+}
+
+#[test]
+fn an_opaque_window_needs_no_backdrop() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    two_halves(&client);
+    client.window("glass").color(BLUE).create();
+    pila.wait_focus("glass");
+    let state = pila.settle();
+    assert_eq!(state["blur"]["allocated"], 0);
+}
+
+#[test]
+fn an_opaque_window_at_half_opacity_has_a_backdrop() {
+    let mut pila =
+        TestPila::with_config(&glass_window_rule(540, 300, "blur = true\nopacity = 0.5"));
+    let client = pila.client();
+    two_halves(&client);
+    client.window("glass").color(BLUE).create();
+    pila.wait_focus("glass");
+    let state = pila.settle();
+    assert_eq!(state["blur"]["entries"], 1);
+}
+
+#[test]
+fn opacity_doesnt_fade_a_windows_backdrop() {
+    let blurred = |rule: &str| {
+        let mut pila = TestPila::with_config(&glass_window_rule(540, 300, rule));
+        let client = pila.client();
+        halves_and_a_glass_window(&mut pila, &client);
+        wait_mixed(&mut pila, 636.0, 400.0);
+        pila.settle();
+        pila.pixel(636.0, 400.0)
+    };
+    let whole = blurred("blur = true");
+    let half = blurred("blur = true\nopacity = 0.5");
+    assert!(near(whole, half, 3), "{whole:?} and {half:?}");
+}
+
+#[test]
+fn a_windows_backdrop_has_its_rounded_corners() {
+    // The edge between the halves runs through the corners: of its left side,
+    // over red, with the window almost all right of the edge...
+    let radius = "corner-radius = 20\nblur = true";
+    let mut pila = TestPila::with_config(&glass_window_rule(638, 300, radius));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    wait_mixed(&mut pila, 639.0, 400.0);
+    pila.settle();
+    assert_eq!(pila.pixel(639.0, 301.0), CLEAR, "top left");
+    assert_eq!(pila.pixel(639.0, 498.0), CLEAR, "bottom left");
+    assert!(mixed(pila.pixel(639.0, 330.0)), "below the corner");
+    drop(pila);
+    // ... and of its right side, with the window just right of it, over green.
+    let mut pila = TestPila::with_config(&glass_window_rule(442, 300, radius));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    wait_mixed(&mut pila, 641.0, 400.0);
+    pila.settle();
+    let green = [0, 255, 0, 255];
+    assert_eq!(pila.pixel(641.0, 301.0), green, "top right");
+    assert_eq!(pila.pixel(641.0, 498.0), green, "bottom right");
+}
+
+#[test]
+fn a_rounded_backdrop_cut_off_by_the_output_keeps_the_right_corners() {
+    // Off the bottom of the output, where its corners aren't.
+    let radius = "corner-radius = 20\nblur = true";
+    let mut pila = TestPila::with_config(&glass_window_rule(638, 700, radius));
+    let client = pila.client();
+    two_halves(&client);
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    let (_, y, ..) = rect(&pila.window("glass")["geometry"]);
+    if y != 700 {
+        eprintln!("placed at {y}, not off the output: skipped");
+        return;
+    }
+    wait_mixed(&mut pila, 639.0, 790.0);
+    pila.settle();
+    assert_eq!(pila.pixel(639.0, 701.0), CLEAR, "the top left corner");
+    assert!(mixed(pila.pixel(639.0, 799.0)), "the output's edge");
+}
+
+#[test]
+fn a_windows_backdrop_follows_it_and_whats_behind_it() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    wait_mixed(&mut pila, 636.0, 400.0);
+    // Dragged all the way onto the green half: no red left in it.
+    pila.move_to(640.0, 400.0);
+    pila.key_press("Super");
+    pila.press("left");
+    pila.move_by(300.0, 0.0);
+    pila.release("left");
+    pila.key_release("Super");
+    pila.wait_pixel(636.0, 400.0, CLEAR);
+    wait_near(&mut pila, 936.0, 400.0, [0, 255, 0, 255]);
+}
+
+#[test]
+fn a_window_behind_a_blur_shows_and_goes() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    two_halves(&client);
+    let behind = client.window("behind").maximized().color(BLUE).create();
+    pila.wait_focus("behind");
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.settle();
+    wait_near(&mut pila, 636.0, 400.0, [0, 0, 255, 255]);
+    client.destroy(behind);
+    wait_mixed(&mut pila, 636.0, 400.0);
+}
+
+#[test]
+fn a_window_seen_through_a_blur_keeps_its_frame_rate() {
+    let mut pila = TestPila::with_config(&format!(
+        "{}\n[[window-rule]]\napp-id = \"glass\"\nblur = true\n",
+        "[[window-rule]]\napp-id = \"glass\"\ntitle-bar = false\n"
+    ));
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    client
+        .window("glass")
+        .fullscreen()
+        .color([0, 0, 0, 0])
+        .create();
+    pila.wait("the glass", |s| {
+        window_in(s, "glass").is_some_and(|w| rect(&w["geometry"]) == (0, 0, 1280, 800))
+    });
+    pila.settle();
+    let surface = client.surface(window);
+    let started = std::time::Instant::now();
+    let mut done = 0;
+    while started.elapsed() < Duration::from_millis(1000) {
+        let tag = format!("frame{done}");
+        let _frame = surface.frame(&client.qh, tag.clone());
+        client.draw(window, None);
+        client.wait_logged(&tag, "Done");
+        done += 1;
+    }
+    // Hidden, it would be about one a second.
+    assert!(done >= 10, "{done} frame callbacks in 1 s");
+}
+
+#[test]
+fn nothing_is_blurred_under_an_opaque_window() {
+    let mut pila = TestPila::with_config(&glass_window_rule(540, 300, "blur = true"));
+    let client = pila.client();
+    two_halves(&client);
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    wait_mixed(&mut pila, 636.0, 400.0);
+    client.window("cover").fullscreen().color(BLUE).create();
+    pila.wait_focus("cover");
+    let blurred = pila.settle()["blur"]["blurred"].as_u64().unwrap();
+    let cover = client.window("wiggle").size(100, 100).color(BLUE).create();
+    pila.settle();
+    client.destroy(cover);
+    let state = pila.settle();
+    assert_eq!(state["blur"]["blurred"].as_u64().unwrap(), blurred);
+    // Kept for when it shows again.
+    assert_eq!(state["blur"]["entries"], 1);
+}
+
+#[test]
+fn stacked_blurs_keep_what_each_has_behind() {
+    let rules = format!(
+        "{}[[window-rule]]\napp-id = \"front\"\ntitle-bar = false\nsize = [200, 200]\n\
+         position = [540, 300]\nblur = true\n{GLASS_RULE}",
+        glass_window_rule(540, 300, "blur = true"),
+    );
+    let mut pila = TestPila::with_config(&rules);
+    let client = pila.client();
+    halves_and_a_glass_window(&mut pila, &client);
+    client.window("front").color([0, 0, 0, 0]).create();
+    pila.wait_focus("front");
+    let (glass, _) = client.layer_surface(
+        "glass",
+        &LayerSpec {
+            layer: Layer::Top,
+            size: (200, 200),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    pila.wait("three backdrops", |s| s["blur"]["entries"] == 3);
+    wait_mixed(&mut pila, 636.0, 400.0);
+}
+
+#[test]
+fn a_blurred_window_across_two_outputs_has_a_backdrop_on_each() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        config: glass_window_rule(1180, 300, "blur = true"),
+        ..Default::default()
+    });
+    let client = pila.client();
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.wait("two backdrops", |s| s["blur"]["entries"] == 2);
+}
+
+/// Read the row of pixels at `y` until `done`; whether one was a mix of red and
+/// green, past the first frames: those can still be of before the change. A whole
+/// row in one request: what's mixed may be moving.
+fn was_mixed(pila: &mut TestPila, y: f64, done: impl Fn(&mut TestPila) -> bool) -> bool {
+    let started = std::time::Instant::now();
+    let mut seen = false;
+    while !done(pila) {
+        assert!(started.elapsed() < TIMEOUT, "it never ended");
+        if started.elapsed() > Duration::from_millis(100) {
+            let row = pila.request(json!({ "cmd": "pixels", "x": 0, "y": y, "w": 1280, "h": 1 }));
+            let row: Vec<u8> = row["rgba"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap() as u8)
+                .collect();
+            seen |= row.as_chunks::<4>().0.iter().any(|px| mixed(*px));
+        }
+    }
+    seen
+}
+
+const SLOW: &str = "[animations]\nenabled = true\nspeed = 4\n";
+
+#[test]
+fn a_blurred_window_opens_with_its_backdrop() {
+    let mut pila = TestPila::with_config(&format!(
+        "{SLOW}{}",
+        glass_window_rule(540, 300, "blur = true")
+    ));
+    let client = pila.client();
+    two_halves(&client);
+    pila.settle();
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait("animating", |s| {
+        window_in(s, "glass").is_some_and(|w| w["animating"] == true)
+    });
+    let seen = was_mixed(&mut pila, 400.0, |pila| {
+        pila.state()["animations"]["running"] == false
+    });
+    assert!(seen, "no blur while it opened");
+    wait_mixed(&mut pila, 636.0, 400.0);
+}
+
+#[test]
+fn a_blurred_window_closes_with_its_backdrop() {
+    let mut pila = TestPila::with_config(&format!(
+        "{SLOW}{}",
+        glass_window_rule(540, 300, "blur = true")
+    ));
+    let client = pila.client();
+    two_halves(&client);
+    let window = client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.settle();
+    wait_mixed(&mut pila, 636.0, 400.0);
+    client.destroy(window);
+    pila.wait("no window", |s| window_in(s, "glass").is_none());
+    let seen = was_mixed(&mut pila, 400.0, |pila| {
+        pila.state()["animations"]["running"] == false
+    });
+    assert!(seen, "no blur while it closed");
+    pila.wait_pixel(636.0, 400.0, CLEAR);
+}
+
+#[test]
+fn a_blurred_window_slides_away_with_its_backdrop() {
+    let mut pila = TestPila::with_config(&format!(
+        "{SLOW}{}",
+        glass_window_rule(540, 300, "blur = true")
+    ));
+    let client = pila.client();
+    two_halves(&client);
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.settle();
+    wait_mixed(&mut pila, 636.0, 400.0);
+    pila.combo("Super+2");
+    let seen = was_mixed(&mut pila, 400.0, |pila| {
+        pila.state()["animations"]["running"] == false
+    });
+    assert!(seen, "no blur while it slid");
+    pila.wait_pixel(636.0, 400.0, CLEAR);
+    pila.combo("Super+1");
+    pila.settle();
+    wait_mixed(&mut pila, 636.0, 400.0);
 }

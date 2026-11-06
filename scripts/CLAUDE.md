@@ -2,7 +2,7 @@
 
 `scripts/check` drives a real pila with real programs (a terminal, xterm, fuzzel, grim,
 Noctalia if installed: windows opening and closing, minimize, maximize, workspace switches, a
-launcher, a capture) and judges the log: the scenarios finished without a panic, animations
+launcher, a capture, a blurred window) and judges the log: the scenarios finished without a panic, animations
 ran (`starts` on `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a
 picture, monitors were identified from their EDID (bare metal), and the frame statistics (no
 missed refresh, CPU per frame on average within 4 ms). It prints PASS/FAIL per check and exits

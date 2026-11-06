@@ -389,6 +389,62 @@ fn screencopy_of_a_region_has_its_blurred_backdrop_in_place() {
 }
 
 #[test]
+fn a_blurred_window_has_its_backdrop_in_a_capture_of_the_screen_only() {
+    let mut pila = TestPila::with_config(
+        "[[window-rule]]\napp-id = \"glass\"\nblur = true\ntitle-bar = false\n\
+         size = [200, 200]\nposition = [540, 300]\n",
+    );
+    let client = pila.client();
+    for (name, anchor, color) in [
+        ("left", Anchor::Left, [255, 255, 0, 0]),
+        ("right", Anchor::Right, [255, 0, 255, 0]),
+    ] {
+        let (surf, _) = client.layer_surface(
+            name,
+            &LayerSpec {
+                layer: Layer::Bottom,
+                anchor: Anchor::Top | Anchor::Bottom | anchor,
+                size: (640, 0),
+                ..LayerSpec::default()
+            },
+            color,
+        );
+        client.wait_surface_configured(surf);
+    }
+    client.window("glass").color([0, 0, 0, 0]).create();
+    pila.wait_focus("glass");
+    pila.settle();
+    pila.wait_pixel_is(636.0, 400.0, "blurred", |[r, g, ..]| r > 20 && g > 20);
+    // The whole screen has it, as drawn: a region of it, here.
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output_region(
+        0,
+        &client.output("HEADLESS-1"),
+        540,
+        300,
+        200,
+        200,
+        &client.qh,
+        "copy".into(),
+    );
+    client.flush();
+    client.wait_logged("copy", "BufferDone");
+    let (buffer, file) = client.capture_buffer((200, 200), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("copy", "Ready");
+    let [r, g, _] = read_pixel(&file, 200, 96, 100);
+    assert!(r > 20 && g > 20, "not blurred: {r},{g}");
+    // A capture of the window alone doesn't: it's clear there.
+    let source = window_source(&client, "glass");
+    let (session, size) = session(&client, &source, "session");
+    let (_frame, file) = capture(&client, &session, size, "frame");
+    client.wait_logged("frame", "Ready");
+    let [r, g, _] = read_pixel(&file, size.0, 96, 100);
+    assert!(r < 20 && g < 20, "what's behind it: {r},{g}");
+}
+
+#[test]
 fn screencopy_with_damage_starts_over_when_the_scale_changes() {
     let mut pila = TestPila::start();
     let client = pila.client();

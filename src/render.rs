@@ -87,9 +87,33 @@ uniform float tint;
     )
 }
 
-/// The blurred backdrop to draw behind a surface, if it has one, at an opacity
-/// (`blur.rs`).
-pub type Backdrop<'a> = &'a mut dyn FnMut(&WlSurface, f32) -> Option<PilaRenderElement>;
+/// The blurred backdrop to draw behind a surface, if it has one (`blur.rs`):
+/// relative to a global point, at a scale and an opacity.
+pub type Backdrop<'a> = &'a mut dyn FnMut(
+    &WlSurface,
+    Point<i32, Logical>,
+    Scale<f64>,
+    f32,
+) -> Option<PilaRenderElement>;
+
+/// A surface of the scene whose backdrop is being prepared: what's behind it is
+/// what the backdrop shows.
+#[derive(Debug, Clone, Copy)]
+pub enum Behind {
+    /// The upper layer surface at this index of `Scene::upper`.
+    Layer(usize),
+    /// The window at this index of `Scene::windows`.
+    Window(usize),
+}
+
+/// Where in the scene to start drawing from (it's drawn front to back).
+#[derive(Clone, Copy)]
+enum Start {
+    /// The upper layer surface at this index of `Scene::upper`.
+    Upper(usize),
+    /// The window at this index of `Scene::windows`, with the ghosts behind it.
+    Window(usize),
+}
 
 /// Behind all windows and layer surfaces.
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -161,6 +185,10 @@ pub struct SceneWindow {
     /// Where the window's surface tree is drawn (geometry origin minus the
     /// geometry offset), in space coordinates.
     pub render_location: Point<i32, Logical>,
+    /// Where the screen behind it is blurred, in space coordinates (`blur.rs`).
+    pub blur: Vec<Rectangle<i32, Logical>>,
+    /// Nothing behind its geometry shows through (`blur::is_opaque`).
+    pub opaque: bool,
     pub title_bar: Option<SceneTitleBar>,
     /// The bell's flash over the window and its title bar (`bell.rs`).
     pub flash: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
@@ -199,6 +227,13 @@ impl SceneWindow {
         rect
     }
 
+    /// What it hides for certain, in space coordinates: nothing while it's
+    /// drawn through a texture, or with corners that let things through.
+    pub fn covers(&self) -> Option<Rectangle<i32, Logical>> {
+        let plain = self.effect.is_none() && self.slid.is_none() && self.rounding.is_none();
+        (self.opaque && plain).then(|| self.frame_rect())
+    }
+
     /// Its geometry plus title bar: what animations scale about.
     fn frame_rect(&self) -> Rectangle<i32, Logical> {
         let geo = Rectangle::new(
@@ -227,30 +262,42 @@ pub fn scene_elements(
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
-    scene_elements_from(renderer, scene, output_location, scale, backdrop, 0)
+    scene_elements_from(
+        renderer,
+        scene,
+        output_location,
+        scale,
+        backdrop,
+        Start::Upper(0),
+    )
 }
 
-/// What's behind the upper layer surface at `index`: the upper layers below
-/// it and everything else, relative to `origin`.
-pub fn elements_behind_layer(
+/// What's behind a surface of the scene, relative to `origin`. A workspace
+/// slide doesn't move what's behind a window: its backdrop is for where it will
+/// be, and goes with it.
+pub fn elements_behind(
     renderer: &mut GlesRenderer,
     scene: &Scene,
-    index: usize,
+    surface: Behind,
     origin: Point<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
-    scene_elements_from(renderer, scene, origin, scale, backdrop, index + 1)
+    let start = match surface {
+        Behind::Layer(index) => Start::Upper(index + 1),
+        Behind::Window(index) => Start::Window(index + 1),
+    };
+    scene_elements_from(renderer, scene, origin, scale, backdrop, start)
 }
 
-/// `scene_elements` starting from the upper layer at `first_upper`.
+/// `scene_elements` from `start`.
 fn scene_elements_from(
     renderer: &mut GlesRenderer,
     scene: &Scene,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
-    first_upper: usize,
+    start: Start,
 ) -> Vec<PilaRenderElement> {
     if scene.locked {
         return scene
@@ -271,55 +318,87 @@ fn scene_elements_from(
             .collect();
     }
     let mut elements = Vec::new();
-    if first_upper == 0 {
-        elements.extend(
-            scene
-                .layer_ghosts
+    match start {
+        Start::Upper(first_upper) => {
+            if first_upper == 0 {
+                elements.extend(
+                    scene
+                        .layer_ghosts
+                        .iter()
+                        .map(|ghost| ghost_element(ghost, output_location, scale)),
+                );
+            }
+            for entry in scene.upper.iter().skip(first_upper) {
+                elements.extend(layer_elements(
+                    renderer,
+                    std::slice::from_ref(entry),
+                    output_location,
+                    scale,
+                ));
+                // Right behind the surface (elements go front to back).
+                elements.extend(backdrop(
+                    entry.layer.wl_surface(),
+                    output_location,
+                    scale,
+                    entry.alpha(),
+                ));
+            }
+            if let Some((buffer, rect)) = &scene.snap_preview {
+                let radius =
+                    Rounding::new(*rect, None, scene.corner_radius, false).map(|r| r.radius);
+                elements.push(solid_element(
+                    renderer,
+                    buffer,
+                    rect.loc - output_location,
+                    radius,
+                    1.0,
+                    scale,
+                ));
+            }
+            match scene
+                .slide
+                .as_ref()
+                .and_then(|slide| Some((slide, slide.output_rect(output_location)?)))
+            {
+                Some((slide, rect)) => elements.extend(slide_elements(
+                    renderer,
+                    &scene.windows,
+                    &scene.ghosts,
+                    slide,
+                    rect,
+                    scale,
+                    backdrop,
+                )),
+                None => elements.extend(window_elements(
+                    renderer,
+                    &scene.windows,
+                    &scene.ghosts,
+                    output_location,
+                    scale,
+                    backdrop,
+                )),
+            }
+        }
+        Start::Window(first) => {
+            // A ghost `before` a window is in front of it.
+            let ghosts: Vec<SceneGhost> = scene
+                .ghosts
                 .iter()
-                .map(|ghost| ghost_element(ghost, output_location, scale)),
-        );
-    }
-    for entry in scene.upper.iter().skip(first_upper) {
-        elements.extend(layer_elements(
-            renderer,
-            std::slice::from_ref(entry),
-            output_location,
-            scale,
-        ));
-        // Right behind the surface (elements go front to back).
-        elements.extend(backdrop(entry.layer.wl_surface(), entry.alpha()));
-    }
-    if let Some((buffer, rect)) = &scene.snap_preview {
-        let radius = Rounding::new(*rect, None, scene.corner_radius, false).map(|r| r.radius);
-        elements.push(solid_element(
-            renderer,
-            buffer,
-            rect.loc - output_location,
-            radius,
-            1.0,
-            scale,
-        ));
-    }
-    match scene
-        .slide
-        .as_ref()
-        .and_then(|slide| Some((slide, slide.output_rect(output_location)?)))
-    {
-        Some((slide, rect)) => elements.extend(slide_elements(
-            renderer,
-            &scene.windows,
-            &scene.ghosts,
-            slide,
-            rect,
-            scale,
-        )),
-        None => elements.extend(window_elements(
-            renderer,
-            &scene.windows,
-            &scene.ghosts,
-            output_location,
-            scale,
-        )),
+                .filter(|ghost| ghost.before >= first)
+                .map(|ghost| SceneGhost {
+                    before: ghost.before - first,
+                    ..ghost.clone()
+                })
+                .collect();
+            elements.extend(window_elements(
+                renderer,
+                &scene.windows[first..],
+                &ghosts,
+                output_location,
+                scale,
+                backdrop,
+            ));
+        }
     }
     elements.extend(layer_elements(
         renderer,
@@ -406,6 +485,7 @@ fn window_elements(
     ghosts: &[SceneGhost],
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
     let shaders = windows
         .iter()
@@ -429,6 +509,7 @@ fn window_elements(
                 shaders.as_ref(),
                 output_location,
                 scale,
+                &mut *backdrop,
             )),
             None => elements.extend(single_window_elements(
                 renderer,
@@ -437,6 +518,7 @@ fn window_elements(
                 Surfaces::Tree,
                 output_location,
                 scale,
+                &mut *backdrop,
             )),
         }
     }
@@ -456,7 +538,8 @@ pub enum Surfaces {
 }
 
 /// One window's elements (front to back): its flash, surfaces and popups,
-/// then its title bar.
+/// its title bar, then its blurred backdrop, which is part of it wherever it's
+/// drawn (a texture that animates, or a slide).
 fn single_window_elements(
     renderer: &mut GlesRenderer,
     entry: &SceneWindow,
@@ -464,6 +547,7 @@ fn single_window_elements(
     surfaces: Surfaces,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
     let mut elements = Vec::new();
     let rounding = entry.rounding.as_ref().filter(|_| shaders.is_some());
@@ -533,6 +617,12 @@ fn single_window_elements(
             entry.alpha,
             scale,
         ));
+    }
+    if !entry.blur.is_empty() {
+        if let Some(surface) = entry.window.wl_surface() {
+            // Whole whatever its opacity: that's of what it draws.
+            elements.extend(backdrop(&surface, output_location, scale, 1.0));
+        }
     }
     elements
 }
@@ -637,6 +727,7 @@ impl OffscreenWindow {
 pub fn warm_up(renderer: &mut GlesRenderer) {
     let start = std::time::Instant::now();
     let _ = rounded::Shaders::get(renderer);
+    let _ = crate::blur::Shaders::get(renderer);
     let scale = Scale::from(1.0);
     if let Some(mut target) = OffscreenWindow::new(renderer, (1, 1).into(), scale) {
         let buffer = SolidColorBuffer::new((1, 1), [0.0, 0.0, 0.0, 1.0]);
@@ -745,13 +836,14 @@ fn animated_window_element(
     shaders: Option<&rounded::Shaders>,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
     // Hidden for now (a snapshot stands in while its client resizes).
     if effect.transform.alpha <= 0.0 {
         return Vec::new();
     }
     let mut draw = |r: &mut GlesRenderer, origin, s| {
-        single_window_elements(r, entry, shaders, Surfaces::Tree, origin, s)
+        single_window_elements(r, entry, shaders, Surfaces::Tree, origin, s, &mut *backdrop)
     };
     let user_data = entry.window.user_data();
     match animated_element(
@@ -779,6 +871,7 @@ fn slide_elements(
     slide: &SceneSlide,
     rect: Rectangle<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
     let carried_index = windows
         .iter()
@@ -799,7 +892,7 @@ fn slide_elements(
             ..ghost.clone()
         })
         .collect();
-    let mut elements = window_elements(renderer, &carried, &[], rect.loc, scale);
+    let mut elements = window_elements(renderer, &carried, &[], rect.loc, scale, &mut *backdrop);
 
     let new = {
         let mut textures = slide.textures.borrow_mut();
@@ -814,7 +907,8 @@ fn slide_elements(
         };
         index.and_then(|index| {
             let target = &mut textures[index].1;
-            let windows = window_elements(renderer, &moving, &ghosts, rect.loc, scale);
+            let windows =
+                window_elements(renderer, &moving, &ghosts, rect.loc, scale, &mut *backdrop);
             // An empty workspace draws nothing: the texture is just cleared.
             target
                 .draw(renderer, &windows)
@@ -827,7 +921,9 @@ fn slide_elements(
     match new {
         Some(buffer) => elements.extend(slid_texture(&buffer, rect, new_offset, scale)),
         // No texture: the new windows as usual, unmoved.
-        None => elements.extend(window_elements(renderer, &moving, &ghosts, rect.loc, scale)),
+        None => elements.extend(window_elements(
+            renderer, &moving, &ghosts, rect.loc, scale, backdrop,
+        )),
     }
     if let Some(old) = slide.old_buffer(rect) {
         elements.extend(slid_texture(old, rect, old_offset, scale));
@@ -885,10 +981,11 @@ pub fn snapshot_windows(
     slide: Option<&SceneSlide>,
     rect: Rectangle<i32, Logical>,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Option<TextureRenderBuffer<GlesTexture>> {
     let elements = match slide.filter(|slide| slide.output_rect(rect.loc).is_some()) {
-        Some(slide) => slide_elements(renderer, windows, ghosts, slide, rect, scale),
-        None => window_elements(renderer, windows, ghosts, rect.loc, scale),
+        Some(slide) => slide_elements(renderer, windows, ghosts, slide, rect, scale, backdrop),
+        None => window_elements(renderer, windows, ghosts, rect.loc, scale, backdrop),
     };
     let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
     target.draw(renderer, &elements).then_some(target.buffer)
@@ -939,6 +1036,7 @@ pub fn snapshot_window(
     entry: &SceneWindow,
     surfaces: Surfaces,
     scale: Scale<f64>,
+    backdrop: Backdrop<'_>,
 ) -> Option<Snapshot> {
     let rect = entry.content_rect();
     let shaders = entry
@@ -950,8 +1048,15 @@ pub fn snapshot_window(
     if entry.window.geometry().is_empty() {
         return None;
     }
-    let elements =
-        single_window_elements(renderer, entry, shaders.as_ref(), surfaces, rect.loc, scale);
+    let elements = single_window_elements(
+        renderer,
+        entry,
+        shaders.as_ref(),
+        surfaces,
+        rect.loc,
+        scale,
+        backdrop,
+    );
     snapshot(
         renderer,
         rect,
@@ -1157,9 +1262,15 @@ pub fn output_elements(
         output_geo.size,
         scale,
     );
-    scene_elements(renderer, scene, origin, scale, &mut |surface, alpha| {
-        blur.element(surface, output_name, origin, scale, alpha)
-    })
+    scene_elements(
+        renderer,
+        scene,
+        origin,
+        scale,
+        &mut |surface, origin, scale, alpha| {
+            blur.element(surface, output_name, origin, scale, alpha)
+        },
+    )
 }
 
 /// A renderer error, as it's logged.

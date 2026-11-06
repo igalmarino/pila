@@ -104,15 +104,16 @@ impl Pila {
             .outputs()
             .filter_map(|output| {
                 let rect = self.space.output_geometry(output)?;
-                Some((rect, crate::scale::output_scale(output)))
+                Some((rect, crate::scale::output_scale(output), output.name()))
             })
             .collect();
-        let Some(renderer) = self.backend.as_mut().map(|b| b.renderer()) else {
+        let Pila { backend, blur, .. } = self;
+        let Some(renderer) = backend.as_mut().map(|b| b.renderer()) else {
             return;
         };
         let old: Vec<_> = outputs
             .into_iter()
-            .filter_map(|(rect, scale)| {
+            .filter_map(|(rect, scale, name)| {
                 let buffer = render::snapshot_windows(
                     renderer,
                     &windows,
@@ -120,6 +121,9 @@ impl Pila {
                     running.as_ref(),
                     rect,
                     scale,
+                    &mut |surface, origin, scale, alpha| {
+                        blur.element(surface, &name, origin, scale, alpha)
+                    },
                 );
                 if buffer.is_none() {
                     debug!(?rect, "no picture of an output's windows; no slide there");

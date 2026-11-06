@@ -2,7 +2,7 @@
 # Bare-metal smoke and performance run: real programs (a terminal, xterm, a
 # launcher, Noctalia, grim) drive a real pila (udev on a TTY, or nested)
 # through windows opening and closing, minimize, maximize, workspace
-# switches and a capture, while pila logs its frame statistics. The checks
+# switches, a capture and a blurred window, while pila logs its frame statistics. The checks
 # (PASS/FAIL, exit status 1 if any failed): the scenarios finished without
 # a panic, animations ran, Noctalia's surfaces follow a layer rule, grim got
 # a picture, and the performance pillar holds (no missed refresh, CPU per
@@ -25,7 +25,7 @@
 # PILA_BIN runs another binary than target/release/pila, such as an installed
 # one or Nix's result/bin/pila, for what's run from a checkout anyway.
 #
-# pila quits by itself when the scenarios are done (about 40 seconds). On a
+# pila quits by itself when the scenarios are done (about a minute). On a
 # TTY the base is your config (~/.config/pila/config.toml: monitors,
 # keyboard, input) without its [animations] and rules, so that what the
 # checks expect doesn't depend on them: animations on, their own rules.
@@ -150,6 +150,38 @@ if [ "${1:-}" = "--workload" ]; then
             sleep 1
             mark "workspace end"
         fi
+
+        # A large blurred window over a terminal that never stops writing: its
+        # backdrop is blurred anew all the time.
+        case "$terminal" in
+            kitty) glass=(kitty --override background_opacity=0.7 --class pila-check-glass) ;;
+            # Foot says which of these two names of the setting it doesn't
+            # know, and goes on.
+            foot) glass=(foot --override colors.alpha=0.7 --override colors-dark.alpha=0.7
+                --app-id=pila-check-glass) ;;
+            *) glass=() ;;
+        esac
+        if [ "${#glass[@]}" -gt 0 ]; then
+            mark "blur begin"
+            run_terminal sh -c 'while :; do date; done' &
+            behind=$!
+            sleep 1
+            "${glass[@]}" sleep 8 &
+            held=$!
+            sleep 3
+            if command -v python3 >/dev/null; then
+                python3 -I scripts/workspace-action 2 >/dev/null
+                sleep 1
+                python3 -I scripts/workspace-action 1 >/dev/null
+                sleep 1
+            fi
+            sleep 1
+            stop "$held" "$behind"
+            sleep 1
+            mark "blur end"
+        else
+            mark "blur skip (no kitty or foot)"
+        fi
     fi
 
     if command -v fuzzel >/dev/null; then
@@ -244,6 +276,11 @@ if ! $judge_only; then
     [[layer-rule]]
     namespace = "noctalia-*"
     animations = false
+
+    [[window-rule]]
+    app-id = "pila-check-glass"
+    size = [1000, 700]
+    blur = true
 EOF
     export PILA_CHECK_CONFIG="$config"
     # Where pila's log goes, for the workload to read (absolute: the
@@ -253,9 +290,9 @@ EOF
     else
         export PILA_CHECK_LOG="$PWD/pila-tty.log"
     fi
-    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug"
+    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug"
 
-    echo "Runs pila with scripted scenarios for about 40 seconds; it quits by itself."
+    echo "Runs pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
     workload="$PWD/scripts/check --workload"
     if $nested; then
@@ -346,6 +383,10 @@ n=$(grep -c 'starts what="' "$log" || true)
 if ran capture; then
     s=$(section capture)
     has "$s" "grim captures the screen" "check: capture ok"
+fi
+if ran blur; then
+    s=$(section blur)
+    has "$s" "a window rule gives a translucent window a backdrop" "blur: allocated"
 fi
 if ran noctalia; then
     s=$(section noctalia)

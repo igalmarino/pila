@@ -215,6 +215,9 @@ tap = true
 # opacity = 0.95                   # 0.1 to 1, title bar included
 #                                  # (only lowers what the app draws: a translucent
 #                                  # terminal stays so with opacity = 1)
+# blur = true                      # blur what's seen through it, title bar
+#                                  # included (false: never; unset: where the
+#                                  # app asks for it)
 #
 # [[window-rule]]
 # app-id = "thunderbird"

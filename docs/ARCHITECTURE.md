@@ -407,9 +407,12 @@ Key flows and invariants:
   used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`.
 - **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
   surface state (`BlurRegion`, committed by Smithay); `Pila::scene` evaluates it per
-  layer surface into `SceneLayer::blur` (upper layers only for now). Before an output's
-  elements are built, both backends (and captures) call `BlurCache::prepare`: for each
-  blurred layer it renders what's behind the region (`render::elements_behind_layer`)
+  layer surface into `SceneLayer::blur` (upper layers only for now) and per window into
+  `SceneWindow::blur` (`blur = true` in a rule covers the geometry and title bar, not a
+  client's shadow; a window opaque over its geometry and at full opacity gets none,
+  `blur::is_opaque`). Before an output's elements are built, the backends (and captures)
+  call `BlurCache::prepare`: back to front, windows and then upper layers, so that each
+  backdrop has those behind it, it renders what's behind the region (`render::elements_behind`)
   into an offscreen texture through a per-region damage tracker, and only when that
   changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
   `Transform::Normal` throughout, textures with linear filtering and clamped edges). All
@@ -421,7 +424,16 @@ Key flows and invariants:
   allocates anew, since a tracker keeps its scale. Entries are per surface and output: an
   output's `prepare` only drops its own, and `forget_output` those of one that's gone or
   turned off. `BlurCache::element` gives `render::scene_elements` the result (a `Texture` variant of
-  `PilaRenderElement`) to draw right behind that layer. A shader failure disables blur.
+  `PilaRenderElement`), found by surface and output, to draw right behind that surface. A
+  window's rounded corners are cut out by the last pass (`Shaders::up_rounded`, with the
+  shape relative to the texture, so an output cutting it off doesn't move them). A window's
+  backdrop is part of what `single_window_elements` draws: it goes into the texture
+  of an animation or a slide, and the picture of a window closing or sliding away, fading
+  with them but not with `opacity`. It's prepared with the windows where a slide will
+  leave them. It's never declared opaque: what it hid would count as not shown (`frame.rs`)
+  and its client drop to a frame a second while the blur still shows it. A window under
+  an opaque one (`SceneWindow::covers`) isn't prepared, but keeps its entry. Shaders are
+  compiled by `render::warm_up`, kept in the EGL context; a failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
   `spawn` adds `PILA_OUTPUT`, the output under the pointer.

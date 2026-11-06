@@ -616,8 +616,19 @@ impl Pila {
             .window_output(window)
             .map(|o| crate::scale::output_scale(&o))
             .unwrap_or_else(|| 1.0.into());
-        let renderer = self.backend.as_mut()?.renderer();
-        let snapshot = render::snapshot_window(renderer, &entry, surfaces, scale);
+        let output_name = self.window_output(window).map(|o| o.name());
+        let Pila { backend, blur, .. } = self;
+        let renderer = backend.as_mut()?.renderer();
+        // Its backdrop goes with it.
+        let snapshot = render::snapshot_window(
+            renderer,
+            &entry,
+            surfaces,
+            scale,
+            &mut |surface, origin, scale, alpha| {
+                blur.element(surface, output_name.as_deref()?, origin, scale, alpha)
+            },
+        );
         if snapshot.is_none() {
             debug!("no snapshot of a closing window; it just goes");
         }

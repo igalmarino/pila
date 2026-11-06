@@ -295,20 +295,24 @@ fn invalid_rules_are_refused() {
 }
 
 #[test]
-fn blur_in_a_window_rule_says_where_it_works() {
+fn a_window_rule_can_only_set_blur_on_or_off() {
     let dir = std::env::temp_dir().join(format!("pila-blur-rule-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("config.toml");
-    std::fs::write(&path, "[[window-rule]]\nblur = true\n").unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
-        .args(["--check-config", "--config"])
-        .arg(&path)
-        .output()
-        .unwrap();
+    let check = |config: &str| {
+        std::fs::write(&path, config).unwrap();
+        std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+            .args(["--check-config", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap()
+            .status
+            .code()
+    };
+    assert_eq!(check("[[window-rule]]\nblur = true\n"), Some(0));
+    assert_eq!(check("[[window-rule]]\nblur = false\n"), Some(0));
+    assert_eq!(check("[[window-rule]]\nblur = \"yes\"\n"), Some(1));
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(output.status.code(), Some(1));
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("[[layer-rule]]"), "{text}");
 }
 
 #[test]

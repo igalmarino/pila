@@ -84,8 +84,7 @@ pub struct WindowRuleFile {
     title_bar: Option<bool>,
     corner_radius: Option<u32>,
     opacity: Option<f64>,
-    /// Only here to say where it works: see `validate`.
-    blur: Option<toml::Value>,
+    blur: Option<bool>,
 }
 
 /// The range of `opacity`: never fully transparent.
@@ -140,6 +139,9 @@ pub struct WindowProps {
     pub corner_radius: Option<u32>,
     /// Of everything it draws, title bar included.
     pub opacity: Option<f64>,
+    /// `true`: blur behind all of it; `false`: never; unset: where the
+    /// client asks (ext-background-effect).
+    pub blur: Option<bool>,
 }
 
 impl WindowProps {
@@ -153,6 +155,7 @@ impl WindowProps {
         self.title_bar = other.title_bar.or(self.title_bar);
         self.corner_radius = other.corner_radius.or(self.corner_radius);
         self.opacity = other.opacity.or(self.opacity);
+        self.blur = other.blur.or(self.blur);
     }
 
     /// Whether `kind` plays for this window.
@@ -206,12 +209,6 @@ impl WindowRuleFile {
     /// The rule, or what's wrong with it (`index` counts from 1, for the
     /// message; `workspaces`: how many there are).
     pub fn validate(self, index: usize, workspaces: usize) -> Result<WindowRule, String> {
-        if self.blur.is_some() {
-            return Err(format!(
-                "window-rule {index}: blur: pila has no blur behind windows; \
-                 it only works in a [[layer-rule]]"
-            ));
-        }
         let open_on_workspace = match self.open_on_workspace {
             None => None,
             Some(n @ 1..) if n <= workspaces => Some(n - 1),
@@ -274,6 +271,7 @@ impl WindowRuleFile {
                 title_bar: self.title_bar,
                 corner_radius: self.corner_radius,
                 opacity: self.opacity,
+                blur: self.blur,
             },
         })
     }

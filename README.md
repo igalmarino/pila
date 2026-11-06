@@ -24,7 +24,7 @@ is untested), distros and setups are exactly what testing is needed for: please
 [report](#reporting-bugs) what works and what doesn't.
 
 Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs (pila uses the
-seat's primary one), blur behind windows (only behind panels and other layer surfaces).
+seat's primary one).
 
 ## Help test pila
 
@@ -61,8 +61,8 @@ A short report helps even if everything works:
 - **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
   snapping; launchers and notifications; workspaces sliding. Configurable, or off.
 - **Window and layer rules** by app id, title or namespace: animations, workspace, size,
-  position, maximized or fullscreen, title bar, corner radius and opacity per app; blur
-  and animations per panel or launcher.
+  position, maximized or fullscreen, title bar, corner radius, opacity and blur per app;
+  blur and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale; optionally, a laptop's built-in screen turns off while an
   external monitor is on.
@@ -72,7 +72,7 @@ A short report helps even if everything works:
   (ext-data-control), screenshots (grim, screencopy) and screen sharing
   (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
-  settings (output power and management), blur behind panels (background-effect),
+  settings (output power and management), blur behind panels and windows (background-effect),
   workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay
   above their window and modal ones that keep the focus (xdg-dialog), window rules by tag
   (xdg-toplevel-tag), Vulkan's FIFO presentation (wp-fifo, wp-commit-timing), explicit sync
