@@ -32,6 +32,7 @@ optdepends=(
     'xdg-desktop-portal-gtk: file chooser and other portals'
     'wl-clipboard: clipboard from the command line'
     'swaylock: locking the session'
+    'libnotify: notifications from pila, such as an invalid config (notify-send)'
 )
 provides=(pila)
 conflicts=(pila)

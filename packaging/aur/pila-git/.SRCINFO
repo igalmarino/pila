@@ -25,6 +25,7 @@ pkgbase = pila-git
 	optdepends = xdg-desktop-portal-gtk: file chooser and other portals
 	optdepends = wl-clipboard: clipboard from the command line
 	optdepends = swaylock: locking the session
+	optdepends = libnotify: notifications from pila, such as an invalid config (notify-send)
 	provides = pila
 	conflicts = pila
 	backup = etc/xdg/xdg-desktop-portal/pila-portals.conf

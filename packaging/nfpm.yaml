@@ -47,6 +47,7 @@ overrides:
       - xdg-desktop-portal-gtk
       - grim
       - slurp
+      - libnotify-bin
   rpm:
     depends:
       - mesa-libEGL
@@ -62,3 +63,4 @@ overrides:
       - xdg-desktop-portal-gtk
       - grim
       - slurp
+      - libnotify

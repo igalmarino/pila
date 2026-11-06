@@ -265,11 +265,13 @@ Host packages for a full session (names are the same on most distros):
   too)
 - `xdg-desktop-portal-wlr`, `grim`, `slurp`: screen sharing
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
+- `libnotify` (`libnotify-bin` on Debian, Ubuntu): `notify-send`, which pila uses to tell you
+  about an invalid config, for instance; a notification daemon must show them (Noctalia, mako, ...)
 
 ```bash
-sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp   # Arch
-sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Debian, Ubuntu
-sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp # Fedora
+sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify       # Arch
+sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify-bin # Debian, Ubuntu
+sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify     # Fedora
 ```
 
 ### Desktop shells and tools
