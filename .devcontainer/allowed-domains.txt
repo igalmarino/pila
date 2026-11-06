@@ -23,6 +23,11 @@ static.crates.io
 static.rust-lang.org
 docs.rs
 
+# Arch Linux: the forum (where pila is announced), the AUR and the wiki
+bbs.archlinux.org
+aur.archlinux.org
+wiki.archlinux.org
+
 # VS Code server extensions
 marketplace.visualstudio.com
 vscode.blob.core.windows.net
