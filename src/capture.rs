@@ -595,10 +595,7 @@ impl GlobalDispatch<ExtOutputImageCaptureSourceManagerV1, ()> for Pila {
         data_init.init(resource, ());
     }
 
-    // Not for sandboxed apps (`state::is_privileged`).
-    fn can_view(client: Client, _: &()) -> bool {
-        crate::state::is_privileged(&client)
-    }
+    crate::state::privileged_global!();
 }
 
 impl GlobalDispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()> for Pila {
@@ -613,10 +610,7 @@ impl GlobalDispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()> for Pila 
         data_init.init(resource, ());
     }
 
-    // Not for sandboxed apps (`state::is_privileged`).
-    fn can_view(client: Client, _: &()) -> bool {
-        crate::state::is_privileged(&client)
-    }
+    crate::state::privileged_global!();
 }
 
 impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
@@ -631,10 +625,7 @@ impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
         data_init.init(resource, ());
     }
 
-    // Not for sandboxed apps (`state::is_privileged`).
-    fn can_view(client: Client, _: &()) -> bool {
-        crate::state::is_privileged(&client)
-    }
+    crate::state::privileged_global!();
 }
 
 // --- Sources ---------------------------------------------------------------

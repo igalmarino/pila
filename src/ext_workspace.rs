@@ -4,7 +4,8 @@
 //! pila's workspaces span all outputs, so each client gets one workspace
 //! group holding every output (the `wl_output`s it bound) and all the
 //! workspaces, named "1", "2", ... with those as their ids and 1D
-//! coordinates. The only capability is `activate`; requests are applied on
+//! coordinates. Panels only: a sandboxed app doesn't get to see or switch
+//! workspaces (`state::is_privileged`). The only capability is `activate`; requests are applied on
 //! the manager's `commit` (the last activation wins) and ignored while the
 //! session is locked. Listeners are kept up to date by diffing
 //! (`Pila::refresh_workspaces`): after a switch, a change in the number of
@@ -175,6 +176,8 @@ impl Pila {
 }
 
 impl GlobalDispatch<ExtWorkspaceManagerV1, ()> for Pila {
+    crate::state::privileged_global!();
+
     fn bind(
         state: &mut Self,
         dh: &DisplayHandle,

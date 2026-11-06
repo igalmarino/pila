@@ -10,12 +10,21 @@
 use std::collections::HashSet;
 
 use smithay::{
-    delegate_idle_inhibit, delegate_idle_notify,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
+    delegate_idle_inhibit,
+    reexports::{
+        wayland_protocols::ext::idle_notify::v1::server::{
+            ext_idle_notification_v1::ExtIdleNotificationV1,
+            ext_idle_notifier_v1::ExtIdleNotifierV1,
+        },
+        wayland_server::{
+            delegate_dispatch, protocol::wl_surface::WlSurface, Client, DataInit, DisplayHandle,
+            GlobalDispatch, New, Resource,
+        },
+    },
     wayland::{
         compositor::get_parent,
         idle_inhibit::IdleInhibitHandler,
-        idle_notify::{IdleNotifierHandler, IdleNotifierState},
+        idle_notify::{IdleNotificationUserData, IdleNotifierHandler, IdleNotifierState},
     },
 };
 
@@ -66,7 +75,24 @@ impl IdleNotifierHandler for Pila {
         &mut self.globals.idle_notifier
     }
 }
-delegate_idle_notify!(Pila);
+// `delegate_idle_notify!` but for the global, which it would show to everyone:
+// when the user is active isn't for sandboxed apps.
+impl GlobalDispatch<ExtIdleNotifierV1, ()> for Pila {
+    fn bind(
+        _: &mut Self,
+        _: &DisplayHandle,
+        _: &Client,
+        resource: New<ExtIdleNotifierV1>,
+        _: &(),
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        data_init.init(resource, ());
+    }
+
+    crate::state::privileged_global!();
+}
+delegate_dispatch!(Pila: [ExtIdleNotifierV1: ()] => IdleNotifierState<Pila>);
+delegate_dispatch!(Pila: [ExtIdleNotificationV1: IdleNotificationUserData] => IdleNotifierState<Pila>);
 
 // zwp_idle_inhibit_manager_v1
 impl IdleInhibitHandler for Pila {

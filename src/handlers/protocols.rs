@@ -4,13 +4,20 @@
 
 use smithay::{
     delegate_content_type, delegate_ext_data_control, delegate_foreign_toplevel_list,
-    delegate_fractional_scale, delegate_keyboard_shortcuts_inhibit, delegate_pointer_gestures,
-    delegate_presentation, delegate_relative_pointer, delegate_security_context,
-    delegate_single_pixel_buffer, delegate_viewporter, delegate_virtual_keyboard_manager,
-    delegate_xdg_foreign, delegate_xdg_toplevel_icon, delegate_xdg_toplevel_tag,
+    delegate_fractional_scale, delegate_pointer_gestures, delegate_presentation,
+    delegate_relative_pointer, delegate_security_context, delegate_single_pixel_buffer,
+    delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_foreign,
+    delegate_xdg_toplevel_icon, delegate_xdg_toplevel_tag,
     reexports::{
         calloop::LoopHandle,
-        wayland_server::{protocol::wl_surface::WlSurface, DisplayHandle},
+        wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::server::{
+            zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
+            zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1,
+        },
+        wayland_server::{
+            delegate_dispatch, protocol::wl_surface::WlSurface, Client, DataInit, DisplayHandle,
+            GlobalDispatch, New,
+        },
     },
     wayland::{
         content_type::ContentTypeState,
@@ -20,7 +27,7 @@ use smithay::{
         idle_notify::IdleNotifierState,
         keyboard_shortcuts_inhibit::{
             KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
-            KeyboardShortcutsInhibitor,
+            KeyboardShortcutsInhibitor, KeyboardShortcutsInhibitorUserData,
         },
         pointer_constraints::PointerConstraintsState,
         pointer_gestures::PointerGesturesState,
@@ -187,7 +194,24 @@ impl KeyboardShortcutsInhibitHandler for Pila {
         inhibitor.activate();
     }
 }
-delegate_keyboard_shortcuts_inhibit!(Pila);
+// `delegate_keyboard_shortcuts_inhibit!` but for the global, which it would
+// show to everyone: a sandboxed app doesn't get to take pila's shortcuts away.
+impl GlobalDispatch<ZwpKeyboardShortcutsInhibitManagerV1, ()> for Pila {
+    fn bind(
+        _: &mut Self,
+        _: &DisplayHandle,
+        _: &Client,
+        resource: New<ZwpKeyboardShortcutsInhibitManagerV1>,
+        _: &(),
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        data_init.init(resource, ());
+    }
+
+    crate::state::privileged_global!();
+}
+delegate_dispatch!(Pila: [ZwpKeyboardShortcutsInhibitManagerV1: ()] => KeyboardShortcutsInhibitState);
+delegate_dispatch!(Pila: [ZwpKeyboardShortcutsInhibitorV1: KeyboardShortcutsInhibitorUserData] => KeyboardShortcutsInhibitState);
 
 // wp_security_context_manager_v1: a sandbox (Flatpak) hands pila a socket
 // for its app; clients connecting through it are marked (`ClientState`) and

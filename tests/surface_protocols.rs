@@ -41,8 +41,6 @@ use wayland_protocols::{
 
 const PUBLIC: &[&str] = &[
     "ext_background_effect_manager_v1",
-    "ext_idle_notifier_v1",
-    "ext_workspace_manager_v1",
     "wl_compositor",
     "wl_data_device_manager",
     "wl_output",
@@ -60,7 +58,6 @@ const PUBLIC: &[&str] = &[
     "xdg_toplevel_icon_manager_v1",
     "xdg_wm_base",
     "zwp_idle_inhibit_manager_v1",
-    "zwp_keyboard_shortcuts_inhibit_manager_v1",
     "zwp_linux_dmabuf_v1",
     "zwp_pointer_constraints_v1",
     "zwp_pointer_gestures_v1",
@@ -82,9 +79,11 @@ const PRIVILEGED: &[&str] = &[
     "ext_data_control_manager_v1",
     "ext_foreign_toplevel_image_capture_source_manager_v1",
     "ext_foreign_toplevel_list_v1",
+    "ext_idle_notifier_v1",
     "ext_image_copy_capture_manager_v1",
     "ext_output_image_capture_source_manager_v1",
     "ext_session_lock_manager_v1",
+    "ext_workspace_manager_v1",
     "wp_security_context_manager_v1",
     "zwlr_foreign_toplevel_manager_v1",
     "zwlr_gamma_control_manager_v1",
@@ -92,6 +91,7 @@ const PRIVILEGED: &[&str] = &[
     "zwlr_output_manager_v1",
     "zwlr_output_power_manager_v1",
     "zwlr_screencopy_manager_v1",
+    "zwp_keyboard_shortcuts_inhibit_manager_v1",
     "zwp_virtual_keyboard_manager_v1",
 ];
 

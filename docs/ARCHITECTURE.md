@@ -35,7 +35,7 @@ Key flows and invariants:
   ignored; keys without Mod, e.g. media keys, can be bound); intercepted keycodes go in
   `suppressed_keys` so their release isn't forwarded to the client either.
   Bindings don't run while the focused surface (or its menu's window) holds an active
-  keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted), or
+  keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted, and sandboxed apps can't make any), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
   builds, to the lock).
 - **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,

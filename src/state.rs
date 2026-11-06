@@ -1719,6 +1719,17 @@ pub fn retire_global(
     }
 }
 
+/// `GlobalDispatch::can_view` of a global not for sandboxed apps
+/// (`is_privileged`).
+macro_rules! privileged_global {
+    () => {
+        fn can_view(client: smithay::reexports::wayland_server::Client, _: &()) -> bool {
+            $crate::state::is_privileged(&client)
+        }
+    };
+}
+pub(crate) use privileged_global;
+
 pub fn is_privileged(client: &Client) -> bool {
     if client.get_data::<XWaylandClientData>().is_some() {
         return true;

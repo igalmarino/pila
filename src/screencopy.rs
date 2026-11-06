@@ -321,10 +321,7 @@ impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for Pila {
         data_init.init(resource, ());
     }
 
-    // Not for sandboxed apps (`state::is_privileged`).
-    fn can_view(client: Client, _: &()) -> bool {
-        crate::state::is_privileged(&client)
-    }
+    crate::state::privileged_global!();
 }
 
 impl Dispatch<ZwlrScreencopyManagerV1, ()> for Pila {
