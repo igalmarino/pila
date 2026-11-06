@@ -183,8 +183,8 @@ From a checkout, `nix develop` gives a shell with everything to build it (`cargo
 --release`). `scripts/install` isn't for NixOS: it writes to paths NixOS doesn't read its session
 entries from.
 
-CI builds this package and starts pila from it, but **it hasn't been tried on a NixOS system
-yet**: please [report](#help-test-pila) how it goes.
+`nix run` has been confirmed on a NixOS system. The login session above hasn't been tried yet:
+please [report](#help-test-pila) how it goes.
 
 ### Arch Linux (AUR)
 
