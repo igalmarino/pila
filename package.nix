@@ -19,6 +19,16 @@
   commit ? null,
 }:
 
+let
+  rustFlags = toString (
+    map (arg: "-C link-arg=" + arg) [
+      "-Wl,--push-state,--no-as-needed"
+      "-lEGL"
+      "-lwayland-client"
+      "-Wl,--pop-state"
+    ]
+  );
+in
 rustPlatform.buildRustPackage {
   pname = "pila";
   version = (lib.importTOML ./Cargo.toml).package.version;
@@ -55,14 +65,7 @@ rustPlatform.buildRustPackage {
   ];
 
   env = {
-    RUSTFLAGS = toString (
-      map (arg: "-C link-arg=" + arg) [
-        "-Wl,--push-state,--no-as-needed"
-        "-lEGL"
-        "-lwayland-client"
-        "-Wl,--pop-state"
-      ]
-    );
+    RUSTFLAGS = rustFlags;
   }
   // lib.optionalAttrs (commit != null) { PILA_BUILD_COMMIT = commit; };
 
@@ -86,8 +89,12 @@ rustPlatform.buildRustPackage {
     wrapProgram $out/bin/pila --suffix PATH : ${lib.makeBinPath [ xwayland ]}
   '';
 
-  # For `services.displayManager.sessionPackages`.
-  passthru.providedSessions = [ "pila" ];
+  passthru = {
+    # For `services.displayManager.sessionPackages`.
+    providedSessions = [ "pila" ];
+    # For the flake's devShell.
+    inherit rustFlags;
+  };
 
   meta = {
     description = "A stacking Wayland compositor built on Smithay";

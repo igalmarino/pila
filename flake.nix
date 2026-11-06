@@ -35,7 +35,7 @@
               pkgs.rustfmt
               pkgs.xwayland
             ];
-            inherit (pila.env) RUSTFLAGS;
+            RUSTFLAGS = pila.rustFlags;
           };
         }
       );
