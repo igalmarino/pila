@@ -219,8 +219,8 @@ tap = true
 # open-on-workspace = 3            # opens there, without switching to it
 # open-maximized = true            # or open-fullscreen = true
 #
-# A layer surface's namespace: scripts/layer-namespaces lists those of
-# what you run.
+# # A layer surface's namespace: scripts/layer-namespaces lists those of
+# # what you run.
 #
 # [[layer-rule]]
 # namespace = "noctalia-*"         # a shell that animates its own surfaces
