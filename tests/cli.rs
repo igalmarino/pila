@@ -235,6 +235,28 @@ fn scripts_copy(name: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Run a script of a `scripts_copy` through bash, which only reads it. Executing
+/// a file just written fails now and then with "Text file busy": another thread
+/// forking at that moment holds it open for writing until it execs.
+fn copied_script(dir: &std::path::Path, script: &str) -> Command {
+    let mut command = Command::new("bash");
+    command.arg(dir.join("scripts").join(script));
+    command
+}
+
+/// Wait until `path`, just written, can be executed (see `copied_script`).
+fn wait_until_executable(path: &std::path::Path) {
+    while let Err(err) = Command::new(path).output() {
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::ExecutableFileBusy,
+            "{}: {err}",
+            path.display()
+        );
+        std::thread::yield_now();
+    }
+}
+
 #[test]
 fn scripts_check_runs_the_binary_it_is_given() {
     use std::os::unix::fs::PermissionsExt;
@@ -247,8 +269,10 @@ fn scripts_check_runs_the_binary_it_is_given() {
     )
     .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_until_executable(&fake);
+    let _ = std::fs::remove_file(&ran);
     // It finds nothing to judge afterwards: only what it started matters here.
-    Command::new(dir.join("scripts/check"))
+    copied_script(&dir, "check")
         .arg("--nested")
         .env("PILA_BIN", &fake)
         .env("XDG_CONFIG_HOME", &dir)
@@ -262,7 +286,7 @@ fn scripts_check_runs_the_binary_it_is_given() {
 fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
     let dir = scripts_copy("missing");
     for args in [&["check", "--nested"][..], &["tty"][..]] {
-        let out = Command::new(dir.join("scripts").join(args[0]))
+        let out = copied_script(&dir, args[0])
             .args(&args[1..])
             .env("PILA_BIN", "/no/such/pila")
             .env("XDG_CONFIG_HOME", &dir)
@@ -295,7 +319,7 @@ fn scripts_check_finds_the_monitors_in_a_bare_metal_log() {
          check: done\n",
     )
     .unwrap();
-    let out = Command::new(dir.join("scripts/check"))
+    let out = copied_script(&dir, "check")
         .arg("--judge")
         .arg(&log)
         .output()
@@ -305,4 +329,21 @@ fn scripts_check_finds_the_monitors_in_a_bare_metal_log() {
         stdout.contains("PASS  monitors were identified (1)"),
         "{stdout}"
     );
+}
+
+#[test]
+fn scripts_check_gives_a_verdict_on_a_log_that_stops_early() {
+    // pila crashed before the scenarios began: it says so, not nothing.
+    let dir = scripts_copy("early");
+    let log = dir.join("early.log");
+    std::fs::write(&log, "INFO pila: starting pila backend=Winit\n").unwrap();
+    let out = copied_script(&dir, "check")
+        .arg("--judge")
+        .arg(&log)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("FAIL  the scenarios finished"), "{stdout}");
+    assert!(stdout.contains("Some checks failed"), "{stdout}");
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
 }

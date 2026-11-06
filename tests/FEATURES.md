@@ -27,7 +27,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Autostart, `-c`, session environment of children | `config_reload::autostart_runs_once_not_on_reload`, `config_reload::a_command_line_command_replaces_autostart`, `bindings::spawned_commands_get_the_session_environment` |
 | `scripts/report`: system, GPU, monitors and log for a bug report, private names removed | `cli::the_report_has_the_system_and_the_log_without_private_names`, `cli::the_report_works_with_no_log` |
 | A missing EGL library is a clear error, not a crash | `cli::a_missing_egl_library_is_an_error_not_a_crash` |
-| `PILA_BIN`: `scripts/check` and `scripts/tty` run any binary | `cli::scripts_check_runs_the_binary_it_is_given`, `cli::scripts_check_and_tty_say_when_the_given_binary_is_missing`, `cli::scripts_check_finds_the_monitors_in_a_bare_metal_log`; on a TTY, the user |
+| `PILA_BIN`: `scripts/check` and `scripts/tty` run any binary | `cli::scripts_check_runs_the_binary_it_is_given`, `cli::scripts_check_and_tty_say_when_the_given_binary_is_missing`, `cli::scripts_check_finds_the_monitors_in_a_bare_metal_log`, `cli::scripts_check_gives_a_verdict_on_a_log_that_stops_early`; on a TTY, the user |
 | udev backend fails cleanly without a seat | `cli::the_udev_backend_without_a_seat_fails_cleanly` |
 
 ## Keybindings
