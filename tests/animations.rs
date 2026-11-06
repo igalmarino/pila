@@ -165,8 +165,8 @@ fn nothing_is_drawn_while_nothing_changes() {
 }
 
 #[test]
-fn an_animation_is_drawn_every_refresh() {
-    let mut pila = TestPila::with_config(ANIMATED);
+fn an_animation_keeps_drawing_until_it_ends() {
+    let mut pila = TestPila::with_config("[animations]\nenabled = true\nspeed = 4\n");
     let client = pila.client();
     client.window("a").create();
     pila.wait_focus("a");
@@ -174,7 +174,9 @@ fn an_animation_is_drawn_every_refresh() {
     pila.combo("Super+m");
     pila.wait_log("starts what=\"maximize\"");
     let after = frames(&pila.settle());
-    // 220 ms at 60 Hz: about 13 frames.
+    // 880 ms at 60 Hz: about 50 frames, or 14 on a starved CPU with software
+    // rendering. Without its own redraws an animation gets one or two. Whether
+    // it hits every refresh is for scripts/check, on real outputs.
     assert!(
         after - before >= 8,
         "only {} frames for the animation",
