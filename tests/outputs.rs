@@ -337,6 +337,30 @@ fn bad_configurations_fail() {
 }
 
 #[test]
+fn a_configuration_the_backend_cant_apply_fails_and_changes_nothing() {
+    let mut pila = two_outputs();
+    let (client, manager) = manager(&pila);
+    pila.request(json!({ "cmd": "output_fail_next" }));
+    let apply = |tag: &str| {
+        let config = manager.create_configuration(last_serial(&client), &client.qh, tag.into());
+        let b = config.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+        b.set_scale(2.0);
+        config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+        config.apply();
+        client.flush();
+    };
+    apply("config");
+    client.wait_logged("config", "Failed");
+    assert!(!client.has_logged("config", "Succeeded"));
+    let state = pila.settle();
+    assert_eq!(state["outputs"][1]["scale"], 1.0);
+    // What failed isn't kept for later: the next one starts clean, and works.
+    apply("config2");
+    client.wait_logged("config2", "Succeeded");
+    pila.wait("the scale changed", |s| s["outputs"][1]["scale"] == 2.0);
+}
+
+#[test]
 fn a_configuration_for_an_old_serial_is_cancelled() {
     let mut pila = two_outputs();
     let (client, manager) = manager(&pila);

@@ -178,14 +178,18 @@ impl Pila {
     }
 
     /// Re-apply the outputs' settings (`[[output]]` with the runtime
-    /// overrides on top) and fit everything to the result.
-    pub(crate) fn apply_outputs(&mut self) {
-        match self.backend {
+    /// overrides on top) and fit everything to the result. Whether the
+    /// backend could do all of it.
+    pub(crate) fn apply_outputs(&mut self) -> bool {
+        let applied = match self.backend {
             Some(Backend::Udev(_)) => crate::udev::apply_output_config(self),
-            Some(Backend::Winit(_)) => self.apply_nested_scale(),
+            Some(Backend::Winit(_)) => {
+                self.apply_nested_scale();
+                true
+            }
             Some(Backend::Headless(_)) => crate::headless::apply_output_config(self),
-            None => {}
-        }
+            None => true,
+        };
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {
             layer_map_for_output(&output).arrange();
         }
@@ -194,6 +198,7 @@ impl Pila {
         self.configure_lock_surfaces();
         self.refresh_output_heads();
         self.queue_redraw();
+        applied
     }
 
     fn apply_keyboard_config(&mut self) {

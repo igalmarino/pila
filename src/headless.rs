@@ -158,6 +158,8 @@ pub struct HeadlessData {
     pub renderer: GlesRenderer,
     pub outputs: Vec<HeadlessOutput>,
     loop_handle: LoopHandle<'static, Pila>,
+    /// The next `apply_output_config` fails, as a modeset can (`output_fail_next`).
+    pub fail_next_apply: bool,
     /// The timer of the next frame, while one is scheduled.
     timer: Option<RegistrationToken>,
 }
@@ -414,6 +416,7 @@ pub fn init_headless(
         renderer,
         outputs: Vec::new(),
         loop_handle: state.loop_handle.clone(),
+        fail_next_apply: false,
         timer: None,
     })));
     for spec in specs {
@@ -550,10 +553,17 @@ fn pick_mode(modes: &[Mode], spec: Option<ModeSpec>) -> Mode {
 
 /// Apply the config (and overrides) to every virtual output: enabled, mode,
 /// scale, transform and position (else right of the previous ones). Never
-/// leaves every output off.
-pub fn apply_output_config(state: &mut Pila) {
+/// leaves every output off. Whether it could (a test can ask it not to:
+/// `fail_next_apply`).
+pub fn apply_output_config(state: &mut Pila) -> bool {
+    let Some(Backend::Headless(data)) = &mut state.backend else {
+        return false;
+    };
+    if std::mem::take(&mut data.fail_next_apply) {
+        return false;
+    }
     let Some(Backend::Headless(data)) = &state.backend else {
-        return;
+        return false;
     };
     let configs: Vec<OutputConfig> = data
         .outputs
@@ -564,7 +574,7 @@ pub fn apply_output_config(state: &mut Pila) {
     let display_handle = state.display_handle.clone();
     let loop_handle = state.loop_handle.clone();
     let Some(Backend::Headless(data)) = &mut state.backend else {
-        return;
+        return false;
     };
     let mut right_edge = 0;
     let mut placed = Vec::new();
@@ -628,6 +638,7 @@ pub fn apply_output_config(state: &mut Pila) {
         state.space.unmap_output(&output);
         state.output_removed(&output);
     }
+    true
 }
 
 fn render_all(state: &mut Pila) {

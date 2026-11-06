@@ -427,8 +427,10 @@ impl Pila {
     }
 
     /// Apply a checked configuration: it becomes the outputs' runtime
-    /// settings, over the config file's.
-    fn apply_output_configuration(&mut self, heads: HashMap<String, HeadConfig>) {
+    /// settings, over the config file's. If the backend can't do it they go
+    /// back to what they were: `false`.
+    fn apply_output_configuration(&mut self, heads: HashMap<String, HeadConfig>) -> bool {
+        let previous = self.output_overrides.clone();
         for (name, config) in heads {
             let info = self.output_management.heads.iter().find(|h| h.name == name);
             let mode = match config.mode {
@@ -468,7 +470,13 @@ impl Pila {
             info!(?over, "output configured by a client");
             self.output_overrides.insert(name, over);
         }
+        if self.apply_outputs() {
+            return true;
+        }
+        warn!("the backend couldn't apply an output configuration");
+        self.output_overrides = previous;
         self.apply_outputs();
+        false
     }
 }
 
@@ -674,10 +682,13 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                         return;
                     }
                 }
-                if matches!(request, configuration::Request::Apply) {
-                    state.apply_output_configuration(configuration.heads);
+                let applied = !matches!(request, configuration::Request::Apply)
+                    || state.apply_output_configuration(configuration.heads);
+                if applied {
+                    resource.succeeded();
+                } else {
+                    resource.failed();
                 }
-                resource.succeeded();
                 // Applying changed the heads: `done` follows `succeeded`.
                 state.refresh_output_heads();
             }

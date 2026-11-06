@@ -23,6 +23,7 @@
 //! - `screenshot` `output`, `path`: the output's last frame as a PPM file.
 //! - `output_add` `spec` (`NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]]`),
 //!   `output_remove` `name`.
+//! - `output_fail_next`: the next time outputs are applied, the backend fails.
 //! - `spawn` `command`: run a command as a binding would.
 //! - `quit`.
 
@@ -282,6 +283,13 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
             if !headless::remove_output(state, str_field(request, "name")?) {
                 return Err("no such output".into());
             }
+            json!({})
+        }
+        "output_fail_next" => {
+            let Some(Backend::Headless(data)) = &mut state.backend else {
+                return Err("not headless".into());
+            };
+            data.fail_next_apply = true;
             json!({})
         }
         "spawn" => {

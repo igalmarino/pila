@@ -798,10 +798,12 @@ fn pick_mode(name: &str, modes: &[DrmMode], config: Option<&OutputConfig>) -> Op
 
 /// Re-apply `[[output]]` (mode, scale, position) to the connected outputs
 /// after the config changed. Outputs keep their left-to-right order; those
-/// without a position go right of the ones placed before them.
-pub fn apply_output_config(state: &mut Pila) {
+/// without a position go right of the ones placed before them. Whether every
+/// output could be set up as asked.
+pub fn apply_output_config(state: &mut Pila) -> bool {
+    let mut applied = true;
     let Some(Backend::Udev(data)) = &state.backend else {
-        return;
+        return false;
     };
     let mut order: Vec<(crtc::Handle, i32)> = data
         .outputs
@@ -829,7 +831,7 @@ pub fn apply_output_config(state: &mut Pila) {
     // external one that actually came on.
     for (crtc, config) in &configs {
         if config.enabled.unwrap_or(true) {
-            enable_output(state, *crtc);
+            applied &= enable_output(state, *crtc);
         }
     }
     // Then the others, and the built-in screens held by the rule last, once
@@ -852,7 +854,7 @@ pub fn apply_output_config(state: &mut Pila) {
     }
 
     let Some(Backend::Udev(data)) = &mut state.backend else {
-        return;
+        return false;
     };
     let UdevData {
         outputs,
@@ -891,7 +893,10 @@ pub fn apply_output_config(state: &mut Pila) {
                         info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
                         remodeled.push(crtc);
                     }
-                    Err(err) => warn!(name, ?err, "failed to change the output mode"),
+                    Err(err) => {
+                        warn!(name, ?err, "failed to change the output mode");
+                        applied = false;
+                    }
                 }
             }
         }
@@ -936,6 +941,7 @@ pub fn apply_output_config(state: &mut Pila) {
     for (output, loc) in placed {
         state.space.map_output(&output, loc);
     }
+    applied
 }
 
 /// Whether an output other than `held` (built-in screens off by
