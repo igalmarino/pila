@@ -77,7 +77,8 @@ Key flows and invariants:
   their spec.
 - **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
   `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
-  theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one idle
+  theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
+  then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
   which also sends presentation feedback with the kernel's timestamp. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
