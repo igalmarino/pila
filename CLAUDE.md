@@ -19,7 +19,8 @@ on **Smithay 0.7.x**.
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
   `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session links
-  its Wayland socket again.
+  its Wayland socket again. Logging out and back in leaves `/run/host-wayland/` empty until
+  then, and nested runs fail with `EventLoopCreation`.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
   the host, from a TTY. Write that code, but ask the user to test it.
@@ -61,10 +62,16 @@ on **Smithay 0.7.x**.
   or an integration test isn't named there: a new test goes into it. Known
   bugs are `#[ignore = "bug: ..."]` tests, listed at its end. The client's
   `wait` closures run with its lock held: read the `Shared` given, never call
-  the client (that deadlocks). `scripts/coverage [--html]` reports line
+  the client (that deadlocks). A test expecting a protocol error calls
+  `Client::expect_error` before the bad request (`wait_error` insists): it stops the client's
+  thread from writing, since a write after pila closes the connection fails and
+  wayland-backend then never reads the protocol error waiting in the socket. `scripts/coverage [--html]` reports line
   coverage per file (instrumented build in `target/coverage`; needs
   `llvm-profdata`/`llvm-cov` of rustc's LLVM major version), a guide to what
   the tests miss.
+- Fixing a bug: first write a test that reproduces it and see it fail, then fix it; the test
+  stays in the suite to verify the fix and keep the bug from coming back. If a bug can't be
+  tested automatically (bare metal, looks), say so and why.
 - Run nested: `cargo run` opens a window on the host desktop and blocks. Don't leave it
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
@@ -92,7 +99,9 @@ on **Smithay 0.7.x**.
   `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a picture,
   monitors were identified from their EDID (bare metal), and the frame statistics (no missed refresh, CPU per frame on average within 4 ms).
   It prints PASS/FAIL per check and exits 1 on a failure. It doesn't test behavior:
-  that's the integration tests' job. `scripts/check --nested` (release build, log in
+  that's the integration tests' job (`scripts/toplevel-action` and
+  `scripts/workspace-action` are its small taskbar and pager clients, standard-library
+  Python). `scripts/check --nested` (release build, log in
   `pila-check.log`) is for you: run it before asking the user to check anything; the
   user runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. A
   feature adds a scenario there (a `mark "name begin/end"` section in the workload,
@@ -127,6 +136,10 @@ on **Smithay 0.7.x**.
   window inside it. Changes that need a pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or
   hardware-related; push to GitHub (`origin`, public, GPL-3.0-or-later) only when asked.
+- Releases: a commit `Release X` with `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`; an
+  annotated tag `vX` on it, message `pila X`; a GitHub release with the changelog's section
+  as its text; then a commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`). The user
+  publishes it to the AUR.
 
 ## Language
 
@@ -170,8 +183,10 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
   timers (the headless test backend, which has no vblank, is the one exception;
-  `schedule_hidden_frames`' and `commit_pacing.rs`'s once-a-second wakes for hidden surfaces and the wake for a timestamp a client asked for aren't pacing); idle callbacks inserted outside an event source come with a `Pila::wake`
-  ping (see "Architecture"); one-time costs are paid at startup, not in the
+  `schedule_hidden_frames`' and `commit_pacing.rs`'s once-a-second wakes for hidden
+  surfaces and the wake for a timestamp a client asked for aren't pacing); idle callbacks
+  inserted outside an event source come with a `Pila::wake` ping (see "Architecture");
+  one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
   an offscreen texture; `text::init` shapes and rasterizes common characters on its
   thread before publishing the fonts).
