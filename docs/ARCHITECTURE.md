@@ -81,7 +81,9 @@ Key flows and invariants:
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
   which also sends presentation feedback with the kernel's timestamp. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
-  releases held keys. Libinput devices get keyboard LEDs and the
+  releases held keys; `ActivateSession` scans the connectors and re-applies the outputs,
+  since a monitor plugged in meanwhile can't come on without DRM master (`enable_output`
+  waits). Libinput devices get keyboard LEDs and the
   `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a touchpad is a device
   that can tap) when added; relative motion goes through the same constraint path as
   nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through

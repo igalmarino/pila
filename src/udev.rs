@@ -569,6 +569,10 @@ pub fn init_udev(
                         data.reapply_gamma(crtc);
                     }
                 }
+                // Monitors plugged or unplugged while away. Those it found
+                // then couldn't come on without DRM master: they do here.
+                scan_connectors(state);
+                state.apply_outputs();
                 state.queue_redraw();
             }
         })?;
@@ -1184,6 +1188,7 @@ fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
         outputs,
         drm,
         renderer,
+        session,
         ..
     } = &mut **data;
     let Some(surface) = outputs.get_mut(&crtc) else {
@@ -1193,6 +1198,11 @@ fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
         return true;
     }
     let name = surface.output.name();
+    // No DRM master on another VT: it comes on at `ActivateSession`.
+    if !session.is_active() {
+        debug!(name, "session inactive: output left off until it's back");
+        return false;
+    }
     let planes = drm.device().planes(&crtc).ok();
     match drm.initialize_output::<_, PilaRenderElement>(
         crtc,
