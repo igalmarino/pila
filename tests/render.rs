@@ -851,16 +851,19 @@ fn a_window_seen_through_a_blur_keeps_its_frame_rate() {
     pila.settle();
     let surface = client.surface(window);
     let started = std::time::Instant::now();
-    let mut done = 0;
-    while started.elapsed() < Duration::from_millis(1000) {
+    for done in 0..6 {
         let tag = format!("frame{done}");
         let _frame = surface.frame(&client.qh, tag.clone());
         client.draw(window, None);
         client.wait_logged(&tag, "Done");
-        done += 1;
     }
-    // Hidden, it would be about one a second.
-    assert!(done >= 10, "{done} frame callbacks in 1 s");
+    // Hidden, it would get one a second: at least 5 s, however fast the
+    // machine. A slow one drawing every frame stays well under the limit.
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(4),
+        "6 frame callbacks in {took:?}"
+    );
 }
 
 #[test]
