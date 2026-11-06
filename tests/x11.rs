@@ -304,10 +304,11 @@ fn an_x11_window_is_managed_by_its_wm_class() {
     pila.wait_focus("XApp");
     pila.settle();
     let (gx, gy, ..) = rect(&w["geometry"]);
-    // Xwayland draws the content. In CI's container, without a GPU, it
-    // never presents the window's background, so it's only checked here
-    // (pila's side, mapping the window, is checked above anyway).
-    if std::env::var_os("CI").is_none() {
+    // Xwayland draws the content. Without a GPU (CI's container, or software
+    // rendering here) it may never present the window's background, so it's only
+    // checked with one (pila's side, mapping the window, is checked above anyway).
+    let software = std::env::var_os("PILA_HEADLESS_DEVICE").is_some_and(|d| d == "software");
+    if std::env::var_os("CI").is_none() && !software {
         pila.wait_pixel((gx + 150) as f64, (gy + 100) as f64, [255, 0, 0, 255]);
     }
 }
