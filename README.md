@@ -43,8 +43,8 @@ A short report helps even if everything works:
 1. [Try it nested first](#try-it-nested-first): it changes nothing on your system.
    [Getting out](#getting-out) says how to leave a real session.
 2. For your real hardware, from a built checkout (`cargo build --release`), run `scripts/check`
-   on a spare TTY, which leaves your session running. It starts real programs for about 40
-   seconds, quits by itself and prints PASS or FAIL per check, with frame times. Its log is
+   on a spare TTY, which leaves your session running. It starts real programs for about a
+   minute, quits by itself and prints PASS or FAIL per check, with frame times. Its log is
    `pila-tty.log`. For a package or Nix's build, a checkout still has the script:
    `PILA_BIN=/usr/bin/pila scripts/check`.
 3. Send a [test report](https://github.com/igalmarino/pila/issues/new?template=test_report.yml)
