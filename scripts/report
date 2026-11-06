@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Gather what a bug or test report needs into one file: pila's version, the
+# system, the GPU and driver, the monitors, whether the config is valid, and
+# the end of the log. Your home directory, user name and host name are taken
+# out, but window titles, commands and file names in the log stay: read it
+# before posting it. Nothing is sent anywhere.
+#
+#   scripts/report [file]       (default: pila-report.txt here)
+#
+# Installed as pila-report (scripts/install, or the AUR package).
+set -uo pipefail
+
+# How much of the log goes in.
+LOG_LINES=300
+
+output="${1:-pila-report.txt}"
+case "$output" in
+    -h | --help)
+        sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+esac
+
+user="${USER:-$(id -un 2>/dev/null || true)}"
+host="$(uname -n 2>/dev/null || true)"
+
+# The host first: it often has the user name in it. Short names are left
+# alone, or they'd mangle ordinary words.
+redact() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "${HOME:-}" ] && line="${line//"$HOME"/\~}"
+        [ "${#host}" -ge 3 ] && line="${line//"$host"/<host>}"
+        [ "${#user}" -ge 3 ] && line="${line//"$user"/<user>}"
+        printf '%s\n' "$line"
+    done
+}
+
+# The pila this checkout built, if it's run from one, else the installed one.
+find_pila() {
+    local root
+    root="$(dirname "$(readlink -f "$0")")/.."
+    if command -v pila >/dev/null; then
+        command -v pila
+    elif [ -x "$root/target/release/pila" ]; then
+        echo "$root/target/release/pila"
+    elif [ -x "$root/target/debug/pila" ]; then
+        echo "$root/target/debug/pila"
+    fi
+}
+
+os_name() {
+    if [ -r /etc/os-release ]; then
+        (. /etc/os-release && echo "${PRETTY_NAME:-${NAME:-unknown}}")
+    else
+        echo unknown
+    fi
+}
+
+section_system() {
+    echo "## System"
+    echo "OS: $(os_name)"
+    echo "Kernel: $(uname -sr)"
+    echo "Init: $(cat /proc/1/comm 2>/dev/null || echo unknown)"
+    echo "Session type: ${XDG_SESSION_TYPE:-unset}"
+    echo "Desktop: ${XDG_CURRENT_DESKTOP:-unset}"
+    echo "Wayland display: ${WAYLAND_DISPLAY:-unset}"
+    echo "Xwayland: $(command -v Xwayland >/dev/null && echo installed || echo missing)"
+}
+
+section_gpu() {
+    local card driver vendor device
+    echo "## GPU"
+    if command -v lspci >/dev/null; then
+        lspci -k 2>/dev/null | grep -EA3 'VGA|3D|Display' | grep -vE '^--|Subsystem'
+    else
+        for card in /sys/class/drm/card[0-9]; do
+            [ -e "$card/device" ] || continue
+            driver="$(basename "$(readlink -f "$card/device/driver")")"
+            vendor="$(cat "$card/device/vendor" 2>/dev/null)"
+            device="$(cat "$card/device/device" 2>/dev/null)"
+            echo "$(basename "$card"): driver $driver, PCI $vendor:$device"
+        done
+    fi
+    if [ -r /proc/driver/nvidia/version ]; then
+        head -n 1 /proc/driver/nvidia/version
+    fi
+}
+
+# Only what the kernel lists: no EDID, which has the monitor's serial number.
+section_monitors() {
+    local connector name mode
+    echo "## Monitors"
+    for connector in /sys/class/drm/card[0-9]-*; do
+        [ -e "$connector/status" ] || continue
+        [ "$(cat "$connector/status")" = connected ] || continue
+        name="$(basename "$connector")"
+        mode="$(head -n 1 "$connector/modes" 2>/dev/null)"
+        echo "${name#card[0-9]-}: preferred mode ${mode:-unknown}"
+    done
+}
+
+# Whether it's valid, not what's in it: it can have private commands.
+section_config() {
+    local pila="$1"
+    echo "## Config"
+    if [ -z "$pila" ]; then
+        echo "not checked: no pila found"
+    else
+        "$pila" --check-config 2>&1
+    fi
+}
+
+# The session's log, or that of a run by hand from here if that's newer.
+find_log() {
+    local log="${XDG_STATE_HOME:-${HOME:-}/.local/state}/pila/pila.log"
+    if [ -f pila-tty.log ] && { [ ! -f "$log" ] || [ pila-tty.log -nt "$log" ]; }; then
+        log=pila-tty.log
+    fi
+    [ -f "$log" ] && echo "$log"
+}
+
+section_log() {
+    local log
+    echo "## Log"
+    log="$(find_log)"
+    if [ -z "$log" ]; then
+        echo "no log found (nested, it's the terminal's output)"
+        return
+    fi
+    echo "$log, last $LOG_LINES lines:"
+    tail -n "$LOG_LINES" "$log"
+}
+
+pila="$(find_pila)"
+
+# Only for the user until they've read it.
+umask 077
+if ! {
+    echo "# pila report"
+    if [ -n "$pila" ]; then
+        "$pila" --version 2>&1
+    else
+        echo "pila not found"
+    fi
+    echo
+    section_system
+    echo
+    section_gpu
+    echo
+    section_monitors
+    echo
+    section_config "$pila"
+    echo
+    section_log
+} 2>&1 | redact >"$output"; then
+    echo "report: can't write $output" >&2
+    exit 1
+fi
+
+echo "Wrote $output."
+echo "Read it before posting it: logs can hold window titles, commands and file names."
+echo "Then attach it to https://github.com/igalmarino/pila/issues/new/choose"

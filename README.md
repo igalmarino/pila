@@ -257,7 +257,9 @@ Mod+Shift+E quits.
 
 ## Reporting bugs
 
-Open an [issue](https://github.com/igalmarino/pila/issues/new/choose) with:
+Open an [issue](https://github.com/igalmarino/pila/issues/new/choose). `pila-report`
+(`scripts/report` in a checkout) gathers most of what's needed into `pila-report.txt`, without
+your home directory, user name and host name, and sends nothing anywhere. By hand, it's:
 
 - `pila --version`, your distro, GPU and driver (`lspci -k | grep -A3 VGA`);
 - how pila was started: login session, `scripts/tty`, or nested;

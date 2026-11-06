@@ -20,6 +20,7 @@ DESTDIR="${DESTDIR:-}"
 install_files=(
     "target/release/pila:$BINDIR/pila:755"
     "resources/session/pila-session:$BINDIR/pila-session:755"
+    "scripts/report:$BINDIR/pila-report:755"
     "resources/session/pila.desktop:$DATADIR/wayland-sessions/pila.desktop:644"
     "resources/xdg/xdg-desktop-portal/pila-portals.conf:$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf:644"
     "resources/xdg/xdg-desktop-portal-wlr/pila:$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila:644"

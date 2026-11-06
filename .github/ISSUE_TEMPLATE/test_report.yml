@@ -5,6 +5,9 @@ body:
   - type: markdown
     attributes:
       value: Reports where everything worked are welcome. They show which setups are known to be good.
+  - type: markdown
+    attributes:
+      value: "`pila-report` (`scripts/report` in a checkout) gathers your system details into a file you can read and attach."
   - type: dropdown
     id: result
     attributes:
