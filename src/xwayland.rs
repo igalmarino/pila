@@ -209,10 +209,7 @@ impl Pila {
             .cloned()
             .collect();
         for window in &windows {
-            self.remove_foreign_toplevel(window);
-            self.forget_focus_history(window);
-            self.forget_in_switch(window);
-            self.forget_off_space(window);
+            self.forget_window(window);
             self.forget_animations(window);
             self.space.unmap_elem(window);
         }
@@ -335,9 +332,7 @@ impl XwmHandler for Pila {
             .and_then(|k| k.current_focus())
             .is_some_and(|focus| focus == surface.clone().into());
         if let Some(window) = self.window_for_x11(&surface) {
-            self.remove_foreign_toplevel(&window);
-            self.forget_focus_history(&window);
-            self.forget_off_space(&window);
+            self.forget_window(&window);
             self.animate_close(&window);
             self.space.unmap_elem(&window);
         }

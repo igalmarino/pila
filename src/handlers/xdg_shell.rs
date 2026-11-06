@@ -64,15 +64,12 @@ impl XdgShellHandler for Pila {
         let was_focused = self.keyboard_focus().as_ref() == Some(wl_surface);
 
         if let Some(window) = self.window_for_surface(wl_surface) {
-            self.remove_foreign_toplevel(&window);
-            self.forget_focus_history(&window);
-            self.forget_off_space(&window);
+            self.forget_window(&window);
             self.animate_close(&window);
             self.space.unmap_elem(&window);
         }
         if was_focused {
-            let next = self.space.elements().next_back().cloned();
-            self.focus_window(next, SERIAL_COUNTER.next_serial());
+            self.focus_top_window(SERIAL_COUNTER.next_serial());
         }
     }
 
@@ -333,10 +330,7 @@ impl Pila {
         let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
         debug!(app_id, "window unmapped by its client");
         let was_focused = self.focused_window().as_ref() == Some(&window);
-        self.remove_foreign_toplevel(&window);
-        self.forget_focus_history(&window);
-        self.forget_in_switch(&window);
-        self.forget_off_space(&window);
+        self.forget_window(&window);
         self.space.unmap_elem(&window);
         self.unmapped.push(Window::new_wayland_window(toplevel));
         if was_focused {

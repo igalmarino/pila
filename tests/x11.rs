@@ -228,6 +228,30 @@ fn xwayland_pid(pila: &TestPila) -> u32 {
 }
 
 #[test]
+fn focus_doesnt_land_on_an_x11_menu_on_top() {
+    let mut pila = TestPila::start();
+    let Some(x11) = X11::connect(&mut pila) else {
+        return;
+    };
+    x11.window("x", (200, 200), 0xff0000);
+    pila.wait_focus("x");
+    let client = pila.client();
+    let w = client.window("w").create();
+    pila.wait_focus("w");
+    x11.menu((100, 120), (80, 60));
+    pila.wait("the menu", |s| {
+        s["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["override_redirect"] == true)
+    });
+    client.destroy(w);
+    client.flush();
+    pila.wait_focus("x");
+}
+
+#[test]
 fn xwayland_starts_with_no_signals_blocked() {
     let mut pila = TestPila::start();
     if X11::connect(&mut pila).is_none() {

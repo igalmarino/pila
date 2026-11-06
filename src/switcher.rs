@@ -147,7 +147,7 @@ impl Pila {
     }
 
     /// Take a window that went away out of a Mod+Tab in progress.
-    pub fn forget_in_switch(&mut self, window: &Window) {
+    fn forget_in_switch(&mut self, window: &Window) {
         if let Some(switch) = &mut self.switch {
             let Some(index) = switch.order.iter().position(|w| w == window) else {
                 return;
@@ -162,9 +162,13 @@ impl Pila {
         }
     }
 
-    /// Forget a window that was unmapped or destroyed.
-    pub fn forget_focus_history(&mut self, window: &Window) {
+    /// A managed window went away, for whatever reason: nothing of pila's
+    /// keeps it, on screen or off.
+    pub fn forget_window(&mut self, window: &Window) {
+        self.remove_foreign_toplevel(window);
         self.focus_history.retain(|w| w != window);
+        self.forget_in_switch(window);
+        self.forget_off_space(window);
     }
 }
 

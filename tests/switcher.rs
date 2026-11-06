@@ -42,6 +42,23 @@ fn mod_tab_switches_to_the_previous_window_and_ends_on_release() {
 }
 
 #[test]
+fn a_window_closing_during_mod_tab_doesnt_upset_the_order() {
+    let (mut pila, client, handles) = windows(&["a", "b", "c", "d"]);
+    pila.key_press("Super");
+    pila.key("Tab");
+    pila.wait_focus("c");
+    pila.key("Tab");
+    pila.wait_focus("b");
+    // One already passed goes away: the next step is still the one after b.
+    client.destroy(handles[3]);
+    client.flush();
+    pila.wait("d is gone", |s| window_in(s, "d").is_none());
+    pila.key("Tab");
+    pila.wait_focus("a");
+    pila.key_release("Super");
+}
+
+#[test]
 fn holding_mod_and_tapping_tab_goes_further_back() {
     let (mut pila, _client, _) = windows(&["a", "b", "c"]);
     pila.key_press("Super");
