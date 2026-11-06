@@ -1,6 +1,6 @@
 //! Switching windows by recent use (Mod+Tab).
 //!
-//! `Pila::focus_history` lists windows most recently focused first; every
+//! `Pila::windows.focus_history` lists windows most recently focused first; every
 //! focus change through `focus_window` moves the window to the front, except
 //! while switching. The first `cycle-focus` takes a snapshot of that order and
 //! focuses (and raises) the second window; further presses step on, and
@@ -54,11 +54,11 @@ pub fn step(index: usize, len: usize, forward: bool) -> usize {
 impl Pila {
     /// Record that `window` got focus (called by `focus_window`).
     pub fn touch_focus_history(&mut self, window: &Window) {
-        if self.switch.is_some() || !switchable(window) {
+        if self.windows.switch.is_some() || !switchable(window) {
             return;
         }
-        self.focus_history.retain(|w| w != window);
-        self.focus_history.insert(0, window.clone());
+        self.windows.focus_history.retain(|w| w != window);
+        self.windows.focus_history.insert(0, window.clone());
     }
 
     /// Switchable windows on the active workspace (mapped or minimized),
@@ -68,13 +68,15 @@ impl Pila {
         let mut mapped: Vec<Window> = self.space.elements().rev().cloned().collect();
         let active = self.workspaces.active;
         mapped.extend(
-            self.minimized
+            self.windows
+                .minimized
                 .iter()
                 .filter(|w| self.workspace_of(w) == active)
                 .cloned(),
         );
-        self.focus_history.retain(IsAlive::alive);
+        self.windows.focus_history.retain(IsAlive::alive);
         let mut order: Vec<Window> = self
+            .windows
             .focus_history
             .iter()
             .filter(|w| mapped.contains(w))
@@ -90,7 +92,7 @@ impl Pila {
 
     /// One step of Mod+Tab (or Mod+Shift+Tab when `!forward`).
     pub fn cycle_focus(&mut self, forward: bool, serial: Serial) {
-        let mut switch = match self.switch.take() {
+        let mut switch = match self.windows.switch.take() {
             Some(switch) => switch,
             None => {
                 let order = self.switch_order();
@@ -130,14 +132,14 @@ impl Pila {
             switch.shown_minimized = Some(window.clone());
         }
         // `focus_window` must not reorder the history mid-switch.
-        self.switch = Some(switch);
+        self.windows.switch = Some(switch);
         self.focus_window(Some(window), serial);
     }
 
     /// The modifiers were released: the window switched to becomes the most
     /// recent one.
     pub fn end_switch(&mut self) {
-        let Some(switch) = self.switch.take() else {
+        let Some(switch) = self.windows.switch.take() else {
             return;
         };
         if let Some(window) = switch.order.get(switch.index).filter(|w| w.alive()) {
@@ -148,7 +150,7 @@ impl Pila {
 
     /// Take a window that went away out of a Mod+Tab in progress.
     fn forget_in_switch(&mut self, window: &Window) {
-        if let Some(switch) = &mut self.switch {
+        if let Some(switch) = &mut self.windows.switch {
             let Some(index) = switch.order.iter().position(|w| w == window) else {
                 return;
             };
@@ -166,7 +168,7 @@ impl Pila {
     /// keeps it, on screen or off.
     pub fn forget_window(&mut self, window: &Window) {
         self.remove_foreign_toplevel(window);
-        self.focus_history.retain(|w| w != window);
+        self.windows.focus_history.retain(|w| w != window);
         self.forget_in_switch(window);
         self.forget_off_space(window);
     }

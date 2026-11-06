@@ -11,7 +11,7 @@
 //! pila's own gestures (`[gestures]` in the config, e.g. a three-finger
 //! swipe to switch windows) are swipes with a finger count that has an
 //! action: such a swipe is kept whole from the clients, from begin to end
-//! (`Pila::swipe`). Its direction is fixed once the fingers have moved
+//! (`Pila::input.swipe`). Its direction is fixed once the fingers have moved
 //! `LOCK` along one axis; after `TRIGGER` the action runs, and window
 //! switching steps once more for every further `STEP`, ending the switch
 //! when the fingers lift. Not while the session is locked or a client
@@ -111,7 +111,7 @@ impl Pila {
     ) {
         let fingers = event.fingers();
         if !self.is_locked() && !self.shortcuts_inhibited() && self.config.handles_swipes(fingers) {
-            self.swipe = Some(Swipe::new(fingers));
+            self.input.swipe = Some(Swipe::new(fingers));
             return;
         }
         let Some(pointer) = self.seat.get_pointer() else {
@@ -131,7 +131,7 @@ impl Pila {
         &mut self,
         event: I::GestureSwipeUpdateEvent,
     ) {
-        if let Some(swipe) = &mut self.swipe {
+        if let Some(swipe) = &mut self.input.swipe {
             let delta = event.delta();
             let fingers = swipe.fingers;
             if let Some((direction, new)) = swipe.update(delta.x, delta.y) {
@@ -154,7 +154,7 @@ impl Pila {
     }
 
     pub(crate) fn on_gesture_swipe_end<I: InputBackend>(&mut self, event: I::GestureSwipeEndEvent) {
-        if self.swipe.take().is_some() {
+        if self.input.swipe.take().is_some() {
             // A window switch made by the swipe ends when the fingers lift.
             self.end_switch();
             return;

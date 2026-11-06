@@ -127,21 +127,21 @@ impl Pila {
             _ => false,
         });
         if activated {
-            self.constrained = Some(surface.clone());
+            self.input.constrained = Some(surface.clone());
         }
     }
 
     /// Release the active constraint when keyboard focus moves to `focused`,
     /// unless that's still the constrained surface's window (or its menu).
     pub fn release_constraint_for_focus(&mut self, focused: Option<&WlSurface>) {
-        let Some(surface) = self.constrained.clone() else {
+        let Some(surface) = self.input.constrained.clone() else {
             return;
         };
         let focused_root = focused.map(|f| self.popup_root(f).unwrap_or_else(|| f.clone()));
         if surface.is_alive() && focused_root.as_ref() == Some(&root(&surface)) {
             return;
         }
-        self.constrained = None;
+        self.input.constrained = None;
         if !surface.is_alive() {
             return;
         }

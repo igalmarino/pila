@@ -103,11 +103,6 @@ pub struct Pila {
     /// (`snap.rs`), and the buffer it's drawn with.
     pub snap_preview: Option<Rectangle<i32, Logical>>,
     pub snap_preview_buffer: SolidColorBuffer,
-    /// Minimized windows, out of the `Space` (`minimize.rs`).
-    pub minimized: Vec<Window>,
-    /// Windows most recently focused first, and the Mod+Tab in progress
-    /// (`switcher.rs`).
-    pub focus_history: Vec<Window>,
     /// The config file, watched for changes (`config_reload.rs`).
     pub config_path: Option<std::path::PathBuf>,
     /// A reload is scheduled (changes are coalesced).
@@ -135,22 +130,19 @@ pub struct Pila {
     /// What's known and set about outputs beyond the `Space`: monitors,
     /// display tools' settings, gamma and power.
     pub outputs: crate::output_management::Outputs,
-    pub switch: Option<Switch>,
     /// Animations in progress (`animation.rs`), and the workspace switch's
     /// (`workspace_slide.rs`).
     pub animations: crate::animation::Animations,
     pub workspace_slide: Option<crate::workspace_slide::WorkspaceSlide>,
     /// Each output's frame statistics, by name (`frame_stats.rs`).
     pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
-    /// A touchpad swipe pila is handling itself (`gestures.rs`).
-    pub swipe: Option<crate::gestures::Swipe>,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
-    /// Toplevels that exist but haven't committed a buffer yet.
-    pub unmapped: Vec<Window>,
-    /// Keys whose press triggered a binding; their release is swallowed too.
-    pub suppressed_keys: HashSet<Keycode>,
+    /// Windows off the `Space`, and the order they were used in.
+    pub windows: Windows,
+    /// Input state of pila's own beyond the seat's.
+    pub input: InputState,
 
     /// The state of Smithay's protocols that handlers hand back.
     pub protocols: Protocols,
@@ -160,11 +152,6 @@ pub struct Pila {
     /// State of the simpler protocols (`handlers/protocols.rs`).
     pub globals: Globals,
     pub idle_inhibitors: IdleInhibitors,
-    /// The surface whose pointer constraint pila activated, if any.
-    pub constrained: Option<WlSurface>,
-    /// Nested-only: the last absolute pointer position from the host, to
-    /// derive relative motion (it differs from pila's pointer while locked).
-    pub host_pointer: Option<Point<f64, Logical>>,
 
     pub seat: Seat<Self>,
     /// Cursor most recently requested by the client under the pointer.
@@ -174,6 +161,33 @@ pub struct Pila {
     /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
     /// needs its own renderer handle here instead.
     pub backend: Option<Backend>,
+}
+
+/// Windows off the `Space`, and the order they were used in (`Pila::windows`).
+#[derive(Default)]
+pub struct Windows {
+    /// Toplevels that exist but haven't committed a buffer yet.
+    pub unmapped: Vec<Window>,
+    /// Minimized windows (`minimize.rs`).
+    pub minimized: Vec<Window>,
+    /// Windows most recently focused first, and the Mod+Tab in progress
+    /// (`switcher.rs`).
+    pub focus_history: Vec<Window>,
+    pub switch: Option<Switch>,
+}
+
+/// pila's own input state, beyond the seat's (`Pila::input`).
+#[derive(Default)]
+pub struct InputState {
+    /// Keys whose press triggered a binding; their release is swallowed too.
+    pub suppressed_keys: HashSet<Keycode>,
+    /// The surface whose pointer constraint pila activated, if any.
+    pub constrained: Option<WlSurface>,
+    /// Nested-only: the last absolute pointer position from the host, to
+    /// derive relative motion (it differs from pila's pointer while locked).
+    pub host_pointer: Option<Point<f64, Logical>>,
+    /// A touchpad swipe pila is handling itself (`gestures.rs`).
+    pub swipe: Option<crate::gestures::Swipe>,
 }
 
 /// The state of Smithay's protocols (`Pila::protocols`), which its handler
@@ -346,6 +360,8 @@ impl Pila {
                 session_lock: session_lock_state,
                 syncobj: None,
             },
+            windows: Windows::default(),
+            input: InputState::default(),
             capture: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState {
@@ -357,10 +373,8 @@ impl Pila {
             },
             pending_startup: Vec::new(),
             children: Vec::new(),
-            minimized: Vec::new(),
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
-            focus_history: Vec::new(),
             config_path: None,
             config_reload_pending: false,
             frame_drawn: false,
@@ -371,20 +385,14 @@ impl Pila {
             ext_workspaces: Default::default(),
             session_management: Default::default(),
             blur: Default::default(),
-            switch: None,
             animations: Default::default(),
             workspace_slide: None,
             frame_stats: HashMap::new(),
-            swipe: None,
             space: Space::default(),
-            unmapped: Vec::new(),
-            suppressed_keys: HashSet::new(),
             popups,
             session_lock: SessionLock::default(),
             globals,
             idle_inhibitors: IdleInhibitors::default(),
-            constrained: None,
-            host_pointer: None,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             backend: None,
@@ -649,7 +657,7 @@ impl Pila {
     pub fn window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
         self.space
             .elements()
-            .chain(self.unmapped.iter())
+            .chain(self.windows.unmapped.iter())
             .chain(self.off_space_windows())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()

@@ -1,5 +1,5 @@
 //! Minimized windows: taken out of the `Space` (not drawn, no input) and kept
-//! in `Pila::minimized`, with where they were. They come back through Mod+Tab
+//! in `Pila::windows.minimized`, with where they were. They come back through Mod+Tab
 //! (minimized windows stay in its recent-use order, `switcher.rs`, show while
 //! selected, and are restored when the switch ends on them) or through a
 //! taskbar using wlr-foreign-toplevel-management (`toplevel_management.rs`).
@@ -30,7 +30,7 @@ fn went_with_parent(window: &Window) -> &Cell<bool> {
 
 impl Pila {
     pub fn is_minimized(&self, window: &Window) -> bool {
-        self.minimized.contains(window)
+        self.windows.minimized.contains(window)
     }
 
     /// Minimize `window` (title bar button, Mod+N, or the client asking).
@@ -60,7 +60,7 @@ impl Pila {
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_suspended(true);
         }
-        self.minimized.push(window.clone());
+        self.windows.minimized.push(window.clone());
         for child in self.transient_children(window) {
             if self.hide_window(&child) {
                 went_with_parent(&child).set(true);
@@ -74,10 +74,10 @@ impl Pila {
     /// is no longer on any output) without focusing it, and the children
     /// that went with it.
     pub(crate) fn show_window(&mut self, window: &Window) {
-        let Some(index) = self.minimized.iter().position(|w| w == window) else {
+        let Some(index) = self.windows.minimized.iter().position(|w| w == window) else {
             return;
         };
-        self.minimized.remove(index);
+        self.windows.minimized.remove(index);
         went_with_parent(window).set(false);
         self.space
             .map_element(window.clone(), space_location(window), false);

@@ -109,7 +109,10 @@ impl Pila {
 
     /// Parked windows and minimized ones: managed windows off the `Space`.
     pub fn off_space_windows(&self) -> impl Iterator<Item = &Window> {
-        self.workspaces.parked.iter().chain(self.minimized.iter())
+        self.workspaces
+            .parked
+            .iter()
+            .chain(self.windows.minimized.iter())
     }
 
     /// Go to the workspace `target` names (a binding or gesture).
@@ -246,6 +249,7 @@ impl Pila {
     /// none), e.g. after the focused one was minimized or left the workspace.
     pub(crate) fn focus_recent_window(&mut self) {
         let next = self
+            .windows
             .focus_history
             .iter()
             .find(|w| self.space.elements().any(|m| m == *w))
@@ -264,7 +268,7 @@ impl Pila {
     /// went away.
     pub fn forget_off_space(&mut self, window: &Window) {
         self.workspaces.parked.retain(|w| w != window);
-        self.minimized.retain(|w| w != window);
+        self.windows.minimized.retain(|w| w != window);
     }
 
     /// The number of workspaces changed (config reload): windows on

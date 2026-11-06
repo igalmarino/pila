@@ -272,7 +272,7 @@ impl Pila {
 
     /// Bring a window to the front with keyboard focus, as a taskbar asks.
     fn activate_toplevel(&mut self, window: &Window) {
-        if self.switch.is_some() {
+        if self.windows.switch.is_some() {
             self.end_switch();
         }
         self.reveal_workspace_of(window);

@@ -167,6 +167,7 @@ impl Pila {
                 .map(|w| self.window_json(w, None, now)),
         );
         let unmapped = self
+            .windows
             .unmapped
             .iter()
             .map(|w| foreign_toplevel::title_and_app_id(w).1)
@@ -254,11 +255,12 @@ impl Pila {
             .focused_window()
             .map(|w| foreign_toplevel::title_and_app_id(&w).1);
         let focus_history = self
+            .windows
             .focus_history
             .iter()
             .map(|w| foreign_toplevel::title_and_app_id(w).1)
             .collect::<Vec<_>>();
-        let switch = self.switch.as_ref().map(|s| {
+        let switch = self.windows.switch.as_ref().map(|s| {
             let (order, index) = s.order();
             json!({
                 "order": order.iter().map(|w| foreign_toplevel::title_and_app_id(w).1).collect::<Vec<_>>(),
@@ -307,7 +309,7 @@ impl Pila {
                     })
                 }),
                 "cursor": cursor,
-                "constrained": self.constrained.is_some(),
+                "constrained": self.input.constrained.is_some(),
             },
             "keyboard_grabbed": self.seat.get_keyboard().is_some_and(|k| k.is_grabbed()),
             "locked": self.is_locked(),

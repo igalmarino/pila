@@ -79,7 +79,7 @@ impl Pila {
                     let raw = handle.modified_sym().raw();
                     let first = Keysym::XF86_Switch_VT_1.raw();
                     if (first..=Keysym::XF86_Switch_VT_12.raw()).contains(&raw) {
-                        state.suppressed_keys.insert(keycode);
+                        state.input.suppressed_keys.insert(keycode);
                         return FilterResult::Intercept(Some(Action::ChangeVt(
                             (raw - first + 1) as i32,
                         )));
@@ -102,12 +102,12 @@ impl Pila {
                             // never Quit.
                             .filter(|action| !inhibited || *action == Action::Quit);
                         if let Some(action) = action {
-                            state.suppressed_keys.insert(keycode);
+                            state.input.suppressed_keys.insert(keycode);
                             return FilterResult::Intercept(Some(action));
                         }
                     }
                     // Don't send the client a release for a press it never saw.
-                    KeyState::Released if state.suppressed_keys.remove(&keycode) => {
+                    KeyState::Released if state.input.suppressed_keys.remove(&keycode) => {
                         return FilterResult::Intercept(None);
                     }
                     _ => {}
@@ -120,7 +120,7 @@ impl Pila {
             self.run_action(action, serial);
         }
         // Mod+Tab ends once Ctrl/Alt/Super are all released.
-        if self.switch.is_some() {
+        if self.windows.switch.is_some() {
             let mods = keyboard.modifier_state();
             if !(mods.ctrl || mods.alt || mods.logo) {
                 self.end_switch();
@@ -161,7 +161,7 @@ impl Pila {
                 |state, _, _| {
                     // Like a real release: a key whose press triggered a
                     // binding was never seen by the client.
-                    if state.suppressed_keys.remove(&keycode) {
+                    if state.input.suppressed_keys.remove(&keycode) {
                         FilterResult::Intercept(())
                     } else {
                         FilterResult::Forward
@@ -169,7 +169,7 @@ impl Pila {
                 },
             );
         }
-        self.suppressed_keys.clear();
+        self.input.suppressed_keys.clear();
         self.end_switch();
     }
 
@@ -188,10 +188,11 @@ impl Pila {
 
         // Nested: relative motion is how far the host pointer moved.
         let delta = self
+            .input
             .host_pointer
             .map(|last| location - last)
             .unwrap_or_default();
-        self.host_pointer = Some(location);
+        self.input.host_pointer = Some(location);
         self.pointer_motion(
             location,
             delta,

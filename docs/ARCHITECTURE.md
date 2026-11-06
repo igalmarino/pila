@@ -7,7 +7,8 @@ A change to a flow or invariant updates its section in the same commit.
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
 implements every Smithay handler trait. Its fields are grouped by subsystem where they go together: Smithay's
 protocol states (`Protocols`), Xwayland (`xwayland::XwaylandState`), screen capture
-(`capture::Captures`), outputs beyond the `Space` (`output_management::Outputs`). Unlike smallvil (but like anvil), the calloop event
+(`capture::Captures`), outputs beyond the `Space` (`output_management::Outputs`), windows
+off the `Space` and their history (`Windows`), pila's own input state (`InputState`). Unlike smallvil (but like anvil), the calloop event
 loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which
 Smithay modules that schedule their own timers (e.g. idle-notify) require. Core window
 management lives in `state.rs`; each feature beyond it has its own module (named in the
@@ -117,7 +118,7 @@ Key flows and invariants:
   `fullscreen_request` honors the requested output for mapped windows
   (`set_fill_state_on`). Touchpad gestures (swipe, pinch, hold) are forwarded to the
   pointer focus through pointer-gestures (`gestures.rs`), except swipes with a finger
-  count that `[gestures]` binds: those are kept whole from begin to end (`Pila::swipe`,
+  count that `[gestures]` binds: those are kept whole from begin to end (`Pila::input.swipe`,
   direction fixed after a small move, action after a threshold, window switching stepping
   per further stretch and ending on lift), unless locked or shortcuts are inhibited.
   Output transforms (rotation) are the `Output`'s: Smithay rotates the rendered frame and
@@ -160,7 +161,7 @@ Key flows and invariants:
   `PopupKeyboardGrab`/`PopupPointerGrab`; they are the only keyboard grabs pila takes.
   A popup grab ignores focus changes, so `focus_window` dismisses it first
   (`dismiss_popup_grab`), and `focused_window` resolves a focused popup to its window.
-- **Window lifecycle:** `new_toplevel` pushes the window onto `Pila::unmapped` (not the
+- **Window lifecycle:** `new_toplevel` pushes the window onto `Pila::windows.unmapped` (not the
   space). A client unmapping it (a null-buffer commit, `unmap_if_buffer_removed`) takes it
   out of the space, taskbars (`remove_foreign_toplevel`, which also stops its capture
   sessions), Mod+Tab and focus, and puts a new `Window` for the toplevel in `unmapped`:
@@ -209,13 +210,13 @@ Key flows and invariants:
   activation and taskbars all agree. The pointer still reaches the parent: the client blocks
   its own widgets.
 - **Window switching** (`switcher.rs`): `focus_window` moves the window to the front of
-  `Pila::focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::switch`,
+  `Pila::windows.focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::windows.switch`,
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;
   the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
   released (checked after every key in `on_keyboard`), on a click, and in
   `release_all_keys`. Unmapped windows are dropped with `forget_focus_history`.
 - **Minimize** (`minimize.rs`): a minimized window is unmapped from the `Space` and kept
-  in `Pila::minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
+  in `Pila::windows.minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
   `window_for_surface`/`window_for_x11` search it too, and destroyed windows are removed
   (`forget_off_space`). It comes back only through Mod+Tab: the switch order includes
   minimized windows; a minimized pick is shown (`show_window`) while selected, hidden
@@ -478,7 +479,7 @@ Key flows and invariants:
   `SeatHandler::focus_changed` releases it (`release_constraint_for_focus`), which makes
   Mod+Tab / clicking elsewhere / locking the escape. The motion path checks the active
   constraint before moving the pointer. Nested, relative motion is derived from the host
-  pointer (`Pila::host_pointer`); a DRM backend sends real relative motion through the same
+  pointer (`Pila::input.host_pointer`); a DRM backend sends real relative motion through the same
   checks.
 - **X11** (`xwayland.rs`, `focus.rs`): pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command

@@ -48,13 +48,16 @@ impl XdgShellHandler for Pila {
         }
         crate::animation::watch_unmap(surface.wl_surface());
         // Mapped on its first buffer commit, once we know its size.
-        self.unmapped.push(Window::new_wayland_window(surface));
+        self.windows
+            .unmapped
+            .push(Window::new_wayland_window(surface));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         let wl_surface = surface.wl_surface();
         self.forget_session_toplevel(wl_surface);
-        self.unmapped
+        self.windows
+            .unmapped
             .retain(|w| w.toplevel().is_some_and(|t| t.wl_surface() != wl_surface));
 
         let was_focused = self.keyboard_focus().as_ref() == Some(wl_surface);
@@ -271,11 +274,12 @@ impl Pila {
     pub fn handle_xdg_commit(&mut self, surface: &WlSurface) {
         self.unmap_if_buffer_removed(surface);
         if let Some(index) = self
+            .windows
             .unmapped
             .iter()
             .position(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
         {
-            let window = self.unmapped[index].clone();
+            let window = self.windows.unmapped[index].clone();
             let toplevel = window.toplevel().unwrap();
             if !toplevel.is_initial_configure_sent() {
                 self.send_initial_scale(surface, self.session_output(&window));
@@ -283,7 +287,7 @@ impl Pila {
                 self.apply_initial_rules(&window);
                 toplevel.send_configure();
             } else if has_buffer(surface) {
-                self.unmapped.remove(index);
+                self.windows.unmapped.remove(index);
                 self.place_new_window(window);
             }
         }
@@ -307,6 +311,7 @@ impl Pila {
     /// close animation, started by `watch_unmap`, fades out on its own.
     fn unmap_if_buffer_removed(&mut self, surface: &WlSurface) {
         let waiting = self
+            .windows
             .unmapped
             .iter()
             .any(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
@@ -328,7 +333,9 @@ impl Pila {
         let was_focused = self.focused_window().as_ref() == Some(&window);
         self.forget_window(&window);
         self.space.unmap_elem(&window);
-        self.unmapped.push(Window::new_wayland_window(toplevel));
+        self.windows
+            .unmapped
+            .push(Window::new_wayland_window(toplevel));
         if was_focused {
             self.focus_recent_window();
         }

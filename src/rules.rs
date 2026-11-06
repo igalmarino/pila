@@ -425,7 +425,7 @@ impl Pila {
         let windows: Vec<Window> = self
             .space
             .elements()
-            .chain(self.unmapped.iter())
+            .chain(self.windows.unmapped.iter())
             .chain(self.off_space_windows())
             .cloned()
             .collect();
