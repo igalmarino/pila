@@ -32,8 +32,8 @@ The biggest unknown is how pila behaves away from its author's laptop. Most usef
 now, in this order:
 
 - **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs;
-- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building,
-  [NixOS](#nix-and-nixos) among them;
+- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building:
+  [Debian, Ubuntu, Fedora](#debian-ubuntu-and-fedora), [NixOS](#nix-and-nixos);
 - **display managers** other than GDM (SDDM, greetd, LightDM);
 - **monitors:** high refresh rates, 4K, mixed scales, several at once;
 - **other shells and apps:** bars, launchers, games, Steam, Electron.
@@ -131,6 +131,22 @@ differ between releases):
 | Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev xwayland pkgconf` |
 
 Then `cargo build --release`.
+
+### Debian, Ubuntu and Fedora
+
+From 0.2.2 on, each [release](https://github.com/igalmarino/pila/releases) has a `.deb` (for
+Ubuntu 24.04 or newer and Debian 13 or newer) and a `.rpm` (for the Fedora current at the time
+of the release), for x86_64. Download one and install it, which brings what it needs:
+
+```bash
+sudo apt install ./pila_*.deb    # Debian, Ubuntu
+sudo dnf install ./pila-*.rpm    # Fedora
+```
+
+They install the same files as `scripts/install` in `/usr`, and there's no repository yet, so
+updating means installing a newer one. Each package is installed on a clean system and started
+headless before it's attached to a release, but a real session on these distros hasn't been
+tried yet: please [report](#help-test-pila) how it goes.
 
 ### Nix and NixOS
 
