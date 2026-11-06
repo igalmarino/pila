@@ -48,6 +48,7 @@ overrides:
       - grim
       - slurp
       - libnotify-bin
+      - xdg-utils
   rpm:
     depends:
       - mesa-libEGL
@@ -64,3 +65,4 @@ overrides:
       - grim
       - slurp
       - libnotify
+      - xdg-utils

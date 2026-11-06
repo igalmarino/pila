@@ -135,11 +135,17 @@ fn report_home(name: &str) -> std::path::PathBuf {
 
 /// Run scripts/report in `home`, with this build first on the `PATH`.
 fn report(home: &std::path::Path) -> std::process::Output {
+    let path = std::env::var("PATH").unwrap();
+    report_on_path(home, &path)
+}
+
+/// Run scripts/report in `home`, with this build first on `path`.
+fn report_on_path(home: &std::path::Path, path: &str) -> std::process::Output {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/report");
     let bin = std::path::Path::new(env!("CARGO_BIN_EXE_pila"))
         .parent()
         .unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let path = format!("{}:{path}", bin.display());
     Command::new(script)
         .current_dir(home)
         .env("PATH", path)
@@ -202,6 +208,35 @@ fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
     assert!(out.status.success(), "{out:?}");
     let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
     assert!(text.contains("In use by pila: /dev/dri/card1"), "{text}");
+}
+
+#[test]
+fn the_report_says_whether_xdg_open_is_installed() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    // Every program on the PATH but xdg-open, whatever this machine has.
+    let home = report_home("xdg-open");
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap()) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if entry.file_name() != "xdg-open" {
+                let _ = symlink(entry.path(), bin.join(entry.file_name()));
+            }
+        }
+    }
+    let report_text = || {
+        let out = report_on_path(&home, &bin.display().to_string());
+        assert!(out.status.success(), "{out:?}");
+        std::fs::read_to_string(home.join("pila-report.txt")).unwrap()
+    };
+    let text = report_text();
+    assert!(text.contains("xdg-open: missing"), "{text}");
+
+    let xdg_open = bin.join("xdg-open");
+    std::fs::write(&xdg_open, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&xdg_open, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let text = report_text();
+    assert!(text.contains("xdg-open: installed"), "{text}");
 }
 
 #[test]

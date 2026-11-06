@@ -66,6 +66,7 @@ section_system() {
     echo "Desktop: ${XDG_CURRENT_DESKTOP:-unset}"
     echo "Wayland display: ${WAYLAND_DISPLAY:-unset}"
     echo "Xwayland: $(command -v Xwayland >/dev/null && echo installed || echo missing)"
+    echo "xdg-open: $(command -v xdg-open >/dev/null && echo installed || echo missing)"
 }
 
 section_gpu() {

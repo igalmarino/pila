@@ -33,6 +33,7 @@ optdepends=(
     'wl-clipboard: clipboard from the command line'
     'swaylock: locking the session'
     'libnotify: notifications from pila, such as an invalid config (notify-send)'
+    'xdg-utils: opening links and files from programs such as kitty (xdg-open)'
 )
 provides=(pila)
 conflicts=(pila)

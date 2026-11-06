@@ -267,11 +267,13 @@ Host packages for a full session (names are the same on most distros):
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
 - `libnotify` (`libnotify-bin` on Debian, Ubuntu): `notify-send`, which pila uses to tell you
   about an invalid config, for instance; a notification daemon must show them (Noctalia, mako, ...)
+- `xdg-utils`: `xdg-open`, which programs such as kitty use to open links and files; without it
+  a click on a link does nothing, and says nothing
 
 ```bash
-sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify       # Arch
-sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify-bin # Debian, Ubuntu
-sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify     # Fedora
+sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils       # Arch
+sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify-bin xdg-utils # Debian, Ubuntu
+sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils     # Fedora
 ```
 
 ### Desktop shells and tools
