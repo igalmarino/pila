@@ -115,7 +115,7 @@ section_config() {
 find_log() {
     local log="${XDG_STATE_HOME:-${HOME:-}/.local/state}/pila/pila.log"
     if [ -f pila-tty.log ] && { [ ! -f "$log" ] || [ pila-tty.log -nt "$log" ]; }; then
-        log=pila-tty.log
+        log="pila-tty.log"
     fi
     [ -f "$log" ] && echo "$log"
 }
