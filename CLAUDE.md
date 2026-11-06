@@ -21,7 +21,7 @@ on **Smithay 0.7.x**.
   `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session links
   its Wayland socket again. Logging out and back in leaves `/run/host-wayland/` empty until
   then, and nested runs fail with `EventLoopCreation`.
-- The DRM/KMS + libinput backend (`--backend udev`, `udev.rs`) cannot be tested in this
+- The DRM/KMS + libinput backend (`--backend udev`, `udev/`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
   the host, from a TTY. Write that code, but ask the user to test it.
 - You can't see the screen. Ask the user to confirm anything visual.
@@ -35,40 +35,15 @@ on **Smithay 0.7.x**.
 
 ## Commands
 
-- Build: `cargo build`; `cargo build --release` for what `scripts/tty` and
-  `scripts/install` use.
 - Lint: `cargo clippy --all-targets -- -D warnings`
-- Format: `cargo fmt`
 - CI (`.github/workflows/ci.yml`) also runs `cargo fmt --check`, builds with `--locked`
   (on `rust-version` too, and on Debian, Ubuntu and Fedora), does a staged install and
   runs `shellcheck --severity=warning --external-sources` on the scripts: run that after
   editing one.
-- Test: `cargo test`; single test: `cargo test <name_substring>`. Unit tests cover pure
-  logic (e.g. title bar/border hit math in `decoration.rs`, config parsing, including
-  `example_config_is_valid` for `config.example.toml`). Integration tests (`tests/*.rs`,
-  harness in `tests/common/`) run a headless pila per test (`--backend headless`, see
-  "Backends" in `docs/ARCHITECTURE.md`), in parallel: `TestPila` starts it with a config (animations off unless
-  the test sets `[animations]`), injects input and reads the state through its control
-  socket, and waits for conditions (`wait`, `wait_window`, `stays`; never sleeps);
-  `Client` (`tests/common/client.rs`) is a synthetic Wayland client on its own thread
-  that acks configures, draws its color at the configured size and records configures
-  and input events. A failing test prints the state and pila's log; `PILA_TEST_LOG`
-  sets its `RUST_LOG`, `PILA_TEST_KEEP=1` keeps a failed test's directory,
-  `PILA_HEADLESS_DEVICE=software` renders on llvmpipe as CI does. A pila that
-  panics fails its test. Every feature gets integration tests; only bare-metal
-  paths (`udev.rs`), real frame times (`scripts/check`) and looks stay with the user.
-  `tests/FEATURES.md` maps every feature to its tests (or says why it has
-  none), and `features_inventory_is_complete` fails if a test it names is gone
-  or an integration test isn't named there: a new test goes into it. Known
-  bugs are `#[ignore = "bug: ..."]` tests, listed at its end. The client's
-  `wait` closures run with its lock held: read the `Shared` given, never call
-  the client (that deadlocks). A test expecting a protocol error calls
-  `Client::expect_error` before the bad request (`wait_error` insists): it stops the client's
-  thread from writing, since a write after pila closes the connection fails and
-  wayland-backend then never reads the protocol error waiting in the socket. `scripts/coverage [--html]` reports line
-  coverage per file (instrumented build in `target/coverage`; needs
-  `llvm-profdata`/`llvm-cov` of rustc's LLVM major version), a guide to what
-  the tests miss.
+- Test: `cargo test`; single test: `cargo test <name_substring>`. Every feature gets
+  integration tests (`tests/*.rs`; how they work is in `tests/CLAUDE.md`) and a new test
+  goes into `tests/FEATURES.md`; only bare-metal paths (`udev/`), real frame times
+  (`scripts/check`) and looks stay with the user.
 - Fixing a bug: first write a test that reproduces it and see it fail, then fix it; the test
   stays in the suite to verify the fix and keep the bug from coming back. If a bug can't be
   tested automatically (bare metal, looks), say so and why.
@@ -78,11 +53,8 @@ on **Smithay 0.7.x**.
 - Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`);
   `pila --check-config [--config FILE]` validates a file as pila reads it, plus the
   keymap (`config::check_keymap`), and exits 0/1 (`main::run_config_check`).
-  Env overrides: `PILA_MOD` (super / alt / ctrl; default super on a TTY, alt nested),
-  `PILA_TERMINAL` (default: the first installed of `config::TERMINALS`, kitty first),
-  `PILA_LAUNCHER` (Mod+D, disabled if unset). Alt is the default because GNOME grabs Super
-  while nested. On a TTY: `XCURSOR_THEME`/`XCURSOR_SIZE`, and the keymap from libxkbcommon's
-  `XKB_DEFAULT_LAYOUT`/`_VARIANT`/`_OPTIONS`.
+  Env overrides: `USAGE` in `main.rs`. Alt is the default because GNOME grabs Super while
+  nested.
 - Test clients available inside the nested compositor: `foot`, `weston-terminal`,
   `weston-simple-egl`, `wayland-info`, and `gtk4-widget-factory` / `gtk4-demo` (menus,
   popovers, dropdowns: the way to exercise popups and popup grabs). `foot` and GTK use
@@ -92,22 +64,10 @@ on **Smithay 0.7.x**.
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
   (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
   Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
-- Bare-metal smoke and performance run: `scripts/check` drives a real pila with real
-  programs (a terminal, xterm, fuzzel, grim, Noctalia if installed: windows opening and
-  closing, minimize, maximize, workspace switches, a launcher, a capture) and judges
-  the log: the scenarios finished without a panic, animations ran (`starts` on
-  `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a picture,
-  monitors were identified from their EDID (bare metal), and the frame statistics (no missed refresh, CPU per frame on average within 4 ms).
-  It prints PASS/FAIL per check and exits 1 on a failure. It doesn't test behavior:
-  that's the integration tests' job (`scripts/toplevel-action` and
-  `scripts/workspace-action` are its small taskbar and pager clients, standard-library
-  Python). `scripts/check --nested` (release build, log in
-  `pila-check.log`) is for you: run it before asking the user to check anything; the
-  user runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. A
-  feature adds a scenario there (a `mark "name begin/end"` section in the workload,
-  checks with `section`, `has`, `lacks` on a debug log target) only if it's bare-metal
-  only or puts load on rendering; what only eyes can judge (how it looks) is still
-  asked of the user.
+- Bare-metal smoke and performance run: `scripts/check --nested` (release build, log in
+  `pila-check.log`) is for you: run it before asking the user to check anything; the user
+  runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. What it
+  checks and when a feature adds a scenario: `scripts/CLAUDE.md`.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
@@ -121,12 +81,9 @@ on **Smithay 0.7.x**.
   mounted here read-only as `/run/host-pila/pila.log` (previous run: `pila.log.old`).
   Taking a change into the session means logging out and back in, which ends this
   Claude session; the user does it.
-- Arch package: `packaging/aur/pila-git` (`PKGBUILD` + `.SRCINFO`, test with `makepkg -f`
-  there); its `package()` runs `scripts/install --no-build` with `PREFIX=/usr DESTDIR=`, so
-  files added to `install_files` need no change there. Keep `depends` in step with the
-  libraries pila links (`readelf -d`) and README's package table, and regenerate
-  `.SRCINFO` (`makepkg --printsrcinfo`) after editing the `PKGBUILD`. The user publishes
-  it to the AUR.
+- Arch package: `packaging/aur/pila-git`. Keep `depends` in its `PKGBUILD` in step with the
+  libraries pila links (`readelf -d`) and README's package table. Packaging and releases:
+  the `release` skill.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's
@@ -136,10 +93,6 @@ on **Smithay 0.7.x**.
   window inside it. Changes that need a pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or
   hardware-related; push to GitHub (`origin`, public, GPL-3.0-or-later) only when asked.
-- Releases: a commit `Release X` with `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`; an
-  annotated tag `vX` on it, message `pila X`; a GitHub release with the changelog's section
-  as its text; then a commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`). The user
-  publishes it to the AUR.
 
 ## Language
 
@@ -217,7 +170,8 @@ wp-security-context (Flatpak) fails `state::is_privileged` (`ClientState::securi
 Xwayland counts as privileged). Smithay globals take it as their filter, pila's own as
 `GlobalDispatch::can_view`. It covers layer-shell, session lock, ext-data-control,
 virtual-keyboard, ext-foreign-toplevel-list, screen capture (both protocols), toplevel
-management, gamma, output management and power, and security-context itself. A new
+management, gamma, output management and power, ext-workspace, keyboard-shortcuts-inhibit,
+ext-idle-notify, and security-context itself. A new
 global that exposes or controls other clients, input or outputs must get it too.
 
 ## Architecture
