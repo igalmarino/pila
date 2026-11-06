@@ -71,6 +71,30 @@ fn unplugging_an_output_moves_its_windows_and_the_pointer() {
 }
 
 #[test]
+fn binding_an_output_as_it_goes_away_doesnt_kill_the_client() {
+    use wayland_client::protocol::{wl_output::WlOutput, wl_registry::WlRegistry};
+    let mut pila = two_outputs();
+    let client = pila.client();
+    let (registry, name): (WlRegistry, u32) = {
+        let shared = client.lock();
+        let name = shared
+            .globals
+            .iter()
+            .rev()
+            .find(|(_, interface, _)| interface == "wl_output")
+            .map(|(name, _, _)| *name)
+            .unwrap();
+        (shared.registry.clone().unwrap(), name)
+    };
+    pila.request(json!({ "cmd": "output_remove", "name": "B" }));
+    // Its `global_remove` was on its way when the client asked for this.
+    let _: WlOutput = registry.bind(name, 4, &client.qh, ());
+    client.flush();
+    client.roundtrip();
+    assert_eq!(client.error(), None);
+}
+
+#[test]
 fn a_maximized_window_on_an_unplugged_output_refits_and_restores_onto_another() {
     let mut pila = two_outputs();
     pila.move_to(1500.0, 300.0);

@@ -86,7 +86,10 @@ Key flows and invariants:
   that can tap) when added; relative motion goes through the same constraint path as
   nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through
   `Pila::output_removed` (closes its layer surfaces, drops its lock surface, moves the
-  pointer and stranded windows, incl. their restore geometry, via `fixup_windows`).
+  pointer and stranded windows, incl. their restore geometry, via `fixup_windows`). Its
+  `wl_output` global goes through `state::retire_global`: disabled now, removed 10 s later,
+  since binding a removed global is a protocol error and a client may be doing that as it
+  hears the news.
   `disable-internal-display` (a boolean; `Config::internal_display`: never / always)
   turns a built-in screen (connector eDP/LVDS/DSI, `is_internal`) off while another,
   external output is on by its own config: `effective_output_config` sets its `enabled`

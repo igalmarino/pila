@@ -230,6 +230,10 @@ const SESSION_ENV: [&str; 4] = [
 /// environment (`export_environment`).
 const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long a global clients were told is gone can still be bound
+/// (`retire_global`).
+const GLOBAL_RETIRE_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Whether the D-Bus address `bus` is the systemd user bus of the runtime
 /// directory `runtime` (`unix:path=$XDG_RUNTIME_DIR/bus`, maybe followed by
 /// more `,key=value` pairs such as a guid).
@@ -1697,6 +1701,24 @@ pub struct ClientState {
 /// the like): any client but a sandboxed one, i.e. one that connected
 /// through a security context. Xwayland is trusted (X11 has no such
 /// boundary anyway).
+/// Take a global away without killing the client binding it right then, before
+/// it heard: clients are told now, and it's removed some time later.
+pub fn retire_global(
+    display: &smithay::reexports::wayland_server::DisplayHandle,
+    loop_handle: &LoopHandle<'static, Pila>,
+    global: smithay::reexports::wayland_server::backend::GlobalId,
+) {
+    display.disable_global::<Pila>(global.clone());
+    let timer = Timer::from_duration(GLOBAL_RETIRE_DELAY);
+    let inserted = loop_handle.insert_source(timer, move |_, _, state| {
+        state.display_handle.remove_global::<Pila>(global.clone());
+        TimeoutAction::Drop
+    });
+    if let Err(err) = inserted {
+        warn!(%err, "can't schedule removing a global");
+    }
+}
+
 pub fn is_privileged(client: &Client) -> bool {
     if client.get_data::<XWaylandClientData>().is_some() {
         return true;

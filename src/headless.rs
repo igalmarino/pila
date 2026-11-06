@@ -503,7 +503,7 @@ pub fn remove_output(state: &mut Pila, name: &str) -> bool {
     let removed = data.outputs.remove(index);
     state.monitors.remove(name);
     if let Some(global) = removed.global {
-        state.display_handle.remove_global::<Pila>(global);
+        crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     }
     info!(name, "output disconnected");
     if removed.enabled {
@@ -562,6 +562,7 @@ pub fn apply_output_config(state: &mut Pila) {
         .collect();
     let any_on = configs.iter().any(|c| c.enabled.unwrap_or(true));
     let display_handle = state.display_handle.clone();
+    let loop_handle = state.loop_handle.clone();
     let Some(Backend::Headless(data)) = &mut state.backend else {
         return;
     };
@@ -593,7 +594,7 @@ pub fn apply_output_config(state: &mut Pila) {
                 o.enabled = false;
                 o.drawn = false;
                 if let Some(global) = o.global.take() {
-                    display_handle.remove_global::<Pila>(global);
+                    crate::state::retire_global(&display_handle, &loop_handle, global);
                 }
                 info!(name = o.output.name(), "output disabled");
                 disabled.push(o.output.clone());

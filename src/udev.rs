@@ -1233,7 +1233,7 @@ fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
     surface.lock_frame = LockFrame::None;
     let output = surface.output.clone();
     if let Some(global) = surface.global.take() {
-        state.display_handle.remove_global::<Pila>(global);
+        crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     }
     info!(name = output.name(), "output disabled");
     state.space.unmap_output(&output);
@@ -1405,7 +1405,7 @@ fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
     // that went away move onto it.
     apply_internal_display(state);
     if let Some(global) = surface.global {
-        state.display_handle.remove_global::<Pila>(global);
+        crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     }
     if surface.enabled {
         state.space.unmap_output(&surface.output);
