@@ -84,7 +84,7 @@ pub fn notify_after_startup(
 ) {
     let timer = Timer::from_duration(STARTUP_NOTICE_DELAY);
     let inserted = loop_handle.insert_source(timer, move |_, _, state: &mut Pila| {
-        state.notify(summary, &body);
+        state.notify_error(summary, &body);
         TimeoutAction::Drop
     });
     if let Err(err) = inserted {

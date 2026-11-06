@@ -66,6 +66,55 @@ fn a_missing_notify_send_is_logged_once() {
     );
 }
 
+/// A `notify-send` that writes its arguments to `notified` in pila's runtime
+/// directory, in a directory of `dir` that's to be all of the `PATH`.
+fn recording_notify_send(dir: &std::path::Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let script = dir.join("notify-send");
+    let log = dir.join("notified");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> {}; done\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dir.display().to_string()
+}
+
+#[test]
+fn an_error_stays_on_screen_longer_than_a_success() {
+    let bin = std::env::temp_dir().join(format!("pila-notify-{}", std::process::id()));
+    let log = bin.join("notified");
+    let path = recording_notify_send(&bin);
+    let mut pila = TestPila::start_with(Options {
+        env: vec![("PATH".into(), path)],
+        ..Default::default()
+    });
+    let wait_for = |text: &str| {
+        let started = std::time::Instant::now();
+        loop {
+            let got = std::fs::read_to_string(&log).unwrap_or_default();
+            if got.contains(text) {
+                return got;
+            }
+            assert!(started.elapsed() < common::TIMEOUT, "no {text:?} in {got}");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    pila.write_config("workspaces = 3\n");
+    let got = wait_for("Config reloaded");
+    assert!(got.contains("--expire-time=3000"), "{got}");
+    std::fs::remove_file(&log).unwrap();
+    pila.write_config("workspaces = = 6\n");
+    let got = wait_for("Config not reloaded");
+    assert!(got.contains("--expire-time=10000"), "{got}");
+    let _ = std::fs::remove_dir_all(&bin);
+}
+
 #[test]
 fn a_syntax_error_keeps_the_running_config() {
     let mut pila = TestPila::with_config("workspaces = 2\n");

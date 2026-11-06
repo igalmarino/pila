@@ -34,6 +34,10 @@ use crate::{config::Config, Pila};
 
 /// How long after the last change to reload.
 const SETTLE: Duration = Duration::from_millis(250);
+/// How long a notification that all went well stays.
+const NOTICE_MS: u32 = 3000;
+/// How long a notification of a problem stays: an error can be long.
+const ERROR_MS: u32 = 10_000;
 
 impl Pila {
     /// Start watching `config_path` for changes. Without a config directory
@@ -128,7 +132,7 @@ impl Pila {
             }
             Err(err) => {
                 warn!(%err, "config not reloaded; keeping the running one");
-                self.notify("Config not reloaded", &err);
+                self.notify_error("Config not reloaded", &err);
             }
         }
     }
@@ -205,7 +209,7 @@ impl Pila {
                 ?kb,
                 "invalid keyboard config; keeping the current keymap"
             );
-            self.notify(
+            self.notify_error(
                 "Keyboard config not applied",
                 &format!(
                     "{}: xkbcommon doesn't know it; keeping the current keymap.",
@@ -231,13 +235,24 @@ impl Pila {
         }
     }
 
+    /// A desktop notification that something went well: a glance is enough.
+    fn notify(&mut self, summary: &str, body: &str) {
+        self.send_notification(summary, body, NOTICE_MS);
+    }
+
+    /// A desktop notification of a problem, with time to read what it says.
+    pub(crate) fn notify_error(&mut self, summary: &str, body: &str) {
+        self.send_notification(summary, body, ERROR_MS);
+    }
+
     /// A desktop notification (through `notify-send`, if there's a
     /// notification daemon such as mako); also in the log. Without
     /// `notify-send` they silently don't show, so the log says why, once.
-    pub(crate) fn notify(&mut self, summary: &str, body: &str) {
+    fn send_notification(&mut self, summary: &str, body: &str, milliseconds: u32) {
         info!(summary, body, "notification");
         let mut cmd = Command::new("notify-send");
-        cmd.args(["--app-name=pila", "--expire-time=3000", summary]);
+        cmd.args(["--app-name=pila", summary]);
+        cmd.arg(format!("--expire-time={milliseconds}"));
         if !body.is_empty() {
             cmd.arg(body);
         }
