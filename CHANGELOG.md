@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.1 (2026-11-05)
+
+- **New protocols:** xdg-session-management (apps restore their windows' place, size and
+  maximized or fullscreen state, also after pila restarts), xdg-dialog (modal dialogs
+  stay over their window), xdg-toplevel-tag (window rules can match a tag), wp-fifo and
+  wp-commit-timing (frame pacing for games and video), linux-drm-syncobj (explicit sync,
+  as Vulkan apps use; untested on NVIDIA), and a dmabuf client's rendering is waited for before
+  it's shown.
+- **Windows:** dialogs and other transient windows stay above their parent and follow
+  it to other workspaces.
+- **Monitors:** make, model and serial come from the monitor's EDID, for clients and for
+  `[[output]]` sections that name a monitor (`name = "LEN P27h-30"`) instead of a
+  connector. A monitor plugged in while on another VT comes on when you're back.
+- **Security:** sandboxed apps (Flatpak) no longer see ext-workspace,
+  keyboard-shortcuts-inhibit or ext-idle-notify: they can't switch workspaces, take
+  pila's shortcuts away or watch when you're active. What an app can leave in the saved
+  sessions is bounded. The session log directory is private.
+- **Reliability:** Xwayland starts again if it dies (at most three times a minute), and
+  starts with no signals blocked; a display tool's output configuration that the monitor
+  can't take fails instead of being reported as applied; a client binding a monitor as
+  it's unplugged is no longer killed; a pila run next to the login session's
+  (`scripts/tty`) no longer overwrites its saved sessions.
+- **Blur:** right at fractional scales (no sharp lines between strips), after a change
+  of scale, in screenshots of a region and behind two overlapping surfaces; damage far
+  from a blurred region no longer redoes it, and a monitor turned off gives its memory
+  back.
+- **Fixes:** a fullscreen window only covers the panels of its own monitor; a menu over
+  a title bar gets the pointer; closing a window during Mod+Tab no longer skips one;
+  focus no longer lands on an X11 menu.
+- **Smoothness:** the cursor theme is read at startup on a thread, and screen captures
+  wait for the GPU without holding up the event loop.
+- **Tools:** `scripts/layer-namespaces` lists the layer surfaces your shell opens, to
+  write `[[layer-rule]]` sections for them.
+
 ## 0.2.0 (2026-11-05)
 
 - **Animations:** short and subtle, only where they help: windows rise and fade in and
