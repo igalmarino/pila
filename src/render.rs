@@ -87,9 +87,9 @@ uniform float tint;
     )
 }
 
-/// The blurred backdrop to draw behind the upper layer surface at an index
-/// of `Scene::upper`, if it has one (`blur.rs`).
-pub type Backdrop<'a> = &'a mut dyn FnMut(usize) -> Option<PilaRenderElement>;
+/// The blurred backdrop to draw behind a surface, if it has one, at an opacity
+/// (`blur.rs`).
+pub type Backdrop<'a> = &'a mut dyn FnMut(&WlSurface, f32) -> Option<PilaRenderElement>;
 
 /// Behind all windows and layer surfaces.
 const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
@@ -279,7 +279,7 @@ fn scene_elements_from(
                 .map(|ghost| ghost_element(ghost, output_location, scale)),
         );
     }
-    for (i, entry) in scene.upper.iter().enumerate().skip(first_upper) {
+    for entry in scene.upper.iter().skip(first_upper) {
         elements.extend(layer_elements(
             renderer,
             std::slice::from_ref(entry),
@@ -287,7 +287,7 @@ fn scene_elements_from(
             scale,
         ));
         // Right behind the surface (elements go front to back).
-        elements.extend(backdrop(i));
+        elements.extend(backdrop(entry.layer.wl_surface(), entry.alpha()));
     }
     if let Some((buffer, rect)) = &scene.snap_preview {
         let radius = Rounding::new(*rect, None, scene.corner_radius, false).map(|r| r.radius);
@@ -1157,8 +1157,8 @@ pub fn output_elements(
         output_geo.size,
         scale,
     );
-    scene_elements(renderer, scene, origin, scale, &mut |i| {
-        blur.element(i, origin, scale, scene.upper[i].alpha())
+    scene_elements(renderer, scene, origin, scale, &mut |surface, alpha| {
+        blur.element(surface, output_name, origin, scale, alpha)
     })
 }
 

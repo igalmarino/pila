@@ -204,9 +204,6 @@ pub struct BlurCache {
     /// Shader compilation failed: no blur.
     broken: bool,
     entries: HashMap<(ObjectId, String), Entry>,
-    /// For the output being drawn: the entry of each blurred upper layer,
-    /// by its index in `Scene::upper`.
-    current: Vec<(usize, (ObjectId, String))>,
     /// Backdrops allocated and passes run, for tests (`Pila::state_json`).
     allocated: u32,
     blurred: u32,
@@ -371,7 +368,6 @@ impl BlurCache {
         output_size: Size<i32, Logical>,
         scale: Scale<f64>,
     ) {
-        self.current.clear();
         // Only this output's: the others' are kept for their own frames.
         for (_, entry) in self.entries.iter_mut().filter(|(k, _)| k.1 == output_name) {
             entry.used = false;
@@ -422,7 +418,6 @@ impl BlurCache {
                 self.entries.remove(&key);
                 continue;
             }
-            self.current.push((index, key));
         }
         self.entries.retain(|k, e| k.1 != output_name || e.used);
     }
@@ -450,9 +445,14 @@ impl BlurCache {
         let origin = output_location + rect.loc;
         let behind: Vec<PilaRenderElement> = {
             let cache = &*self;
-            render::elements_behind_layer(renderer, scene, index, origin, scale, &mut |i| {
-                cache.element(i, origin, scale, scene.upper[i].alpha())
-            })
+            render::elements_behind_layer(
+                renderer,
+                scene,
+                index,
+                origin,
+                scale,
+                &mut |surface, alpha| cache.element(surface, &key.1, origin, scale, alpha),
+            )
         };
         let clear = render::clear_color(scene);
 
@@ -573,19 +573,19 @@ impl BlurCache {
         (self.allocated, self.blurred, self.entries.len())
     }
 
-    /// The backdrop element of the upper layer at `index` in the scene
-    /// `prepare` ran for, if it has one, relative to `origin` (global, what the
-    /// elements it goes with are relative to).
+    /// The backdrop element of `surface` on the output `output_name`, as the
+    /// last `prepare` left it, if it has one, relative to `origin` (global, what
+    /// the elements it goes with are relative to).
     /// At `alpha`: a layer surface fading in fades its backdrop with it.
     pub fn element(
         &self,
-        index: usize,
+        surface: &WlSurface,
+        output_name: &str,
         origin: Point<i32, Logical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Option<PilaRenderElement> {
-        let (_, key) = self.current.iter().find(|(i, _)| *i == index)?;
-        let entry = self.entries.get(key)?;
+        let entry = self.entries.get(&(surface.id(), output_name.to_string()))?;
         if !entry.drawn {
             return None;
         }
