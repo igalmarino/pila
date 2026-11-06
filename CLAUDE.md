@@ -14,11 +14,12 @@ on **Smithay 0.7.x**.
   session.
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
   the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
-  (`/run/host-wayland/wayland-0`, a hard link `scripts/link-wayland` makes to the socket of
-  whichever session the container was entered from: pila, or GNOME); the compositor
+  (`/run/host-wayland/wayland-0`, which `scripts/link-wayland` makes for whichever session
+  the container was entered from: on pila a wp-security-context socket, so privileged
+  protocols are hidden here too; on GNOME a hard link to the session's socket); the compositor
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
-  `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session links
+  `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session makes
   its Wayland socket again. Logging out and back in leaves `/run/host-wayland/` empty until
   then, and nested runs fail with `EventLoopCreation`.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev/`) cannot be tested in this
