@@ -356,11 +356,15 @@ Key flows and invariants:
   the session's own damage tracker sees a change. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
+  `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
+  (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
+  `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
+  calloop source on the fence fd. Without one it waits, as before.
 - **Screencopy** (`screencopy.rs`, wlr-screencopy v3, for clients that predate
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
   output-local); pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
-  in an idle callback; `copy_with_damage` waits in `Pila::screencopies` until that
+  after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::screencopies` until that
   manager's damage tracker for the output/region (`screencopy_trackers`) sees a change,
   checked from `after_frames`. A mode/scale change or a removed output fails the frame.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):

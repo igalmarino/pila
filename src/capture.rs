@@ -27,21 +27,23 @@
 //! sessions are created stopped. Any client but a sandboxed one
 //! (`state::is_privileged`) may capture, as with other compositors.
 
-use std::{sync::Mutex, time::Duration};
+use std::{cell::RefCell, os::fd::OwnedFd, rc::Rc, sync::Mutex, time::Duration};
 
 use smithay::{
     backend::{
         allocator::{Buffer as _, Fourcc},
+        egl::fence::EGLFence,
         renderer::{
             buffer_type,
             damage::OutputDamageTracker,
             element::AsRenderElements,
-            gles::{GlesRenderer, GlesTexture},
+            gles::{GlesMapping, GlesRenderer, GlesTexture},
             Bind, BufferType, ExportMem, Offscreen, TextureMapping,
         },
     },
     output::{Output, WeakOutput},
     reexports::{
+        calloop::{generic::Generic, Interest, Mode, PostAction},
         wayland_protocols::ext::{
             image_capture_source::v1::server::{
                 ext_foreign_toplevel_image_capture_source_manager_v1::{
@@ -80,7 +82,7 @@ use smithay::{
         shm::{with_buffer_contents, with_buffer_contents_mut},
     },
 };
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     render::{self, PilaRenderElement},
@@ -386,29 +388,28 @@ impl Pila {
             vec![Rectangle::from_size(size)]
         };
 
-        match copy_frame(renderer, &buffer, size, scale, &elements, clear) {
-            Ok(()) => {}
-            Err(CopyError::Constraints) => {
-                debug!("capture: buffer doesn't match the constraints");
-                session.fail(FailureReason::BufferConstraints);
+        let copied = match copy_frame(renderer, &buffer, size, scale, &elements, clear) {
+            Ok(copied) => copied,
+            Err(err) => {
+                session.fail(copy_failure(err));
                 return;
             }
-            Err(CopyError::Render(err)) => {
-                warn!(err, "capture failed");
-                session.fail(FailureReason::Unknown);
-                return;
-            }
-        }
-
-        frame.transform(wl_output::Transform::Normal);
-        for rect in damage {
-            frame.damage(rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
-        }
-        let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
-        frame.presentation_time(hi, lo, nanos);
-        frame.ready();
+        };
         session.pending = false;
         session.captured_once = true;
+        let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
+        self.when_copied(copied, move |_, result| {
+            if let Err(err) = result {
+                frame.failed(copy_failure(err));
+                return;
+            }
+            frame.transform(wl_output::Transform::Normal);
+            for rect in damage {
+                frame.damage(rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+            }
+            frame.presentation_time(hi, lo, nanos);
+            frame.ready();
+        });
     }
 
     /// Stop the sessions of an output that went away.
@@ -428,6 +429,63 @@ impl Pila {
             {
                 session.stop();
             }
+        }
+    }
+}
+
+/// A copy into a client's buffer, done or still on the GPU.
+pub(crate) enum Copied {
+    Done,
+    /// `finish` completes it once `fence` (a native fence fd) is signaled.
+    InFlight {
+        fence: OwnedFd,
+        finish: Finish,
+    },
+}
+
+/// What completes a copy once the GPU is done with it.
+pub(crate) type Finish = Box<dyn FnOnce(&mut GlesRenderer) -> Result<(), CopyError>>;
+
+impl Pila {
+    /// Run `then` once `copied` is complete: now, or when the GPU is done with
+    /// it, without waiting on the event loop.
+    pub(crate) fn when_copied(
+        &mut self,
+        copied: Copied,
+        then: impl FnOnce(&mut Pila, Result<(), CopyError>) + 'static,
+    ) {
+        let (fence, finish) = match copied {
+            Copied::Done => return then(self, Ok(())),
+            Copied::InFlight { fence, finish } => (fence, finish),
+        };
+        trace!("capture: waiting for the GPU's fence");
+        // Taken by whichever runs it: the source, or this if it can't be added.
+        let pending = Rc::new(RefCell::new(Some((finish, then))));
+        fn run<T: FnOnce(&mut Pila, Result<(), CopyError>)>(
+            state: &mut Pila,
+            pending: &RefCell<Option<(Finish, T)>>,
+        ) {
+            let taken = pending.borrow_mut().take();
+            if let Some((finish, then)) = taken {
+                let result = match state.backend.as_mut() {
+                    Some(backend) => finish(backend.renderer()),
+                    None => Err(CopyError::Render("no renderer".into())),
+                };
+                then(state, result);
+            }
+        }
+        let in_source = pending.clone();
+        let inserted = self.loop_handle.insert_source(
+            Generic::new(fence, Interest::READ, Mode::OneShot),
+            move |_, _, state| {
+                run(state, &in_source);
+                Ok(PostAction::Remove)
+            },
+        );
+        if let Err(err) = inserted {
+            // `finish` waits for the GPU by itself.
+            warn!(err = %err.error, "can't wait for a capture's fence");
+            run(self, &pending);
         }
     }
 }
@@ -454,11 +512,25 @@ pub(crate) fn copy_frame(
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
     clear: [f32; 4],
-) -> Result<(), CopyError> {
+) -> Result<Copied, CopyError> {
     match buffer_type(buffer) {
         Some(BufferType::Shm) => copy_to_shm(renderer, buffer, size, scale, elements, clear),
         Some(BufferType::Dma) => render_to_dmabuf(renderer, buffer, size, scale, elements, clear),
         _ => Err(CopyError::Constraints),
+    }
+}
+
+/// Why a frame failed, for a copy that did, logged.
+fn copy_failure(err: CopyError) -> FailureReason {
+    match err {
+        CopyError::Constraints => {
+            debug!("capture: buffer doesn't match the constraints");
+            FailureReason::BufferConstraints
+        }
+        CopyError::Render(err) => {
+            warn!(err, "capture failed");
+            FailureReason::Unknown
+        }
     }
 }
 
@@ -474,7 +546,7 @@ fn render_to_dmabuf(
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
     clear: [f32; 4],
-) -> Result<(), CopyError> {
+) -> Result<Copied, CopyError> {
     let mut dmabuf = get_dmabuf(buffer)
         .map_err(|_| CopyError::Constraints)?
         .clone();
@@ -490,9 +562,15 @@ fn render_to_dmabuf(
     let result = tracker
         .render_output(renderer, &mut target, 0, elements, clear)
         .map_err(|e| render_error(&e))?;
-    // The client reads it as soon as it gets `ready`.
+    // The client reads it as soon as it gets `ready`: once the GPU is done.
+    if let Some(fence) = result.sync.export() {
+        return Ok(Copied::InFlight {
+            fence,
+            finish: Box::new(|_| Ok(())),
+        });
+    }
     result.sync.wait().map_err(|e| render_error(&e))?;
-    Ok(())
+    Ok(Copied::Done)
 }
 
 /// Render `elements` offscreen and copy the pixels into the shm `buffer`.
@@ -503,7 +581,7 @@ fn copy_to_shm(
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
     clear: [f32; 4],
-) -> Result<(), CopyError> {
+) -> Result<Copied, CopyError> {
     let (w, h) = (size.w, size.h);
     let format = with_buffer_contents(buffer, |_, _, data| {
         (data.width == w && data.height == h && data.stride >= w * 4).then_some(data.format)
@@ -524,10 +602,10 @@ fn copy_to_shm(
             .map_err(|e| render_error(&e))?;
     let mut target = renderer.bind(&mut texture).map_err(|e| render_error(&e))?;
     let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
-    let result = tracker
+    // The read-back below comes after the drawing in the same context.
+    tracker
         .render_output(renderer, &mut target, 0, elements, clear)
         .map_err(|e| render_error(&e))?;
-    result.sync.wait().map_err(|e| render_error(&e))?;
     let region = Rectangle::from_size((w, h).into());
     let (mapping, swap_rb) = match renderer.copy_framebuffer(&target, region, wanted) {
         Ok(mapping) => (mapping, false),
@@ -538,12 +616,47 @@ fn copy_to_shm(
             wanted != Fourcc::Abgr8888,
         ),
     };
+    drop(target);
+    // Reading the pixels waits for the GPU: with a fence to wait on, that's
+    // after it signals, off the event loop's back.
+    let display = renderer.egl_context().display().clone();
+    let fence = renderer
+        .with_context(|gl| {
+            let fence = EGLFence::create(&display).ok();
+            // SAFETY: a plain flush in the renderer's current context.
+            unsafe { gl.Flush() };
+            fence
+        })
+        .ok()
+        .flatten()
+        .and_then(|fence| fence.export().ok());
+    let buffer = buffer.clone();
+    let write =
+        move |renderer: &mut GlesRenderer| write_shm(renderer, &mapping, &buffer, (w, h), swap_rb);
+    match fence {
+        Some(fence) => Ok(Copied::InFlight {
+            fence,
+            finish: Box::new(write),
+        }),
+        None => write(renderer).map(|()| Copied::Done),
+    }
+}
+
+/// Write the read-back pixels of `mapping` into the shm `buffer` of `size`,
+/// swapping red and blue if asked.
+fn write_shm(
+    renderer: &mut GlesRenderer,
+    mapping: &GlesMapping,
+    buffer: &WlBuffer,
+    (w, h): (i32, i32),
+    swap_rb: bool,
+) -> Result<(), CopyError> {
     // glReadPixels returns rows bottom-up: an offscreen texture drawn with
     // `Transform::Normal` reads back upside down unless the mapping says
     // it's already flipped.
     let bottom_up = !mapping.flipped();
     let pixels = renderer
-        .map_texture(&mapping)
+        .map_texture(mapping)
         .map_err(|e| render_error(&e))?;
 
     let row = (w * 4) as usize;

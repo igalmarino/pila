@@ -96,6 +96,13 @@ fn physical_size(
     )
 }
 
+fn log_failure(err: CopyError) {
+    match err {
+        CopyError::Constraints => debug!("screencopy: the buffer doesn't match"),
+        CopyError::Render(err) => warn!(err, "screencopy failed"),
+    }
+}
+
 /// Whether `buffer` is one this frame accepts: the advertised size, and a
 /// format `copy_frame` can write.
 fn buffer_matches(buffer: &WlBuffer, size: Size<i32, Physical>) -> bool {
@@ -265,31 +272,34 @@ impl Pila {
             }
         }
 
-        match capture::copy_frame(renderer, &buffer, size, scale, &elements, clear) {
-            Ok(()) => {}
-            Err(CopyError::Constraints) => {
-                debug!("screencopy: the buffer doesn't match");
+        let copied = match capture::copy_frame(renderer, &buffer, size, scale, &elements, clear) {
+            Ok(copied) => copied,
+            Err(err) => {
+                log_failure(err);
                 frame.failed();
                 return true;
             }
-            Err(CopyError::Render(err)) => {
-                warn!(err, "screencopy failed");
-                frame.failed();
-                return true;
-            }
-        }
-        // Rows come out top-down for both buffer kinds (`copy_frame`).
-        frame.flags(Flags::empty());
-        for rect in damage {
-            frame.damage(
-                rect.loc.x as u32,
-                rect.loc.y as u32,
-                rect.size.w as u32,
-                rect.size.h as u32,
-            );
-        }
+        };
         let (hi, lo, nanos) = capture::split_timestamp(self.clock.now().into());
-        frame.ready(hi, lo, nanos);
+        let frame = frame.clone();
+        self.when_copied(copied, move |_, result| {
+            if let Err(err) = result {
+                log_failure(err);
+                frame.failed();
+                return;
+            }
+            // Rows come out top-down for both buffer kinds (`copy_frame`).
+            frame.flags(Flags::empty());
+            for rect in damage {
+                frame.damage(
+                    rect.loc.x as u32,
+                    rect.loc.y as u32,
+                    rect.size.w as u32,
+                    rect.size.h as u32,
+                );
+            }
+            frame.ready(hi, lo, nanos);
+        });
         true
     }
 
@@ -409,11 +419,9 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
         frame_state.buffer = Some(buffer);
         frame_state.with_damage = with_damage;
         state.screencopies.push(resource.clone());
-        if !with_damage {
-            state
-                .loop_handle
-                .insert_idle(|state| state.process_screencopies());
-        }
+        // Copied after the next frame (`after_frames`): at most once per
+        // refresh however fast a client asks, as with damage.
+        state.queue_redraw();
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyFrameV1, _: &FrameData) {
