@@ -9,6 +9,10 @@
 //! texture shaders) and keeps the result, which `BlurCache::element` hands
 //! to `render::scene_elements` to draw right behind that surface.
 //!
+//! A region is often many rectangles (clients tessellate rounded shapes into
+//! strips). Everything is blurred over their bounding box, whose texture then
+//! has what's outside the region cleared to transparent (`Entry::mask`).
+//!
 //! The blur is redone only when something behind the region changed
 //! (a damage tracker per region, fed the elements behind it); otherwise the
 //! kept texture is drawn as is, and the output's own damage tracking skips
@@ -168,6 +172,8 @@ struct Entry {
     /// The blurred area, output-local.
     rect: Rectangle<i32, Logical>,
     size: Size<i32, Physical>,
+    /// What's outside the region in `rect`, relative to it: transparent.
+    mask: Vec<Rectangle<i32, Physical>>,
     /// Level 0 is `size`; each further level half of the one before.
     levels: Vec<GlesTexture>,
     /// Level 0 as a render buffer: its commit is bumped when re-blurred, so
@@ -225,6 +231,36 @@ fn blur_texture(
         })
         .map_err(|e| render_error(&e))?;
     Ok(texture)
+}
+
+/// What's outside the region `rects` (relative to the output) in its
+/// bounding box `bounds`, drawn at `size`, relative to the box.
+fn outside_region(
+    rects: &[Rectangle<i32, Logical>],
+    bounds: Rectangle<i32, Logical>,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+) -> Vec<Rectangle<i32, Physical>> {
+    let inside = rects.iter().map(|r| {
+        Rectangle::new(r.loc - bounds.loc, r.size)
+            .to_f64()
+            .to_physical_precise_round(scale)
+    });
+    Rectangle::subtract_rects_many([Rectangle::from_size(size)], inside)
+}
+
+/// Make `rects` of `texture` transparent.
+fn clear_rects(
+    renderer: &mut GlesRenderer,
+    texture: &mut GlesTexture,
+    size: Size<i32, Physical>,
+    rects: &[Rectangle<i32, Physical>],
+) -> Result<(), GlesError> {
+    let mut target = renderer.bind(texture)?;
+    let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+    frame.clear(Color32F::TRANSPARENT, rects)?;
+    let _ = frame.finish()?;
+    Ok(())
 }
 
 /// One blur pass: draw `src` into `dst` through `program`.
@@ -308,11 +344,12 @@ impl BlurCache {
         scale: Scale<f64>,
     ) {
         self.current.clear();
-        for entry in self.entries.values_mut() {
+        // Only this output's: the others' are kept for their own frames.
+        for (_, entry) in self.entries.iter_mut().filter(|(k, _)| k.1 == output_name) {
             entry.used = false;
         }
         if scene.locked || self.broken {
-            self.entries.retain(|_, e| e.used);
+            self.entries.retain(|k, e| k.1 != output_name || e.used);
             return;
         }
         // Back to front, so a blur surface behind another is blurred first
@@ -321,10 +358,14 @@ impl BlurCache {
             if layer.blur.is_empty() {
                 continue;
             }
-            let rect = layer
+            let rects: Vec<Rectangle<i32, Logical>> = layer
                 .blur
                 .iter()
                 .map(|r| Rectangle::new(r.loc + layer.location - output_location, r.size))
+                .collect();
+            let rect = rects
+                .iter()
+                .copied()
                 .reduce(|a, b| a.merge(b))
                 .and_then(|r| r.intersection(Rectangle::from_size(output_size)));
             let Some(rect) = rect else {
@@ -334,6 +375,7 @@ impl BlurCache {
             if size.w <= 0 || size.h <= 0 {
                 continue;
             }
+            let mask = outside_region(&rects, rect, size, scale);
             let key = (layer.layer.wl_surface().id(), output_name.to_string());
             if self.shaders(renderer).is_none() {
                 return;
@@ -345,6 +387,7 @@ impl BlurCache {
                 &key,
                 rect,
                 size,
+                mask,
                 output_location,
                 scale,
             ) {
@@ -354,7 +397,12 @@ impl BlurCache {
             }
             self.current.push((index, key));
         }
-        self.entries.retain(|_, e| e.used);
+        self.entries.retain(|k, e| k.1 != output_name || e.used);
+    }
+
+    /// Drop what's kept for an output that's gone.
+    pub fn forget_output(&mut self, output_name: &str) {
+        self.entries.retain(|k, _| k.1 != output_name);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -366,6 +414,7 @@ impl BlurCache {
         key: &(ObjectId, String),
         rect: Rectangle<i32, Logical>,
         size: Size<i32, Physical>,
+        mask: Vec<Rectangle<i32, Physical>>,
         output_location: Point<i32, Logical>,
         scale: Scale<f64>,
     ) -> Result<(), String> {
@@ -403,6 +452,7 @@ impl BlurCache {
                     Entry {
                         rect,
                         size,
+                        mask: mask.clone(),
                         levels,
                         result,
                         tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
@@ -422,7 +472,9 @@ impl BlurCache {
             Ok((None, _)) => false,
             Err(err) => return Err(render_error(&err)),
         };
-        if entry.drawn && !changed && !fresh && !BLUR_ALWAYS {
+        let reshaped = entry.mask != mask;
+        entry.mask = mask;
+        if entry.drawn && !changed && !reshaped && !fresh && !BLUR_ALWAYS {
             return Ok(());
         }
 
@@ -447,11 +499,22 @@ impl BlurCache {
             pass(renderer, &shaders.up, &after[0], &mut before[k - 1])
                 .map_err(|e| render_error(&e))?;
         }
+        if !entry.mask.is_empty() {
+            clear_rects(renderer, &mut entry.levels[0], size, &entry.mask)
+                .map_err(|e| render_error(&e))?;
+        }
         let buffer_size = entry.levels[0].size();
-        let _ = entry
-            .result
-            .render()
-            .draw(|_| Ok::<_, ()>(vec![Rectangle::from_size(buffer_size)]));
+        // Opaque where it's not cleared: what's behind that isn't drawn.
+        let opaque = Rectangle::subtract_rects_many(
+            [Rectangle::from_size(buffer_size)],
+            entry
+                .mask
+                .iter()
+                .map(|r| Rectangle::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into())),
+        );
+        let mut context = entry.result.render();
+        context.update_opaque_regions(Some(opaque));
+        let _ = context.draw(|_| Ok::<_, ()>(vec![Rectangle::from_size(buffer_size)]));
         entry.drawn = true;
         Ok(())
     }

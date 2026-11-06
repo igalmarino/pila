@@ -730,6 +730,7 @@ impl Pila {
         self.fail_screencopies_of(output);
         self.gamma_output_removed(output);
         self.output_power_removed(output);
+        self.blur.forget_output(&output.name());
         let layers: Vec<_> = layer_map_for_output(output).layers().cloned().collect();
         for layer in layers {
             layer.layer_surface().send_close();

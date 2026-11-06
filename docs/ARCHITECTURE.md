@@ -393,7 +393,11 @@ Key flows and invariants:
   blurred layer it renders what's behind the region (`render::elements_behind_layer`)
   into an offscreen texture through a per-region damage tracker, and only when that
   changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
-  `Transform::Normal` throughout, textures with linear filtering and clamped edges);
+  `Transform::Normal` throughout, textures with linear filtering and clamped edges). All
+  of it covers the region's bounding box; what's outside the region (clients tessellate
+  rounded shapes into strips) is then cleared to transparent (`Entry::mask`), and a new
+  shape redoes it even with nothing changed behind. Entries are per surface and output:
+  an output's `prepare` only drops its own, and `forget_output` those of one that's gone.
   `BlurCache::element` gives `render::scene_elements` the result (a `Texture` variant of
   `PilaRenderElement`) to draw right behind that layer. A shader failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
