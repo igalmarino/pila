@@ -24,14 +24,15 @@ const TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl XdgActivationHandler for Pila {
     fn activation_state(&mut self) -> &mut XdgActivationState {
-        &mut self.xdg_activation_state
+        &mut self.protocols.xdg_activation
     }
 
     /// Returning `false` makes Smithay drop the token, so `request_activation`
     /// only ever sees tokens that passed this check.
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         // Unused tokens would otherwise pile up.
-        self.xdg_activation_state
+        self.protocols
+            .xdg_activation
             .retain_tokens(|_, d| d.timestamp.elapsed() < TOKEN_TIMEOUT);
 
         let valid = self.token_is_valid(&data);
@@ -45,7 +46,7 @@ impl XdgActivationHandler for Pila {
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
-        self.xdg_activation_state.remove_token(&token);
+        self.protocols.xdg_activation.remove_token(&token);
         if token_data.timestamp.elapsed() >= TOKEN_TIMEOUT {
             debug!("ignoring expired activation token");
             return;

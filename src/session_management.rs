@@ -678,7 +678,7 @@ impl Dispatch<XdgSessionV1, String> for Pila {
                 name,
             } => {
                 let object = data_init.init(object, ());
-                let toplevel = state.xdg_shell_state.get_toplevel(&toplevel);
+                let toplevel = state.protocols.xdg_shell.get_toplevel(&toplevel);
                 let (true, Some(toplevel)) = (in_use, toplevel) else {
                     return;
                 };
@@ -714,7 +714,7 @@ impl Dispatch<XdgSessionV1, String> for Pila {
                 name,
             } => {
                 let object = data_init.init(object, ());
-                let toplevel = state.xdg_shell_state.get_toplevel(&toplevel);
+                let toplevel = state.protocols.xdg_shell.get_toplevel(&toplevel);
                 let (true, Some(toplevel)) = (in_use, toplevel) else {
                     return;
                 };

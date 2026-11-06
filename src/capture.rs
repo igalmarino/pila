@@ -27,7 +27,9 @@
 //! sessions are created stopped. Any client but a sandboxed one
 //! (`state::is_privileged`) may capture, as with other compositors.
 
-use std::{cell::RefCell, os::fd::OwnedFd, rc::Rc, sync::Mutex, time::Duration};
+use std::{
+    cell::RefCell, collections::HashMap, os::fd::OwnedFd, rc::Rc, sync::Mutex, time::Duration,
+};
 
 use smithay::{
     backend::{
@@ -69,6 +71,7 @@ use smithay::{
                 },
             },
         },
+        wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
         wayland_server::{
             backend::ClientId,
             protocol::{wl_buffer::WlBuffer, wl_output, wl_shm},
@@ -103,7 +106,7 @@ pub(crate) const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Argb8888, Fourcc::Xrgb88
 
 /// Where and how clients may allocate dma-bufs for captures: the renderer's
 /// DRM device and the modifiers it can render to, per format. Set by the
-/// backend (`Pila::capture_dmabuf`); without it only shm is offered.
+/// backend (`Pila::capture.dmabuf`); without it only shm is offered.
 pub struct DmabufTarget {
     device: u64,
     formats: Vec<(Fourcc, Vec<u64>)>,
@@ -146,7 +149,20 @@ pub enum Target {
     Gone,
 }
 
-/// A capture session (`Pila::captures`).
+/// Screen capture state (`Pila::capture`).
+#[derive(Default)]
+pub struct Captures {
+    /// ext-image-copy-capture sessions.
+    pub sessions: Vec<Session>,
+    /// Where captures may use dma-bufs (set by the backend).
+    pub dmabuf: Option<DmabufTarget>,
+    /// wlr-screencopy frames waiting to be copied, and the damage trackers
+    /// of `copy_with_damage` (`screencopy.rs`).
+    pub screencopies: Vec<ZwlrScreencopyFrameV1>,
+    pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
+}
+
+/// A capture session (`Captures::sessions`).
 pub struct Session {
     resource: ExtImageCopyCaptureSessionV1,
     target: Target,
@@ -267,16 +283,16 @@ impl Pila {
     /// session's first). Called after each rendered frame and when a first
     /// capture is requested.
     pub fn process_captures(&mut self) {
-        if !self.captures.iter().any(|s| s.pending) {
+        if !self.capture.sessions.iter().any(|s| s.pending) {
             return;
         }
-        let mut sessions = std::mem::take(&mut self.captures);
+        let mut sessions = std::mem::take(&mut self.capture.sessions);
         for session in sessions.iter_mut().filter(|s| s.pending) {
             self.process_capture(session);
         }
         // Sessions created meanwhile (none expected) are kept too.
-        sessions.append(&mut self.captures);
-        self.captures = sessions;
+        sessions.append(&mut self.capture.sessions);
+        self.capture.sessions = sessions;
     }
 
     fn process_capture(&mut self, session: &mut Session) {
@@ -285,7 +301,7 @@ impl Pila {
             return;
         };
         if session.geometry != Some(geometry) {
-            session.send_constraints(geometry, self.capture_dmabuf.as_ref());
+            session.send_constraints(geometry, self.capture.dmabuf.as_ref());
             session.fail(FailureReason::BufferConstraints);
             return;
         }
@@ -415,7 +431,7 @@ impl Pila {
     /// The window with foreign-toplevel `identifier` is gone: stop its
     /// sessions now, whether or not a frame is waiting.
     pub fn stop_window_captures(&mut self, identifier: &str) {
-        for session in &mut self.captures {
+        for session in &mut self.capture.sessions {
             if matches!(&session.target, Target::Toplevel(id) if id == identifier) {
                 session.stop();
             }
@@ -424,7 +440,7 @@ impl Pila {
 
     /// Stop the sessions of an output that went away.
     pub fn stop_captures_of(&mut self, output: &Output) {
-        for session in &mut self.captures {
+        for session in &mut self.capture.sessions {
             if matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output))
             {
                 session.stop();
@@ -849,12 +865,12 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                 };
                 match state.capture_geometry(&session.target) {
                     Some(geometry) => {
-                        session.send_constraints(geometry, state.capture_dmabuf.as_ref())
+                        session.send_constraints(geometry, state.capture.dmabuf.as_ref())
                     }
                     None => session.stop(),
                 }
                 debug!(target = ?session.target, paint_cursors = session.paint_cursors, "capture session");
-                state.captures.push(session);
+                state.capture.sessions.push(session);
             }
             manager::Request::CreatePointerCursorSession { session, .. } => {
                 data_init.init(session, Mutex::new(false));
@@ -901,7 +917,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
                     stopped: false,
                 };
                 session.stop();
-                state.captures.push(session);
+                state.capture.sessions.push(session);
             }
             cursor_session::Request::Destroy => {}
             _ => {}
@@ -921,7 +937,11 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for Pila {
     ) {
         match request {
             session::Request::CreateFrame { frame } => {
-                let Some(session) = state.captures.iter_mut().find(|s| s.resource == *resource)
+                let Some(session) = state
+                    .capture
+                    .sessions
+                    .iter_mut()
+                    .find(|s| s.resource == *resource)
                 else {
                     data_init.init(
                         frame,
@@ -955,7 +975,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for Pila {
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ExtImageCopyCaptureSessionV1, _: &()) {
-        state.captures.retain(|s| s.resource != *resource);
+        state.capture.sessions.retain(|s| s.resource != *resource);
     }
 }
 
@@ -1004,7 +1024,8 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                 frame_state.captured = true;
                 drop(frame_state);
                 let Some(session) = state
-                    .captures
+                    .capture
+                    .sessions
                     .iter_mut()
                     .find(|s| s.resource == data.session)
                 else {
@@ -1034,7 +1055,7 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
         resource: &ExtImageCopyCaptureFrameV1,
         _: &FrameData,
     ) {
-        for session in &mut state.captures {
+        for session in &mut state.capture.sessions {
             if session.frame.as_ref() == Some(resource) {
                 session.frame = None;
                 session.pending = false;

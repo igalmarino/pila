@@ -30,7 +30,7 @@ use crate::{grabs::resize_grab, state::ClientState, Pila};
 
 impl CompositorHandler for Pila {
     fn compositor_state(&mut self) -> &mut CompositorState {
-        &mut self.compositor_state
+        &mut self.protocols.compositor
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
@@ -136,7 +136,7 @@ impl Pila {
 
 impl DrmSyncobjHandler for Pila {
     fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
-        self.syncobj_state.as_mut()
+        self.protocols.syncobj.as_mut()
     }
 }
 delegate_drm_syncobj!(Pila);
@@ -170,13 +170,13 @@ impl BufferHandler for Pila {
 
 impl ShmHandler for Pila {
     fn shm_state(&self) -> &ShmState {
-        &self.shm_state
+        &self.protocols.shm
     }
 }
 
 impl DmabufHandler for Pila {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
-        &mut self.dmabuf_state
+        &mut self.protocols.dmabuf
     }
 
     fn dmabuf_imported(

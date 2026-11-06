@@ -9,7 +9,7 @@
 //! `done` with a new serial, which cancels configurations still being
 //! built. A configuration is checked against the snapshot (`test`) and,
 //! for `apply`, turned into `[[output]]`-style overrides
-//! (`Pila::output_overrides`) that go through the same path as the config
+//! (`Pila::outputs.overrides`) that go through the same path as the config
 //! file (`apply_outputs`); editing a monitor's `[[output]]` section drops
 //! its override. Nested, only the scale can change.
 
@@ -98,13 +98,29 @@ struct Configuration {
     heads: HashMap<String, HeadConfig>,
 }
 
-/// The protocol's state (`Pila::output_management`).
+/// The protocol's state (`Pila::outputs.management`).
 #[derive(Default)]
 pub struct OutputManagement {
     serial: u32,
     heads: Vec<HeadInfo>,
     managers: HashMap<ZwlrOutputManagerV1, ClientHeads>,
     configurations: HashMap<ZwlrOutputConfigurationV1, Configuration>,
+}
+
+/// What's known and set about outputs beyond the `Space` (`Pila::outputs`).
+#[derive(Default)]
+pub struct Outputs {
+    /// Display tools' view of the monitors, and what they set, over
+    /// `[[output]]`, by output name.
+    pub management: OutputManagement,
+    pub overrides: HashMap<String, crate::config::OutputConfig>,
+    /// The monitor on each output that says which it is, by output name
+    /// (`edid.rs`).
+    pub monitors: HashMap<String, crate::edid::Monitor>,
+    /// The client controlling each output's gamma (`gamma_control.rs`).
+    pub gamma: crate::gamma_control::GammaControls,
+    /// Clients watching or setting outputs' power (`output_power.rs`).
+    pub power: crate::output_power::OutputPowers,
 }
 
 /// Create the global. Called once from `Pila::new`.
@@ -315,7 +331,7 @@ impl Pila {
                 .collect(),
         };
         for head in &mut heads {
-            if let Some(monitor) = self.monitors.get(&head.name) {
+            if let Some(monitor) = self.outputs.monitors.get(&head.name) {
                 head.make.clone_from(&monitor.make);
                 head.model.clone_from(&monitor.model);
                 head.serial.clone_from(&monitor.serial);
@@ -331,7 +347,7 @@ impl Pila {
         self.refresh_workspaces();
         let new = self.output_heads();
         let dh = self.display_handle.clone();
-        let om = &mut self.output_management;
+        let om = &mut self.outputs.management;
         if new == om.heads {
             return;
         }
@@ -365,7 +381,7 @@ impl Pila {
         &self,
         heads: &HashMap<String, HeadConfig>,
     ) -> Result<(), String> {
-        let om = &self.output_management;
+        let om = &self.outputs.management;
         for info in &om.heads {
             let Some(config) = heads.get(&info.name) else {
                 return Err(format!("head {} isn't configured", info.name));
@@ -439,9 +455,14 @@ impl Pila {
     /// settings, over the config file's. If the backend can't do it they go
     /// back to what they were: `false`.
     fn apply_output_configuration(&mut self, heads: HashMap<String, HeadConfig>) -> bool {
-        let previous = self.output_overrides.clone();
+        let previous = self.outputs.overrides.clone();
         for (name, config) in heads {
-            let info = self.output_management.heads.iter().find(|h| h.name == name);
+            let info = self
+                .outputs
+                .management
+                .heads
+                .iter()
+                .find(|h| h.name == name);
             let mode = match config.mode {
                 Some(ModeChoice::Index(i)) => info.and_then(|h| h.modes.get(i)).map(mode_spec),
                 Some(ModeChoice::Custom { size, refresh_mhz }) => Some(ModeSpec {
@@ -469,13 +490,13 @@ impl Pila {
                 adaptive_sync: config.adaptive_sync.or(info.and_then(|h| h.adaptive_sync)),
             };
             info!(?over, "output configured by a client");
-            self.output_overrides.insert(name, over);
+            self.outputs.overrides.insert(name, over);
         }
         if self.apply_outputs() {
             return true;
         }
         warn!("the backend couldn't apply an output configuration");
-        self.output_overrides = previous;
+        self.outputs.overrides = previous;
         self.apply_outputs();
         false
     }
@@ -495,7 +516,7 @@ impl GlobalDispatch<ZwlrOutputManagerV1, ()> for Pila {
         // it also tells the other managers what changed (and starts a new
         // serial) before this one is shown it.
         state.refresh_output_heads();
-        let om = &mut state.output_management;
+        let om = &mut state.outputs.management;
         let mut client = ClientHeads {
             heads: HashMap::new(),
         };
@@ -521,14 +542,14 @@ impl Dispatch<ZwlrOutputManagerV1, ()> for Pila {
     ) {
         match request {
             manager::Request::CreateConfiguration { id, serial } => {
-                let current = state.output_management.serial;
+                let current = state.outputs.management.serial;
                 let configuration = data_init.init(id, serial);
                 if serial != current {
                     debug!(serial, current, "output configuration with a stale serial");
                     configuration.cancelled();
                     return;
                 }
-                state.output_management.configurations.insert(
+                state.outputs.management.configurations.insert(
                     configuration,
                     Configuration {
                         heads: HashMap::new(),
@@ -536,7 +557,7 @@ impl Dispatch<ZwlrOutputManagerV1, ()> for Pila {
                 );
             }
             manager::Request::Stop => {
-                state.output_management.managers.remove(resource);
+                state.outputs.management.managers.remove(resource);
                 resource.finished();
             }
             _ => {}
@@ -544,7 +565,7 @@ impl Dispatch<ZwlrOutputManagerV1, ()> for Pila {
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrOutputManagerV1, _: &()) {
-        state.output_management.managers.remove(resource);
+        state.outputs.management.managers.remove(resource);
     }
 }
 
@@ -562,7 +583,7 @@ impl Dispatch<ZwlrOutputHeadV1, String> for Pila {
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrOutputHeadV1, name: &String) {
-        for client in state.output_management.managers.values_mut() {
+        for client in state.outputs.management.managers.values_mut() {
             if client.heads.get(name).is_some_and(|(h, _)| h == resource) {
                 client.heads.remove(name);
             }
@@ -599,7 +620,8 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
         data_init: &mut DataInit<'_, Self>,
     ) {
         let live = state
-            .output_management
+            .outputs
+            .management
             .configurations
             .contains_key(resource);
         match request {
@@ -611,7 +633,8 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                     return;
                 }
                 let configuration = state
-                    .output_management
+                    .outputs
+                    .management
                     .configurations
                     .get_mut(resource)
                     .expect("live");
@@ -638,7 +661,8 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                 }
                 let name = head.data::<String>().cloned().unwrap_or_default();
                 let configuration = state
-                    .output_management
+                    .outputs
+                    .management
                     .configurations
                     .get_mut(resource)
                     .expect("live");
@@ -652,10 +676,10 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                 configuration.heads.insert(name, HeadConfig::default());
             }
             configuration::Request::Apply | configuration::Request::Test => {
-                let Some(configuration) = state.output_management.configurations.remove(resource)
+                let Some(configuration) = state.outputs.management.configurations.remove(resource)
                 else {
                     // Cancelled ones were told so; a used one is an error.
-                    if *serial == state.output_management.serial {
+                    if *serial == state.outputs.management.serial {
                         resource.post_error(
                             configuration::Error::AlreadyUsed,
                             "configuration applied or tested twice",
@@ -664,7 +688,8 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                     return;
                 };
                 let unconfigured = state
-                    .output_management
+                    .outputs
+                    .management
                     .heads
                     .iter()
                     .find(|h| !configuration.heads.contains_key(&h.name));
@@ -698,7 +723,7 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrOutputConfigurationV1, _: &u32) {
-        state.output_management.configurations.remove(resource);
+        state.outputs.management.configurations.remove(resource);
     }
 }
 
@@ -716,7 +741,8 @@ impl Dispatch<ZwlrOutputConfigurationHeadV1, ConfigHeadData> for Pila {
             return;
         };
         let Some(config) = state
-            .output_management
+            .outputs
+            .management
             .configurations
             .get_mut(configuration)
             .and_then(|c| c.heads.get_mut(name))

@@ -20,6 +20,7 @@ use smithay::{
     delegate_xwayland_shell,
     desktop::Window,
     input::pointer::GrabStartData as PointerGrabStartData,
+    reexports::calloop::RegistrationToken,
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::CompositorHandler,
@@ -122,6 +123,18 @@ fn with_signals_unblocked<T>(f: impl FnOnce() -> T) -> T {
     }
 }
 
+/// Xwayland while pila runs it (`Pila::xwayland`).
+pub struct XwaylandState {
+    /// Its window manager and display number, once it's ready.
+    pub wm: Option<X11Wm>,
+    pub display: Option<u32>,
+    pub shell_state: XWaylandShellState,
+    /// Its event source, removed on exit (`stop_xwayland`).
+    pub token: Option<RegistrationToken>,
+    /// When it was started again lately (`may_restart`).
+    pub restarts: Vec<Instant>,
+}
+
 impl Pila {
     /// Start Xwayland; the `startup` commands run once X is ready (or failed
     /// to start).
@@ -160,8 +173,8 @@ impl Pila {
                         {
                             Ok(wm) => {
                                 info!(display = display_number, "Xwayland ready");
-                                state.xwm = Some(wm);
-                                state.xdisplay = Some(display_number);
+                                state.xwayland.wm = Some(wm);
+                                state.xwayland.display = Some(display_number);
                             }
                             Err(err) => warn!(?err, "failed to start the X11 window manager"),
                         }
@@ -173,7 +186,7 @@ impl Pila {
             });
         match inserted {
             Ok(token) => {
-                self.xwayland_token = Some(token);
+                self.xwayland.token = Some(token);
                 self.pending_startup = startup;
             }
             Err(err) => {
@@ -187,8 +200,8 @@ impl Pila {
     /// and removes its lock and socket files. (Left to the event loop's own
     /// drop, it doesn't happen.)
     pub fn stop_xwayland(&mut self) {
-        self.xwm = None;
-        if let Some(token) = self.xwayland_token.take() {
+        self.xwayland.wm = None;
+        if let Some(token) = self.xwayland.token.take() {
             self.loop_handle.remove(token);
         }
     }
@@ -216,14 +229,14 @@ impl Pila {
         self.x11_cleared_selection(SelectionTarget::Clipboard);
         self.x11_cleared_selection(SelectionTarget::Primary);
         self.stop_xwayland();
-        self.xdisplay = None;
+        self.xwayland.display = None;
         if was_focused {
             self.focus_recent_window();
         }
         self.refresh_pointer_focus();
         self.queue_redraw();
 
-        if may_restart(&mut self.xwayland_restarts, Instant::now()) {
+        if may_restart(&mut self.xwayland.restarts, Instant::now()) {
             warn!("Xwayland died; starting it again");
             self.loop_handle
                 .insert_idle(|state| state.start_xwayland(Vec::new()));
@@ -260,7 +273,7 @@ impl Pila {
     /// Raise an X11 window in X's own stacking order too, so X keeps
     /// delivering input to the window pila shows on top.
     pub fn x11_window_raised(&mut self, window: &Window) {
-        if let (Some(x11), Some(xwm)) = (window.x11_surface(), self.xwm.as_mut()) {
+        if let (Some(x11), Some(xwm)) = (window.x11_surface(), self.xwayland.wm.as_mut()) {
             let _ = xwm.raise_window(x11);
         }
     }
@@ -268,20 +281,21 @@ impl Pila {
 
 impl XWaylandShellHandler for Pila {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.xwayland_shell_state
+        &mut self.xwayland.shell_state
     }
 }
 delegate_xwayland_shell!(Pila);
 
 impl XwmHandler for Pila {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
-        self.xwm
+        self.xwayland
+            .wm
             .as_mut()
             .expect("X11 event without a window manager")
     }
 
     fn disconnected(&mut self, xwm: XwmId) {
-        if self.xwm.as_ref().is_some_and(|wm| wm.id() == xwm) {
+        if self.xwayland.wm.as_ref().is_some_and(|wm| wm.id() == xwm) {
             self.xwayland_gone();
         }
     }

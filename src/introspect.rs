@@ -328,7 +328,7 @@ impl Pila {
                 "blurred": self.blur.stats().1,
                 "entries": self.blur.stats().2,
             },
-            "xwayland": self.xdisplay,
+            "xwayland": self.xwayland.display,
             "children": self.children.len(),
         })
     }

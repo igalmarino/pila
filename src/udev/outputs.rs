@@ -304,8 +304,8 @@ pub(super) fn connector_connected(
     };
     info!(name, make, model, "monitor");
     match monitor {
-        Some(monitor) => state.monitors.insert(name.clone(), monitor),
-        None => state.monitors.remove(&name),
+        Some(monitor) => state.outputs.monitors.insert(name.clone(), monitor),
+        None => state.outputs.monitors.remove(&name),
     };
     let output_config = effective_output_config(state, &name);
     let modes = connector.modes().to_vec();
@@ -525,7 +525,7 @@ pub(super) fn set_vrr(data: &UdevData, crtc: crtc::Handle, on: bool) {
 
 /// `[[output]]` for `name`, turned off by `disable-internal-display` if it's
 /// the built-in screen and that applies now, with what a display tool set at
-/// runtime on top (`Pila::output_overrides`).
+/// runtime on top (`Pila::outputs.overrides`).
 pub(super) fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
     let mut file = state
         .output_section(name)
@@ -544,7 +544,7 @@ pub(super) fn off_by_rule(state: &Pila, name: &str) -> bool {
 }
 
 pub(super) fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
-    match state.output_overrides.get(&file.name) {
+    match state.outputs.overrides.get(&file.name) {
         Some(over) => file.overridden_by(over),
         None => file,
     }
@@ -658,7 +658,7 @@ pub(super) fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
         return;
     };
     info!(name = surface.output.name(), "output disconnected");
-    state.monitors.remove(&surface.output.name());
+    state.outputs.monitors.remove(&surface.output.name());
     // The built-in screen comes back first, so the windows of the monitor
     // that went away move onto it.
     apply_internal_display(state);

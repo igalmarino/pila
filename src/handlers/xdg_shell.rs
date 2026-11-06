@@ -35,7 +35,7 @@ use crate::{
 
 impl XdgShellHandler for Pila {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.xdg_shell_state
+        &mut self.protocols.xdg_shell
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {

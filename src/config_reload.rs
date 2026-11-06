@@ -154,8 +154,8 @@ impl Pila {
         if outputs_changed {
             // An edited [[output]] section takes over from what a display
             // tool set for that monitor; untouched sections don't.
-            let (monitors, config) = (&self.monitors, &self.config);
-            self.output_overrides.retain(|name, _| {
+            let (monitors, config) = (&self.outputs.monitors, &self.config);
+            self.outputs.overrides.retain(|name, _| {
                 let monitor = monitors.get(name);
                 old.output(name, monitor) == config.output(name, monitor)
             });
@@ -165,7 +165,7 @@ impl Pila {
         // rule takes over the built-in screens from them.
         let rule_changed = old.internal_display != self.config.internal_display;
         if rule_changed {
-            for (name, over) in &mut self.output_overrides {
+            for (name, over) in &mut self.outputs.overrides {
                 if crate::udev::is_internal(name) {
                     over.enabled = None;
                 }
@@ -219,7 +219,8 @@ impl Pila {
     pub(crate) fn apply_nested_scale(&mut self) {
         let file = self.config.output("winit", None).and_then(|c| c.scale);
         let scale = self
-            .output_overrides
+            .outputs
+            .overrides
             .get("winit")
             .and_then(|c| c.scale)
             .or(file)

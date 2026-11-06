@@ -5,7 +5,9 @@ commands are in [CLAUDE.md](../CLAUDE.md), setup in [CONTRIBUTING.md](../CONTRIB
 A change to a flow or invariant updates its section in the same commit.
 
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
-implements every Smithay handler trait. Unlike smallvil (but like anvil), the calloop event
+implements every Smithay handler trait. Its fields are grouped by subsystem where they go together: Smithay's
+protocol states (`Protocols`), Xwayland (`xwayland::XwaylandState`), screen capture
+(`capture::Captures`), outputs beyond the `Space` (`output_management::Outputs`). Unlike smallvil (but like anvil), the calloop event
 loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which
 Smithay modules that schedule their own timers (e.g. idle-notify) require. Core window
 management lives in `state.rs`; each feature beyond it has its own module (named in the
@@ -24,7 +26,7 @@ Key flows and invariants:
   (`UdevData::apply_input_config`), `[[output]]` (`Pila::apply_outputs` →
   `udev::apply_output_config`: enabled, mode via `use_mode`, scale, transform, position,
   adaptive sync; nested only scale) with wlr-output-management's runtime overrides on
-  top (`Pila::output_overrides`; an edited section drops its monitor's). Anything that reads
+  top (`Pila::outputs.overrides`; an edited section drops its monitor's). Anything that reads
   `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
   re-run. A new setting must either be read when used or be re-applied there. Keep in
   sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc
@@ -65,14 +67,14 @@ Key flows and invariants:
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
-- **Monitors** (`edid.rs`, `Pila::monitors` by output name): on a connector connecting,
+- **Monitors** (`edid.rs`, `Pila::outputs.monitors` by output name): on a connector connecting,
   `udev/` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
   and serial from the base block; a missing or invalid one leaves "Unknown". They go to
   `wl_output` and `xdg-output` through `PhysicalProperties`, and to wlr-output-management
   in `output_heads`. An `[[output]]` section may name the monitor instead of the connector
   (`Config::output`: the monitor, then its model, then the connector); only that one
   section applies. `Pila::output_section` returns it under the output's name, since
-  `output_overrides` and `is_internal` go by the connector. Set before the output's settings
+  `Outputs::overrides` and `is_internal` go by the connector. Set before the output's settings
   are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
   their spec.
 - **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
@@ -349,9 +351,9 @@ Key flows and invariants:
   redraws forever. Layer and lock surfaces use their own output. Xwayland stays at scale 1 (upscaled).
 - **Screen capture** (`capture.rs`, ext-image-capture-source + ext-image-copy-capture, on
   the `wayland-protocols` bindings): sources are an output or a window (by its
-  foreign-toplevel identifier). Sessions live in `Pila::captures`; frames are rendered
+  foreign-toplevel identifier). Sessions live in `Pila::capture.sessions`; frames are rendered
   from `scene()` (window sources: only the window, no title bar) straight into the
-  client's dma-buf (device and modifiers from `Pila::capture_dmabuf`, set by the backend),
+  client's dma-buf (device and modifiers from `Pila::capture.dmabuf`, set by the backend),
   or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A
   session's first frame is copied at once (idle), later ones in `after_frames` only when
   the session's own damage tracker sees a change. Size changes re-send constraints and
@@ -365,8 +367,8 @@ Key flows and invariants:
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
   output-local); pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
-  after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::screencopies` until that
-  manager's damage tracker for the output/region (`screencopy_trackers`) sees a change,
+  after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
+  manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
   checked from `after_frames`. A mode/scale change or a removed output fails the frame.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
@@ -393,7 +395,7 @@ Key flows and invariants:
   progress; it runs after connect/disconnect, `apply_outputs` and a nested resize. A
   configuration is checked against the snapshot (`check_output_configuration`: known
   modes only, ≥ 1 head enabled, scale 0.5..8) and applied as `[[output]]`-style overrides
-  in `Pila::output_overrides`, which `udev::effective_output_config` layers over the file
+  in `Pila::outputs.overrides`, which `udev::effective_output_config` layers over the file
   for `connector_connected` and `apply_output_config`. If the backend can't do it
   (`apply_outputs` returns false: a failed modeset) the overrides go back to what they were
   and the client gets `failed`. Disabling a head

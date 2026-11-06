@@ -26,7 +26,7 @@ use crate::Pila;
 
 const VERSION: u32 = 1;
 
-/// The live objects and their outputs (`Pila::output_powers`).
+/// The live objects and their outputs (`Pila::outputs.power`).
 pub type OutputPowers = Vec<(ZwlrOutputPowerV1, Output)>;
 
 /// Create the global. Called once from `Pila::new`.
@@ -45,7 +45,7 @@ fn mode(on: bool) -> Mode {
 impl Pila {
     /// An output went away: its power objects are over.
     pub fn output_power_removed(&mut self, output: &Output) {
-        self.output_powers.retain(|(resource, o)| {
+        self.outputs.power.retain(|(resource, o)| {
             if o == output {
                 resource.failed();
             }
@@ -90,7 +90,7 @@ impl Dispatch<ZwlrOutputPowerManagerV1, ()> for Pila {
             (Some(output), Some(on)) => {
                 let resource = data_init.init(id, Some(output.clone()));
                 resource.mode(mode(on));
-                state.output_powers.push((resource, output));
+                state.outputs.power.push((resource, output));
             }
             _ => data_init.init(id, None).failed(),
         }
@@ -122,7 +122,7 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
             // Failed at creation.
             return;
         };
-        if !state.output_powers.iter().any(|(r, _)| r == resource) {
+        if !state.outputs.power.iter().any(|(r, _)| r == resource) {
             return;
         }
         debug!(output = output.name(), on, "output power request");
@@ -136,14 +136,14 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
                 on, "couldn't set the output's power"
             );
             resource.failed();
-            state.output_powers.retain(|(r, _)| r != resource);
+            state.outputs.power.retain(|(r, _)| r != resource);
             return;
         }
         if !on {
             // Nothing draws there until it's back; what's kept for it is big.
             state.blur.forget_output(&output.name());
         }
-        for (r, o) in &state.output_powers {
+        for (r, o) in &state.outputs.power {
             if o == output {
                 r.mode(mode(on));
             }
@@ -151,6 +151,6 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrOutputPowerV1, _: &Option<Output>) {
-        state.output_powers.retain(|(r, _)| r != resource);
+        state.outputs.power.retain(|(r, _)| r != resource);
     }
 }

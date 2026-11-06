@@ -212,7 +212,7 @@ impl Pila {
 
 impl SessionLockHandler for Pila {
     fn lock_state(&mut self) -> &mut SessionLockManagerState {
-        &mut self.session_lock_state
+        &mut self.protocols.session_lock
     }
 
     fn lock(&mut self, confirmation: SessionLocker) {

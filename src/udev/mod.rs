@@ -476,7 +476,7 @@ pub fn init_udev(
     )?;
     let fd = DrmDeviceFd::new(DeviceFd::from(fd));
     if supports_syncobj_eventfd(&fd) {
-        state.syncobj_state = Some(DrmSyncobjState::new::<Pila>(
+        state.protocols.syncobj = Some(DrmSyncobjState::new::<Pila>(
             &state.display_handle,
             fd.clone(),
         ));
@@ -496,7 +496,7 @@ pub fn init_udev(
     // SAFETY: the context was just created for this renderer only.
     let mut renderer = unsafe { GlesRenderer::new(context)? };
     crate::render::warm_up(&mut renderer);
-    state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(
+    state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(
         render_node.dev_id(),
         &renderer,
     ));
@@ -517,11 +517,12 @@ pub fn init_udev(
     );
 
     // Client buffers: shm in the formats the renderer reads, dmabuf on this GPU.
-    state.shm_state.update_formats(renderer.shm_formats());
+    state.protocols.shm.update_formats(renderer.shm_formats());
     let feedback =
         DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()?;
     state
-        .dmabuf_state
+        .protocols
+        .dmabuf
         .create_global_with_default_feedback::<Pila>(&state.display_handle, &feedback);
 
     // Input.

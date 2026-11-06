@@ -8,10 +8,7 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{
-        damage::OutputDamageTracker, element::solid::SolidColorBuffer,
-        utils::with_renderer_surface_state,
-    },
+    backend::renderer::{element::solid::SolidColorBuffer, utils::with_renderer_surface_state},
     desktop::{
         find_popup_root_surface, layer_map_for_output, LayerSurface, PopupManager, Space, Window,
         WindowSurfaceType,
@@ -27,10 +24,9 @@ use smithay::{
             self,
             generic::Generic,
             timer::{TimeoutAction, Timer},
-            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, RegistrationToken,
+            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
         },
         wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -57,7 +53,7 @@ use smithay::{
         xdg_activation::XdgActivationState,
         xwayland_shell::XWaylandShellState,
     },
-    xwayland::{X11Wm, XWaylandClientData},
+    xwayland::XWaylandClientData,
 };
 use tracing::{debug, error, info, warn};
 
@@ -96,19 +92,12 @@ pub struct Pila {
     pub wake: smithay::reexports::calloop::ping::Ping,
     pub config: Config,
 
-    /// Xwayland's window manager and display number, once it's running
-    /// (`xwayland.rs`).
-    pub xwm: Option<X11Wm>,
-    pub xdisplay: Option<u32>,
-    pub xwayland_shell_state: XWaylandShellState,
+    /// Xwayland and its window manager (`xwayland.rs`).
+    pub xwayland: crate::xwayland::XwaylandState,
     /// The startup commands, held back until Xwayland is ready.
     pub pending_startup: Vec<String>,
     /// Programs pila started, reaped on SIGCHLD (`reap_children`).
     pub children: Vec<std::process::Child>,
-    /// Xwayland's event source, removed on exit (`stop_xwayland`).
-    pub xwayland_token: Option<RegistrationToken>,
-    /// When Xwayland was started again lately (`xwayland::may_restart`).
-    pub xwayland_restarts: Vec<std::time::Instant>,
 
     /// Where a dragged window would snap to, shown above the windows
     /// (`snap.rs`), and the buffer it's drawn with.
@@ -129,19 +118,10 @@ pub struct Pila {
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
-    /// linux-drm-syncobj, where the backend has a DRM device that can do it
-    /// (set by the backend).
-    pub syncobj_state: Option<smithay::wayland::drm_syncobj::DrmSyncobjState>,
     /// Surfaces with fifo barriers to signal (`commit_pacing.rs`).
     pub commit_pacing: crate::commit_pacing::CommitPacing,
-    /// Screen capture sessions (`capture.rs`).
-    pub captures: Vec<crate::capture::Session>,
-    /// Where captures may use dma-bufs (set by the backend).
-    pub capture_dmabuf: Option<crate::capture::DmabufTarget>,
-    /// wlr-screencopy frames waiting to be copied, and the damage trackers
-    /// of `copy_with_damage` (`screencopy.rs`).
-    pub screencopies: Vec<ZwlrScreencopyFrameV1>,
-    pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
+    /// Screen capture: ext-image-copy-capture and wlr-screencopy.
+    pub capture: crate::capture::Captures,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -150,19 +130,11 @@ pub struct Pila {
     pub ext_workspaces: crate::ext_workspace::ExtWorkspaces,
     /// Saved window states of clients' sessions (`session_management.rs`).
     pub session_management: crate::session_management::SessionManagement,
-    /// The client controlling each output's gamma (`gamma_control.rs`).
-    pub gamma_controls: crate::gamma_control::GammaControls,
-    /// Clients watching or setting outputs' power (`output_power.rs`).
-    pub output_powers: crate::output_power::OutputPowers,
     /// Blurred backdrops of layer surfaces (`blur.rs`).
     pub blur: crate::blur::BlurCache,
-    /// Display tools' view of the monitors (`output_management.rs`), and
-    /// what they set, over `[[output]]`, by output name.
-    pub output_management: crate::output_management::OutputManagement,
-    pub output_overrides: HashMap<String, crate::config::OutputConfig>,
-    /// The monitor on each output that says which it is, by output name
-    /// (`edid.rs`).
-    pub monitors: HashMap<String, crate::edid::Monitor>,
+    /// What's known and set about outputs beyond the `Space`: monitors,
+    /// display tools' settings, gamma and power.
+    pub outputs: crate::output_management::Outputs,
     pub switch: Option<Switch>,
     /// Animations in progress (`animation.rs`), and the workspace switch's
     /// (`workspace_slide.rs`).
@@ -180,22 +152,9 @@ pub struct Pila {
     /// Keys whose press triggered a binding; their release is swallowed too.
     pub suppressed_keys: HashSet<Keycode>,
 
-    // Smithay protocol state
-    pub compositor_state: CompositorState,
-    pub xdg_shell_state: XdgShellState,
-    pub layer_shell_state: WlrLayerShellState,
-    pub shm_state: ShmState,
-    pub output_manager_state: OutputManagerState,
-    pub seat_state: SeatState<Pila>,
-    pub data_device_state: DataDeviceState,
-    pub primary_selection_state: PrimarySelectionState,
-    pub xdg_decoration_state: XdgDecorationState,
-    pub xdg_activation_state: XdgActivationState,
-    pub cursor_shape_state: CursorShapeManagerState,
-    /// Its global is created by the backend, which knows the render device and formats.
-    pub dmabuf_state: DmabufState,
+    /// The state of Smithay's protocols that handlers hand back.
+    pub protocols: Protocols,
     pub popups: PopupManager,
-    pub session_lock_state: SessionLockManagerState,
     /// Whether the screen is locked, and by whom (`session_lock.rs`).
     pub session_lock: SessionLock,
     /// State of the simpler protocols (`handlers/protocols.rs`).
@@ -215,6 +174,28 @@ pub struct Pila {
     /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
     /// needs its own renderer handle here instead.
     pub backend: Option<Backend>,
+}
+
+/// The state of Smithay's protocols (`Pila::protocols`), which its handler
+/// traits ask for.
+pub struct Protocols {
+    pub compositor: CompositorState,
+    pub xdg_shell: XdgShellState,
+    pub layer_shell: WlrLayerShellState,
+    pub shm: ShmState,
+    pub output_manager: OutputManagerState,
+    pub seat: SeatState<Pila>,
+    pub data_device: DataDeviceState,
+    pub primary_selection: PrimarySelectionState,
+    pub xdg_decoration: XdgDecorationState,
+    pub xdg_activation: XdgActivationState,
+    pub cursor_shape: CursorShapeManagerState,
+    /// Its global is created by the backend, which knows the render device
+    /// and formats.
+    pub dmabuf: DmabufState,
+    pub session_lock: SessionLockManagerState,
+    /// linux-drm-syncobj, where the backend's DRM device can do it.
+    pub syncobj: Option<smithay::wayland::drm_syncobj::DrmSyncobjState>,
 }
 
 /// `XDG_CURRENT_DESKTOP` for everything pila starts; xdg-desktop-portal
@@ -349,59 +330,56 @@ impl Pila {
             loop_handle,
             wake,
             config,
-            xwm: None,
-            xdisplay: None,
-            xwayland_shell_state,
+            protocols: Protocols {
+                compositor: compositor_state,
+                xdg_shell: xdg_shell_state,
+                layer_shell: layer_shell_state,
+                shm: shm_state,
+                output_manager: output_manager_state,
+                seat: seat_state,
+                data_device: data_device_state,
+                primary_selection: primary_selection_state,
+                xdg_decoration: xdg_decoration_state,
+                xdg_activation: xdg_activation_state,
+                cursor_shape: cursor_shape_state,
+                dmabuf: dmabuf_state,
+                session_lock: session_lock_state,
+                syncobj: None,
+            },
+            capture: Default::default(),
+            outputs: Default::default(),
+            xwayland: crate::xwayland::XwaylandState {
+                wm: None,
+                display: None,
+                shell_state: xwayland_shell_state,
+                token: None,
+                restarts: Vec::new(),
+            },
             pending_startup: Vec::new(),
             children: Vec::new(),
             minimized: Vec::new(),
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
             focus_history: Vec::new(),
-            captures: Vec::new(),
             config_path: None,
             config_reload_pending: false,
             frame_drawn: false,
             hidden_frame_timer: false,
-            syncobj_state: None,
             commit_pacing: Default::default(),
-            capture_dmabuf: None,
-            screencopies: Vec::new(),
-            screencopy_trackers: HashMap::new(),
             toplevel_management: Default::default(),
             workspaces: Default::default(),
             ext_workspaces: Default::default(),
             session_management: Default::default(),
-            gamma_controls: Default::default(),
-            output_powers: Default::default(),
-            output_management: Default::default(),
             blur: Default::default(),
-            output_overrides: HashMap::new(),
-            monitors: HashMap::new(),
             switch: None,
             animations: Default::default(),
             workspace_slide: None,
             frame_stats: HashMap::new(),
             swipe: None,
-            xwayland_token: None,
-            xwayland_restarts: Vec::new(),
             space: Space::default(),
             unmapped: Vec::new(),
             suppressed_keys: HashSet::new(),
-            compositor_state,
-            xdg_shell_state,
-            layer_shell_state,
-            shm_state,
-            output_manager_state,
-            seat_state,
-            data_device_state,
-            primary_selection_state,
-            xdg_decoration_state,
-            xdg_activation_state,
-            cursor_shape_state,
-            dmabuf_state,
             popups,
-            session_lock_state,
             session_lock: SessionLock::default(),
             globals,
             idle_inhibitors: IdleInhibitors::default(),
@@ -1281,9 +1259,9 @@ impl Pila {
 
     /// The `[[output]]` section for the output called `name`, under that
     /// name whatever the section says (what's keyed on it, like
-    /// `output_overrides`, goes by the output's name).
+    /// `Outputs::overrides`, goes by the output's name).
     pub fn output_section(&self, name: &str) -> Option<crate::config::OutputConfig> {
-        let section = self.config.output(name, self.monitors.get(name))?;
+        let section = self.config.output(name, self.outputs.monitors.get(name))?;
         let mut section = section.clone();
         section.name = name.to_string();
         Some(section)
@@ -1532,7 +1510,7 @@ impl Pila {
             .env("XDG_CURRENT_DESKTOP", DESKTOP_NAME)
             .env("XDG_SESSION_TYPE", "wayland");
         // X11 apps go to pila's Xwayland, never the host's X server.
-        match self.xdisplay {
+        match self.xwayland.display {
             Some(display) => cmd.env("DISPLAY", format!(":{display}")),
             None => cmd.env_remove("DISPLAY"),
         };

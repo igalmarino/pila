@@ -164,7 +164,7 @@ impl Pila {
         let (w, h) = (size.w as u32, size.h as u32);
         frame.buffer(SHM_FORMAT, w, h, w * 4);
         if frame.version() >= 3 {
-            if self.capture_dmabuf.as_ref().is_some_and(|d| d.offers()) {
+            if self.capture.dmabuf.as_ref().is_some_and(|d| d.offers()) {
                 frame.linux_dmabuf(capture::DMABUF_FORMATS[1] as u32, w, h);
             }
             frame.buffer_done();
@@ -175,13 +175,13 @@ impl Pila {
     /// damage) the ones whose region changed since that client's last copy.
     /// Called after each rendered frame and when a plain copy is requested.
     pub fn process_screencopies(&mut self) {
-        if self.screencopies.is_empty() {
+        if self.capture.screencopies.is_empty() {
             return;
         }
-        let frames = std::mem::take(&mut self.screencopies);
+        let frames = std::mem::take(&mut self.capture.screencopies);
         for frame in frames {
             if !self.process_screencopy(&frame) {
-                self.screencopies.push(frame);
+                self.capture.screencopies.push(frame);
             }
         }
     }
@@ -251,6 +251,7 @@ impl Pila {
         let mut damage = Vec::new();
         if with_damage {
             let tracker = self
+                .capture
                 .screencopy_trackers
                 .entry((
                     manager.id(),
@@ -305,7 +306,7 @@ impl Pila {
 
     /// Fail the pending frames of an output that went away.
     pub fn fail_screencopies_of(&mut self, output: &Output) {
-        self.screencopies.retain(|frame| {
+        self.capture.screencopies.retain(|frame| {
             let gone = frame.data::<FrameData>().is_some_and(|d| {
                 d.lock()
                     .unwrap()
@@ -317,7 +318,8 @@ impl Pila {
             }
             !gone
         });
-        self.screencopy_trackers
+        self.capture
+            .screencopy_trackers
             .retain(|(_, name, ..), _| name != output.name().as_str());
     }
 }
@@ -379,6 +381,7 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for Pila {
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyManagerV1, _: &()) {
         state
+            .capture
             .screencopy_trackers
             .retain(|(m, ..), _| *m != resource.id());
     }
@@ -418,13 +421,13 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
         frame_state.copied = true;
         frame_state.buffer = Some(buffer);
         frame_state.with_damage = with_damage;
-        state.screencopies.push(resource.clone());
+        state.capture.screencopies.push(resource.clone());
         // Copied after the next frame (`after_frames`): at most once per
         // refresh however fast a client asks, as with damage.
         state.queue_redraw();
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyFrameV1, _: &FrameData) {
-        state.screencopies.retain(|f| f != resource);
+        state.capture.screencopies.retain(|f| f != resource);
     }
 }

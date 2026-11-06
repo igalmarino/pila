@@ -48,7 +48,7 @@ fn read_ramp(mut file: File, bytes: &mut [u8]) -> std::io::Result<()> {
     }
 }
 
-/// The live control of each output (`Pila::gamma_controls`).
+/// The live control of each output (`Pila::outputs.gamma`).
 pub type GammaControls = HashMap<Output, ZwlrGammaControlV1>;
 
 /// A control's user data: its output (`None` if it failed at creation) and
@@ -67,14 +67,15 @@ impl Pila {
     /// Drop a control: back to linear gamma.
     fn drop_gamma_control(&mut self, resource: &ZwlrGammaControlV1) {
         let Some(output) = self
-            .gamma_controls
+            .outputs
+            .gamma
             .iter()
             .find(|(_, c)| *c == resource)
             .map(|(o, _)| o.clone())
         else {
             return;
         };
-        self.gamma_controls.remove(&output);
+        self.outputs.gamma.remove(&output);
         let reset = self
             .backend
             .as_mut()
@@ -89,7 +90,7 @@ impl Pila {
 
     /// An output went away: its control is over.
     pub fn gamma_output_removed(&mut self, output: &Output) {
-        if let Some(control) = self.gamma_controls.remove(output) {
+        if let Some(control) = self.outputs.gamma.remove(output) {
             control.failed();
         }
     }
@@ -126,7 +127,7 @@ impl Dispatch<ZwlrGammaControlManagerV1, ()> for Pila {
         let output = Output::from_resource(&output);
         let size = output.as_ref().and_then(|o| {
             // One control per output at a time.
-            (!state.gamma_controls.contains_key(o))
+            (!state.outputs.gamma.contains_key(o))
                 .then(|| state.backend.as_ref().and_then(|b| b.gamma_size(o)))
                 .flatten()
         });
@@ -141,7 +142,7 @@ impl Dispatch<ZwlrGammaControlManagerV1, ()> for Pila {
                 );
                 control.gamma_size(size);
                 debug!(output = output.name(), size, "gamma control taken");
-                state.gamma_controls.insert(output, control);
+                state.outputs.gamma.insert(output, control);
             }
             _ => {
                 let control = data_init.init(
@@ -173,7 +174,7 @@ impl Dispatch<ZwlrGammaControlV1, GammaData> for Pila {
         let Some(output) = data
             .output
             .as_ref()
-            .filter(|o| state.gamma_controls.get(o) == Some(resource))
+            .filter(|o| state.outputs.gamma.get(o) == Some(resource))
         else {
             // Failed at creation, or superseded.
             return;

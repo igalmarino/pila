@@ -43,7 +43,7 @@ impl SeatHandler for Pila {
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<Pila> {
-        &mut self.seat_state
+        &mut self.protocols.seat
     }
 
     // Stored for the renderer; the backend decides who draws what (nested,
@@ -117,7 +117,7 @@ impl SelectionHandler for Pila {
         source: Option<SelectionSource>,
         _seat: Seat<Self>,
     ) {
-        if let Some(xwm) = self.xwm.as_mut() {
+        if let Some(xwm) = self.xwayland.wm.as_mut() {
             if let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types())) {
                 warn!(?err, ?ty, "failed to offer the selection to X11 apps");
             }
@@ -133,7 +133,7 @@ impl SelectionHandler for Pila {
         _seat: Seat<Self>,
         _user_data: &(),
     ) {
-        if let Some(xwm) = self.xwm.as_mut() {
+        if let Some(xwm) = self.xwayland.wm.as_mut() {
             if let Err(err) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone()) {
                 warn!(
                     ?err,
@@ -147,7 +147,7 @@ impl SelectionHandler for Pila {
 
 impl DataDeviceHandler for Pila {
     fn data_device_state(&self) -> &DataDeviceState {
-        &self.data_device_state
+        &self.protocols.data_device
     }
 }
 
@@ -159,7 +159,7 @@ delegate_data_device!(Pila);
 
 impl PrimarySelectionHandler for Pila {
     fn primary_selection_state(&self) -> &PrimarySelectionState {
-        &self.primary_selection_state
+        &self.protocols.primary_selection
     }
 }
 delegate_primary_selection!(Pila);

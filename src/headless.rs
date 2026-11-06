@@ -390,12 +390,14 @@ pub fn init_headless(
     match feedback {
         Some(feedback) => {
             state
-                .dmabuf_state
+                .protocols
+                .dmabuf
                 .create_global_with_default_feedback::<Pila>(&state.display_handle, &feedback);
         }
         None => {
             state
-                .dmabuf_state
+                .protocols
+                .dmabuf
                 .create_global::<Pila>(&state.display_handle, formats);
         }
     }
@@ -404,12 +406,13 @@ pub fn init_headless(
         if let Ok(device) = device {
             let fd = DrmDeviceFd::new(DeviceFd::from(std::os::fd::OwnedFd::from(device)));
             if supports_syncobj_eventfd(&fd) {
-                state.syncobj_state = Some(DrmSyncobjState::new::<Pila>(&state.display_handle, fd));
+                state.protocols.syncobj =
+                    Some(DrmSyncobjState::new::<Pila>(&state.display_handle, fd));
             }
         }
     }
     if let Some((_, dev)) = node {
-        state.capture_dmabuf = Some(crate::capture::DmabufTarget::new(dev, &renderer));
+        state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(dev, &renderer));
     }
 
     state.backend = Some(Backend::Headless(Box::new(HeadlessData {
@@ -450,7 +453,10 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
         },
     );
     if let Some(monitor) = &spec.monitor {
-        state.monitors.insert(spec.name.clone(), monitor.clone());
+        state
+            .outputs
+            .monitors
+            .insert(spec.name.clone(), monitor.clone());
     }
     let Some(Backend::Headless(data)) = &mut state.backend else {
         return false;
@@ -504,7 +510,7 @@ pub fn remove_output(state: &mut Pila, name: &str) -> bool {
         return false;
     };
     let removed = data.outputs.remove(index);
-    state.monitors.remove(name);
+    state.outputs.monitors.remove(name);
     if let Some(global) = removed.global {
         crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     }
@@ -525,7 +531,7 @@ fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
     let mut config = state
         .output_section(name)
         .unwrap_or_else(|| OutputConfig::named(name));
-    if let Some(over) = state.output_overrides.get(name) {
+    if let Some(over) = state.outputs.overrides.get(name) {
         config.mode = over.mode.or(config.mode);
         config.scale = over.scale.or(config.scale);
         config.position = over.position.or(config.position);
