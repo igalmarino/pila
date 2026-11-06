@@ -326,7 +326,7 @@ if grep -q "panicked" "$log"; then
     fail "no panic"
 fi
 
-terminal=$(grep -o 'check: terminal [a-z]*' "$log" | head -1 | awk '{print $3}')
+terminal=$(grep -o 'check: terminal [a-z]*' "$log" | head -1 | awk '{print $3}' || true)
 if [ "${terminal:-none}" = none ]; then
     fail "a terminal ran the window scenarios (install kitty or foot)"
 fi
