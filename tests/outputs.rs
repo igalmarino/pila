@@ -379,6 +379,109 @@ fn editing_an_outputs_config_section_drops_its_override() {
     pila.wait("B at 1.5", |s| s["outputs"][1]["scale"] == 1.5);
 }
 
+// --- Monitors (`edid.rs`) ---------------------------------------------------------
+
+const MONITOR: &str = "=LEN/P27h-30/ABC";
+
+fn scale_of(state: &Value, output: &str) -> f64 {
+    let outputs = state["outputs"].as_array().unwrap();
+    let found = outputs.iter().find(|o| o["name"] == output).unwrap();
+    found["scale"].as_f64().unwrap()
+}
+
+fn with_monitor_on(connector: &str, config: &str) -> TestPila {
+    let outputs = format!("A:1280x800,{connector}:1024x768{MONITOR}");
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some(outputs),
+        ..Options::default()
+    });
+    pila.write_config(config);
+    pila.wait_log("config reloaded");
+    pila
+}
+
+#[test]
+fn a_section_naming_a_model_follows_the_monitor_to_any_connector() {
+    for connector in ["B", "C"] {
+        let mut pila = with_monitor_on(
+            connector,
+            "[[output]]\nname = \"LEN P27h-30\"\nscale = 2.0\n",
+        );
+        let state = pila.wait("the monitor at 2", |s| scale_of(s, connector) == 2.0);
+        assert_eq!(scale_of(&state, "A"), 1.0);
+    }
+}
+
+#[test]
+fn a_section_naming_the_monitor_itself_wins_over_its_model_and_connector() {
+    let mut pila = with_monitor_on(
+        "B",
+        "[[output]]\nname = \"B\"\nscale = 1.25\n\
+         [[output]]\nname = \"LEN P27h-30\"\nscale = 1.5\n\
+         [[output]]\nname = \"LEN P27h-30 ABC\"\nscale = 2.0\n",
+    );
+    pila.wait("the monitor's section", |s| scale_of(s, "B") == 2.0);
+}
+
+#[test]
+fn a_section_for_another_monitor_doesnt_apply() {
+    let mut pila = with_monitor_on(
+        "B",
+        "[[output]]\nname = \"LEN Other\"\nscale = 2.0\n\
+         [[output]]\nname = \"LEN P27h-30 XYZ\"\nscale = 2.0\n",
+    );
+    assert_eq!(scale_of(&pila.settle(), "B"), 1.0);
+}
+
+#[test]
+fn a_monitor_going_away_takes_its_section_with_it() {
+    let mut pila = with_monitor_on("B", "[[output]]\nname = \"LEN P27h-30\"\nscale = 2.0\n");
+    pila.wait("the monitor at 2", |s| scale_of(s, "B") == 2.0);
+    pila.request(json!({ "cmd": "output_remove", "name": "B" }));
+    pila.wait("gone", |s| s["outputs"].as_array().unwrap().len() == 1);
+    pila.request(json!({ "cmd": "output_add", "spec": "B:1024x768=DEL/U2720Q" }));
+    let state = pila.wait("another monitor", |s| {
+        s["outputs"].as_array().unwrap().len() == 2
+    });
+    assert_eq!(scale_of(&state, "B"), 1.0);
+}
+
+#[test]
+fn a_tools_setting_stays_until_the_monitors_section_is_edited() {
+    let mut pila = with_monitor_on("B", "[[output]]\nname = \"LEN P27h-30\"\nscale = 2.0\n");
+    pila.wait("the monitor at 2", |s| scale_of(s, "B") == 2.0);
+    let (client, manager) = manager(&pila);
+    let configuration = configuration(&client, &manager);
+    let setup = configuration.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+    setup.set_scale(1.5);
+    configuration.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    configuration.apply();
+    client.flush();
+    client.wait_logged("config", "Succeeded");
+    pila.wait("B at 1.5", |s| scale_of(s, "B") == 1.5);
+    // Its section edited: the file takes over again.
+    pila.write_config("[[output]]\nname = \"LEN P27h-30\"\nscale = 1.25\n");
+    pila.wait("B at 1.25", |s| scale_of(s, "B") == 1.25);
+}
+
+#[test]
+fn clients_get_the_monitors_make_model_and_serial() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some(format!("A:1280x800,B:1024x768{MONITOR}")),
+        ..Options::default()
+    });
+    let state = pila.state();
+    let outputs = state["outputs"].as_array().unwrap();
+    assert_eq!(outputs[1]["make"], "LEN");
+    assert_eq!(outputs[1]["model"], "P27h-30");
+    assert_eq!(outputs[0]["make"], "pila");
+    let (client, _manager) = manager(&pila);
+    client.wait_logged("head", "Make { make: \"LEN\" }");
+    client.wait_logged("head", "Model { model: \"P27h-30\" }");
+    client.wait_logged("head", "SerialNumber { serial_number: \"ABC\" }");
+    client.wait_logged("head", "Make { make: \"pila\" }");
+}
+
 // --- Power and gamma -------------------------------------------------------------
 
 #[test]

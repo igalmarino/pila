@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::edid::Monitor;
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::DeviceFd;
@@ -64,15 +65,18 @@ pub const DEFAULT_OUTPUTS: &str = "HEADLESS-1:1280x800@60";
 /// changes (config, wlr-output-management) can be tested.
 const EXTRA_MODES: [(i32, i32, i32); 2] = [(1024, 768, 60_000), (1920, 1080, 60_000)];
 
-/// A virtual output as `--headless-outputs` gives it: `NAME:WxH[@HZ]`.
+/// A virtual output as `--headless-outputs` gives it:
+/// `NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]]`. A real output's monitor comes from
+/// its EDID (`edid.rs`); this one stands in for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputSpec {
     pub name: String,
     pub size: (i32, i32),
     pub refresh_mhz: i32,
+    pub monitor: Option<Monitor>,
 }
 
-/// Parse `NAME:WxH[@HZ]`, several separated by commas.
+/// Parse `OutputSpec`s, several separated by commas.
 pub fn parse_output_specs(text: &str) -> Result<Vec<OutputSpec>, String> {
     text.split(',')
         .filter(|s| !s.trim().is_empty())
@@ -81,7 +85,24 @@ pub fn parse_output_specs(text: &str) -> Result<Vec<OutputSpec>, String> {
 }
 
 pub fn parse_output_spec(spec: &str) -> Result<OutputSpec, String> {
-    let (name, mode) = spec
+    let (output, monitor) = match spec.split_once('=') {
+        Some((output, monitor)) => (output, Some(monitor)),
+        None => (spec, None),
+    };
+    let monitor = monitor
+        .map(|monitor| {
+            let mut parts = monitor.split('/');
+            match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                (Some(make), Some(model), serial, None) => Ok(Monitor {
+                    make: make.to_string(),
+                    model: model.to_string(),
+                    serial: serial.map(str::to_string),
+                }),
+                _ => Err(format!("output {spec:?}: expected MAKE/MODEL[/SERIAL]")),
+            }
+        })
+        .transpose()?;
+    let (name, mode) = output
         .split_once(':')
         .ok_or_else(|| format!("output {spec:?}: expected NAME:WxH[@HZ]"))?;
     if name.is_empty() {
@@ -109,6 +130,7 @@ pub fn parse_output_spec(spec: &str) -> Result<OutputSpec, String> {
         name: name.to_string(),
         size: (w, h),
         refresh_mhz,
+        monitor,
     })
 }
 
@@ -414,10 +436,22 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "pila".into(),
-            model: "headless".into(),
+            make: spec
+                .monitor
+                .as_ref()
+                .map_or("pila".into(), |m| m.make.clone()),
+            model: spec
+                .monitor
+                .as_ref()
+                .map_or("headless".into(), |m| m.model.clone()),
         },
     );
+    if let Some(monitor) = &spec.monitor {
+        state.monitors.insert(spec.name.clone(), monitor.clone());
+    }
+    let Some(Backend::Headless(data)) = &mut state.backend else {
+        return false;
+    };
     let own = Mode {
         size: spec.size.into(),
         refresh: spec.refresh_mhz,
@@ -467,6 +501,7 @@ pub fn remove_output(state: &mut Pila, name: &str) -> bool {
         return false;
     };
     let removed = data.outputs.remove(index);
+    state.monitors.remove(name);
     if let Some(global) = removed.global {
         state.display_handle.remove_global::<Pila>(global);
     }
@@ -485,9 +520,7 @@ pub fn remove_output(state: &mut Pila, name: &str) -> bool {
 /// on top.
 fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
     let mut config = state
-        .config
-        .output(name)
-        .cloned()
+        .output_section(name)
         .unwrap_or_else(|| OutputConfig::named(name));
     if let Some(over) = state.output_overrides.get(name) {
         config.mode = over.mode.or(config.mode);
@@ -987,16 +1020,32 @@ mod tests {
                 OutputSpec {
                     name: "A".into(),
                     size: (800, 600),
-                    refresh_mhz: 60_000
+                    refresh_mhz: 60_000,
+                    monitor: None,
                 },
                 OutputSpec {
                     name: "B-2".into(),
                     size: (1920, 1080),
-                    refresh_mhz: 144_000
+                    refresh_mhz: 144_000,
+                    monitor: None,
                 },
             ]
         );
         assert!(parse_output_spec("A").is_err());
+        let monitor = parse_output_spec("A:800x600=LEN/P27h 30/ABC")
+            .unwrap()
+            .monitor;
+        assert_eq!(
+            monitor,
+            Some(Monitor {
+                make: "LEN".into(),
+                model: "P27h 30".into(),
+                serial: Some("ABC".into()),
+            })
+        );
+        let monitor = parse_output_spec("A:800x600=LEN/P27h").unwrap().monitor;
+        assert_eq!(monitor.unwrap().serial, None);
+        assert!(parse_output_spec("A:800x600=LEN").is_err());
         assert!(parse_output_spec(":800x600").is_err());
         assert!(parse_output_spec("A:800").is_err());
         assert!(parse_output_spec("A:0x600").is_err());

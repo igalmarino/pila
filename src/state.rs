@@ -158,6 +158,9 @@ pub struct Pila {
     /// what they set, over `[[output]]`, by output name.
     pub output_management: crate::output_management::OutputManagement,
     pub output_overrides: HashMap<String, crate::config::OutputConfig>,
+    /// The monitor on each output that says which it is, by output name
+    /// (`edid.rs`).
+    pub monitors: HashMap<String, crate::edid::Monitor>,
     pub switch: Option<Switch>,
     /// Animations in progress (`animation.rs`), and the workspace switch's
     /// (`workspace_slide.rs`).
@@ -368,6 +371,7 @@ impl Pila {
             output_management: Default::default(),
             blur: Default::default(),
             output_overrides: HashMap::new(),
+            monitors: HashMap::new(),
             switch: None,
             animations: Default::default(),
             workspace_slide: None,
@@ -1266,6 +1270,16 @@ impl Pila {
         // On bare metal the redraw is an idle callback, which calloop only
         // runs after the next event; waking the loop makes that now.
         self.wake.ping();
+    }
+
+    /// The `[[output]]` section for the output called `name`, under that
+    /// name whatever the section says (what's keyed on it, like
+    /// `output_overrides`, goes by the output's name).
+    pub fn output_section(&self, name: &str) -> Option<crate::config::OutputConfig> {
+        let section = self.config.output(name, self.monitors.get(name))?;
+        let mut section = section.clone();
+        section.name = name.to_string();
+        Some(section)
     }
 
     /// Housekeeping after `output` was drawn, for any backend: what

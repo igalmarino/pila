@@ -50,6 +50,8 @@
 //! Nested, Alt is the default because a host desktop such as GNOME grabs
 //! Super while pila runs inside it.
 
+use crate::edid::Monitor;
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -662,7 +664,8 @@ impl Default for InputConfig {
 }
 
 /// `[[output]]`: settings for one monitor, matched by connector name
-/// (`eDP-1`, `DP-1`, `HDMI-A-1`, ...; `winit` is the nested window).
+/// (`eDP-1`, `DP-1`, `HDMI-A-1`, ...; `winit` is the nested window) or by the
+/// monitor's make and model, with or without its serial (`LEN P27h-30`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputConfig {
     pub name: String,
@@ -1148,9 +1151,17 @@ impl Config {
         found
     }
 
-    /// The `[[output]]` settings for the output called `name`, if any.
-    pub fn output(&self, name: &str) -> Option<&OutputConfig> {
-        self.outputs.iter().find(|o| o.name == name)
+    /// The `[[output]]` settings for the output called `name` showing
+    /// `monitor`, if any: the most specific section, the monitor itself
+    /// before its model before the connector.
+    pub fn output(&self, name: &str, monitor: Option<&Monitor>) -> Option<&OutputConfig> {
+        let by_monitor = |matches: fn(&Monitor, &str) -> bool| {
+            let monitor = monitor?;
+            self.outputs.iter().find(|o| matches(monitor, &o.name))
+        };
+        by_monitor(Monitor::is_exactly)
+            .or_else(|| by_monitor(Monitor::is_model))
+            .or_else(|| self.outputs.iter().find(|o| o.name == name))
     }
 
     /// The action for a swipe, if pila handles it.
@@ -1344,10 +1355,10 @@ mod tests {
             &no_env,
         )
         .unwrap();
-        let edp = config.output("eDP-1").unwrap();
+        let edp = config.output("eDP-1", None).unwrap();
         assert_eq!(edp.scale, Some(160.0 / 120.0));
         assert_eq!(edp.mode, None);
-        let dp = config.output("DP-1").unwrap();
+        let dp = config.output("DP-1", None).unwrap();
         assert_eq!(dp.position, Some((1440, 0)));
         assert_eq!(
             dp.mode,
@@ -1357,7 +1368,7 @@ mod tests {
                 refresh_hz: Some(59.95)
             })
         );
-        assert!(config.output("HDMI-A-1").is_none());
+        assert!(config.output("HDMI-A-1", None).is_none());
         assert_eq!(dp.transform, None);
         assert_eq!(dp.enabled, None);
         assert_eq!(dp.adaptive_sync, None);
@@ -1370,7 +1381,7 @@ mod tests {
             &no_env,
         )
         .unwrap();
-        let dp = config.output("DP-1").unwrap();
+        let dp = config.output("DP-1", None).unwrap();
         assert_eq!(dp.enabled, Some(false));
         assert_eq!(dp.adaptive_sync, Some(true));
         let over = OutputConfig {
@@ -1394,11 +1405,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            config.output("DP-1").unwrap().transform,
+            config.output("DP-1", None).unwrap().transform,
             Some(Transform::_90)
         );
         assert_eq!(
-            config.output("HDMI-A-1").unwrap().transform,
+            config.output("HDMI-A-1", None).unwrap().transform,
             Some(Transform::Flipped270)
         );
         let err = Config::from_toml("[[output]]\nname = \"DP-1\"\ntransform = \"45\"", &no_env)
@@ -1684,6 +1695,45 @@ mod tests {
         );
         // The words it used to take.
         assert!(parse(r#"disable-internal-display = "always""#).is_err());
+    }
+
+    #[test]
+    fn the_most_specific_output_section_wins() {
+        let config = Config::from_toml(
+            r#"
+            [[output]]
+            name = "DP-1"
+            scale = 1.25
+            [[output]]
+            name = "LEN P27h-30"
+            scale = 1.5
+            [[output]]
+            name = "LEN P27h-30 ABC"
+            scale = 2.0
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        let monitor = |serial: Option<&str>| Monitor {
+            make: "LEN".into(),
+            model: "P27h-30".into(),
+            serial: serial.map(str::to_string),
+        };
+        let scale = |name: &str, monitor: Option<&Monitor>| {
+            config.output(name, monitor).and_then(|c| c.scale)
+        };
+        assert_eq!(scale("DP-1", Some(&monitor(Some("ABC")))), Some(2.0));
+        assert_eq!(scale("DP-2", Some(&monitor(Some("ABC")))), Some(2.0));
+        assert_eq!(scale("DP-1", Some(&monitor(Some("XYZ")))), Some(1.5));
+        assert_eq!(scale("DP-1", Some(&monitor(None))), Some(1.5));
+        assert_eq!(scale("DP-1", None), Some(1.25));
+        assert_eq!(scale("DP-2", None), None);
+        let other = Monitor {
+            make: "DEL".into(),
+            model: "U2720Q".into(),
+            serial: None,
+        };
+        assert_eq!(scale("DP-1", Some(&other)), Some(1.25));
     }
 
     #[test]

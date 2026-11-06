@@ -181,6 +181,8 @@ impl Pila {
                     let mode = output.current_mode();
                     json!({
                         "name": output.name(),
+                        "make": output.physical_properties().make,
+                        "model": output.physical_properties().model,
                         "enabled": o.enabled,
                         "power": o.power,
                         "geometry": self.space.output_geometry(output).map(rect),

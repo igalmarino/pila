@@ -65,9 +65,18 @@ Key flows and invariants:
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
+- **Monitors** (`edid.rs`, `Pila::monitors` by output name): on a connector connecting,
+  `udev.rs` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
+  and serial from the base block; a missing or invalid one leaves "Unknown". They go to
+  `wl_output` and `xdg-output` through `PhysicalProperties`, and to wlr-output-management
+  in `output_heads`. An `[[output]]` section may name the monitor instead of the connector
+  (`Config::output`: the monitor, then its model, then the connector); only that one
+  section applies. `Pila::output_section` returns it under the output's name, since
+  `output_overrides` and `is_internal` go by the connector. Set before the output's settings
+  are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
+  their spec.
 - **Bare metal (udev):** one GPU (the seat's primary), outputs placed by their
-  `[[output]]` config (mode, scale, position, transform) or else left to right, EDID off
-  (make/model "Unknown", see `Cargo.toml`). pila draws named cursors from the xcursor
+  `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
   which also sends presentation feedback with the kernel's timestamp. The session lock is

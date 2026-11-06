@@ -15,6 +15,8 @@ use std::{collections::HashMap, time::Duration};
 
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 
+use crate::edid::Monitor;
+
 use smithay::{
     backend::{
         allocator::{
@@ -1039,6 +1041,20 @@ fn logical_width(output: &Output, transform: Transform, scale: f64) -> i32 {
 
 fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc::Handle) {
     let name = connector_name(&connector);
+    // Before its settings: an `[[output]]` section may name the monitor.
+    let monitor = match &state.backend {
+        Some(Backend::Udev(data)) => read_monitor(&data.drm, &connector),
+        _ => None,
+    };
+    let (make, model) = match &monitor {
+        Some(monitor) => (monitor.make.clone(), monitor.model.clone()),
+        None => ("Unknown".to_string(), "Unknown".to_string()),
+    };
+    info!(name, make, model, "monitor");
+    match monitor {
+        Some(monitor) => state.monitors.insert(name.clone(), monitor),
+        None => state.monitors.remove(&name),
+    };
     let output_config = effective_output_config(state, &name);
     let modes = connector.modes().to_vec();
     let Some(drm_mode) = pick_mode(&name, &modes, Some(&output_config)) else {
@@ -1084,9 +1100,8 @@ fn connector_connected(state: &mut Pila, connector: connector::Info, crtc: crtc:
         PhysicalProperties {
             size: (phys_w as i32, phys_h as i32).into(),
             subpixel: connector.subpixel().into(),
-            // EDID parsing is off (see Cargo.toml).
-            make: "Unknown".into(),
-            model: "Unknown".into(),
+            make,
+            model,
         },
     );
     let wl_mode = WlMode::from(drm_mode);
@@ -1255,9 +1270,7 @@ fn set_vrr(data: &UdevData, crtc: crtc::Handle, on: bool) {
 /// runtime on top (`Pila::output_overrides`).
 fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
     let mut file = state
-        .config
-        .output(name)
-        .cloned()
+        .output_section(name)
         .unwrap_or_else(|| OutputConfig::named(name));
     if off_by_rule(state, name) {
         file.enabled = Some(false);
@@ -1268,7 +1281,8 @@ fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
 /// Whether `disable-internal-display` (rather than the file) turns output
 /// `name` off now. Such an output keeps its place in the layout.
 fn off_by_rule(state: &Pila, name: &str) -> bool {
-    state.config.output(name).and_then(|c| c.enabled).is_none() && internal_display_off(state, name)
+    state.output_section(name).and_then(|c| c.enabled).is_none()
+        && internal_display_off(state, name)
 }
 
 fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
@@ -1303,9 +1317,7 @@ fn internal_display_off(state: &Pila, name: &str) -> bool {
         .chain(data.scan_pending.iter().cloned());
     internal_off(applies, name, connected, |other| {
         let config = state
-            .config
-            .output(other)
-            .cloned()
+            .output_section(other)
             .unwrap_or_else(|| OutputConfig::named(other));
         with_overrides(state, config).enabled.unwrap_or(true)
     })
@@ -1388,6 +1400,7 @@ fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
         return;
     };
     info!(name = surface.output.name(), "output disconnected");
+    state.monitors.remove(&surface.output.name());
     // The built-in screen comes back first, so the windows of the monitor
     // that went away move onto it.
     apply_internal_display(state);
@@ -1400,6 +1413,18 @@ fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
     }
     state.refresh_output_heads();
     state.queue_redraw();
+}
+
+/// The monitor on the connector, from its `EDID` property.
+fn read_monitor(drm: &PilaDrmOutputManager, connector: &connector::Info) -> Option<Monitor> {
+    let device = drm.device();
+    let props = device.get_properties(connector.handle()).ok()?;
+    let (info, value) = props.into_iter().find_map(|(handle, value)| {
+        let info = device.get_property(handle).ok()?;
+        (info.name().to_str() == Ok("EDID")).then_some((info, value))
+    })?;
+    let blob = info.value_type().convert_value(value).as_blob()?;
+    crate::edid::parse(&device.get_property_blob(blob).ok()?)
 }
 
 /// Whether the connector is marked `non-desktop` (VR headsets and the like).

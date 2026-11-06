@@ -361,6 +361,18 @@ else
     fi
 fi
 
+# Bare metal only: nothing else reads an EDID (`edid.rs`).
+if grep -q 'backend=Udev' "$log"; then
+    monitors=$(grep -c 'pila::udev: monitor ' "$log" || true)
+    if [ "$monitors" -eq 0 ]; then
+        fail "monitors were identified (none logged)"
+    elif grep 'pila::udev: monitor ' "$log" | grep -q 'make="Unknown"'; then
+        fail "monitors were identified (one has no valid EDID)"
+    else
+        pass "monitors were identified ($monitors)"
+    fi
+fi
+
 echo
 if [ "$failed" -eq 0 ]; then
     echo "All checks passed."

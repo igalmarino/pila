@@ -21,7 +21,8 @@
 //! - `pixels` `x`, `y`, `w`, `h` (global logical): the pixels of the last
 //!   frame, as `rgba` (a flat array) with its physical `width`/`height`.
 //! - `screenshot` `output`, `path`: the output's last frame as a PPM file.
-//! - `output_add` `spec` (`NAME:WxH[@HZ]`), `output_remove` `name`.
+//! - `output_add` `spec` (`NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]]`),
+//!   `output_remove` `name`.
 //! - `spawn` `command`: run a command as a binding would.
 //! - `quit`.
 

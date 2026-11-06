@@ -154,8 +154,11 @@ impl Pila {
         if outputs_changed {
             // An edited [[output]] section takes over from what a display
             // tool set for that monitor; untouched sections don't.
-            self.output_overrides
-                .retain(|name, _| old.output(name) == self.config.output(name));
+            let (monitors, config) = (&self.monitors, &self.config);
+            self.output_overrides.retain(|name, _| {
+                let monitor = monitors.get(name);
+                old.output(name, monitor) == config.output(name, monitor)
+            });
         }
         // `disable-internal-display` decides which outputs are on, too. A
         // display tool's applies pin every head's on/off state; a changed
@@ -217,7 +220,7 @@ impl Pila {
 
     /// Nested: only the scale of the `winit` output applies.
     fn apply_nested_scale(&mut self) {
-        let file = self.config.output("winit").and_then(|c| c.scale);
+        let file = self.config.output("winit", None).and_then(|c| c.scale);
         let scale = self
             .output_overrides
             .get("winit")

@@ -99,6 +99,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Output power and gamma (protocol side) | `outputs::an_output_can_be_turned_off_and_on`, `outputs::gamma_ramps_are_set_and_reset`, `outputs::a_second_gamma_control_or_a_short_ramp_fails`, `src/gamma_control.rs` unit tests |
 | `disable-internal-display` | `src/udev.rs::the_built_in_screen_goes_off_only_for_an_external_one_that_is_on`, `src/udev.rs::built_in_screens_are_recognized_by_connector`; the rest on bare metal |
 | DRM/KMS: modes, CRTCs, vblank pacing, VRR, gamma ioctl, power, VT switching | bare metal: `scripts/check` (modes, CRTCs, vblank pacing), the rest by hand (the user); `src/udev.rs::linear_ramps_are_recognized` |
+| Monitors: make, model and serial from the EDID; `[[output]]` by monitor (reading the property runs only on bare metal: `scripts/check`, parsing is unit tested) | `outputs::a_section_naming_a_model_follows_the_monitor_to_any_connector`, `outputs::a_section_naming_the_monitor_itself_wins_over_its_model_and_connector`, `outputs::a_section_for_another_monitor_doesnt_apply`, `outputs::a_monitor_going_away_takes_its_section_with_it`, `outputs::a_tools_setting_stays_until_the_monitors_section_is_edited`, `outputs::clients_get_the_monitors_make_model_and_serial`, `src/edid.rs::a_monitor_gives_its_make_name_and_serial`, `src/config.rs::the_most_specific_output_section_wins` |
 
 ## Taskbars and capture
 

@@ -56,7 +56,7 @@ pub fn init_winit(
     );
     let _global = output.create_global::<Pila>(display_handle);
     // Nested there's one output; only `scale` of its `[[output]]` applies.
-    let output_config = state.config.output("winit");
+    let output_config = state.config.output("winit", None);
     if output_config
         .is_some_and(|c| c.mode.is_some() || c.position.is_some() || c.transform.is_some())
     {

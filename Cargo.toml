@@ -29,8 +29,8 @@ wayland-scanner = "0.31"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 # Connector scanning for the DRM backend; same source as the copy in Smithay
 # v0.7.0's tree. Its EDID support (`display-info`) is off: it binds
-# libdisplay-info 0.1/0.2 and current distros ship 0.3, so monitors show as
-# "Unknown".
+# libdisplay-info 0.1/0.2 and current distros ship 0.3. `edid.rs` reads what
+# pila needs.
 smithay-drm-extras = { version = "0.1", default-features = false }
 # Named cursors on bare metal (the nested host draws its own).
 xcursor = "0.3"

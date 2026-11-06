@@ -24,8 +24,7 @@ is untested), distros and setups are exactly what testing is needed for: please
 [report](#reporting-bugs) what works and what doesn't.
 
 Known gaps: touchscreens, input methods (IME), several GPUs (pila uses the seat's primary
-one), monitor names (EDID isn't read, so monitors show as "Unknown"; `[[output]]` matches
-connector names such as `eDP-1`).
+one).
 
 ## Features
 

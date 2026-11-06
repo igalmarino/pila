@@ -161,6 +161,12 @@ tap = true
 # "winit", and only its scale applies. Tools using wlr-output-management
 # (wlr-randr, a shell's display settings) change these at runtime; editing a
 # monitor's entry here puts the file back in charge of that monitor.
+# A section names a connector or a monitor: its make and model ("LEN P27h-30"),
+# for any monitor of that model on any connector, or with its serial too ("LEN
+# P27h-30 ABC123"), for that one monitor. The most specific section wins, and
+# only that one applies. wlr-randr lists them; `pila.log` has the make and model
+# ("monitor"). Without an EDID a monitor only answers to its connector.
+#
 # [[output]]
 # name = "eDP-1"
 # scale = 1.25              # may be fractional (in 1/120 steps); default 1

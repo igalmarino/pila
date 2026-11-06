@@ -21,6 +21,7 @@ mod config;
 mod config_reload;
 mod cursor;
 mod decoration;
+mod edid;
 mod ext_workspace;
 mod focus;
 mod foreign_toplevel;
@@ -83,8 +84,9 @@ Options:
                         ($XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.control). Default:
                         winit if WAYLAND_DISPLAY or DISPLAY is set, else udev
   --headless-outputs <OUTPUTS>
-                        The headless backend's outputs, NAME:WxH[@HZ] separated
-                        by commas (default: HEADLESS-1:1280x800@60)
+                        The headless backend's outputs,
+                        NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]] separated by commas
+                        (default: HEADLESS-1:1280x800@60)
   --check-config        Check the config file (as pila would read it, the
                         keymap included) and exit: 0 if it's valid, 1 if not
   -V, --version         Show the version

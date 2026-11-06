@@ -268,7 +268,7 @@ impl Pila {
     /// The monitors as the protocol sees them: from the backend on bare
     /// metal; nested, the window is the one head and keeps its mode.
     pub fn output_heads(&self) -> Vec<HeadInfo> {
-        match self.backend.as_ref().and_then(Backend::output_heads) {
+        let mut heads = match self.backend.as_ref().and_then(Backend::output_heads) {
             Some(heads) => heads,
             None => self
                 .space
@@ -304,7 +304,15 @@ impl Pila {
                     }
                 })
                 .collect(),
+        };
+        for head in &mut heads {
+            if let Some(monitor) = self.monitors.get(&head.name) {
+                head.make.clone_from(&monitor.make);
+                head.model.clone_from(&monitor.model);
+                head.serial.clone_from(&monitor.serial);
+            }
         }
+        heads
     }
 
     /// Tell every client what changed about the monitors. Called whenever
