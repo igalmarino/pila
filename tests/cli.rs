@@ -198,3 +198,26 @@ fn the_report_works_with_no_log() {
     let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
     assert!(text.contains("no log found"), "{text}");
 }
+
+#[test]
+fn a_missing_egl_library_is_an_error_not_a_crash() {
+    // A broken library found first fails to load just like a missing one.
+    let dir = std::env::temp_dir().join(format!("pila-no-egl-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("libEGL.so.1"), "not a library").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_pila"))
+        .args(["--backend", "headless"])
+        .env("LD_LIBRARY_PATH", &dir)
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env("XDG_STATE_HOME", &dir)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("libEGL.so.1"), "{stderr}");
+    assert!(stderr.contains("LD_LIBRARY_PATH"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

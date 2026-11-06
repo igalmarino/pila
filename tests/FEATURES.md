@@ -26,6 +26,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Reload: each section applied, invalid files kept out | `config_reload::a_new_binding_works_after_a_reload`, `config_reload::an_invalid_file_keeps_the_running_config`, `config_reload::a_syntax_error_keeps_the_running_config`, `config_reload::the_keyboard_layout_changes_on_reload`, `config_reload::an_invalid_keymap_keeps_the_current_one`, `config_reload::the_mod_key_changes_on_reload`, `config_reload::output_scale_position_and_transform_apply_on_reload`, `config_reload::an_output_disabled_by_the_config_moves_its_windows`, `config_reload::every_output_off_leaves_one_on`, `config_reload::a_reload_with_an_unchanged_file_keeps_windows_as_they_are`, `workspaces::fewer_workspaces_after_a_reload_bring_windows_to_the_last_one`, `rules::rules_are_resolved_again_on_reload_but_not_on_title_changes` |
 | Autostart, `-c`, session environment of children | `config_reload::autostart_runs_once_not_on_reload`, `config_reload::a_command_line_command_replaces_autostart`, `bindings::spawned_commands_get_the_session_environment` |
 | `scripts/report`: system, GPU, monitors and log for a bug report, private names removed | `cli::the_report_has_the_system_and_the_log_without_private_names`, `cli::the_report_works_with_no_log` |
+| A missing EGL library is a clear error, not a crash | `cli::a_missing_egl_library_is_an_error_not_a_crash` |
 | udev backend fails cleanly without a seat | `cli::the_udev_backend_without_a_seat_fails_cleanly` |
 
 ## Keybindings

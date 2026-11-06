@@ -44,7 +44,8 @@ Key flows and invariants:
 - **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,
   `winit.rs`), `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev/`) or `Headless`
   (tests, `headless.rs`), chosen by `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY`
-  is set. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
+  is set. `main` checks first that `libEGL.so.1` can be loaded (`missing_library`), since
+  Smithay panics if it can't. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
   imports, `queue_redraw`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
   hard-codes a keyboard and pointer for all.

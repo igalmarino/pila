@@ -182,6 +182,34 @@ fn log_panics() {
     }));
 }
 
+/// Why `name` can't be loaded at runtime, or `None` if it can. Smithay loads
+/// EGL by itself when a backend starts and panics if it can't, so that's
+/// checked first, to say what's wrong and leave cleanly.
+fn missing_library(name: &str) -> Option<String> {
+    let path = std::ffi::CString::new(name).ok()?;
+    // SAFETY: `path` is a valid C string; a library opened is closed right
+    // away (a library Smithay opens later is loaded again), and dlerror's
+    // message is copied before anything else can change it.
+    unsafe {
+        let library = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY);
+        if !library.is_null() {
+            libc::dlclose(library);
+            return None;
+        }
+        let reason = libc::dlerror();
+        let reason = if reason.is_null() {
+            "no reason given".into()
+        } else {
+            std::ffi::CStr::from_ptr(reason).to_string_lossy()
+        };
+        Some(format!(
+            "can't load {name}, which pila needs at runtime: {reason}. Install the package that \
+             has it (libglvnd or Mesa, depending on the distro); if it's outside the standard \
+             library paths, as on NixOS, add its directory to LD_LIBRARY_PATH"
+        ))
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut startup_command = None;
     let mut check_config = false;
@@ -315,6 +343,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting pila"
     );
 
+    if let Some(error) = missing_library("libEGL.so.1") {
+        return Err(error.into());
+    }
+
     let display: Display<Pila> = Display::new()?;
     let mut state = Pila::new(&mut event_loop, display, config);
     state.config_path = config_path;
@@ -365,4 +397,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_library;
+
+    #[test]
+    fn a_library_that_is_there_is_not_missing() {
+        assert_eq!(missing_library("libc.so.6"), None);
+    }
+
+    #[test]
+    fn a_missing_library_is_named_and_says_what_to_do() {
+        let error = missing_library("libpila-no-such-library.so.1").expect("it's missing");
+        assert!(error.contains("libpila-no-such-library.so.1"), "{error}");
+        assert!(error.contains("LD_LIBRARY_PATH"), "{error}");
+    }
 }
