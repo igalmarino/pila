@@ -899,17 +899,12 @@ fn syncobj_of(
     ))
 }
 
-/// The connection fails with this error. A client can lose the race with
-/// pila closing the connection and get an I/O error first, with no way to read
-/// the protocol error that came before it.
+/// The connection fails with this error.
 #[track_caller]
 fn assert_syncobj_error(client: &Client, code: SyncobjError) {
     let error = client.wait_error();
     let expected = format!("Protocol error {} ", code as u32);
-    assert!(
-        error.contains(&expected) || error.contains("Io error"),
-        "{error}"
-    );
+    assert!(error.contains(&expected), "{error}");
 }
 
 /// Attach a dmabuf of `size` with its sync points, and commit.
@@ -979,6 +974,7 @@ fn an_acquire_point_needs_a_release_point() {
     };
     let buffer = client.dmabuf_buffer((120, 90)).expect("a dmabuf buffer");
     let surface = client.surface(window);
+    client.expect_error();
     surface.attach(Some(&buffer), 0, 0);
     sync.set_acquire_point(&timeline.object, 0, 1);
     surface.commit();
@@ -994,6 +990,7 @@ fn sync_points_need_a_dmabuf() {
     let Some((sync, timeline)) = syncobj_of(&client, window) else {
         return;
     };
+    client.expect_error();
     sync.set_acquire_point(&timeline.object, 0, 1);
     sync.set_release_point(&timeline.object, 0, 2);
     client.draw(window, Some((130, 90)));

@@ -447,6 +447,7 @@ fn a_second_gamma_control_or_a_short_ramp_fails() {
     // A ramp of the wrong size is a protocol error (invalid_gamma).
     let short = memfd(&[0u8; 10]);
     use std::os::fd::AsFd;
+    client.expect_error();
     control.set_gamma(short.as_fd());
     client.flush();
     let error = client.wait_error();

@@ -547,6 +547,7 @@ fn a_session_in_use_by_the_same_client_is_an_error() {
     let client = pila.client();
     client.session(None, "session");
     let id = client.session_id("session");
+    client.expect_error();
     client.session(Some(&id), "again");
     assert_error(&client, 1, "xdg_session_manager_v1");
 }
@@ -555,6 +556,7 @@ fn a_session_in_use_by_the_same_client_is_an_error() {
 fn an_empty_session_id_is_an_error() {
     let pila = TestPila::start();
     let client = pila.client();
+    client.expect_error();
     client.session(Some(""), "session");
     assert_error(&client, 2, "xdg_session_manager_v1");
 }
@@ -564,6 +566,7 @@ fn an_empty_toplevel_name_is_an_error() {
     let pila = TestPila::start();
     let client = pila.client();
     let session = client.session(None, "session");
+    client.expect_error();
     add(&client, &session, "");
     assert_error(&client, 3, "xdg_session_v1");
 }
@@ -572,6 +575,7 @@ fn an_empty_toplevel_name_is_an_error() {
 fn adding_a_known_name_is_an_error() {
     let (mut pila, client, session, window) = moved_in_session();
     close(&mut pila, &client, window);
+    client.expect_error();
     add(&client, &session, "main");
     assert_error(&client, 1, "xdg_session_v1");
 }
@@ -579,6 +583,7 @@ fn adding_a_known_name_is_an_error() {
 #[test]
 fn restoring_a_name_in_use_is_an_error() {
     let (_pila, client, session, _window) = moved_in_session();
+    client.expect_error();
     restore(&client, &session, "main");
     assert_error(&client, 1, "xdg_session_v1");
 }
@@ -589,6 +594,7 @@ fn adding_a_toplevel_twice_is_an_error() {
     let client = pila.client();
     let session = client.session(None, "session");
     let window = add(&client, &session, "main");
+    client.expect_error();
     client.request(window, |toplevel| {
         let _: XdgToplevelSessionV1 =
             session.add_toplevel(toplevel, "second".into(), &client.qh, "toplevel".into());
@@ -603,6 +609,7 @@ fn restoring_after_the_first_commit_is_an_error() {
     let session = client.session(None, "session");
     let window = client.window("a").size(400, 300).create();
     pila.wait_window("a");
+    client.expect_error();
     client.request(window, |toplevel| {
         let _: XdgToplevelSessionV1 =
             session.restore_toplevel(toplevel, "main".into(), &client.qh, "toplevel".into());
@@ -635,6 +642,7 @@ fn renaming_to_a_name_in_use_is_an_error() {
         })
         .create();
     let object: XdgToplevelSessionV1 = object.into_inner().unwrap();
+    client.expect_error();
     object.rename("two".into());
     client.flush();
     assert_error(&client, 1, "xdg_session_v1");

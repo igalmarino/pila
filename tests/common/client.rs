@@ -7,7 +7,7 @@
 use std::{
     io::Write,
     os::{
-        fd::{AsFd, FromRawFd, OwnedFd},
+        fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
         unix::net::UnixStream,
     },
     path::Path,
@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use wayland_client::backend::WaylandError;
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -165,6 +166,8 @@ pub struct Shared {
     next_sync: u32,
     /// The connection failed (protocol error, or pila went away).
     pub error: Option<String>,
+    /// See `Client::expect_error`.
+    pub expecting_error: bool,
     pub last_serial: u32,
     pub registry: Option<WlRegistry>,
     /// Events of the other protocols (`protocols.rs`), in order.
@@ -448,8 +451,8 @@ impl Client {
         queue.roundtrip(&mut handler).expect("roundtrip");
         queue.roundtrip(&mut handler).expect("roundtrip");
         let thread = std::thread::spawn(move || loop {
-            if let Err(err) = queue.blocking_dispatch(&mut handler) {
-                handler.shared.lock().unwrap().error = Some(format!("{err}"));
+            if let Err(err) = dispatch(&mut queue, &mut handler) {
+                handler.shared.lock().unwrap().error = Some(err);
                 return;
             }
         });
@@ -468,6 +471,15 @@ impl Client {
 
     pub fn flush(&self) {
         let _ = self.conn.flush();
+    }
+
+    /// The next requests are a protocol error, which `wait_error` will read.
+    /// From here on the client's thread sends nothing of its own (acks,
+    /// redraws): writing to a connection pila closed after the error would
+    /// fail, and the backend keeps that I/O error for good, without reading
+    /// the protocol error waiting in the socket. Requests flushed here still go.
+    pub fn expect_error(&self) {
+        self.lock().expecting_error = true;
     }
 
     /// Whether pila offers a global.
@@ -537,6 +549,10 @@ impl Client {
     /// Wait until the connection fails (e.g. a protocol error); its error.
     #[track_caller]
     pub fn wait_error(&self) -> String {
+        assert!(
+            self.lock().expecting_error,
+            "call expect_error before the request that fails"
+        );
         self.wait("the connection to fail", |s| s.error.is_some());
         self.error().unwrap()
     }
@@ -711,6 +727,39 @@ fn configured_size(w: &WindowData) -> (i32, i32) {
 }
 
 /// Draw `w` in its color at `size` and commit.
+/// `EventQueue::blocking_dispatch`, without its flush once a protocol error
+/// is expected (`Client::expect_error`).
+fn dispatch(queue: &mut EventQueue<Handler>, handler: &mut Handler) -> Result<(), String> {
+    let text = |err: &dyn std::fmt::Display| format!("{err}");
+    if queue.dispatch_pending(handler).map_err(|e| text(&e))? > 0 {
+        return Ok(());
+    }
+    if !handler.shared.lock().unwrap().expecting_error {
+        queue.flush().map_err(|e| text(&e))?;
+    }
+    if let Some(guard) = queue.prepare_read() {
+        let mut fds = [libc::pollfd {
+            fd: guard.connection_fd().as_raw_fd(),
+            events: libc::POLLIN | libc::POLLERR,
+            revents: 0,
+        }];
+        // SAFETY: a valid array of one pollfd, on a fd `guard` keeps open.
+        while unsafe { libc::poll(fds.as_mut_ptr(), 1, -1) } < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                return Err(text(&err));
+            }
+        }
+        match guard.read() {
+            Ok(_) => {}
+            Err(WaylandError::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(err) => return Err(text(&err)),
+        }
+    }
+    queue.dispatch_pending(handler).map_err(|e| text(&e))?;
+    Ok(())
+}
+
 fn draw(shm: &WlShm, qh: &QueueHandle<Handler>, w: &mut WindowData, size: (i32, i32)) {
     paint(shm, qh, &w.surface, w.color, size);
     w.size = size;
