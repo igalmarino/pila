@@ -1,7 +1,8 @@
 # Lint, test and build pila, check the minimum Rust version, build it on
 # other distros with the packages README.md lists, check the scripts and look
-# up the dependencies in the RustSec advisory database. Actions are pinned by
-# commit, so a moved tag can't change what runs here.
+# up the dependencies in the RustSec advisory database, and build the Nix
+# package. Actions are pinned by commit, so a moved tag can't change what runs
+# here.
 name: CI
 
 on:
@@ -105,6 +106,32 @@ jobs:
           key: ${{ matrix.image }}
       - run: cargo build --locked
       - run: ./target/debug/pila --version
+
+  nix:
+    name: Nix (package, smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: cachix/install-nix-action@2126ae7fc54c9df00dd18f7f18754393182c73cd # v31.9.1
+      - run: nix flake check --no-build
+      - run: cat flake.lock
+      - run: nix build --print-build-logs
+      - name: The package says which commit it is
+        run: ./result/bin/pila --version | tee /dev/stderr | grep -F "$(git rev-parse --short=7 HEAD)"
+      - run: ./result/bin/pila-report --help
+      - run: nix develop --command cargo --version
+      # EGL's drivers, which a NixOS system provides, come from Mesa here. If
+      # it starts, it's still running when its time is up.
+      - name: Smoke test
+        run: |
+          mesa="$(nix build --no-link --print-out-paths nixpkgs#mesa)"
+          status=0
+          XDG_RUNTIME_DIR="$(mktemp -d)" PILA_HEADLESS_DEVICE=software \
+            __EGL_VENDOR_LIBRARY_DIRS="$mesa/share/glvnd/egl_vendor.d" \
+            timeout 5 ./result/bin/pila --backend headless >pila.log 2>&1 || status=$?
+          tail -n 20 pila.log
+          test "$status" = 124
+          grep -F 'Xwayland ready' pila.log
 
   scripts:
     name: Shell scripts
