@@ -327,7 +327,10 @@ fn opacity_can_only_lower_what_a_window_draws() {
     pila.wait_window("clear");
     let state = pila.settle();
     let (x, y, ..) = rect(&window_in(&state, "clear").unwrap()["geometry"]);
-    assert_eq!(pila.pixel((x + 200) as f64, (y + 150) as f64), [31, 33, 38, 255]);
+    assert_eq!(
+        pila.pixel((x + 200) as f64, (y + 150) as f64),
+        [31, 33, 38, 255]
+    );
 }
 
 #[test]

@@ -194,7 +194,8 @@ fn the_report_has_the_system_and_the_log_without_private_names() {
 fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
     let home = report_home("gpu");
     // More than the report takes from the end of the log.
-    let mut log = String::from("2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n");
+    let mut log =
+        String::from("2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n");
     log.push_str(&"something else\n".repeat(1000));
     std::fs::write(home.join("state/pila/pila.log"), log).unwrap();
     let out = report(&home);
