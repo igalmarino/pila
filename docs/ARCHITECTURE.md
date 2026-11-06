@@ -403,10 +403,13 @@ Key flows and invariants:
   changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
   `Transform::Normal` throughout, textures with linear filtering and clamped edges). All
   of it covers the region's bounding box; what's outside the region (clients tessellate
-  rounded shapes into strips) is then cleared to transparent (`Entry::mask`), and a new
-  shape redoes it even with nothing changed behind. Entries are per surface and output:
-  an output's `prepare` only drops its own, and `forget_output` those of one that's gone.
-  `BlurCache::element` gives `render::scene_elements` the result (a `Texture` variant of
+  rounded shapes into strips) is then cleared to transparent (`Entry::mask`, worked out by
+  edges so strips leave no gaps at a fractional scale, only when the region changes), and a
+  new shape redoes it even with nothing changed behind. Damage only counts within
+  `BLUR_REACH` of the region. Only a backdrop with no mask is opaque. A change of scale
+  allocates anew, since a tracker keeps its scale. Entries are per surface and output: an
+  output's `prepare` only drops its own, and `forget_output` those of one that's gone or
+  turned off. `BlurCache::element` gives `render::scene_elements` the result (a `Texture` variant of
   `PilaRenderElement`) to draw right behind that layer. A shader failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;

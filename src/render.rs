@@ -1158,6 +1158,6 @@ pub fn output_elements(
         scale,
     );
     scene_elements(renderer, scene, origin, scale, &mut |i| {
-        blur.element(i, scale, scene.upper[i].alpha())
+        blur.element(i, origin, scale, scene.upper[i].alpha())
     })
 }

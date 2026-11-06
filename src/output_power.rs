@@ -139,6 +139,10 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
             state.output_powers.retain(|(r, _)| r != resource);
             return;
         }
+        if !on {
+            // Nothing draws there until it's back; what's kept for it is big.
+            state.blur.forget_output(&output.name());
+        }
         for (r, o) in &state.output_powers {
             if o == output {
                 r.mode(mode(on));

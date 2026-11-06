@@ -68,6 +68,10 @@ const BLUR_PASSES: usize = 3;
 const BLUR_OFFSET: f32 = 2.5;
 /// Redo every blur every frame (to debug the change detection).
 const BLUR_ALWAYS: bool = false;
+/// How far from what changed the passes can show it, in physical pixels: an
+/// upper bound (each pass samples `BLUR_OFFSET` times two texels of its level
+/// away at most, the levels doubling).
+const BLUR_REACH: i32 = (2 << BLUR_PASSES) * 3;
 
 /// The surface's blur region, double-buffered with the surface state.
 #[derive(Default, Clone, Debug)]
@@ -171,7 +175,14 @@ struct Shaders {
 struct Entry {
     /// The blurred area, output-local.
     rect: Rectangle<i32, Logical>,
+    /// Where it is in the global space.
+    global: Point<i32, Logical>,
     size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    /// The region, output-local, as `inside` and `mask` were worked out from.
+    rects: Vec<Rectangle<i32, Logical>>,
+    /// The region in `rect`, relative to it, as drawn.
+    inside: Vec<Rectangle<i32, Physical>>,
     /// What's outside the region in `rect`, relative to it: transparent.
     mask: Vec<Rectangle<i32, Physical>>,
     /// Level 0 is `size`; each further level half of the one before.
@@ -196,6 +207,9 @@ pub struct BlurCache {
     /// For the output being drawn: the entry of each blurred upper layer,
     /// by its index in `Scene::upper`.
     current: Vec<(usize, (ObjectId, String))>,
+    /// Backdrops allocated and passes run, for tests (`Pila::state_json`).
+    allocated: u32,
+    blurred: u32,
 }
 
 fn render_error(err: &dyn std::fmt::Debug) -> String {
@@ -233,20 +247,25 @@ fn blur_texture(
     Ok(texture)
 }
 
-/// What's outside the region `rects` (relative to the output) in its
-/// bounding box `bounds`, drawn at `size`, relative to the box.
-fn outside_region(
+/// The region `rects` (relative to the output) in physical pixels, relative
+/// to its bounding box `bounds`. By their edges: rounded apart from each other,
+/// a rectangle's position and size would leave gaps between neighbors at a
+/// fractional scale.
+fn inside_region(
     rects: &[Rectangle<i32, Logical>],
     bounds: Rectangle<i32, Logical>,
-    size: Size<i32, Physical>,
     scale: Scale<f64>,
 ) -> Vec<Rectangle<i32, Physical>> {
-    let inside = rects.iter().map(|r| {
-        Rectangle::new(r.loc - bounds.loc, r.size)
-            .to_f64()
-            .to_physical_precise_round(scale)
-    });
-    Rectangle::subtract_rects_many([Rectangle::from_size(size)], inside)
+    let x = |v: i32| (v as f64 * scale.x).round() as i32;
+    let y = |v: i32| (v as f64 * scale.y).round() as i32;
+    rects
+        .iter()
+        .map(|r| {
+            let loc = r.loc - bounds.loc;
+            let end = loc + r.size.to_point();
+            Rectangle::from_extremities((x(loc.x), y(loc.y)), (x(end.x), y(end.y)))
+        })
+        .collect()
 }
 
 /// Make `rects` of `texture` transparent.
@@ -298,6 +317,17 @@ fn pass(
     // implicit, no fence to wait for.
     let _ = frame.finish()?;
     Ok(())
+}
+
+/// Whether `damage` is within `BLUR_REACH` of `inside`, so the passes carry it
+/// there.
+fn near(damage: Rectangle<i32, Physical>, inside: Rectangle<i32, Physical>) -> bool {
+    let margin = Size::from((BLUR_REACH, BLUR_REACH));
+    Rectangle::new(
+        inside.loc - margin.to_point(),
+        inside.size + margin + margin,
+    )
+    .overlaps(damage)
 }
 
 impl BlurCache {
@@ -375,7 +405,6 @@ impl BlurCache {
             if size.w <= 0 || size.h <= 0 {
                 continue;
             }
-            let mask = outside_region(&rects, rect, size, scale);
             let key = (layer.layer.wl_surface().id(), output_name.to_string());
             if self.shaders(renderer).is_none() {
                 return;
@@ -387,7 +416,7 @@ impl BlurCache {
                 &key,
                 rect,
                 size,
-                mask,
+                rects,
                 output_location,
                 scale,
             ) {
@@ -400,7 +429,7 @@ impl BlurCache {
         self.entries.retain(|k, e| k.1 != output_name || e.used);
     }
 
-    /// Drop what's kept for an output that's gone.
+    /// Drop what's kept for an output that's gone or turned off.
     pub fn forget_output(&mut self, output_name: &str) {
         self.entries.retain(|k, _| k.1 != output_name);
     }
@@ -414,7 +443,7 @@ impl BlurCache {
         key: &(ObjectId, String),
         rect: Rectangle<i32, Logical>,
         size: Size<i32, Physical>,
-        mask: Vec<Rectangle<i32, Physical>>,
+        rects: Vec<Rectangle<i32, Logical>>,
         output_location: Point<i32, Logical>,
         scale: Scale<f64>,
     ) -> Result<(), String> {
@@ -424,15 +453,17 @@ impl BlurCache {
         let behind: Vec<PilaRenderElement> = {
             let cache = &*self;
             render::elements_behind_layer(renderer, scene, index, origin, scale, &mut |i| {
-                cache.element(i, scale, scene.upper[i].alpha())
+                cache.element(i, origin, scale, scene.upper[i].alpha())
             })
         };
         let clear = render::clear_color(scene);
 
         let fresh = match self.entries.get(key) {
-            Some(entry) if entry.size == size => false,
+            // A tracker keeps its scale: it can't draw for another one.
+            Some(entry) if entry.size == size && entry.scale == scale => false,
             _ => {
                 debug!(?rect, ?size, "blur: allocated");
+                self.allocated += 1;
                 let mut levels = Vec::with_capacity(BLUR_PASSES + 1);
                 for k in 0..=BLUR_PASSES {
                     let level: Size<i32, Buffer> =
@@ -451,8 +482,12 @@ impl BlurCache {
                     key.clone(),
                     Entry {
                         rect,
+                        global: origin,
                         size,
-                        mask: mask.clone(),
+                        scale,
+                        rects: Vec::new(),
+                        inside: Vec::new(),
+                        mask: Vec::new(),
                         levels,
                         result,
                         tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
@@ -465,19 +500,35 @@ impl BlurCache {
         };
         let entry = self.entries.get_mut(key).expect("inserted above");
         entry.used = true;
+        let reshaped = entry.rects != rects || entry.rect != rect;
+        if reshaped {
+            entry.inside = inside_region(&rects, rect, scale);
+            entry.mask = Rectangle::subtract_rects_many(
+                [Rectangle::from_size(size)],
+                entry.inside.iter().copied(),
+            );
+            entry.rects = rects;
+        }
         entry.rect = rect;
+        entry.global = origin;
 
+        // Only what can show in the region counts.
         let changed = match entry.tracker.damage_output(1, &behind) {
-            Ok((Some(damage), _)) => !damage.is_empty(),
+            Ok((Some(damage), _)) => damage.iter().any(|rect| {
+                entry.mask.is_empty()
+                    || entry
+                        .inside
+                        .iter()
+                        .any(|inside| rect.overlaps(*inside) || near(*rect, *inside))
+            }),
             Ok((None, _)) => false,
             Err(err) => return Err(render_error(&err)),
         };
-        let reshaped = entry.mask != mask;
-        entry.mask = mask;
         if entry.drawn && !changed && !reshaped && !fresh && !BLUR_ALWAYS {
             return Ok(());
         }
 
+        self.blurred += 1;
         // The scene behind the region, then the blur passes down and back
         // up, ending in level 0.
         {
@@ -504,27 +555,34 @@ impl BlurCache {
                 .map_err(|e| render_error(&e))?;
         }
         let buffer_size = entry.levels[0].size();
-        // Opaque where it's not cleared: what's behind that isn't drawn.
-        let opaque = Rectangle::subtract_rects_many(
-            [Rectangle::from_size(buffer_size)],
-            entry
-                .mask
-                .iter()
-                .map(|r| Rectangle::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into())),
-        );
+        // Opaque if nothing's cleared: what's behind it isn't drawn. With a
+        // mask, what's inside isn't exactly opaque either: at a fractional
+        // scale, Smithay rounds an opaque region out over the cleared pixels.
+        let opaque = entry
+            .mask
+            .is_empty()
+            .then(|| vec![Rectangle::from_size(buffer_size)]);
         let mut context = entry.result.render();
-        context.update_opaque_regions(Some(opaque));
+        context.update_opaque_regions(opaque);
         let _ = context.draw(|_| Ok::<_, ()>(vec![Rectangle::from_size(buffer_size)]));
         entry.drawn = true;
         Ok(())
     }
 
+    /// What tests read (`Pila::state_json`): backdrops allocated, times they
+    /// were blurred, and those kept now.
+    pub fn stats(&self) -> (u32, u32, usize) {
+        (self.allocated, self.blurred, self.entries.len())
+    }
+
     /// The backdrop element of the upper layer at `index` in the scene
-    /// `prepare` ran for, if it has one.
+    /// `prepare` ran for, if it has one, relative to `origin` (global, what the
+    /// elements it goes with are relative to).
     /// At `alpha`: a layer surface fading in fades its backdrop with it.
     pub fn element(
         &self,
         index: usize,
+        origin: Point<i32, Logical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Option<PilaRenderElement> {
@@ -533,7 +591,7 @@ impl BlurCache {
         if !entry.drawn {
             return None;
         }
-        let location: Point<f64, Physical> = entry.rect.loc.to_f64().to_physical(scale);
+        let location: Point<f64, Physical> = (entry.global - origin).to_f64().to_physical(scale);
         let buffer_size = entry.levels[0].size();
         let src = Rectangle::from_size(buffer_size.to_logical(1, Transform::Normal).to_f64());
         Some(PilaRenderElement::Texture(

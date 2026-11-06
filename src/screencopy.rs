@@ -69,7 +69,7 @@ pub type FrameData = Mutex<Option<FrameState>>;
 /// What distinguishes the damage trackers of `copy_with_damage`: the
 /// manager (each client sees changes since *its* last copy), the output and
 /// the region (as x, y, w, h: `Rectangle` isn't hashable).
-pub type TrackerKey = (ObjectId, String, (i32, i32, i32, i32));
+pub type TrackerKey = (ObjectId, String, (i32, i32, i32, i32), u64);
 
 /// Create the global. Called once from `Pila::new`.
 pub fn init_global(dh: &DisplayHandle) {
@@ -249,6 +249,9 @@ impl Pila {
                     manager.id(),
                     output.name(),
                     (region.loc.x, region.loc.y, region.size.w, region.size.h),
+                    // A tracker keeps its scale, and the size stays for
+                    // another one.
+                    scale.x.to_bits(),
                 ))
                 .or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
             match tracker.damage_output(1, &elements) {
@@ -305,7 +308,7 @@ impl Pila {
             !gone
         });
         self.screencopy_trackers
-            .retain(|(_, name, _), _| name != output.name().as_str());
+            .retain(|(_, name, ..), _| name != output.name().as_str());
     }
 }
 

@@ -5,7 +5,7 @@
 mod common;
 
 use common::client::Decorations;
-use common::protocols::LayerSpec;
+use common::protocols::{LayerSpec, Surf};
 use common::*;
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::Layer, zwlr_layer_surface_v1::Anchor,
@@ -439,15 +439,181 @@ fn blurs_on_two_outputs_show_a_window_that_opens_animated() {
 
 #[test]
 fn blurs_on_two_outputs_keep_their_backdrops() {
-    // Debug logs say when a backdrop is allocated: once per surface and output.
+    // A backdrop is allocated once per surface and output.
     let (mut pila, _client) = glasses_on_two_outputs(GLASS_RULE);
     for x in 0..20 {
         pila.move_to(100.0 + x as f64, 100.0);
         pila.move_to(1400.0 + x as f64, 100.0);
     }
+    let state = pila.settle();
+    assert_eq!(state["blur"]["allocated"], 2, "backdrops allocated");
+}
+
+/// Ask for blur behind `rects` of a surface, in this order.
+fn set_blur_region(
+    pila: &mut TestPila,
+    client: &Client,
+    glass: Surf,
+    rects: &[(i32, i32, i32, i32)],
+) {
+    use wayland_client::protocol::wl_compositor::WlCompositor;
+    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
+    let surface = client.wl_surface_of(glass);
+    let manager: ExtBackgroundEffectManagerV1 = client.bind("ext_background_effect_manager_v1", 1);
+    let effect = manager.get_background_effect(&surface, &client.qh, "effect".into());
+    let compositor: WlCompositor = client.lock().compositor.clone().unwrap();
+    let region = compositor.create_region(&client.qh, "region".into());
+    for (x, y, w, h) in rects {
+        region.add(*x, *y, *w, *h);
+    }
+    effect.set_blur_region(Some(&region));
+    surface.commit();
+    client.flush();
     pila.settle();
-    let allocated = pila.log().matches("blur: allocated").count();
-    assert_eq!(allocated, 2, "backdrops allocated");
+}
+
+#[test]
+fn a_blur_has_no_gaps_at_a_fractional_scale() {
+    // 1024x640 logical: red and green halves, the glass at 412,220, which is
+    // the physical pixel 515,275.
+    let mut pila = TestPila::with_config("[[output]]\nname = \"HEADLESS-1\"\nscale = 1.25\n");
+    let client = pila.client();
+    for (name, anchor, color) in [
+        ("left", Anchor::Left, [255, 255, 0, 0]),
+        ("right", Anchor::Right, [255, 0, 255, 0]),
+    ] {
+        let (surf, _) = client.layer_surface(
+            name,
+            &LayerSpec {
+                layer: Layer::Bottom,
+                anchor: Anchor::Top | Anchor::Bottom | anchor,
+                size: (512, 0),
+                ..LayerSpec::default()
+            },
+            color,
+        );
+        client.wait_surface_configured(surf);
+    }
+    let (glass, _) = client.layer_surface(
+        "glass",
+        &LayerSpec {
+            layer: Layer::Top,
+            size: (200, 200),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    // One logical row at a time, as a client tessellates a rounded shape.
+    let rows: Vec<_> = (0..200).map(|y| (0, y, 200, 1)).collect();
+    set_blur_region(&mut pila, &client, glass, &rows);
+    // By the red/green edge, every physical row of the glass is mixed.
+    let mix = |px: [u8; 4]| px[0] > 20 && px[1] > 20;
+    let started = std::time::Instant::now();
+    while !mix(pila.pixel(510.0, 320.0)) {
+        assert!(started.elapsed() < TIMEOUT, "not blurred");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for row in 276..524 {
+        let px = pila.pixel(510.0, row as f64 / 1.25);
+        assert!(mix(px), "the physical row {row} is sharp: {px:?}");
+    }
+}
+
+#[test]
+fn a_blur_follows_a_change_of_scale() {
+    // A glass over the whole output, whose physical size doesn't change.
+    let mut pila = TestPila::with_config(&format!(
+        "[[output]]\nname = \"HEADLESS-1\"\nscale = 2\n{GLASS_RULE}"
+    ));
+    let client = pila.client();
+    let (left, _) = client.layer_surface(
+        "left",
+        &LayerSpec {
+            layer: Layer::Bottom,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left,
+            size: (320, 0),
+            ..LayerSpec::default()
+        },
+        [255, 255, 0, 0],
+    );
+    client.wait_surface_configured(left);
+    let (glass, _) = client.layer_surface(
+        "glass",
+        &LayerSpec {
+            layer: Layer::Top,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+            size: (0, 0),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    pila.settle();
+    // 320 logical pixels are half of the screen, 640x400 here.
+    wait_near(&mut pila, 100.0, 200.0, [255, 0, 0, 255]);
+    pila.write_config(&format!(
+        "[[output]]\nname = \"HEADLESS-1\"\nscale = 1\n{GLASS_RULE}"
+    ));
+    pila.wait("the new scale", |s| s["outputs"][0]["scale"] == 1.0);
+    pila.settle();
+    // And a quarter of it now: drawn at the old scale, it would be half.
+    wait_near(&mut pila, 100.0, 400.0, [255, 0, 0, 255]);
+    wait_near(&mut pila, 900.0, 400.0, BACKGROUND);
+    let px = pila.pixel(500.0, 400.0);
+    assert!(near(px, BACKGROUND, 3), "the red goes too far: {px:?}");
+}
+
+#[test]
+fn damage_far_from_the_region_doesnt_blur_again() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client.window("a").size(100, 100).color(BLUE).create();
+    pila.wait_focus("a");
+    let (glass, _) = client.layer_surface(
+        "glass",
+        &LayerSpec {
+            layer: Layer::Top,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+            size: (0, 0),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    // Bars at the top and the bottom; the window is in the middle, between
+    // them, in their bounding box.
+    set_blur_region(
+        &mut pila,
+        &client,
+        glass,
+        &[(0, 0, 1280, 20), (0, 780, 1280, 20)],
+    );
+    let blurred = pila.settle()["blur"]["blurred"].as_u64().unwrap();
+    assert!(blurred > 0);
+    for _ in 0..5 {
+        client.draw(a, None);
+        client.roundtrip();
+        pila.settle();
+    }
+    assert_eq!(pila.settle()["blur"]["blurred"].as_u64().unwrap(), blurred);
+}
+
+#[test]
+fn an_output_turned_off_gives_its_backdrops_up() {
+    use wayland_protocols_wlr::output_power_management::v1::client::{
+        zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1, zwlr_output_power_v1::Mode,
+    };
+    let (mut pila, client) = glasses_on_two_outputs(GLASS_RULE);
+    pila.wait("both backdrops", |s| s["blur"]["entries"] == 2);
+    let manager: ZwlrOutputPowerManagerV1 = client.bind("zwlr_output_power_manager_v1", 1);
+    let power = manager.get_output_power(&client.output("B"), &client.qh, "power".into());
+    power.set_mode(Mode::Off);
+    client.flush();
+    pila.wait("only one left", |s| s["blur"]["entries"] == 1);
+    power.set_mode(Mode::On);
+    client.flush();
+    pila.wait("back", |s| s["blur"]["entries"] == 2);
 }
 
 #[test]

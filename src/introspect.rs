@@ -323,6 +323,11 @@ impl Pila {
                 "resizing": resizing,
             },
             "redraw_pending": headless.is_some_and(|d| crate::headless::redraw_pending(d)),
+            "blur": {
+                "allocated": self.blur.stats().0,
+                "blurred": self.blur.stats().1,
+                "entries": self.blur.stats().2,
+            },
             "xwayland": self.xdisplay,
             "children": self.children.len(),
         })

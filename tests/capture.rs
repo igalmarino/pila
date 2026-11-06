@@ -5,7 +5,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::protocols::read_pixel;
+use common::protocols::{read_pixel, LayerSpec};
 use common::*;
 use wayland_client::protocol::wl_shm::Format;
 use wayland_protocols::ext::{
@@ -25,6 +25,9 @@ use wayland_protocols::ext::{
         },
         ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
     },
+};
+use wayland_protocols_wlr::layer_shell::v1::client::{
+    zwlr_layer_shell_v1::Layer, zwlr_layer_surface_v1::Anchor,
 };
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 
@@ -329,6 +332,94 @@ fn screencopy_of_a_region() {
     assert_eq!(read_pixel(&file, 100, 75, 75), [255, 0, 0]);
     assert_eq!(read_pixel(&file, 100, 75, 5), BACKGROUND);
     assert_eq!(read_pixel(&file, 100, 5, 75), BACKGROUND);
+}
+
+#[test]
+fn screencopy_of_a_region_has_its_blurred_backdrop_in_place() {
+    let mut pila = TestPila::with_config("[[layer-rule]]\nnamespace = \"glass\"\nblur = true\n");
+    let client = pila.client();
+    // Red and green halves, and a glass over the edge between them at 540,300.
+    for (name, anchor, color) in [
+        ("left", Anchor::Left, [255, 255, 0, 0]),
+        ("right", Anchor::Right, [255, 0, 255, 0]),
+    ] {
+        let (surf, _) = client.layer_surface(
+            name,
+            &LayerSpec {
+                layer: Layer::Bottom,
+                anchor: Anchor::Top | Anchor::Bottom | anchor,
+                size: (640, 0),
+                ..LayerSpec::default()
+            },
+            color,
+        );
+        client.wait_surface_configured(surf);
+    }
+    let (glass, _) = client.layer_surface(
+        "glass",
+        &LayerSpec {
+            layer: Layer::Top,
+            size: (200, 200),
+            ..LayerSpec::default()
+        },
+        [0, 0, 0, 0],
+    );
+    client.wait_surface_configured(glass);
+    pila.settle();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output_region(
+        0,
+        &client.output("HEADLESS-1"),
+        540,
+        300,
+        200,
+        200,
+        &client.qh,
+        "copy".into(),
+    );
+    client.flush();
+    client.wait_logged("copy", "BufferDone");
+    let (buffer, file) = client.capture_buffer((200, 200), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("copy", "Ready");
+    // Just left of the edge, under the glass: a mix, as on the screen.
+    let [r, g, _] = read_pixel(&file, 200, 96, 100);
+    assert!(r > 20 && g > 20, "not blurred: {r},{g}");
+}
+
+#[test]
+fn screencopy_with_damage_starts_over_when_the_scale_changes() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let output = client.output("HEADLESS-1");
+    let first = manager.capture_output(0, &output, &client.qh, "first".into());
+    client.flush();
+    client.wait_logged("first", "BufferDone");
+    let (buffer, _) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+    first.copy_with_damage(&buffer);
+    client.flush();
+    client.wait_logged("first", "Ready");
+    // The same size in pixels, so the frame is still good.
+    pila.write_config("[[output]]\nname = \"HEADLESS-1\"\nscale = 2\n");
+    pila.wait("the new scale", |s| s["outputs"][0]["scale"] == 2.0);
+    pila.settle();
+    let second = manager.capture_output(0, &output, &client.qh, "second".into());
+    client.flush();
+    client.wait_logged("second", "BufferDone");
+    let (buffer, _) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+    second.copy_with_damage(&buffer);
+    client.flush();
+    client.wait_logged("second", "Ready");
+    assert!(
+        client.has_logged("second", "width: 1280, height: 800"),
+        "not everything is damaged: {:?}",
+        client.logged("second")
+    );
 }
 
 #[test]
