@@ -5,9 +5,13 @@ description: How to cut a pila release and maintain the Arch package (PKGBUILD, 
 
 # Releases
 
+0. Compatibility checks on what's about to be released, which don't run on every push:
+   `gh workflow run compat.yml`, and wait for it to pass.
 1. A commit `Release X` with `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`.
 2. An annotated tag `vX` on it, message `pila X`.
-3. A GitHub release with the changelog's section as its text.
+3. A GitHub release with the changelog's section as its text. Publishing it starts `packages.yml`, which
+   builds the `.deb` and `.rpm`, installs them on clean systems and attaches them: check that it
+   passes.
 4. A commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`).
 
 The user publishes it to the AUR. The Nix flake (`flake.nix`) takes its version from

@@ -1,0 +1,64 @@
+# The .deb and .rpm of a release (.github/workflows/packages.yml), from what
+# scripts/install puts in stage/ with PREFIX=/usr. A directory added to
+# install_files is added here too.
+name: pila
+version: ${VERSION}
+release: "1"
+arch: amd64
+section: x11
+priority: optional
+maintainer: Ignacio Galmarino <igalmarino@gmail.com>
+description: A stacking Wayland compositor built on Smithay
+homepage: https://github.com/igalmarino/pila
+license: GPL-3.0-or-later
+
+contents:
+  - src: stage/usr/bin/*
+    dst: /usr/bin/
+    file_info:
+      mode: 0755
+  - src: stage/usr/share/wayland-sessions/*
+    dst: /usr/share/wayland-sessions/
+  - src: stage/usr/share/doc/pila/*
+    dst: /usr/share/doc/pila/
+  - src: stage/etc/xdg/xdg-desktop-portal/*
+    dst: /etc/xdg/xdg-desktop-portal/
+    type: config
+  - src: stage/etc/xdg/xdg-desktop-portal-wlr/*
+    dst: /etc/xdg/xdg-desktop-portal-wlr/
+    type: config
+
+overrides:
+  # Built on the oldest release supported, Ubuntu 24.04: its glibc is the minimum.
+  deb:
+    depends:
+      - libc6 (>= 2.39)
+      - libgcc-s1
+      - libegl1
+      - libgbm1
+      - libinput10
+      - libseat1
+      - libudev1
+      - libxkbcommon0
+      - xwayland
+    recommends:
+      - kitty
+      - xdg-desktop-portal-wlr
+      - xdg-desktop-portal-gtk
+      - grim
+      - slurp
+  rpm:
+    depends:
+      - mesa-libEGL
+      - mesa-libgbm
+      - libinput
+      - libseat
+      - systemd-libs
+      - libxkbcommon
+      - xorg-x11-server-Xwayland
+    recommends:
+      - kitty
+      - xdg-desktop-portal-wlr
+      - xdg-desktop-portal-gtk
+      - grim
+      - slurp

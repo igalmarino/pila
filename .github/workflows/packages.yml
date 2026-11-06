@@ -1,0 +1,147 @@
+# The .deb and .rpm of a release: built when one is published, installed on
+# clean systems and started there, then attached to it. By hand (gh workflow run
+# packages.yml) it stops before attaching, and the packages are the run's
+# artifacts. nfpm is pinned by checksum, the actions by commit.
+name: Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  NFPM_VERSION: 2.48.0
+  NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the ${{ matrix.packager }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest release supported, so the glibc it needs is everywhere.
+          - packager: deb
+            image: ubuntu:24.04
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends
+              build-essential curl ca-certificates git
+              libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libegl1 xwayland pkg-config
+          - packager: rpm
+            image: fedora:latest
+            install: >-
+              dnf install -y gcc curl git tar gzip
+              libseat-devel libinput-devel systemd-devel mesa-libgbm-devel
+              libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland
+              pkgconf-pkg-config
+    steps:
+      - name: Packages
+        run: ${{ matrix.install }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Rust (rustup, stable)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: nfpm
+        run: |
+          curl -sSfL -o nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "$NFPM_SHA256  nfpm.tar.gz" | sha256sum --check
+          tar -xzf nfpm.tar.gz nfpm
+      - run: cargo build --release --locked
+      - name: Version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ "$GITHUB_EVENT_NAME" = release ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "The tag $GITHUB_REF_NAME isn't Cargo.toml's version $version" >&2
+            exit 1
+          fi
+      - name: Package
+        run: |
+          DESTDIR="$PWD/stage" PREFIX=/usr scripts/install --no-build
+          install -Dm644 -t stage/usr/share/doc/pila README.md config.example.toml
+          mkdir dist
+          ./nfpm package --config packaging/nfpm.yaml --packager "${{ matrix.packager }}" --target dist/
+          ls -l dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.packager }}
+          path: dist/*
+          if-no-files-found: error
+
+  test:
+    name: Install on ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Without what's only recommended: what's required has to be enough.
+          - image: ubuntu:24.04
+            packager: deb
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends ./dist/*.deb
+          - image: debian:trixie
+            packager: deb
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends ./dist/*.deb
+          - image: fedora:latest
+            packager: rpm
+            install: >-
+              dnf install -y --setopt=install_weak_deps=False ./dist/*.rpm
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ matrix.packager }}
+          path: dist
+      - name: Install
+        run: ${{ matrix.install }}
+      - name: What's installed
+        run: |
+          pila --version
+          pila-report --help >/dev/null
+          test -x /usr/bin/pila-session
+          grep -F 'Exec=/usr/bin/pila-session' /usr/share/wayland-sessions/pila.desktop
+          test -f /etc/xdg/xdg-desktop-portal/pila-portals.conf
+          test -f /etc/xdg/xdg-desktop-portal-wlr/pila
+      # If it starts, it's still running when its time is up.
+      - name: Smoke test
+        run: |
+          status=0
+          XDG_RUNTIME_DIR="$(mktemp -d)" PILA_HEADLESS_DEVICE=software \
+            timeout 5 pila --backend headless >pila.log 2>&1 || status=$?
+          tail -n 20 pila.log
+          test "$status" = 124
+          grep -F 'Xwayland ready' pila.log
+
+  attach:
+    name: Attach to the release
+    if: github.event_name == 'release'
+    needs: test
+    runs-on: ubuntu-latest
+    # The only job that writes: it uploads the packages to the release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: (cd dist && sha256sum -- * > SHA256SUMS)
+      - run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
