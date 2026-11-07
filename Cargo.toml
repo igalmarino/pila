@@ -21,7 +21,7 @@ cosmic-text = "0.19"
 libc = "0.2"
 # The config file (`config.rs`).
 serde = { version = "1", features = ["derive"] }
-# The headless backend's control socket (`test_control.rs`, `introspect.rs`).
+# `pila msg` (`ipc.rs`) and the headless backend's control socket (`test_control.rs`).
 serde_json = "1"
 # Bindings of xdg-session-management-v1 (`session_protocol.rs`), until a
 # wayland-protocols release has them.

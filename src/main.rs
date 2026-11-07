@@ -35,6 +35,8 @@ mod headless;
 mod idle;
 mod input;
 mod introspect;
+mod ipc;
+mod ipc_client;
 mod layers;
 mod minimize;
 mod output_management;
@@ -73,6 +75,7 @@ const USAGE: &str = "\
 Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev|headless]
             [--headless-outputs <OUTPUTS>]
        pila --check-config [--config <FILE>]
+       pila msg [--json] <request>    (pila msg --help)
 
 Options:
   -c, --command <CMD>   Shell command to run at startup, instead of the
@@ -109,7 +112,8 @@ Environment (overrides the config file):
 
 The config file is reloaded when it changes (all but autostart).
 
-Programs pila starts get XDG_CURRENT_DESKTOP=pila, and commands run by
+Programs pila starts get XDG_CURRENT_DESKTOP=pila and PILA_SOCKET (pila msg),
+and commands run by
 bindings PILA_OUTPUT, the name of the output under the pointer. On a TTY, pila
 exports WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and to systemd
 --user when that's the bus), for the screen-sharing portals: run it as a login
@@ -212,6 +216,11 @@ fn missing_library(name: &str) -> Option<String> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Talks to a running pila: nothing below applies.
+    let all_args: Vec<String> = std::env::args().skip(1).collect();
+    if all_args.first().is_some_and(|arg| arg == "msg") {
+        std::process::exit(ipc_client::run(&all_args[1..]));
+    }
     let mut startup_command = None;
     let mut check_config = false;
     let mut config_path = None;
@@ -364,6 +373,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.session_management.load_and_persist();
     }
 
+    ipc::init(&mut state);
+
     match backend {
         BackendKind::Winit => winit::init_winit(&mut event_loop, &mut state)?,
         BackendKind::Udev => udev::init_udev(&mut event_loop, &mut state)?,
@@ -395,6 +406,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = state.display_handle.flush_clients();
     })?;
 
+    ipc::close(&state);
     state.report_frames();
     state.finish_sessions();
     state.stop_xwayland();

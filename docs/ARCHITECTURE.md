@@ -526,6 +526,14 @@ Key flows and invariants:
 - **Show desktop** (`Pila::show_desktop`, `minimize.rs`): minimizes the workspace's windows without
   a transient parent and remembers them (`Windows::desktop_shown`); again, `show_window` in their
   order. `show_window` and `place_new_window` forget them, so the next press starts over.
+- **IPC** (`ipc.rs`, `ipc_client.rs`; public format in `docs/IPC.md`): a Unix socket on the event
+  loop, for `pila msg`, opened on every backend and removed on the way out. Nothing a client does may
+  hold the loop: reads and writes don't block, a client gets `READS_PER_WAKE` reads per wake, what
+  it hasn't read waits in `Client::unread` with a write source of its own, and past `MAX_UNREAD` or
+  `MAX_REQUEST` it's disconnected. A client's place (`MAX_CLIENTS`) frees when its last source goes.
+  Answers have their own JSON, not `state_json` (for tests, free to change), and are built only when
+  asked. `action`, `focus` and `close` are refused while locked. An action goes through
+  `Action::parse` and `run_action`, with a window switch ended at once, as no key is held.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit; a window that

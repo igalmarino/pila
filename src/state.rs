@@ -100,6 +100,8 @@ pub struct Pila {
     /// The clock presentation-time timestamps use (CLOCK_MONOTONIC).
     pub clock: Clock<Monotonic>,
     pub socket_name: OsString,
+    /// Where `pila msg` finds this pila (`ipc.rs`).
+    pub ipc_socket: Option<std::path::PathBuf>,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, Pila>,
@@ -350,6 +352,7 @@ impl Pila {
             start_time,
             clock,
             socket_name,
+            ipc_socket: None,
             display_handle: dh,
             loop_signal,
             loop_handle,
@@ -1598,6 +1601,10 @@ impl Pila {
         cmd.env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_CURRENT_DESKTOP", DESKTOP_NAME)
             .env("XDG_SESSION_TYPE", "wayland");
+        match &self.ipc_socket {
+            Some(path) => cmd.env("PILA_SOCKET", path),
+            None => cmd.env_remove("PILA_SOCKET"),
+        };
         // X11 apps go to pila's Xwayland, never the host's X server.
         match self.xwayland.display {
             Some(display) => cmd.env("DISPLAY", format!(":{display}")),

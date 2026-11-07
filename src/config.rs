@@ -344,7 +344,7 @@ impl WorkspaceTarget {
 
 impl Action {
     /// `None` for `"none"`, which removes a binding.
-    fn parse(text: &str) -> Result<Option<Self>, String> {
+    pub(crate) fn parse(text: &str) -> Result<Option<Self>, String> {
         let text = text.trim();
         if let Some(command) = text.strip_prefix("spawn ") {
             return Ok(Some(Action::Spawn(command.trim().to_string())));

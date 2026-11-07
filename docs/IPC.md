@@ -1,0 +1,80 @@
+# IPC
+
+`pila msg` asks a running pila about its windows and monitors and runs actions. Other programs
+can talk to the same socket directly.
+
+## pila msg
+
+```
+pila msg [--json] windows            The windows, on all workspaces
+pila msg [--json] outputs            The monitors
+pila msg [--json] workspaces         The workspaces
+pila msg [--json] focused            The focused window
+pila msg [--json] version            pila's version
+pila msg action <action>             Run an action, as in [bindings]
+pila msg focus <id>                  Focus a window, on whichever workspace
+pila msg close <id>                  Ask a window to close
+```
+
+For example: `pila msg action workspace 2`, `pila msg --json windows | jq`.
+
+Without `--json` the output is for people, and may change. Scripts should use `--json`.
+
+Exit status: 0 on success, 1 if pila refused the request (it says why on stderr), 2 for wrong
+arguments, 3 if it can't talk to pila.
+
+## The socket
+
+A Unix stream socket, for the same user only (mode 0600). Programs pila starts have its path in
+`PILA_SOCKET`; otherwise it's `$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
+
+Each request is one line of JSON and gets one line of JSON back, in order. A connection can be
+kept open for more than one.
+
+```
+→ {"request": "action", "action": "workspace 2"}
+← {"ok": true}
+→ {"request": "nothing"}
+← {"ok": false, "error": "unknown request \"nothing\""}
+```
+
+Limits: a request is at most 64 KiB, 32 clients at once, and a client that leaves more than
+1 MiB of answers unread is disconnected.
+
+## What's guaranteed
+
+Answers to queries carry `protocol`, now 1. New requests and new fields can appear at any time, so
+ignore what you don't know. Removing a field or changing what one means raises `protocol`. The
+actions are those of `config.example.toml`.
+
+## Requests
+
+| `request` | Fields | Answer |
+|---|---|---|
+| `version` | | `protocol`, `version` |
+| `windows` | | `protocol`, `windows`: mapped windows back to front, then those minimized or on other workspaces |
+| `outputs` | | `protocol`, `outputs` |
+| `workspaces` | | `protocol`, `workspaces` |
+| `focused` | | `protocol`, `window`: a window, or null |
+| `action` | `action`: as in `[bindings]` | nothing more |
+| `focus` | `id` | nothing more |
+| `close` | `id` | nothing more |
+
+While the session is locked, `action`, `focus` and `close` are refused, `quit` included, and
+queries still answer. An action with `spawn` runs a command as your user; any program of yours can
+do that anyway.
+
+**A window:** `id` (string, for as long as the window lives; the same identifier as
+ext-foreign-toplevel-list), `app_id`, `title`, `workspace` (from 1), `output` (a name, or null off
+screen), `focused`, `x`, `y`, `width`, `height` (logical pixels; where it comes back to if it's off
+screen; the title bar isn't included), `minimized`, `maximized`, `fullscreen`, `snapped` (`left`,
+`right`, `top-left`, `top-right`, `bottom-left`, `bottom-right` or null), `always_on_top`,
+`all_workspaces`, `x11`. Titles and app ids are what programs set: they can hold anything,
+terminal escapes included. Text from `pila msg` without `--json` has control characters replaced.
+
+**An output:** `name`, `make`, `model`, `x`, `y`, `width`, `height` (logical pixels), `refresh`
+(mHz, or null), `scale`, `transform` (as in `[[output]]`), `focused` (the pointer is on it). Only
+those turned on.
+
+**A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on
+all workspaces counts for the active one).

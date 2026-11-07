@@ -83,6 +83,8 @@ A short report helps even if everything works:
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
   any key bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
+- **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
+  action ([docs/IPC.md](docs/IPC.md)).
 
 Not there yet: touchscreens, input methods (IME), several GPUs.
 
