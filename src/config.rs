@@ -2037,6 +2037,23 @@ mod tests {
     }
 
     #[test]
+    fn the_manual_and_man_page_list_every_default_binding() {
+        let manual = include_str!("../docs/MANUAL.md");
+        let man = include_str!("../docs/pila.1").replace("\\-", "-");
+        let defaults = DEFAULT_BINDINGS.iter().chain(DEFAULT_GESTURES);
+        for (keys, _) in defaults {
+            assert!(
+                manual.contains(&format!("`{keys}`")),
+                "docs/MANUAL.md doesn't list the default {keys:?}"
+            );
+            assert!(
+                man.contains(keys),
+                "docs/pila.1 doesn't list the default {keys:?}"
+            );
+        }
+    }
+
+    #[test]
     fn the_example_sets_nothing() {
         // Its values are all commented out, so what's active can't drift
         // from the defaults: only table headers are left, which keep an

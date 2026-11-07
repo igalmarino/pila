@@ -15,6 +15,8 @@ replaced when an `ext-` version lands.
 
 ![pila with a terminal and a Noctalia bar](docs/screenshot.png)
 
+How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`).
+
 ## Status
 
 pila is **alpha**: usable day to day (its author runs it as their only desktop and
@@ -312,13 +314,9 @@ invalid, pila keeps running with the previous one and shows the error in a notif
 the file, keyboard layout included, without starting pila: it prints what's wrong and
 exits with status 1, or 0 if it's valid.
 
-A few defaults (Mod is Super on a TTY or login session and Alt nested, unless `mod` says
-otherwise): Mod+Return opens a terminal (kitty, or another one that is installed),
-Mod+Tab switches windows, Mod+Left/Right snap, Mod+Up/Down maximize and restore, Mod+M
-maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+T keeps a window above the others, Mod+P
-keeps it on all workspaces, Mod+H shows the desktop, Mod+O goes to the next monitor and
-Mod+Shift+O sends the window there, Mod+Shift+S and Mod+Ctrl+S take screenshots (a region to the
-clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes, Mod+Shift+E quits.
+The default key bindings, and how to set up a desktop, monitors, screen sharing, locking and
+games, are in the [user manual](docs/MANUAL.md). Mod is Super on a TTY or login session and Alt
+nested; Mod+Return opens a terminal and Mod+Shift+E quits.
 
 ## Reporting bugs
 

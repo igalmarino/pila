@@ -83,7 +83,8 @@ rustPlatform.buildRustPackage {
       -t $out/share/xdg-desktop-portal
     install -Dm644 resources/xdg/xdg-desktop-portal-wlr/pila \
       -t $out/etc/xdg/xdg-desktop-portal-wlr
-    install -Dm644 README.md config.example.toml -t $out/share/doc/pila
+    install -Dm644 README.md config.example.toml docs/MANUAL.md docs/IPC.md -t $out/share/doc/pila
+    install -Dm644 docs/pila.1 -t $out/share/man/man1
 
     # After the user's own, if they have one.
     wrapProgram $out/bin/pila --suffix PATH : ${lib.makeBinPath [ xwayland ]}

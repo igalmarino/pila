@@ -220,7 +220,11 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 - **Backends:** code outside them uses `Backend`'s methods rather than matching on it.
 - **Settings:** a new one is read when used or re-applied in `apply_config`. Keep in sync:
   `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc, the
-  defaults in `config.example.toml`, and `USAGE` in `main.rs` for flags and env vars.
+  defaults in `config.example.toml` (every value commented out and marked default or example),
+  `USAGE` in `main.rs` for flags and env vars, and the user docs: `docs/MANUAL.md` (by task)
+  and the man page `docs/pila.1` (tests check that both list every default binding, and the
+  man page every flag and variable of `USAGE`). A feature users see gets its place in the
+  manual.
 
 ## Reference code
 

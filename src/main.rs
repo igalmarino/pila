@@ -421,7 +421,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::missing_library;
+    use super::{missing_library, USAGE};
+
+    #[test]
+    fn the_man_page_has_every_option_and_variable_of_the_usage() {
+        let man = include_str!("../docs/pila.1").replace("\\-", "-");
+        // `--flag`s and `-x`s, and the variables (all capitals, at least
+        // one underscore, as PILA_MOD and XKB_DEFAULT_LAYOUT are written).
+        // pila's own flags are those above the environment (below, "systemd
+        // --user" is another program's).
+        let options = USAGE.split("Environment").next().unwrap();
+        let words = USAGE.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        for word in words {
+            let flag = word.starts_with('-')
+                && word.len() > 1
+                && !word.ends_with('-')
+                && options.contains(word);
+            let variable = word.contains('_')
+                && word.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                && !word.starts_with('_');
+            if (flag || variable) && !man.contains(word) {
+                panic!("docs/pila.1 doesn't mention {word} from USAGE");
+            }
+        }
+    }
 
     #[test]
     fn a_library_that_is_there_is_not_missing() {

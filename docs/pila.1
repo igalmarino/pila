@@ -1,0 +1,291 @@
+.TH PILA 1 "" "pila" "User Commands"
+.SH NAME
+pila \- a stacking Wayland compositor
+.SH SYNOPSIS
+.B pila
+.RB [ \-c | \-\-command
+.IR CMD ]
+.RB [ \-\-config
+.IR FILE ]
+.RB [ \-\-backend
+.BR winit | udev | headless ]
+.RB [ \-\-headless\-outputs
+.IR OUTPUTS ]
+.br
+.B pila \-\-check\-config
+.RB [ \-\-config
+.IR FILE ]
+.br
+.B pila msg
+.RB [ \-\-json ]
+.I request
+.br
+.B pila\-session
+.br
+.B pila\-report
+.RI [ file ]
+.SH DESCRIPTION
+.B pila
+is a stacking Wayland compositor: overlapping windows with title bars, snapping, workspaces
+that span all monitors, animations and per-app rules, configured in one TOML file that applies
+when saved.
+X11 apps run through Xwayland, which pila starts.
+.PP
+Started from a login screen or a TTY, pila drives the monitors and input devices itself.
+Started inside another desktop, it opens as a window there (nested), with Alt as its Mod key.
+.PP
+.B pila\-session
+starts pila as a login session: with its log in
+.IR ~/.local/state/pila/pila.log ,
+and a D-Bus session bus of its own (with dbus-run-session) when the system gives none.
+Login screens run it; from a TTY, run it after logging in.
+.PP
+.B pila\-report
+gathers what a bug report needs (version, system, GPU, monitors, whether the configuration is
+valid, the end of the log) into
+.I file
+(default:
+.IR pila\-report.txt ),
+without the user name, host name and home directory.
+It sends nothing anywhere.
+.PP
+The user manual,
+.IR MANUAL.md ,
+describes how to use and set up pila; it's installed with the documentation (usually in
+.IR /usr/share/doc/pila )
+and on https://github.com/igalmarino/pila.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-command " " \fICMD\fR
+Run the shell command
+.I CMD
+at startup, instead of the configuration's
+.B autostart
+(which defaults to the terminal).
+.TP
+.BR \-\-config " " \fIFILE\fR
+Read the configuration from
+.I FILE
+instead of the default (see
+.BR FILES ).
+.TP
+.BR \-\-backend " " \fIBACKEND\fR
+.B winit
+opens pila as a window in another Wayland or X11 session;
+.B udev
+drives the monitors and input devices directly, from a TTY;
+.B headless
+has virtual outputs and a control socket
+.RI ( $XDG_RUNTIME_DIR/ <WAYLAND_DISPLAY> .control ),
+for automated tests.
+The default is
+.B winit
+if
+.B WAYLAND_DISPLAY
+or
+.B DISPLAY
+is set, else
+.BR udev .
+.TP
+.BR \-\-headless\-outputs " " \fIOUTPUTS\fR
+The headless backend's outputs:
+.IR NAME : W x H [@ HZ ][= MAKE / MODEL [/ SERIAL ]],
+separated by commas (default: HEADLESS\-1:1280x800@60).
+.TP
+.B \-\-check\-config
+Check the configuration file as pila would read it, the keyboard layout included, print what's
+wrong, and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version.
+.TP
+.BR \-h ", " \-\-help
+Show a summary of the options.
+.SH PILA MSG
+.B pila msg
+talks to a running pila:
+.TP
+.BR "pila msg " [ \-\-json ] " windows" | outputs | workspaces | focused | version
+List the windows, monitors or workspaces, or show the focused window or the version.
+.TP
+.BI "pila msg action " action
+Run an action, as in a key binding (for example
+.BR "workspace 2" ).
+.TP
+.BI "pila msg focus " id ", pila msg close " id
+Focus a window, or ask it to close, by the
+.I id
+.B pila msg windows
+gives.
+.PP
+Scripts should use
+.BR \-\-json :
+the plain text is for people and may change.
+.B pila msg \-\-help
+has the details.
+Exit status: 0 on success, 1 if pila refused the request, 2 for wrong arguments, 3 if it can't
+reach pila.
+.SH DEFAULT BINDINGS
+Mod is Super from a login screen or a TTY and Alt nested, unless the configuration's
+.B mod
+says otherwise.
+.TP
+.B Mod+Return
+Open a terminal.
+.TP
+.B Mod+D
+Open the launcher, if one is configured.
+.TP
+.BR Mod+Tab ", " Mod+J
+Switch to the previous window; hold Mod and repeat for older ones.
+.TP
+.B Mod+Shift+Tab
+The same, the other way.
+.TP
+.BR Mod+M ", " Mod+Up
+Maximize; again, restore.
+.TP
+.B Mod+N
+Minimize.
+.TP
+.B Mod+F
+Fullscreen.
+.TP
+.BR Mod+Left ", " Mod+Right
+Fill the left or right half of the screen; again, restore.
+.TP
+.B Mod+Down
+Restore a snapped or maximized window.
+.TP
+.BR Mod+Shift+Left ", " Mod+Shift+Right ", " Mod+Shift+Up ", " Mod+Shift+Down
+Move the window.
+.TP
+.BR Mod+Ctrl+Right ", " Mod+Ctrl+Down ", " Mod+Ctrl+Left ", " Mod+Ctrl+Up
+Make the window wider, taller, narrower, shorter.
+.TP
+.B Mod+C
+Center the window.
+.TP
+.B Mod+T
+Keep the window above the others; again, stop.
+.TP
+.B Mod+P
+Keep the window on all workspaces; again, stop.
+.TP
+.B Mod+H
+Minimize the workspace's windows; again, bring them back.
+.TP
+.BR Mod+O ", " Mod+Shift+O
+Go to the next monitor; send the window there.
+.TP
+.BR Mod+1 " .. " Mod+9 ", " Mod+Shift+1 " .. " Mod+Shift+9
+Go to a workspace; send the window there.
+.TP
+.BR Mod+Page_Down ", " Mod+Page_Up
+Next, previous workspace.
+.TP
+.BR Mod+Shift+Page_Down ", " Mod+Shift+Page_Up
+Send the window to the next, previous workspace.
+.TP
+.B Mod+Shift+S
+Screenshot of a region to the clipboard (grim, slurp, wl-copy).
+.TP
+.B Mod+Ctrl+S
+Screenshot of the monitor under the pointer to
+.I ~/Pictures
+(grim).
+.TP
+.B Mod+Shift+Q
+Close the window.
+.TP
+.B Mod+Shift+E
+Quit pila.
+.TP
+.BR "Mod + left drag" ", " "Mod + right drag"
+Move a window; resize it from the nearest corner.
+.TP
+.B Ctrl+Alt+F1 .. F12
+Switch to another virtual terminal.
+.PP
+Touchpad swipes:
+.B swipe\-3\-left
+and
+.B swipe\-3\-right
+switch windows,
+.B swipe\-3\-up
+maximizes or restores,
+.B swipe\-3\-down
+restores,
+.B swipe\-4\-left
+and
+.B swipe\-4\-right
+go to the next and previous workspace.
+.PP
+The configuration's
+.B [bindings]
+and
+.B [gestures]
+change any of them.
+.SH ENVIRONMENT
+.TP
+.B PILA_MOD
+The Mod key:
+.BR super ,
+.B alt
+or
+.BR ctrl .
+Overrides the configuration's
+.BR mod .
+.TP
+.B PILA_TERMINAL
+The terminal for Mod+Return and startup.
+Overrides
+.BR terminal .
+.TP
+.B PILA_LAUNCHER
+The command for Mod+D.
+Overrides
+.BR launcher .
+.TP
+.BR XCURSOR_THEME ", " XCURSOR_SIZE
+The cursor theme and size, from a TTY (default: default, 24).
+.TP
+.BR XKB_DEFAULT_LAYOUT ", " XKB_DEFAULT_VARIANT ", " XKB_DEFAULT_OPTIONS
+The keyboard layout when the configuration's
+.B [keyboard]
+leaves it empty.
+.TP
+.B RUST_LOG
+What the log shows (default: info; debug for details).
+.PP
+Programs pila starts get
+.BR XDG_CURRENT_DESKTOP =pila
+and
+.B PILA_SOCKET
+(for
+.BR "pila msg" ),
+and commands run by key bindings get
+.BR PILA_OUTPUT ,
+the name of the monitor under the pointer.
+.SH FILES
+.TP
+.IR ~/.config/pila/config.toml " (or " $XDG_CONFIG_HOME/pila/config.toml )
+The configuration. Every option is described in
+.IR config.example.toml ,
+installed with the documentation.
+.TP
+.I ~/.local/state/pila/pila.log
+The log of a session started by
+.BR pila\-session ;
+.I pila.log.old
+is the run before.
+With systemd, also
+.BR "journalctl \-t pila \-b" .
+.SH EXIT STATUS
+.B pila \-\-check\-config
+exits with 0 if the configuration is valid and 1 if not.
+.SH SEE ALSO
+.BR Xwayland (1),
+.BR xkeyboard\-config (7)
+.PP
+https://github.com/igalmarino/pila

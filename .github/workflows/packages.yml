@@ -71,7 +71,7 @@ jobs:
       - name: Package
         run: |
           DESTDIR="$PWD/stage" PREFIX=/usr scripts/install --no-build
-          install -Dm644 -t stage/usr/share/doc/pila README.md config.example.toml
+          install -Dm644 -t stage/usr/share/doc/pila README.md config.example.toml docs/MANUAL.md docs/IPC.md
           mkdir dist
           ./nfpm package --config packaging/nfpm.yaml --packager "${{ matrix.packager }}" --target dist/
           ls -l dist
