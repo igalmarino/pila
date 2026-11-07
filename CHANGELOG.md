@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.1 (2026-11-07)
+
+- **Config errors say what's wrong:** a notification about an invalid config used to show only
+  the start of the parser's message ("TOML parse error at line 127, column 4 |") and cut off the
+  line that said what the problem was. Now it reads `line 127, column 4: <what's wrong>`, and a key
+  binding outside `[bindings]` says that bindings go there.
+- **`config.example.toml`:** every value is commented out, so a copy of it changes nothing until
+  you edit it, and each one says whether it's the default or an example. Table headers stay
+  active, so a line you uncomment lands in its table: the list of default bindings used to sit
+  above `[bindings]`, and uncommenting one put it in `[input.mouse]`. Also explained now: the
+  keyboard `model`, `[input.mouse]`, the range of `scale` and Mod+drag.
+- **Packages:**
+  - `pila-git` no longer runs the test suite while building it: the tests need a working EGL
+    setup, which a virtual machine may not have, and CI already runs them on every commit.
+  - `bash` is a dependency (`pila-session` and `pila-report` are bash scripts).
+  - `wl-clipboard` is recommended: without `wl-copy`, Mod+Shift+S did nothing, with no message.
+  - `swaylock` and `pciutils` are suggested, not recommended, in the `.deb` and `.rpm`, so apt
+    and dnf don't install them by default: a shell such as Noctalia has its own lock screen,
+    and only `pila-report` uses `lspci`. They're optional in `pila-git`.
+- **`pila-report`** says whether `wl-copy` is installed, and hides your user name only as a whole
+  word: a name that ended another word ("destroy") mangled the log and gave the name away.
+
+Since 0.3.0, a tester has run pila from LightDM in an Arch virtual machine.
+
 ## 0.3.0 (2026-11-06)
 
 - **Removed:** `disable-internal-display`. **A config that has it is now invalid:** pila says so
