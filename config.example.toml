@@ -1,6 +1,10 @@
 # pila configuration. Copy to ~/.config/pila/config.toml (or
 # $XDG_CONFIG_HOME/pila/config.toml, or pass --config FILE) and edit.
-# Every setting is optional; what's shown here are the defaults or examples.
+# Every setting is optional, and every one here is commented out: as it is,
+# this file gives the same desktop as no file at all. Values marked
+# "(default)" are what pila uses when the setting is unset; the others are
+# examples. Take the `#` off a line to use it: table headers ([keyboard],
+# [bindings], ...) are left active so it lands in the right table.
 # PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
 # An invalid file is reported in the log and in a notification, and pila starts
 # with the defaults.
@@ -8,22 +12,23 @@
 # invalid, pila keeps the running config and says why in a notification.
 # `pila --check-config` checks the file (keymap included) without starting.
 
-# The modifier in "Mod+..." bindings and for Mod+drag: alt, super or ctrl.
-# Unset, it's super on a TTY and alt nested (a host desktop such as GNOME
-# grabs Super while pila runs inside it).
+# The modifier in "Mod+..." bindings and for Mod+drag (Mod+left drag moves a
+# window, Mod+right drag resizes it from the nearest corner): alt, super or
+# ctrl. Unset, it's super on a TTY and alt nested (a host desktop such as
+# GNOME grabs Super while pila runs inside it).
 # mod = "super"
 
 # Mod+Return, and what starts when there's no autostart. Unset, the first
 # installed of kitty, foot, alacritty, ghostty, wezterm, konsole,
 # gnome-terminal and xterm.
-# terminal = "kitty"
+# terminal = "foot"                # e.g.
 
-# Mod+D. Without one, Mod+D does nothing.
-# launcher = "fuzzel"
+# Mod+D. Unset, Mod+D does nothing.
+# launcher = "fuzzel"              # e.g.
 
 # Commands run at startup instead of the terminal (pila -c overrides them).
-# They start once Xwayland is ready, so X11 apps work too.
-# autostart = [
+# They start once Xwayland is ready, so X11 apps work too. Unset, the terminal.
+# autostart = [                    # e.g.
 #     "swaybg -c 333355",
 #     "waybar",
 #     "mako",
@@ -32,28 +37,27 @@
 
 # How many workspaces (virtual desktops) there are, 1 to 32. They span all
 # screens; Mod+1..N goes to one, Mod+Shift+1..N moves the window there.
-# workspaces = 4
+# workspaces = 4                   # (default)
 
-# Rounded window corners: the radius in logical pixels, 0 (the default, square
-# corners) to 64. Maximized and fullscreen windows stay square. The radius is
-# at most half the window's shorter side, and with a title bar at most the
-# bar's height (28).
-# corner-radius = 10
+# Rounded window corners: the radius in logical pixels, 0 (square) to 64.
+# Maximized and fullscreen windows stay square. The radius is at most half
+# the window's shorter side, and with a title bar at most the bar's height (28).
+# corner-radius = 0                # (default); e.g. 10
 
 # The shadow under each window, stronger for the focused one. None for a
 # maximized or fullscreen window, or one whose app draws its own (past its
-# geometry, as GTK's do); a window rule's `shadow` can say otherwise. The defaults:
-# [shadow]
-# enabled = true
-# size = 24                        # how far it reaches, in logical pixels: 0 to 64
-# offset = [0, 6]                  # right and down, -64 to 64
-# color = "#00000066"              # #rrggbb or #rrggbbaa
-# inactive-color = "#00000033"
+# geometry, as GTK's do); a window rule's `shadow` can say otherwise.
+[shadow]
+# enabled = true                   # (default)
+# size = 24                        # (default) how far it reaches, in logical pixels: 0 to 64
+# offset = [0, 6]                  # (default) right and down, -64 to 64
+# color = "#00000066"              # (default) #rrggbb or #rrggbbaa
+# inactive-color = "#00000033"     # (default) under the other windows
 
-# The colors of what pila draws, as #rrggbb. The defaults:
-# [colors]
+# The colors of what pila draws, as #rrggbb. All of them are the defaults.
+[colors]
 # bar = "#2f3136"                  # title bar of the focused window
-# bar-inactive = "#26272b"
+# bar-inactive = "#26272b"         # title bar of the others
 # icon = "#dfe1e5"                 # its title and buttons
 # icon-inactive = "#80838a"
 # hover = "#3f4249"                # a button under the pointer
@@ -65,42 +69,48 @@
 
 # Short, subtle animations. `enabled = false` turns them all off; `speed`
 # multiplies every duration (0.25 to 4: 2 is twice as slow). Each one takes
-# its duration in ms (1 to 1000), or false to turn it off.
+# its duration in ms (1 to 1000), or false to turn it off. All of them are
+# the defaults.
 [animations]
-enabled = true
-speed = 1.0
-window-open = 200     # rise and fade in
-window-close = 180    # shrink, drop and fade out
-minimize = 200        # and restoring
-maximize = 220        # also fullscreen and snapping
-layer = 150           # launchers, notifications
-workspace = 250       # slide sideways
+# enabled = true
+# speed = 1.0
+# window-open = 200                # rise and fade in
+# window-close = 180               # shrink, drop and fade out
+# minimize = 200                   # and restoring
+# maximize = 220                   # also fullscreen and snapping
+# layer = 150                      # launchers, notifications
+# workspace = 250                  # slide sideways
 
-# Passed to xkbcommon; empty means its defaults (or XKB_DEFAULT_*).
+# The keymap, passed to xkbcommon. Unset (or empty), xkbcommon's defaults or
+# the XKB_DEFAULT_* variables. `localectl list-x11-keymap-layouts` (and
+# -variants, -models, -options) lists the names where systemd is installed;
+# `pila --check-config` says if xkbcommon can't build the keymap.
 [keyboard]
-layout = ""             # e.g. "us,es"
-variant = ""            # e.g. ",dvorak"
-model = ""
-# options = "grp:alt_shift_toggle,caps:escape"
-repeat-delay = 200      # ms before a held key repeats
-repeat-rate = 25        # repeats per second
+# layout = "us,es"                 # e.g.: a list switches between them
+# variant = ",dvorak"              # e.g.: one per layout
+# model = "pc105"                  # e.g.: the keyboard's physical model
+# options = "grp:alt_shift_toggle,caps:escape"   # e.g.
+# repeat-delay = 200               # (default) ms before a held key repeats
+# repeat-rate = 25                 # (default) repeats per second
 
 # Touchpad and mouse (libinput, on a TTY; nested, the host handles input).
-# Unset options keep libinput's defaults, except tap, which pila turns on.
+# Unset options keep libinput's defaults for the device, except tap, which
+# pila turns on. Options a device doesn't support are skipped.
 [input.touchpad]
-tap = true
-# natural-scroll = true           # content follows the fingers
-# accel-speed = 0.0               # -1 (slowest) to 1 (fastest)
-# accel-profile = "adaptive"      # or "flat"
-# disable-while-typing = true
-# click-method = "clickfinger"    # 1/2/3 fingers = left/right/middle; or "button-areas"
-# middle-emulation = false        # left + right together = middle
+# tap = true                       # (default) tap to click
+# natural-scroll = true            # e.g.: content follows the fingers
+# accel-speed = 0.3                # e.g.: -1 (slowest) to 1 (fastest)
+# accel-profile = "flat"           # e.g.: "adaptive" or "flat" (no acceleration)
+# disable-while-typing = true      # e.g.: ignore the touchpad briefly while typing
+# click-method = "clickfinger"     # e.g.: 1/2/3 fingers = left/right/middle; or "button-areas"
+# middle-emulation = true          # e.g.: left + right together = middle
 
+# The same options as the touchpad's, for mice and trackballs.
 [input.mouse]
-# natural-scroll = false
-# accel-speed = 0.0
-# accel-profile = "flat"
-# middle-emulation = false
+# natural-scroll = true            # e.g.
+# accel-speed = -0.5               # e.g.
+# accel-profile = "flat"           # e.g.: no acceleration, as many players prefer
+# middle-emulation = true          # e.g.
 
 [bindings]
 # Key bindings: add new ones, replace defaults, or remove them with "none".
@@ -193,10 +203,11 @@ tap = true
 # P27h-30 ABC123"), for that one monitor. The most specific section wins, and
 # only that one applies. wlr-randr lists them; `pila.log` has the make and model
 # ("monitor"). Without an EDID a monitor only answers to its connector.
+# The entries below are examples: take the `#` off a whole one, header included.
 #
 # [[output]]
 # name = "eDP-1"
-# scale = 1.25              # may be fractional (in 1/120 steps); default 1
+# scale = 1.25              # 0.5 to 8, may be fractional (in 1/120 steps); default 1
 #
 # [[output]]
 # name = "DP-1"
@@ -221,11 +232,13 @@ tap = true
 # and again for all of them when this file is saved; a title changing later
 # doesn't re-match. The open-* properties, size, position, always-on-top and
 # all-workspaces only apply when a window opens.
+# The rules below are examples: take the `#` off a whole one, header included.
 #
 # [[window-rule]]
 # app-id = "steam_app_*"           # games: no open/close animation
 # animations = false               # or per animation: { open = false,
-#                                  #   close = false, minimize = false }
+#                                  #   close = false, minimize = false,
+#                                  #   maximize = false }
 #
 # [[window-rule]]
 # app-id = "firefox"

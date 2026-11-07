@@ -2037,6 +2037,26 @@ mod tests {
     }
 
     #[test]
+    fn the_example_sets_nothing() {
+        // Its values are all commented out, so what's active can't drift
+        // from the defaults: only table headers are left, which keep an
+        // uncommented line in its table.
+        let example = include_str!("../config.example.toml");
+        for (n, line) in example.lines().enumerate() {
+            let line = line.trim();
+            let header = line.starts_with('[') && line.ends_with(']');
+            assert!(
+                line.is_empty() || line.starts_with('#') || header,
+                "config.example.toml:{}: {line:?} isn't commented out",
+                n + 1
+            );
+        }
+        let parsed = Config::from_toml(example, &no_env).unwrap();
+        let empty = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(format!("{parsed:?}"), format!("{empty:?}"));
+    }
+
+    #[test]
     fn example_defaults_uncomment_into_their_tables() {
         // A tester took the `#` off a line of the defaults list, which then
         // sat above [bindings] and so landed in [input.mouse].
