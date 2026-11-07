@@ -2,7 +2,8 @@
 # $XDG_CONFIG_HOME/pila/config.toml, or pass --config FILE) and edit.
 # Every setting is optional; what's shown here are the defaults or examples.
 # PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
-# An invalid file is reported in the log and pila starts with the defaults.
+# An invalid file is reported in the log and in a notification, and pila starts
+# with the defaults.
 # Saved changes apply right away (except autostart); if the edited file is
 # invalid, pila keeps the running config and says why in a notification.
 # `pila --check-config` checks the file (keymap included) without starting.
@@ -145,7 +146,8 @@ tap = true
 #   "Mod+Shift+O" = "move-to-output next"
 #   "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"   (a region to the clipboard)
 #   "Mod+Ctrl+S"  = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
-#                   (the screen under the pointer to a file; both need grim and slurp)
+#                   (the screen under the pointer to a file; it needs grim, and the one
+#                   above grim, slurp and wl-clipboard)
 #   "Mod+1" .. "Mod+N" = "workspace 1" .. "workspace N"
 #   "Mod+Shift+1" .. "Mod+Shift+N" = "move-to-workspace 1" .. "move-to-workspace N"
 #                   (N = workspaces, at most 9; the other digits reach the apps)
@@ -217,8 +219,8 @@ tap = true
 # new window's app id ("mapping window") and layer surface's namespace ("new
 # layer surface"). Rules are matched when a window or layer surface appears,
 # and again for all of them when this file is saved; a title changing later
-# doesn't re-match. The open-* properties, size and position only apply when
-# a window opens.
+# doesn't re-match. The open-* properties, size, position, always-on-top and
+# all-workspaces only apply when a window opens.
 #
 # [[window-rule]]
 # app-id = "steam_app_*"           # games: no open/close animation

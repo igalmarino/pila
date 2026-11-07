@@ -81,8 +81,8 @@ Key flows and invariants:
   are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
   their spec.
 - **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
-  connectors and outputs, `draw.rs` frames and vblanks, `input.rs` and `gamma.rs` the rest. one GPU (the seat's primary), outputs placed by their
-  `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
+  connectors and outputs, `draw.rs` frames and vblanks, `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
+  primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
@@ -203,15 +203,17 @@ Key flows and invariants:
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;
   the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
   released (checked after every key in `on_keyboard`), on a click, and in
-  `release_all_keys`. Unmapped windows are dropped with `forget_focus_history`.
+  `release_all_keys`. Unmapped windows are dropped with `forget_window`.
 - **Minimize** (`minimize.rs`): a minimized window is unmapped from the `Space` and kept
   in `Pila::windows.minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
   `window_for_surface`/`window_for_x11` search it too, and destroyed windows are removed
-  (`forget_off_space`). It comes back only through Mod+Tab: the switch order includes
-  minimized windows; a minimized pick is shown (`show_window`) while selected, hidden
-  again (`hide_window`) when the switch moves on, and stays when the switch ends.
+  (`forget_off_space`). The switch order includes minimized windows: a minimized pick is shown
+  (`show_window`) while selected, hidden again (`hide_window`) when the switch moves on, and stays
+  when the switch ends. Taskbars, xdg-activation, `pila msg focus` and show desktop bring them
+  back too.
 - **Workspaces** (`workspaces.rs`, `config.workspaces` of them, spanning all outputs): the
-  `Space` holds only the active workspace's windows (and X11 override-redirect ones);
+  `Space` holds only the active workspace's windows, those on all workspaces (`stacking.rs`) and
+  X11 override-redirect ones;
   the others' are parked in `Workspaces::parked` (back to front, workspace and location in
   user data, X11 ones suspended). Minimized windows remember their workspace too, so
   "off the `Space`" means `off_space_windows()` (parked + minimized): lookups by surface,
@@ -220,8 +222,8 @@ Key flows and invariants:
   user-data record (`workspaces::leave_space`/`space_location`). Invariant: a window in the `Space` is on the
   active workspace. `switch_workspace` (refused while locked) ends Mod+Tab and popup grabs,
   swaps the windows (a window in pila's move/resize grab comes along; other pointer
-  grabs, e.g. a client's DnD, are left alone), focuses the most recent one there and
-  refreshes pointer focus. Mod+Tab only lists the active workspace; activating a window elsewhere
+  grabs, e.g. a client's DnD, are left alone), focuses the most recent one of its own there
+  (`focus_arriving_window`) and refreshes pointer focus. Mod+Tab only lists the active workspace; activating a window elsewhere
   (taskbar, xdg-activation) switches first (`reveal_workspace_of`). ext-workspace
   (`ext_workspace.rs`, on the `wayland-protocols` bindings): one group with every
   output, workspaces "1".."N", only `activate`, applied on `commit`; diffed by
@@ -313,12 +315,14 @@ Key flows and invariants:
   it opens: `size` and `open-maximized`/`open-fullscreen` before an xdg toplevel's
   initial configure (`apply_initial_rules` from `handle_xdg_commit`; X11: size by
   `configure`, fill after placing, in `map_window_request`), `position` (from the
-  usable area's top-left, title bar included) and `open-on-workspace` (`park`ed there,
-  unfocused, no animation) in `place_new_window`; live, like `animations`: `title-bar =
+  usable area's top-left, title bar included), `open-on-workspace` (`park`ed there,
+  unfocused, no animation) and `always-on-top`/`all-workspaces` (`stacking.rs`) in
+  `place_new_window`; live, like `animations`: `title-bar =
   false` (`decoration::bar_hidden`: no bar drawn nor laid out, the window stays SSD),
   `corner-radius` (over the global one, in `scene_window`) and `opacity`
   (`SceneWindow::alpha`, passed to every element of the window, title bar and flash
-  included; Smithay's elements drop their opaque regions below 1). Hot paths read them
+  included; Smithay's elements drop their opaque regions below 1), `blur` (see "Blur") and
+  `shadow` (see "Shadows"). Hot paths read them
   through `rules::with_window_props` (no copy); a reload also re-fits filled windows
   (a bar shown or hidden moves them). Layer properties: `animations` and
   `blur` (`blur_rects`: `true` the whole surface, `false` none, unset the client's
@@ -422,8 +426,8 @@ Key flows and invariants:
   an opaque one (`SceneWindow::covers`) isn't prepared, but keeps its entry. Shaders are
   compiled by `render::warm_up`, kept in the EGL context; a failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
-  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila` and `XDG_SESSION_TYPE=wayland`;
-  `spawn` adds `PILA_OUTPUT`, the output under the pointer.
+  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila`, `XDG_SESSION_TYPE=wayland`
+  and `PILA_SOCKET` (`ipc.rs`); `spawn` adds `PILA_OUTPUT`, the output under the pointer.
   Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
   which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in

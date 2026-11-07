@@ -12,7 +12,8 @@ description: How to cut a pila release and maintain the Arch package (PKGBUILD, 
 3. A GitHub release with the changelog's section as its text. Publishing it starts `packages.yml`, which
    builds the `.deb` and `.rpm`, installs them on clean systems and attaches them: check that it
    passes.
-4. A commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`).
+4. A commit `pila-git: pkgver for vX` (`PKGBUILD` and `.SRCINFO`). `pkgver` is
+   `X.r<commits>.g<7 of the commit's hash>`: of the commit, `vX^{commit}`, not of the annotated tag.
 
 Pushing that commit starts `aur.yml`, which publishes it to the AUR once the user approves it in
 GitHub (the `aur` environment). The Nix flake (`flake.nix`) takes its version from

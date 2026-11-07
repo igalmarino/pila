@@ -206,7 +206,8 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 - **X11:** `window.toplevel()` may be `None`: use `wl_surface()`, `fill_state`,
   `close_window` and `focus_target`, and branch on `x11_surface()`. Moving a managed X11
   window must tell X (`x11_window_moved`); compare focus through `Pila::keyboard_focus()`.
-- **Off the `Space`:** it holds only the active workspace's windows. Parked and minimized
+- **Off the `Space`:** it holds only the active workspace's windows and those on all
+  workspaces. Parked and minimized
   ones are `off_space_windows()`, and unmapped ones are elsewhere too: look windows up with
   `window_for_surface`/`window_for_x11`, not by searching the `Space`.
 - **Pending vs committed:** layout uses the pending decoration mode (`layout_offset`),

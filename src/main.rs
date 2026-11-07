@@ -113,8 +113,8 @@ Environment (overrides the config file):
 The config file is reloaded when it changes (all but autostart).
 
 Programs pila starts get XDG_CURRENT_DESKTOP=pila and PILA_SOCKET (pila msg),
-and commands run by
-bindings PILA_OUTPUT, the name of the output under the pointer. On a TTY, pila
+and commands run by bindings PILA_OUTPUT, the name of the output under the
+pointer. On a TTY, pila
 exports WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and to systemd
 --user when that's the bus), for the screen-sharing portals: run it as a login
 session (scripts/install) or under dbus-run-session (scripts/tty), with

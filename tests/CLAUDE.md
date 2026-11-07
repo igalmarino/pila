@@ -6,7 +6,8 @@ parsing, including `example_config_is_valid` for `config.example.toml`).
 Integration tests (`tests/*.rs`, harness in `tests/common/`) run a headless pila per test
 (`--backend headless`, see "Backends" in `docs/ARCHITECTURE.md`), in parallel:
 
-- `TestPila` starts it with a config (animations off unless the test sets `[animations]`),
+- `TestPila` starts it with a config (animations and shadows off unless the test sets
+  `[animations]` or `[shadow]`),
   injects input and reads the state through its control socket, and waits for conditions
   (`wait`, `wait_window`, `stays`; never sleeps).
 - `Client` (`tests/common/client.rs`) is a synthetic Wayland client on its own thread that

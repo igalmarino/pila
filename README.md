@@ -18,10 +18,10 @@ replaced when an `ext-` version lands.
 ## Status
 
 pila is **alpha**: usable day to day (its author runs it as their only desktop and
-develops it from inside itself), but so far tested on one machine: an AMD laptop (Mesa,
-`amdgpu`) with an external monitor, on Arch Linux. Other GPUs (Intel should work; NVIDIA
-is untested), distros and setups are exactly what testing is needed for: please
-[report](#reporting-bugs) what works and what doesn't.
+develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
+with an external monitor, on Arch Linux. A tester has run it on an Intel laptop, and `nix run`
+has been confirmed on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups are exactly
+what testing is needed for: please [report](#reporting-bugs) what works and what doesn't.
 
 Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs (pila uses the
 seat's primary one).
@@ -31,7 +31,8 @@ seat's primary one).
 The biggest unknown is how pila behaves away from its author's laptop. Most useful right
 now, in this order:
 
-- **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs;
+- **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs. On a laptop with two
+  GPUs, pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
 - **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building:
   [Debian, Ubuntu, Fedora](#debian-ubuntu-and-fedora), [NixOS](#nix-and-nixos);
 - **display managers** other than GDM (SDDM, greetd, LightDM);
@@ -57,14 +58,14 @@ A short report helps even if everything works:
   maximize and fullscreen; snapping to screen halves and quarters by keyboard or by dragging to
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
-  between monitors; switching by recent use (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes); a shadow
-  under each window (`[shadow]`); optional rounded corners (`corner-radius`); your own colors
-  (`[colors]`).
+  between monitors; switching by recent use (Mod+Tab); workspaces spanning all monitors (Mod+1..N,
+  four-finger swipes); a shadow under each window (`[shadow]`); optional rounded corners
+  (`corner-radius`); your own colors (`[colors]`).
 - **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
   snapping; launchers and notifications; workspaces sliding. Configurable, or off.
 - **Window and layer rules** by app id, title or namespace: animations, workspace, size,
-  position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius, opacity, blur and shadow per app;
-  blur and animations per panel or launcher.
+  position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius,
+  opacity, blur and shadow per app; blur and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
@@ -80,13 +81,11 @@ A short report helps even if everything works:
   (linux-drm-syncobj). Enough for a full shell such as Noctalia.
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
-  four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps, pointer lock and confinement for games,
-  any key bindable (media keys included).
+  four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
+  pointer lock and confinement for games, any key bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 - **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
   action ([docs/IPC.md](docs/IPC.md)).
-
-Not there yet: touchscreens, input methods (IME), several GPUs.
 
 ## Running pila
 
@@ -266,7 +265,8 @@ Host packages for a full session (names are the same on most distros):
 
 - `kitty`: the default terminal (or set `terminal`; foot, alacritty and others are found
   too)
-- `xdg-desktop-portal-wlr`, `grim`, `slurp`: screen sharing
+- `xdg-desktop-portal-wlr`, `slurp`: screen sharing (`slurp` picks the screen to share)
+- `grim`, `slurp`: screenshots; Mod+Ctrl+S needs `grim`, Mod+Shift+S both and `wl-clipboard`
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
 - `libnotify` (`libnotify-bin` on Debian, Ubuntu): `notify-send`, which pila uses to tell you
   about an invalid config, for instance; a notification daemon must show them (Noctalia, mako, ...)
@@ -296,9 +296,10 @@ pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`,
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
 pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
-each monitor's mode, scale, rotation and position, animations (`[animations]`) and
-per-app rules (`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid
-one is reported in the log and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
+each monitor's mode, scale, rotation and position, the number of workspaces, rounded corners,
+shadows (`[shadow]`), colors (`[colors]`), animations (`[animations]`) and per-app rules
+(`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid one is
+reported in the log and in a notification, and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.
 
 Saving the file applies it right away, everything but `autostart`. If the new version is
@@ -310,9 +311,10 @@ exits with status 1, or 0 if it's valid.
 A few defaults (Mod is Super on a TTY or login session and Alt nested, unless `mod` says
 otherwise): Mod+Return opens a terminal (kitty, or another one that is installed),
 Mod+Tab switches windows, Mod+Left/Right snap, Mod+Up/Down maximize and restore, Mod+M
-maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+Shift+S and Mod+Ctrl+S take
-screenshots (a region to the clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes,
-Mod+Shift+E quits.
+maximizes, Mod+F goes fullscreen, Mod+N minimizes, Mod+T keeps a window above the others, Mod+P
+keeps it on all workspaces, Mod+H shows the desktop, Mod+O goes to the next monitor and
+Mod+Shift+O sends the window there, Mod+Shift+S and Mod+Ctrl+S take screenshots (a region to the
+clipboard, the screen to `~/Pictures`), Mod+Shift+Q closes, Mod+Shift+E quits.
 
 ## Reporting bugs
 

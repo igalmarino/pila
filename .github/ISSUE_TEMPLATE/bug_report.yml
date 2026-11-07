@@ -14,7 +14,7 @@ body:
     attributes:
       label: pila version
       description: The output of `pila --version` (or the commit, for a source build).
-      placeholder: pila 0.2.1 (v0.2.1)
+      placeholder: pila 0.3.0 (v0.3.0)
     validations:
       required: true
   - type: dropdown

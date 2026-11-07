@@ -33,7 +33,7 @@ render loop, and how each protocol and feature is wired.
 
 pila is developed in a dev container on any Linux host with Docker, from inside pila itself
 (or another desktop, kept as a fallback session), with **Claude Code** running inside the
-container. (The author's host is Arch with GNOME as the fallback.)
+container. (The author's host is Arch, with pila as its only desktop.)
 
 - An Arch Linux image with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and
   every library pila needs (winit, DRM/KMS, libinput)
@@ -44,7 +44,8 @@ container. (The author's host is Arch with GNOME as the fallback.)
   `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
   against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
 - Claude Code (native install) with auth and history persisted across rebuilds
-- An egress firewall so Claude Code can only reach crates.io, GitHub, Anthropic and docs.rs
+- An egress firewall so Claude Code can only reach what `.devcontainer/allowed-domains.txt` lists
+  (crates.io, GitHub, Anthropic, docs.rs, Arch's sites and what the tools need)
 
 The container follows the session it's entered from: entered from a pila session
 (`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME (or any
