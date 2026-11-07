@@ -41,6 +41,9 @@ rustPlatform.buildRustPackage {
       ./README.md
       ./build.rs
       ./config.example.toml
+      ./docs/IPC.md
+      ./docs/MANUAL.md
+      ./docs/pila.1
       ./resources
       ./scripts/report
       ./src
