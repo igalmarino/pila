@@ -32,6 +32,7 @@ overrides:
   # Built on the oldest release supported, Ubuntu 24.04: its glibc is the minimum.
   deb:
     depends:
+      - bash
       - libc6 (>= 2.39)
       - libgcc-s1
       - libegl1
@@ -50,8 +51,11 @@ overrides:
       - libnotify-bin
       - xdg-utils
       - wl-clipboard
+      - swaylock
+      - pciutils
   rpm:
     depends:
+      - bash
       - mesa-libEGL
       - mesa-libgbm
       - libinput
@@ -68,3 +72,5 @@ overrides:
       - libnotify
       - xdg-utils
       - wl-clipboard
+      - swaylock
+      - pciutils

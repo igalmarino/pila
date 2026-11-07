@@ -275,11 +275,13 @@ Host packages for a full session (names are the same on most distros):
   a click on a link does nothing, and says nothing
 - `wl-clipboard`: `wl-copy`, which Mod+Shift+S needs to put a region of the screen on the clipboard;
   without it, that binding does nothing
+- `swaylock`: locking the session (bind it, or run it from swayidle)
+- `pciutils`: `lspci`, with which `pila-report` names the GPU and its driver
 
 ```bash
-sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils wl-clipboard       # Arch
-sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify-bin xdg-utils wl-clipboard # Debian, Ubuntu
-sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils wl-clipboard     # Fedora
+sudo pacman -S kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils wl-clipboard swaylock pciutils       # Arch
+sudo apt install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify-bin xdg-utils wl-clipboard swaylock pciutils # Debian, Ubuntu
+sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp libnotify xdg-utils wl-clipboard swaylock pciutils     # Fedora
 ```
 
 ### Desktop shells and tools
