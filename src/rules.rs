@@ -86,6 +86,8 @@ pub struct WindowRuleFile {
     opacity: Option<f64>,
     blur: Option<bool>,
     shadow: Option<bool>,
+    always_on_top: Option<bool>,
+    all_workspaces: Option<bool>,
 }
 
 /// The range of `opacity`: never fully transparent.
@@ -146,6 +148,9 @@ pub struct WindowProps {
     /// `true`: pila draws one, even if the client draws its own; `false`:
     /// never; unset: `[shadow]`, for a window that doesn't draw its own.
     pub shadow: Option<bool>,
+    /// When it opens: above the others, or on all workspaces (`stacking.rs`).
+    pub always_on_top: Option<bool>,
+    pub all_workspaces: Option<bool>,
 }
 
 impl WindowProps {
@@ -161,6 +166,8 @@ impl WindowProps {
         self.opacity = other.opacity.or(self.opacity);
         self.blur = other.blur.or(self.blur);
         self.shadow = other.shadow.or(self.shadow);
+        self.always_on_top = other.always_on_top.or(self.always_on_top);
+        self.all_workspaces = other.all_workspaces.or(self.all_workspaces);
     }
 
     /// Whether `kind` plays for this window.
@@ -278,6 +285,8 @@ impl WindowRuleFile {
                 opacity: self.opacity,
                 blur: self.blur,
                 shadow: self.shadow,
+                always_on_top: self.always_on_top,
+                all_workspaces: self.all_workspaces,
             },
         })
     }

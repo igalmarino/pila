@@ -10,6 +10,9 @@
 //! order, then focuses the target's most recently used window. A window
 //! being moved or resized with the pointer comes along.
 //!
+//! A window on all workspaces (`stacking.rs`) is never parked: it stays in the
+//! `Space`, over what comes in, and a slide draws it fixed.
+//!
 //! Mod+Tab only goes through the active workspace's windows. Activating a
 //! window elsewhere (a taskbar, xdg-activation) switches to its workspace.
 //! Taskbars and panels see and switch workspaces through ext-workspace
@@ -26,6 +29,7 @@ use tracing::debug;
 use crate::{
     config::WorkspaceTarget,
     grabs::{MoveSurfaceGrab, ResizeSurfaceGrab},
+    stacking::{is_on_all_workspaces, leave_all_workspaces},
     Pila,
 };
 
@@ -100,6 +104,9 @@ pub fn resolve(target: WorkspaceTarget, active: usize, count: usize) -> Option<u
 impl Pila {
     /// The workspace `window` is on.
     pub fn workspace_of(&self, window: &Window) -> usize {
+        if is_on_all_workspaces(window) {
+            return self.workspaces.active;
+        }
         let off_space = self.workspaces.parked.contains(window) || self.is_minimized(window);
         match window.user_data().get::<OffSpace>() {
             Some(data) if off_space => data.index.get(),
@@ -139,6 +146,7 @@ impl Pila {
         debug!(index, "moving window to workspace");
         // A Mod+Tab in progress must not come back to the parked window.
         self.end_switch();
+        leave_all_workspaces(&family);
         for member in &family {
             self.park(member, index);
         }
@@ -166,7 +174,7 @@ impl Pila {
     }
 
     /// The window pila is moving or resizing with the pointer, if any.
-    fn grabbed_window(&self) -> Option<Window> {
+    pub(crate) fn grabbed_window(&self) -> Option<Window> {
         self.seat.get_pointer()?.with_grab(|_, grab| {
             if let Some(grab) = grab.downcast_ref::<MoveSurfaceGrab>() {
                 Some(grab.window.clone())
@@ -185,14 +193,21 @@ impl Pila {
         // A Mod+Tab in progress ends on the window it's at.
         self.end_switch();
         self.dismiss_popup_grab();
-        let carried = self.grabbed_window();
+        let grabbed = self.grabbed_window();
+        // They stay where they are, in their order, as the others change.
+        let staying: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|w| is_on_all_workspaces(w) || Some(*w) == grabbed.as_ref())
+            .cloned()
+            .collect();
         // Each output's picture of the windows leaving, for the slide.
-        self.start_workspace_slide(index, carried.clone());
+        self.start_workspace_slide(index, staying.clone());
         let from = self.workspaces.active;
         let shown: Vec<Window> = self
             .space
             .elements()
-            .filter(|w| !is_override_redirect(w) && Some(*w) != carried.as_ref())
+            .filter(|w| !is_override_redirect(w) && !staying.contains(w))
             .cloned()
             .collect();
         for window in shown {
@@ -200,10 +215,13 @@ impl Pila {
         }
         self.workspaces.active = index;
         self.unpark_active();
-        match carried {
+        match grabbed {
             Some(window) => self.focus_window(Some(window), SERIAL_COUNTER.next_serial()),
-            None => self.focus_recent_window(),
+            None => self.focus_arriving_window(),
         }
+        // Over what came in, even the window that took the focus.
+        self.raise_in_order(&staying);
+        self.keep_on_top();
         self.refresh_pointer_focus();
         self.refresh_workspaces();
         self.queue_redraw();
@@ -245,6 +263,27 @@ impl Pila {
         self.fixup_windows();
     }
 
+    /// After a switch: the most recent of the workspace's own windows, or else
+    /// whatever `focus_recent_window` finds.
+    fn focus_arriving_window(&mut self) {
+        let own = self
+            .windows
+            .focus_history
+            .iter()
+            .find(|w| !is_on_all_workspaces(w) && self.space.elements().any(|m| m == *w))
+            .or_else(|| {
+                self.space
+                    .elements()
+                    .rev()
+                    .find(|w| !is_override_redirect(w) && !is_on_all_workspaces(w))
+            })
+            .cloned();
+        match own {
+            Some(window) => self.focus_window(Some(window), SERIAL_COUNTER.next_serial()),
+            None => self.focus_recent_window(),
+        }
+    }
+
     /// Focus the most recently used window on screen (or the top one, or
     /// none), e.g. after the focused one was minimized or left the workspace.
     pub(crate) fn focus_recent_window(&mut self) {
@@ -269,6 +308,9 @@ impl Pila {
     pub fn forget_off_space(&mut self, window: &Window) {
         self.workspaces.parked.retain(|w| w != window);
         self.windows.minimized.retain(|w| w != window);
+        if let Some(hidden) = &mut self.windows.desktop_shown {
+            hidden.windows.retain(|w| w != window);
+        }
     }
 
     /// The number of workspaces changed (config reload): windows on

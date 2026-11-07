@@ -9,7 +9,11 @@
 
 use std::cell::Cell;
 
-use smithay::{desktop::Window, utils::SERIAL_COUNTER};
+use smithay::{
+    desktop::Window,
+    utils::{IsAlive, SERIAL_COUNTER},
+};
+use tracing::debug;
 
 use crate::{
     workspaces::{deactivate, leave_space, space_location},
@@ -28,7 +32,63 @@ fn went_with_parent(window: &Window) -> &Cell<bool> {
     &window.user_data().get::<WentWithParent>().unwrap().0
 }
 
+/// What `show-desktop` took off screen, to bring back on that workspace.
+pub struct DesktopShown {
+    workspace: usize,
+    /// Back to front.
+    pub windows: Vec<Window>,
+    focused: Option<Window>,
+}
+
 impl Pila {
+    /// Minimize the workspace's windows; again, bring those back in their
+    /// order. Opening a window or bringing one back forgets them, so the next
+    /// time starts over. Those already minimized stay so.
+    pub fn show_desktop(&mut self) {
+        let active = self.workspaces.active;
+        if let Some(shown) = self
+            .windows
+            .desktop_shown
+            .take()
+            .filter(|shown| shown.workspace == active && !shown.windows.is_empty())
+        {
+            for window in &shown.windows {
+                self.show_window(window);
+            }
+            self.keep_on_top();
+            match shown.focused.filter(IsAlive::alive) {
+                Some(window) => self.focus_window(Some(window), SERIAL_COUNTER.next_serial()),
+                None => self.focus_recent_window(),
+            }
+            self.refresh_pointer_focus();
+            return;
+        }
+        let focused = self.focused_window();
+        // Their children go with them.
+        let windows: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|w| {
+                !crate::workspaces::is_override_redirect(w) && self.transient_parent(w).is_none()
+            })
+            .cloned()
+            .collect();
+        if windows.is_empty() {
+            return;
+        }
+        debug!(count = windows.len(), "showing the desktop");
+        for window in &windows {
+            self.hide_window(window);
+        }
+        self.windows.desktop_shown = Some(DesktopShown {
+            workspace: active,
+            windows,
+            focused,
+        });
+        self.focus_recent_window();
+        self.refresh_pointer_focus();
+    }
+
     pub fn is_minimized(&self, window: &Window) -> bool {
         self.windows.minimized.contains(window)
     }
@@ -78,6 +138,7 @@ impl Pila {
             return;
         };
         self.windows.minimized.remove(index);
+        self.windows.desktop_shown = None;
         went_with_parent(window).set(false);
         self.space
             .map_element(window.clone(), space_location(window), false);

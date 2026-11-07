@@ -54,14 +54,16 @@ A short report helps even if everything works:
 
 - **Windows:** server-side title bars (minimize, maximize, close) and resize borders, or
   client-side decorations for apps that draw their own; Mod+drag to move and resize;
-  maximize and fullscreen; snapping to screen halves by keyboard or by dragging to an edge;
-  moving, resizing and centering from the keyboard; minimize; switching by recent use
-  (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes); optional
-  rounded corners (`corner-radius`).
+  maximize and fullscreen; snapping to screen halves and quarters by keyboard or by dragging to
+  an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
+  desktop; keeping a window above the others or on all workspaces; moving windows and focus
+  between monitors; switching by recent use (Mod+Tab); workspaces spanning all monitors (Mod+1..N, four-finger swipes); a shadow
+  under each window (`[shadow]`); optional rounded corners (`corner-radius`); your own colors
+  (`[colors]`).
 - **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
   snapping; launchers and notifications; workspaces sliding. Configurable, or off.
 - **Window and layer rules** by app id, title or namespace: animations, workspace, size,
-  position, maximized or fullscreen, title bar, corner radius, opacity and blur per app;
+  position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius, opacity, blur and shadow per app;
   blur and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
   and (fractional) scale.

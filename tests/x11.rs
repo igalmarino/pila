@@ -252,6 +252,24 @@ fn focus_doesnt_land_on_an_x11_menu_on_top() {
 }
 
 #[test]
+fn an_x11_window_can_stay_on_top() {
+    let mut pila = TestPila::start();
+    let Some(x11) = X11::connect(&mut pila) else {
+        return;
+    };
+    x11.window("x", (200, 200), 0xff0000);
+    pila.wait_focus("x");
+    pila.combo("Super+t");
+    pila.wait("marked", |s| {
+        window_in(s, "x").unwrap()["always_on_top"] == true
+    });
+    let client = pila.client();
+    client.window("w").create();
+    pila.wait_focus("w");
+    assert_eq!(stacking(&pila.state()), ["w", "x"]);
+}
+
+#[test]
 fn xwayland_starts_with_no_signals_blocked() {
     let mut pila = TestPila::start();
     if X11::connect(&mut pila).is_none() {

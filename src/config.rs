@@ -19,6 +19,11 @@
 //! | Mod+Shift+arrows      | Move the window                |
 //! | Mod+Ctrl+arrows       | Resize (Right/Down grow, Left/Up shrink) |
 //! | Mod+C                 | Center the window              |
+//! | Mod+T                 | Keep the window above the others (again: stop) |
+//! | Mod+P                 | Keep the window on all workspaces (again: stop) |
+//! | Mod+H                 | Minimize the workspace's windows (again: bring them back) |
+//! | Mod+O                 | Go to the next output          |
+//! | Mod+Shift+O           | Move the window to the next output |
 //! | Mod+Shift+S           | Screenshot of a region (slurp) to the clipboard |
 //! | Mod+Ctrl+S            | Screenshot of the screen under the pointer to ~/Pictures |
 //! | Mod+1..N              | Go to workspace 1..N (N = `workspaces`, at most 9) |
@@ -90,6 +95,11 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Ctrl+Down", "grow-height"),
     ("Mod+Ctrl+Up", "shrink-height"),
     ("Mod+C", "center"),
+    ("Mod+T", "toggle-always-on-top"),
+    ("Mod+P", "toggle-all-workspaces"),
+    ("Mod+H", "show-desktop"),
+    ("Mod+O", "focus-output next"),
+    ("Mod+Shift+O", "move-to-output next"),
     ("Mod+Shift+S", "spawn grim -g \"$(slurp)\" - | wl-copy"),
     (
         "Mod+Ctrl+S",
@@ -269,6 +279,11 @@ pub enum Action {
     /// Snap to the left/right half of the output (`snap.rs`).
     SnapLeft,
     SnapRight,
+    /// Snap to a quarter of the output.
+    SnapTopLeft,
+    SnapTopRight,
+    SnapBottomLeft,
+    SnapBottomRight,
     /// Undo a snap or a maximize.
     Restore,
     /// Move by (x, y) / resize by (w, h) logical pixels.
@@ -281,8 +296,24 @@ pub enum Action {
     /// Go to a workspace, or move the focused window there (`workspaces.rs`).
     Workspace(WorkspaceTarget),
     MoveToWorkspace(WorkspaceTarget),
+    /// Keep the focused window above the others, or on all workspaces
+    /// (`stacking.rs`).
+    ToggleAlwaysOnTop,
+    ToggleAllWorkspaces,
+    /// Minimize the workspace's windows, or bring them back (`minimize.rs`).
+    ShowDesktop,
+    /// Go to another output, or send the focused window there (`stacking.rs`).
+    FocusOutput(OutputTarget),
+    MoveToOutput(OutputTarget),
     /// Switch to virtual terminal N (Ctrl+Alt+F<N> on a TTY; not configurable).
     ChangeVt(i32),
+}
+
+/// Which output an output action goes to: by position, around the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputTarget {
+    Next,
+    Prev,
 }
 
 /// Which workspace a workspace action goes to.
@@ -330,6 +361,22 @@ impl Action {
                 return WorkspaceTarget::parse(target).map(|t| Some(make(t)));
             }
         }
+        // "focus-output next", "move-to-output-prev".
+        for (prefix, make) in [
+            ("move-to-output", Action::MoveToOutput as fn(_) -> _),
+            ("focus-output", Action::FocusOutput),
+        ] {
+            if let Some(target) = text
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_prefix(' ').or_else(|| rest.strip_prefix('-')))
+            {
+                return match target.trim() {
+                    "next" => Ok(Some(make(OutputTarget::Next))),
+                    "prev" => Ok(Some(make(OutputTarget::Prev))),
+                    other => Err(format!("{prefix} {other:?}: must be next or prev")),
+                };
+            }
+        }
         Ok(Some(match text {
             "none" => return Ok(None),
             "terminal" => Action::Terminal,
@@ -340,6 +387,13 @@ impl Action {
             "minimize" => Action::Minimize,
             "snap-left" => Action::SnapLeft,
             "snap-right" => Action::SnapRight,
+            "snap-top-left" => Action::SnapTopLeft,
+            "snap-top-right" => Action::SnapTopRight,
+            "snap-bottom-left" => Action::SnapBottomLeft,
+            "snap-bottom-right" => Action::SnapBottomRight,
+            "toggle-always-on-top" => Action::ToggleAlwaysOnTop,
+            "toggle-all-workspaces" => Action::ToggleAllWorkspaces,
+            "show-desktop" => Action::ShowDesktop,
             "restore" => Action::Restore,
             "move-left" => Action::MoveWindow(-KEYBOARD_STEP, 0),
             "move-right" => Action::MoveWindow(KEYBOARD_STEP, 0),
@@ -357,8 +411,11 @@ impl Action {
                 return Err(format!(
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
                      cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, snap-left, \
-                     snap-right, restore, move-left/right/up/down, grow-width, shrink-width, \
-                     grow-height, shrink-height, center, workspace <n|next|prev>, \
+                     snap-right, snap-top-left, snap-top-right, snap-bottom-left, \
+                     snap-bottom-right, restore, move-left/right/up/down, grow-width, \
+                     shrink-width, grow-height, shrink-height, center, toggle-always-on-top, \
+                     toggle-all-workspaces, show-desktop, focus-output <next|prev>, \
+                     move-to-output <next|prev>, workspace <n|next|prev>, \
                      move-to-workspace <n|next|prev>, quit or none)"
                 ))
             }

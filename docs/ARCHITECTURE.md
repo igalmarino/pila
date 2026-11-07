@@ -506,6 +506,26 @@ Key flows and invariants:
   drawn just above the windows) and applies it on release; dragging a snapped or filled
   window first restores its old size under the cursor (`begin_move`). Keyboard
   move/resize/center go through `apply_rect`, which also configures X11 windows.
+  `Side` also names the four quarters (`snap-top-left`, ... or a drag near a corner:
+  `edge_target`); a quarter is tiled only on the edges it touches.
+- **Always on top, all workspaces** (`stacking.rs`): two marks in a window's user data, from a
+  rule when it opens or a binding, shared by its transient family (`mark_new_window`,
+  `inherit_marks`). `keep_on_top` puts the marked ones back above the others in their order, doing
+  nothing if they already are (a change of order means damage). **Whatever raises a window has
+  to end in it:** `raise_family` and `keep_transients_above` do, and so every
+  `map_element(.., true)` is followed by one of them. `top_layer_covered` skips a marked window
+  that isn't fullscreen itself, so one kept over a fullscreen window doesn't bring panels back.
+  A window on all workspaces is never parked: `show_workspace` leaves it in the `Space`, raises
+  it after focusing, and a slide draws it fixed (`SceneSlide::carried`); `workspace_of` says the
+  active one; `move-to-workspace` removes the mark. Neither is saved with a session.
+- **Between outputs** (`stacking.rs`): `move_focused_to_output` keeps the window's place relative
+  to the usable area (`fit_in_area`), fills the new output if it was filled, or takes the same
+  side (`move_snapped_to`), and translates where it goes back to. `focus_output` moves the pointer
+  to the output's middle through `warp_pointer` (not if a client holds it) and focuses the top window
+  there. Outputs go by position, around the end.
+- **Show desktop** (`Pila::show_desktop`, `minimize.rs`): minimizes the workspace's windows without
+  a transient parent and remembers them (`Windows::desktop_shown`); again, `show_window` in their
+  order. `show_window` and `place_new_window` forget them, so the next press starts over.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit; a window that

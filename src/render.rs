@@ -894,22 +894,20 @@ fn slide_elements(
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
-    let carried_index = windows
-        .iter()
-        .position(|entry| Some(&entry.window) == slide.carried.as_ref());
-    let (carried, moving): (Vec<SceneWindow>, Vec<SceneWindow>) = windows
-        .iter()
-        .cloned()
-        .partition(|entry| Some(&entry.window) == slide.carried.as_ref());
+    let is_carried = |entry: &SceneWindow| slide.carried.contains(&entry.window);
+    let (carried, moving): (Vec<SceneWindow>, Vec<SceneWindow>) =
+        windows.iter().cloned().partition(is_carried);
     // Ghosts are placed by index among all the windows: shift those behind
-    // the carried window, which isn't among the moving ones.
+    // carried windows, which aren't among the moving ones.
     let ghosts: Vec<SceneGhost> = ghosts
         .iter()
         .map(|ghost| SceneGhost {
-            before: match carried_index {
-                Some(carried) if ghost.before > carried => ghost.before - 1,
-                _ => ghost.before,
-            },
+            before: ghost.before
+                - windows
+                    .iter()
+                    .take(ghost.before)
+                    .filter(|entry| is_carried(entry))
+                    .count(),
             ..ghost.clone()
         })
         .collect();

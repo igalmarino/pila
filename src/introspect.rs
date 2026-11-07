@@ -65,10 +65,9 @@ impl Pila {
             "minimized": self.is_minimized(window),
             "maximized": maximized,
             "fullscreen": fullscreen,
-            "snapped": snap::snapped_side(window).map(|s| match s {
-                snap::Side::Left => "left",
-                snap::Side::Right => "right",
-            }),
+            "snapped": snap::snapped_side(window).map(snap::Side::name),
+            "always_on_top": crate::stacking::is_always_on_top(window),
+            "all_workspaces": crate::stacking::is_on_all_workspaces(window),
             "ssd": decoration::is_ssd(window),
             "title_bar": decoration::has_title_bar(window),
             "focused": focused,

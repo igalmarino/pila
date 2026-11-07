@@ -130,6 +130,40 @@ fn a_locked_pointer_stays_put_and_gets_relative_motion() {
 }
 
 #[test]
+fn going_to_another_output_leaves_a_locked_pointer_where_it_is() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    let window = client.window("game").size(400, 300).create();
+    pila.wait_focus("game");
+    let (x, y, ..) = rect(&pila.window("game")["geometry"]);
+    pila.move_to((x + 100) as f64, (y + 100) as f64);
+    client.wait("pointer enter", |s| {
+        s.pointer_name.as_deref() == Some("game")
+    });
+    let constraints: ZwpPointerConstraintsV1 = client.bind("zwp_pointer_constraints_v1", 1);
+    let _locked = constraints.lock_pointer(
+        &client.surface(window),
+        &pointer(&client),
+        None,
+        Lifetime::Persistent,
+        &client.qh,
+        "locked".into(),
+    );
+    client.flush();
+    client.wait_logged("locked", "Locked");
+    pila.wait("constrained", |s| s["pointer"]["constrained"] == true);
+    pila.combo("Super+o");
+    pila.wait("focus on the other output", |s| s["focused"].is_null());
+    assert_eq!(
+        pila.state()["pointer"]["x"].as_f64().unwrap(),
+        (x + 100) as f64
+    );
+}
+
+#[test]
 fn a_lock_only_activates_on_the_focused_window_under_the_pointer() {
     let mut pila = TestPila::start();
     let client = pila.client();

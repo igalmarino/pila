@@ -156,7 +156,7 @@ impl Pila {
     }
 
     /// Put `windows` on top, in order, in X's stacking order too.
-    fn raise_in_order(&mut self, windows: &[Window]) {
+    pub(crate) fn raise_in_order(&mut self, windows: &[Window]) {
         for window in windows {
             self.space.raise_element(window, false);
             self.x11_window_raised(window);
@@ -168,6 +168,7 @@ impl Pila {
     pub fn raise_family(&mut self, window: &Window) {
         let family = self.transient_family(window);
         self.raise_in_order(&family);
+        self.keep_on_top();
         for w in self.space.elements() {
             w.set_activated(w == window);
         }
@@ -181,6 +182,7 @@ impl Pila {
         if descendants.len() > 1 {
             self.raise_in_order(&descendants[1..]);
         }
+        self.keep_on_top();
     }
 
     /// `window` was set on another window, or on none: if that left it
@@ -189,6 +191,7 @@ impl Pila {
         let Some(parent) = self.transient_parent(window) else {
             return;
         };
+        self.inherit_marks(window);
         let position = |w: &Window, space: &smithay::desktop::Space<Window>| {
             space.elements().position(|e| e == w)
         };
@@ -202,6 +205,7 @@ impl Pila {
             let mut descendants = Vec::new();
             self.descendants_in_order(window, &[], &mut descendants);
             self.raise_in_order(&descendants);
+            self.keep_on_top();
             self.refresh_pointer_focus();
             self.queue_redraw();
         }

@@ -313,6 +313,38 @@ impl Pila {
         }
     }
 
+    /// Put the pointer at `location` (a binding, not the device), unless a client
+    /// holds it where it is. Clients get it as any other motion.
+    pub(crate) fn warp_pointer(&mut self, location: Point<f64, Logical>) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let current = pointer.current_location();
+        if let Some((surface, origin)) = self.constraint_surface_under(current) {
+            if !matches!(
+                self.active_constraint(&surface, origin, current),
+                Constraint::None
+            ) {
+                return;
+            }
+        }
+        let under = self.surface_under(location);
+        pointer.motion(
+            self,
+            under.clone(),
+            &MotionEvent {
+                location,
+                serial: SERIAL_COUNTER.next_serial(),
+                time: self.start_time.elapsed().as_millis() as u32,
+            },
+        );
+        pointer.frame(self);
+        self.update_decoration_cursor(location);
+        if let Some((surface, origin)) = &under {
+            self.maybe_activate_constraint(surface, *origin, location);
+        }
+    }
+
     /// Resize arrows over a window's resize border, the default arrow over a
     /// title bar or the background. Client surfaces set their own.
     fn update_decoration_cursor(&mut self, pos: Point<f64, Logical>) {

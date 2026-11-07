@@ -212,6 +212,8 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 - **Pending vs committed:** layout uses the pending decoration mode (`layout_offset`),
   drawing and hit testing the committed one (`has_title_bar`); `fill_state` reads the
   pending xdg state.
+- **Stacking:** a new way to raise a window must end in `Pila::keep_on_top` (`stacking.rs`), or
+  always-on-top windows end up below it.
 - **Grabs:** `Pila::set_cursor` must be called after `set_grab` (`Focus::Clear` resets the
   cursor).
 - **Backends:** code outside them uses `Backend`'s methods rather than matching on it.

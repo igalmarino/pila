@@ -30,17 +30,49 @@ const EDGE: f64 = 2.0;
 /// title bar right above the output, and a button released over it never
 /// reaches pila, so the preview must show before the pointer gets there.
 const EDGE_TOP: f64 = 10.0;
+/// How near a corner, along either edge, a drag asks for a quarter.
+const CORNER: f64 = 64.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Left,
     Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Side {
+    /// As `pila msg` and the action names say it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Right => "right",
+            Side::TopLeft => "top-left",
+            Side::TopRight => "top-right",
+            Side::BottomLeft => "bottom-left",
+            Side::BottomRight => "bottom-right",
+        }
+    }
+
+    fn is_left(self) -> bool {
+        matches!(self, Side::Left | Side::TopLeft | Side::BottomLeft)
+    }
+
+    fn touches_top(self) -> bool {
+        !matches!(self, Side::BottomLeft | Side::BottomRight)
+    }
+
+    fn touches_bottom(self) -> bool {
+        !matches!(self, Side::TopLeft | Side::TopRight)
+    }
 }
 
 /// Where a dragged window would go if released now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapTarget {
-    Half(Side),
+    Side(Side),
     Maximize,
 }
 
@@ -78,14 +110,21 @@ pub fn snapped_side(window: &Window) -> Option<Side> {
 }
 
 /// The rectangle (window geometry, below a `bar`-high title bar) for the
-/// `side` half of `area`.
-pub fn half(area: Rectangle<i32, Logical>, side: Side, bar: i32) -> Rectangle<i32, Logical> {
+/// half or quarter of `area` that `side` names.
+pub fn side_rect(area: Rectangle<i32, Logical>, side: Side, bar: i32) -> Rectangle<i32, Logical> {
     let left_w = area.size.w / 2;
-    let (x, w) = match side {
-        Side::Left => (area.loc.x, left_w),
-        Side::Right => (area.loc.x + left_w, area.size.w - left_w),
+    let top_h = area.size.h / 2;
+    let (x, w) = if side.is_left() {
+        (area.loc.x, left_w)
+    } else {
+        (area.loc.x + left_w, area.size.w - left_w)
     };
-    Rectangle::new((x, area.loc.y + bar).into(), (w, area.size.h - bar).into())
+    let (y, h) = match (side.touches_top(), side.touches_bottom()) {
+        (true, true) => (area.loc.y, area.size.h),
+        (true, false) => (area.loc.y, top_h),
+        (false, _) => (area.loc.y + top_h, area.size.h - top_h),
+    };
+    Rectangle::new((x, y + bar).into(), (w, h - bar).into())
 }
 
 /// Which snap the pointer at `pos` asks for, given the output it's on.
@@ -94,11 +133,29 @@ pub fn edge_target(
     pos: Point<f64, Logical>,
 ) -> Option<SnapTarget> {
     let geo = output.to_f64();
-    if pos.x <= geo.loc.x + EDGE {
-        Some(SnapTarget::Half(Side::Left))
-    } else if pos.x >= geo.loc.x + geo.size.w - 1.0 - EDGE {
-        Some(SnapTarget::Half(Side::Right))
-    } else if pos.y <= geo.loc.y + EDGE_TOP {
+    let (right, bottom) = (geo.loc.x + geo.size.w - 1.0, geo.loc.y + geo.size.h - 1.0);
+    let at_left = pos.x <= geo.loc.x + EDGE;
+    let at_right = pos.x >= right - EDGE;
+    let at_top = pos.y <= geo.loc.y + EDGE_TOP;
+    let at_bottom = pos.y >= bottom - EDGE;
+    let near_left = pos.x <= geo.loc.x + CORNER;
+    let near_right = pos.x >= right - CORNER;
+    let near_top = pos.y <= geo.loc.y + CORNER;
+    let near_bottom = pos.y >= bottom - CORNER;
+    let corner = |side| Some(SnapTarget::Side(side));
+    if (at_left && near_top) || (at_top && near_left) {
+        corner(Side::TopLeft)
+    } else if (at_right && near_top) || (at_top && near_right) {
+        corner(Side::TopRight)
+    } else if (at_left && near_bottom) || (at_bottom && near_left) {
+        corner(Side::BottomLeft)
+    } else if (at_right && near_bottom) || (at_bottom && near_right) {
+        corner(Side::BottomRight)
+    } else if at_left {
+        corner(Side::Left)
+    } else if at_right {
+        corner(Side::Right)
+    } else if at_top {
         Some(SnapTarget::Maximize)
     } else {
         None
@@ -127,11 +184,16 @@ impl Pila {
                     state.states.unset(s);
                 }
                 if let Some(side) = side {
-                    state.states.set(TiledTop);
-                    state.states.set(TiledBottom);
-                    state.states.set(match side {
-                        Side::Left => TiledLeft,
-                        Side::Right => TiledRight,
+                    if side.touches_top() {
+                        state.states.set(TiledTop);
+                    }
+                    if side.touches_bottom() {
+                        state.states.set(TiledBottom);
+                    }
+                    state.states.set(if side.is_left() {
+                        TiledLeft
+                    } else {
+                        TiledRight
                     });
                 }
                 state.size = Some(rect.size);
@@ -177,9 +239,28 @@ impl Pila {
         let Some(area) = self.usable_area_for(window) else {
             return;
         };
-        let rect = half(area, side, decoration::layout_offset(window, false));
+        let rect = side_rect(area, side, decoration::layout_offset(window, false));
         set_snap_state(window, Some((side, before)));
         self.apply_rect(window, rect, Some(side));
+    }
+
+    /// If `window` is snapped: the same side of `area`, on another output, and it
+    /// goes back to `moved(where it was before)`. Whether it was snapped.
+    pub(crate) fn move_snapped_to(
+        &mut self,
+        window: &Window,
+        area: Rectangle<i32, Logical>,
+        moved: impl Fn(Rectangle<i32, Logical>) -> Point<i32, Logical>,
+    ) -> bool {
+        let Some((side, mut before)) = snap_state(window) else {
+            return false;
+        };
+        before.loc = moved(before);
+        self.animate_geometry(window);
+        set_snap_state(window, Some((side, before)));
+        let rect = side_rect(area, side, decoration::layout_offset(window, false));
+        self.apply_rect(window, rect, Some(side));
+        true
     }
 
     /// Back to the size it had before snapping, at `at` (or where it was).
@@ -280,9 +361,9 @@ impl Pila {
         let area = self.usable_area_for(window)?;
         let bar = decoration::layout_offset(window, false);
         match target {
-            SnapTarget::Half(side) => {
+            SnapTarget::Side(side) => {
                 // The preview covers the title bar too.
-                let rect = half(area, side, bar);
+                let rect = side_rect(area, side, bar);
                 Some(Rectangle::new(
                     (rect.loc.x, rect.loc.y - bar).into(),
                     (rect.size.w, rect.size.h + bar).into(),
@@ -297,7 +378,7 @@ impl Pila {
     pub fn apply_snap_target(&mut self, window: &Window, target: SnapTarget) {
         tracing::debug!(?target, rect = ?self.window_rect(window), "drop at an output edge");
         match target {
-            SnapTarget::Half(side) => self.snap_window(window, side),
+            SnapTarget::Side(side) => self.snap_window(window, side),
             SnapTarget::Maximize => {
                 let before = self.forget_snap(window);
                 self.set_fill_state(window, true, false);
@@ -317,8 +398,8 @@ mod tests {
     #[test]
     fn halves_split_the_area_below_the_title_bar() {
         let area = Rectangle::new((0, 30).into(), (1921, 1050).into());
-        let left = half(area, Side::Left, 28);
-        let right = half(area, Side::Right, 28);
+        let left = side_rect(area, Side::Left, 28);
+        let right = side_rect(area, Side::Right, 28);
         assert_eq!(left, Rectangle::new((0, 58).into(), (960, 1022).into()));
         assert_eq!(right, Rectangle::new((960, 58).into(), (961, 1022).into()));
     }
@@ -327,10 +408,21 @@ mod tests {
     fn edges_pick_the_snap_target() {
         let output = Rectangle::new((1920, 0).into(), (2560, 1440).into());
         let at = |x, y| edge_target(output, (x, y).into());
-        assert_eq!(at(1920.0, 700.0), Some(SnapTarget::Half(Side::Left)));
-        assert_eq!(at(4479.0, 700.0), Some(SnapTarget::Half(Side::Right)));
+        assert_eq!(at(1920.0, 700.0), Some(SnapTarget::Side(Side::Left)));
+        assert_eq!(at(4479.0, 700.0), Some(SnapTarget::Side(Side::Right)));
         assert_eq!(at(3000.0, 0.0), Some(SnapTarget::Maximize));
         assert_eq!(at(3000.0, 9.0), Some(SnapTarget::Maximize));
         assert_eq!(at(3000.0, 700.0), None);
+        // Near a corner, along either edge.
+        let corner = |side| Some(SnapTarget::Side(side));
+        assert_eq!(at(1920.0, 0.0), corner(Side::TopLeft));
+        assert_eq!(at(1920.0, 60.0), corner(Side::TopLeft));
+        assert_eq!(at(1980.0, 0.0), corner(Side::TopLeft));
+        assert_eq!(at(4479.0, 0.0), corner(Side::TopRight));
+        assert_eq!(at(1920.0, 1439.0), corner(Side::BottomLeft));
+        assert_eq!(at(1980.0, 1439.0), corner(Side::BottomLeft));
+        assert_eq!(at(4479.0, 1439.0), corner(Side::BottomRight));
+        // Along the bottom away from the corners: nothing.
+        assert_eq!(at(3000.0, 1439.0), None);
     }
 }

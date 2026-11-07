@@ -57,6 +57,8 @@ impl Pila {
             .elements()
             .rev()
             .filter(|w| !is_override_redirect(w))
+            // One kept above a fullscreen window doesn't bring panels back.
+            .filter(|w| !crate::stacking::is_always_on_top(w) || fill_state(w).1)
             .find(|w| self.window_output(w).as_ref() == Some(output));
         top.is_some_and(|w| fill_state(w).1)
             && !layer_map_for_output(output)

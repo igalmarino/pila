@@ -49,6 +49,7 @@ mod session_lock;
 mod session_management;
 mod session_protocol;
 mod snap;
+mod stacking;
 mod state;
 mod switcher;
 mod test_control;

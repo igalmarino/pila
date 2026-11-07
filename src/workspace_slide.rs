@@ -39,8 +39,9 @@ pub struct WorkspaceSlide {
     direction: f64,
     /// Per output, where it is and its windows as they were.
     old: Vec<(Rectangle<i32, Logical>, TextureRenderBuffer<GlesTexture>)>,
-    /// A window dragged along to the new workspace: drawn as usual.
-    carried: Option<Window>,
+    /// A window dragged along to the new workspace, and those on all of them:
+    /// drawn as usual.
+    carried: Vec<Window>,
     textures: SlideTextures,
 }
 
@@ -51,7 +52,7 @@ pub struct SceneSlide {
     pub progress: f64,
     pub direction: f64,
     pub old: Vec<(Rectangle<i32, Logical>, TextureRenderBuffer<GlesTexture>)>,
-    pub carried: Option<Window>,
+    pub carried: Vec<Window>,
     pub textures: SlideTextures,
 }
 
@@ -80,8 +81,8 @@ impl SceneSlide {
 impl Pila {
     /// The active workspace is about to become `index`: take each output's
     /// picture of the windows now, for them to slide out. Call before the
-    /// windows are swapped; `carried` stays out of the picture.
-    pub fn start_workspace_slide(&mut self, index: usize, carried: Option<Window>) {
+    /// windows are swapped; `carried` stay out of the picture.
+    pub fn start_workspace_slide(&mut self, index: usize, carried: Vec<Window>) {
         // A slide still running: the new one starts from what it shows.
         let running = self.scene_slide(self.animation_time());
         self.workspace_slide = None;
@@ -97,7 +98,7 @@ impl Pila {
         let (windows, ghosts) = self.scene_windows(now);
         let windows: Vec<_> = windows
             .into_iter()
-            .filter(|w| Some(&w.window) != carried.as_ref())
+            .filter(|w| !carried.contains(&w.window))
             .collect();
         let outputs: Vec<_> = self
             .space

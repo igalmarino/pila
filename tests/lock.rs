@@ -59,6 +59,23 @@ fn bindings_and_workspace_switches_dont_run_while_locked() {
 }
 
 #[test]
+fn stacking_bindings_dont_run_while_locked() {
+    let (mut pila, _windows, _locker, _lock) = locked();
+    let before = pila.state();
+    for combo in ["Super+t", "Super+p", "Super+h", "Super+o", "Super+Shift+o"] {
+        pila.combo(combo);
+    }
+    pila.settle();
+    let after = pila.state();
+    assert_eq!(stacking(&after), stacking(&before));
+    for window in after["windows"].as_array().unwrap() {
+        assert_eq!(window["always_on_top"], false);
+        assert_eq!(window["all_workspaces"], false);
+        assert_eq!(window["minimized"], false);
+    }
+}
+
+#[test]
 fn clicks_dont_reach_windows_while_locked() {
     let (mut pila, apps, locker, _lock) = locked();
     let (x, y, ..) = rect(&pila.window("a")["geometry"]);

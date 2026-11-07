@@ -109,13 +109,17 @@ tap = true
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
 # the previous window; hold the modifiers and repeat for older ones),
 # cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
-# fullscreen, snap-left, snap-right, restore, move-left/right/up/down,
+# fullscreen, snap-left, snap-right, snap-top-left, snap-top-right,
+# snap-bottom-left, snap-bottom-right, restore, move-left/right/up/down,
 # grow-width, shrink-width, grow-height, shrink-height, center,
+# toggle-always-on-top (above the others), toggle-all-workspaces,
+# show-desktop (minimize the workspace's windows; again, bring them back),
+# focus-output <next|prev>, move-to-output <next|prev>,
 # workspace <n|next|prev> (go to a workspace; next/prev don't wrap around),
 # move-to-workspace <n|next|prev> (move the window there; "workspace-next" and
 # "move-to-workspace-prev" work too), quit, none.
-# Dragging a window to the left/right edge of a screen snaps it to that half;
-# the top edge maximizes it.
+# Dragging a window to the left/right edge of a screen snaps it to that half,
+# near a corner to that quarter; the top edge maximizes it.
 #
 # The defaults:
 #   "Mod+Return"  = "terminal"
@@ -134,6 +138,11 @@ tap = true
 #   "Mod+Ctrl+Right" = "grow-width"   "Mod+Ctrl+Left" = "shrink-width"
 #   "Mod+Ctrl+Down"  = "grow-height"  "Mod+Ctrl+Up"   = "shrink-height"
 #   "Mod+C"       = "center"
+#   "Mod+T"       = "toggle-always-on-top"
+#   "Mod+P"       = "toggle-all-workspaces"
+#   "Mod+H"       = "show-desktop"
+#   "Mod+O"       = "focus-output next"
+#   "Mod+Shift+O" = "move-to-output next"
 #   "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"   (a region to the clipboard)
 #   "Mod+Ctrl+S"  = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
 #                   (the screen under the pointer to a file; both need grim and slurp)
@@ -240,6 +249,8 @@ tap = true
 # app-id = "thunderbird"
 # open-on-workspace = 3            # opens there, without switching to it
 # open-maximized = true            # or open-fullscreen = true
+# always-on-top = true             # above the others, from when it opens
+# all-workspaces = true            # on every workspace, from when it opens
 #
 # # A layer surface's namespace: scripts/layer-namespaces lists those of
 # # what you run.

@@ -191,6 +191,8 @@ pub struct Windows {
     /// (`switcher.rs`).
     pub focus_history: Vec<Window>,
     pub switch: Option<Switch>,
+    /// What `show-desktop` minimized, to bring back (`minimize.rs`).
+    pub desktop_shown: Option<crate::minimize::DesktopShown>,
 }
 
 /// pila's own input state, beyond the seat's (`Pila::input`).
@@ -559,7 +561,7 @@ impl Pila {
         let slide = self.scene_slide(now);
         if let Some(slide) = &slide {
             for entry in &mut windows {
-                if slide.carried.as_ref() != Some(&entry.window) {
+                if !slide.carried.contains(&entry.window) {
                     entry.slid = Some(self.window_output(&entry.window));
                 }
             }
@@ -914,6 +916,12 @@ impl Pila {
     /// `place_new_window` with its window rules already resolved (an X11
     /// window's, whose size had to be set before).
     pub fn place_new_window_with(&mut self, window: Window, props: crate::rules::WindowProps) {
+        self.windows.desktop_shown = None;
+        self.mark_new_window(
+            &window,
+            props.always_on_top == Some(true),
+            props.all_workspaces == Some(true),
+        );
         let pointer_location = self.pointer_location();
         let (maximized, fullscreen) = fill_state(&window);
         // A position rule wins over the session, and is from the pointer's
@@ -988,6 +996,7 @@ impl Pila {
             .open_on_workspace
             .or(parent_workspace)
             .filter(|index| *index != self.workspaces.active)
+            .filter(|_| !crate::stacking::is_on_all_workspaces(&window))
         {
             debug!(target: "pila::rules", app_id, workspace = index + 1, "opens on workspace");
             self.park(&window, index);
@@ -1395,6 +1404,34 @@ impl Pila {
                     self.snap_window(&window, side);
                 }
             }
+            Action::SnapTopLeft
+            | Action::SnapTopRight
+            | Action::SnapBottomLeft
+            | Action::SnapBottomRight => {
+                if let Some(window) = self.focused_window() {
+                    use crate::snap::Side;
+                    let side = match action {
+                        Action::SnapTopLeft => Side::TopLeft,
+                        Action::SnapTopRight => Side::TopRight,
+                        Action::SnapBottomLeft => Side::BottomLeft,
+                        _ => Side::BottomRight,
+                    };
+                    self.snap_window(&window, side);
+                }
+            }
+            Action::ToggleAlwaysOnTop => {
+                if let Some(window) = self.focused_window() {
+                    self.toggle_always_on_top(&window);
+                }
+            }
+            Action::ToggleAllWorkspaces => {
+                if let Some(window) = self.focused_window() {
+                    self.toggle_all_workspaces(&window);
+                }
+            }
+            Action::ShowDesktop => self.show_desktop(),
+            Action::FocusOutput(target) => self.focus_output(target),
+            Action::MoveToOutput(target) => self.move_focused_to_output(target),
             Action::Restore => {
                 if let Some(window) = self.focused_window() {
                     self.restore_window_size(&window);
