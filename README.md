@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/igalmarino/pila/actions/workflows/ci.yml/badge.svg)](https://github.com/igalmarino/pila/actions/workflows/ci.yml)
 
-A stacking Wayland compositor written in Rust on [Smithay](https://github.com/Smithay/smithay).
+A stacking (not tiling) Wayland compositor written in Rust on [Smithay](https://github.com/Smithay/smithay).
 Windows float and overlap, with server-side title bars, like a classic desktop; panels,
 launchers, wallpapers and lock screens come from the usual Wayland tools (waybar, fuzzel,
 swaybg, swaylock, ...).
