@@ -243,14 +243,13 @@ screen:
 
 ```toml
 autostart = ["noctalia"]
+launcher = "noctalia msg panel-toggle launcher"    # Mod+D opens Noctalia's launcher
 
 # Noctalia animates its own panels; without this, pila animates them as well.
 [[layer-rule]]
 namespace = "noctalia-*"
 animations = false
 ```
-
-Set `launcher` to the command that opens Noctalia's launcher if you want `Mod+D` for it.
 
 **With separate tools**, for example:
 
