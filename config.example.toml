@@ -16,7 +16,7 @@
 # window, Mod+right drag resizes it from the nearest corner): alt, super or
 # ctrl. Unset, it's super on a TTY and alt nested (a host desktop such as
 # GNOME grabs Super while pila runs inside it).
-# mod = "super"
+# mod = "super"                  # (default on a TTY; alt nested)
 
 # Mod+Return, and what starts when there's no autostart. Unset, the first
 # installed of kitty, foot, alacritty, ghostty, wezterm, konsole,
@@ -42,7 +42,7 @@
 # Rounded window corners: the radius in logical pixels, 0 (square) to 64.
 # Maximized and fullscreen windows stay square. The radius is at most half
 # the window's shorter side, and with a title bar at most the bar's height (28).
-# corner-radius = 0                # (default); e.g. 10
+# corner-radius = 0                # (default)
 
 # The shadow under each window, stronger for the focused one. None for a
 # maximized or fullscreen window, or one whose app draws its own (past its
@@ -167,6 +167,8 @@
 #   "Mod+Shift+Page_Up"   = "move-to-workspace-prev"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
+#
+# Examples:
 # "Mod+Shift+Return" = "spawn kitty -e htop"
 # "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
 # "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
@@ -188,6 +190,8 @@
 #   "swipe-3-down"  = "restore"
 #   "swipe-4-left"  = "workspace-next"
 #   "swipe-4-right" = "workspace-prev"
+#
+# Examples:
 # "swipe-3-down" = "minimize"
 # "swipe-4-up" = "snap-left"
 # "swipe-4-down" = "snap-right"
