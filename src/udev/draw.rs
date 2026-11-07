@@ -179,9 +179,9 @@ pub(super) fn frame_finish(
     // While an animation runs every vblank should show a new frame: the
     // vblanks since the last frame shown, beyond one, were missed (if it's
     // still running: the pause after one ends doesn't count).
-    let missed = match (metadata.is_some(), surface.last_vblank) {
-        (true, Some(last)) if surface.back_to_back && animating => seq.saturating_sub(last + 1),
-        _ => 0,
+    let missed = match metadata.is_some().then_some(surface.last_vblank).flatten() {
+        Some(last) => missed_refreshes(last, seq, surface.back_to_back && animating),
+        None => 0,
     };
     surface.last_vblank = metadata.is_some().then_some(seq);
     surface.last_vblank_time = Some(hw_time.unwrap_or_else(|| now.into()));
@@ -217,8 +217,26 @@ pub(super) fn frame_finish(
     let animating = state.animating();
     if let Some(Backend::Udev(data)) = &mut state.backend {
         if let Some(surface) = data.outputs.get_mut(&crtc) {
-            surface.back_to_back = animating;
+            surface.back_to_back = back_to_back(animating, surface.frame_pending);
         }
+    }
+}
+
+/// Whether the next frame on an output follows the one just shown with no pause
+/// meant: an animation runs, and this output has a frame on its way. One that
+/// has nothing new while another output animates just rests, and its idle
+/// vblanks aren't missed refreshes.
+fn back_to_back(animating: bool, frame_queued: bool) -> bool {
+    animating && frame_queued
+}
+
+/// Refreshes missed from the vblank `last` that showed a frame to `seq` that
+/// shows the next: all but one, if they were meant to be back to back.
+fn missed_refreshes(last: u64, seq: u64, back_to_back: bool) -> u64 {
+    if back_to_back {
+        seq.saturating_sub(last + 1)
+    } else {
+        0
     }
 }
 
@@ -235,5 +253,27 @@ pub(super) fn maybe_confirm_lock(state: &mut Pila) {
         .all(|surface| surface.lock_frame == LockFrame::Shown)
     {
         state.confirm_lock();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_output_at_rest_during_another_outputs_animation_misses_nothing() {
+        // Its last frame showed during the animation, and nothing followed.
+        assert!(!back_to_back(true, false));
+        // 240 vblanks later something changes, with another animation running.
+        assert_eq!(missed_refreshes(1000, 1241, back_to_back(true, false)), 0);
+    }
+
+    #[test]
+    fn a_frame_late_during_an_animation_is_missed_refreshes() {
+        assert!(back_to_back(true, true));
+        assert_eq!(missed_refreshes(1000, 1001, back_to_back(true, true)), 0);
+        assert_eq!(missed_refreshes(1000, 1003, back_to_back(true, true)), 2);
+        // With no animation the pause is meant.
+        assert_eq!(missed_refreshes(1000, 1003, back_to_back(false, true)), 0);
     }
 }
