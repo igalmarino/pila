@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 (2026-11-06)
+
+- **Removed:** `disable-internal-display`. **A config that has it is now invalid:** pila says so
+  and starts with the defaults, so delete the line. To turn a built-in screen off, use
+  `enabled = false` in its `[[output]]`; it comes back if no other output is left on.
+- **Shadows:** a shadow under each window, stronger for the focused one, on by default.
+  `[shadow]` sets its size, offset and colors or turns it off, and a window rule's `shadow` does
+  it per app. Maximized and fullscreen windows have none, nor do those that draw their own.
+- **Colors:** `[colors]` sets the title bars, buttons, the background and the snap preview,
+  applied when the config is saved.
+- **Windows:**
+  - Mod+T keeps a window above the others, also over a fullscreen one, and Mod+P keeps it on all
+    workspaces. Rules can do it when a window opens: `always-on-top`, `all-workspaces`.
+  - Dragging to a corner snaps to a quarter of the screen. `snap-top-left` and the like are
+    actions too, with no default binding.
+  - Mod+H shows the desktop; again, it brings the windows back.
+- **Monitors:** Mod+Shift+O sends a window to the next monitor, keeping its place, or filling it or
+  snapping to the same side. Mod+O moves the pointer and focus there.
+- **`pila msg`:** lists windows, monitors and workspaces as text or JSON and runs any action, for
+  scripts. Actions are refused while the session is locked. The format is in `docs/IPC.md`.
+- **New default bindings:** Mod+T, Mod+P, Mod+H, Mod+O and Mod+Shift+O. Your `[bindings]` still win.
+- **Fixes:** `scripts/check` no longer counts as missed refreshes the time a monitor rests while
+  another one animates.
+
+All of this was tried on one AMD laptop with an external monitor; other GPUs are untried.
+
 ## 0.2.3 (2026-11-06)
 
 - **Blur behind windows:** a translucent window can show what's behind it blurred, when the app
