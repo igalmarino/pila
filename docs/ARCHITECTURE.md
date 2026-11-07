@@ -537,6 +537,20 @@ Key flows and invariants:
   rasterized with its corner cut. `ShapeDamage` (draws nothing, in front of the window)
   damages a window whose shape changed without a commit (e.g. a reload). Shaders are
   compiled once per EGL context; on failure corners stay square.
+- **Shadows** (`rounded.rs`, `[shadow]`, on by default): `Pila::scene_window` gives a window a
+  `Shadow` (`SceneWindow::shadow`) from its frame and corners, stronger if it's focused. None
+  for a maximized or fullscreen window or an override-redirect one, or for one whose `bbox` goes
+  past its geometry (the client draws its own), unless a rule's `shadow` says otherwise.
+  `ShadowElement` is a pixel shader from the distance to the frame: no texture and no pass of
+  its own, and clear inside the frame, so it doesn't show through a translucent window or get
+  into its blur. It comes last in `single_window_elements`, so it's behind the window's backdrop
+  and in the backdrop of what's in front. `content_rect` includes it: textures of animations
+  and snapshots hold it. Its id and commit are in the window's user data, and the commit only
+  changes with its look (`ShadowState`): moving is the damage tracker's job, and a frame only
+  draws it where something over or under it changed. Never opaque, and out of hit testing.
+- **Colors** (`[colors]`, `config::Colors`, premultiplied): `Scene::colors` for the clear color,
+  `SceneTitleBar::colors` for the bar. Rasterized buttons and titles are keyed by their colors,
+  so a reload redraws them. The bar stays opaque, which `SceneWindow::covers` counts on.
 - **Resize** uses per-surface `ResizeSurfaceState` in the surface data map;
   `resize_grab::handle_commit` (called from `CompositorHandler::commit`) repositions the
   window when resizing from the top/left edges once the client commits the new size.

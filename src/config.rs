@@ -862,11 +862,203 @@ struct ConfigFile {
     input: InputFile,
     workspaces: Option<usize>,
     corner_radius: Option<u32>,
+    shadow: ShadowFile,
+    colors: ColorsFile,
     animations: AnimationsFile,
     #[serde(rename = "window-rule")]
     window_rules: Vec<crate::rules::WindowRuleFile>,
     #[serde(rename = "layer-rule")]
     layer_rules: Vec<crate::rules::LayerRuleFile>,
+}
+
+/// A color from the config: `#rrggbb`, or `#rrggbbaa` if `alpha` allows it.
+/// Premultiplied, as the renderer takes it.
+fn parse_color(name: &str, text: &str, alpha: bool) -> Result<[f32; 4], String> {
+    let invalid = || {
+        let form = if alpha {
+            "#rrggbb or #rrggbbaa"
+        } else {
+            "#rrggbb"
+        };
+        format!("{name} = {text:?}: must be {form}")
+    };
+    let digits = text.strip_prefix('#').ok_or_else(invalid)?;
+    if !digits.is_ascii() || !(digits.len() == 6 || (alpha && digits.len() == 8)) {
+        return Err(invalid());
+    }
+    let channel = |i: usize| {
+        u8::from_str_radix(&digits[i..i + 2], 16)
+            .map(|v| f32::from(v) / 255.0)
+            .map_err(|_| invalid())
+    };
+    let a = if digits.len() == 8 { channel(6)? } else { 1.0 };
+    Ok([channel(0)? * a, channel(2)? * a, channel(4)? * a, a])
+}
+
+/// The colors of what pila draws itself (`[colors]`). Premultiplied.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Colors {
+    pub bar: [f32; 4],
+    pub bar_inactive: [f32; 4],
+    /// Title and buttons of the focused window.
+    pub icon: [f32; 3],
+    pub icon_inactive: [f32; 3],
+    /// A title bar button under the pointer.
+    pub hover: [f32; 3],
+    pub hover_icon: [f32; 3],
+    pub close_hover: [f32; 3],
+    pub close_hover_icon: [f32; 3],
+    /// Behind all windows and layer surfaces.
+    pub background: [f32; 4],
+    /// Where a dragged window would snap to (`snap.rs`).
+    pub snap_preview: [f32; 4],
+}
+
+impl Default for Colors {
+    fn default() -> Self {
+        // Neutral dark greys; focus is shown by the bar and icon brightness.
+        Self {
+            bar: [0.184, 0.192, 0.212, 1.0],          // #2f3136
+            bar_inactive: [0.149, 0.153, 0.169, 1.0], // #26272b
+            icon: [0.875, 0.882, 0.898],              // #dfe1e5
+            icon_inactive: [0.502, 0.514, 0.541],     // #80838a
+            hover: [0.247, 0.259, 0.286],             // #3f4249
+            hover_icon: [0.949, 0.953, 0.961],        // #f2f3f5
+            close_hover: [0.769, 0.169, 0.110],       // #c42b1c
+            close_hover_icon: [1.0, 1.0, 1.0],
+            background: [0.12, 0.13, 0.15, 1.0],   // #1f2126
+            snap_preview: [0.08, 0.14, 0.24, 0.3], // #4477cc4d
+        }
+    }
+}
+
+/// `[colors]` as written: unset ones keep `Colors`' defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct ColorsFile {
+    bar: Option<String>,
+    bar_inactive: Option<String>,
+    icon: Option<String>,
+    icon_inactive: Option<String>,
+    hover: Option<String>,
+    hover_icon: Option<String>,
+    close_hover: Option<String>,
+    close_hover_icon: Option<String>,
+    background: Option<String>,
+    snap_preview: Option<String>,
+}
+
+impl ColorsFile {
+    fn validate(self) -> Result<Colors, String> {
+        let defaults = Colors::default();
+        let rgba = |name: &str, text: Option<String>, default: [f32; 4], alpha: bool| {
+            text.map_or(Ok(default), |text| {
+                parse_color(&format!("colors.{name}"), &text, alpha)
+            })
+        };
+        let rgb = |name: &str, text: Option<String>, default: [f32; 3]| {
+            text.map_or(Ok(default), |text| {
+                parse_color(&format!("colors.{name}"), &text, false).map(|[r, g, b, _]| [r, g, b])
+            })
+        };
+        Ok(Colors {
+            bar: rgba("bar", self.bar, defaults.bar, false)?,
+            bar_inactive: rgba(
+                "bar-inactive",
+                self.bar_inactive,
+                defaults.bar_inactive,
+                false,
+            )?,
+            icon: rgb("icon", self.icon, defaults.icon)?,
+            icon_inactive: rgb("icon-inactive", self.icon_inactive, defaults.icon_inactive)?,
+            hover: rgb("hover", self.hover, defaults.hover)?,
+            hover_icon: rgb("hover-icon", self.hover_icon, defaults.hover_icon)?,
+            close_hover: rgb("close-hover", self.close_hover, defaults.close_hover)?,
+            close_hover_icon: rgb(
+                "close-hover-icon",
+                self.close_hover_icon,
+                defaults.close_hover_icon,
+            )?,
+            background: rgba("background", self.background, defaults.background, false)?,
+            snap_preview: rgba(
+                "snap-preview",
+                self.snap_preview,
+                defaults.snap_preview,
+                true,
+            )?,
+        })
+    }
+}
+
+/// The largest `[shadow]` `size` and, either way, `offset` (logical pixels).
+const MAX_SHADOW: i32 = 64;
+
+/// The shadows pila draws under windows (`[shadow]`; `rounded.rs`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowConfig {
+    pub enabled: bool,
+    /// How far it reaches past the window, in logical pixels.
+    pub size: i32,
+    pub offset: (i32, i32),
+    /// Premultiplied, under the focused window.
+    pub color: [f32; 4],
+    pub inactive_color: [f32; 4],
+}
+
+impl Default for ShadowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            size: 24,
+            offset: (0, 6),
+            color: [0.0, 0.0, 0.0, 0.4],
+            inactive_color: [0.0, 0.0, 0.0, 0.2],
+        }
+    }
+}
+
+/// `[shadow]` as written: unset ones keep `ShadowConfig`'s defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct ShadowFile {
+    enabled: Option<bool>,
+    size: Option<i32>,
+    offset: Option<[i32; 2]>,
+    color: Option<String>,
+    inactive_color: Option<String>,
+}
+
+impl ShadowFile {
+    fn validate(self) -> Result<ShadowConfig, String> {
+        let defaults = ShadowConfig::default();
+        let size = self.size.unwrap_or(defaults.size);
+        if !(0..=MAX_SHADOW).contains(&size) {
+            return Err(format!("shadow.size = {size}: must be 0 to {MAX_SHADOW}"));
+        }
+        let offset = self.offset.map_or(defaults.offset, |[x, y]| (x, y));
+        if [offset.0, offset.1].iter().any(|v| v.abs() > MAX_SHADOW) {
+            return Err(format!(
+                "shadow.offset = [{}, {}]: must be -{MAX_SHADOW} to {MAX_SHADOW}",
+                offset.0, offset.1
+            ));
+        }
+        let color = |name: &str, text: Option<String>, default| {
+            text.map_or(Ok(default), |text| {
+                parse_color(&format!("shadow.{name}"), &text, true)
+            })
+        };
+        Ok(ShadowConfig {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            size,
+            offset,
+            color: color("color", self.color, defaults.color)?,
+            inactive_color: color(
+                "inactive-color",
+                self.inactive_color,
+                defaults.inactive_color,
+            )?,
+        })
+    }
 }
 
 /// `[input]` as written: unset sections keep `InputConfig`'s defaults.
@@ -898,6 +1090,8 @@ pub struct Config {
     pub workspaces: usize,
     /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
     pub corner_radius: u32,
+    pub shadow: ShadowConfig,
+    pub colors: Colors,
     /// Which animations play and how long they last (`animation.rs`).
     pub animations: AnimationsConfig,
     /// `[[window-rule]]` and `[[layer-rule]]`, in order (`rules.rs`).
@@ -1025,6 +1219,8 @@ impl Config {
             }
         };
 
+        let shadow = file.shadow.validate()?;
+        let colors = file.colors.validate()?;
         let animations = file.animations.validate()?;
         let window_rules = file
             .window_rules
@@ -1117,6 +1313,8 @@ impl Config {
             input,
             workspaces,
             corner_radius,
+            shadow,
+            colors,
             animations,
             window_rules,
             layer_rules,
@@ -1466,6 +1664,43 @@ mod tests {
         };
         assert!(spawned(config.action_for(Keysym::s, &alt_shift)).contains("wl-copy"));
         assert!(spawned(config.action_for(Keysym::s, &alt_ctrl)).contains("$PILA_OUTPUT"));
+    }
+
+    #[test]
+    fn colors_are_premultiplied_and_keep_their_defaults() {
+        let config = Config::from_toml(
+            "[colors]\nbar = \"#ff0000\"\nsnap-preview = \"#ff000080\"\n",
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(config.colors.bar, [1.0, 0.0, 0.0, 1.0]);
+        let alpha = 128.0 / 255.0;
+        assert_eq!(config.colors.snap_preview, [alpha, 0.0, 0.0, alpha]);
+        assert_eq!(config.colors.icon, Colors::default().icon);
+    }
+
+    #[test]
+    fn a_bad_color_says_which_and_why() {
+        for (text, wanted) in [
+            ("[colors]\nbar = \"red\"", "colors.bar"),
+            ("[colors]\nbar = \"#ff0000aa\"", "#rrggbb"),
+            ("[colors]\nicon = \"#ggg000\"", "colors.icon"),
+            ("[colors]\nhover = \"#ñ00000\"", "colors.hover"),
+            ("[shadow]\ncolor = \"#12\"", "shadow.color"),
+        ] {
+            let error = Config::from_toml(text, &no_env).unwrap_err();
+            assert!(error.contains(wanted), "{text}: {error}");
+        }
+    }
+
+    #[test]
+    fn shadows_are_on_by_default_and_bounded() {
+        let shadow = Config::from_toml("", &no_env).unwrap().shadow;
+        assert_eq!(shadow, ShadowConfig::default());
+        assert!(shadow.enabled);
+        assert!(Config::from_toml("[shadow]\nsize = 65", &no_env).is_err());
+        assert!(Config::from_toml("[shadow]\nsize = -1", &no_env).is_err());
+        assert!(Config::from_toml("[shadow]\noffset = [0, 65]", &no_env).is_err());
     }
 
     #[test]

@@ -29,9 +29,6 @@ pub struct MoveSurfaceGrab {
     pub moved: bool,
 }
 
-/// The snap preview's color: a translucent blue, premultiplied.
-const PREVIEW_COLOR: [f32; 4] = [0.08, 0.14, 0.24, 0.3];
-
 impl PointerGrab<Pila> for MoveSurfaceGrab {
     fn motion(
         &mut self,
@@ -66,7 +63,8 @@ impl PointerGrab<Pila> for MoveSurfaceGrab {
             self.snap = target;
             data.snap_preview = target.and_then(|t| data.snap_target_rect(&self.window, t));
             if let Some(rect) = data.snap_preview {
-                data.snap_preview_buffer.update(rect.size, PREVIEW_COLOR);
+                data.snap_preview_buffer
+                    .update(rect.size, data.config.colors.snap_preview);
             }
             data.queue_redraw();
         }

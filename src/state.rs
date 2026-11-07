@@ -586,6 +586,7 @@ impl Pila {
             ghosts,
             lower: layers(self.lower_layers()),
             corner_radius: self.config.corner_radius,
+            colors: self.config.colors,
             ..Default::default()
         }
     }
@@ -633,10 +634,11 @@ impl Pila {
         let loc = self.space.element_location(window)?;
         let bar_rect = decoration::title_bar_rect(window, loc);
         let (maximized, fullscreen) = fill_state(window);
-        let (radius, alpha) = crate::rules::with_window_props(window, |props| {
+        let (radius, alpha, shadow_rule) = crate::rules::with_window_props(window, |props| {
             (
                 props.corner_radius.unwrap_or(self.config.corner_radius),
                 props.opacity.unwrap_or(1.0) as f32,
+                props.shadow,
             )
         });
         let rounding = crate::rounded::Rounding::new(
@@ -649,12 +651,33 @@ impl Pila {
             rect,
             focused: focused == Some(window),
             hover: hovered.filter(|(w, _)| w == window).map(|(_, part)| *part),
+            colors: self.config.colors,
         });
         let render_location = loc - window.geometry().loc;
         let frame = bar_rect.map_or(Rectangle::new(loc, window.geometry().size), |bar| {
             bar.merge(Rectangle::new(loc, window.geometry().size))
         });
         let opaque = alpha >= 1.0 && crate::blur::is_opaque(window);
+        let config = &self.config.shadow;
+        // Past its geometry a client draws what a shadow would be.
+        let wanted = shadow_rule
+            .unwrap_or_else(|| config.enabled && window.geometry().contains_rect(window.bbox()));
+        let shadow = (wanted
+            && config.size > 0
+            && !maximized
+            && !fullscreen
+            && !crate::workspaces::is_override_redirect(window))
+        .then(|| crate::rounded::Shadow {
+            frame,
+            radius: rounding.map_or(0.0, |r| r.radius),
+            size: config.size,
+            offset: config.offset.into(),
+            color: if focused == Some(window) {
+                config.color
+            } else {
+                config.inactive_color
+            },
+        });
         Some(SceneWindow {
             window: window.clone(),
             render_location,
@@ -667,6 +690,7 @@ impl Pila {
             title_bar,
             flash: crate::bell::flash(window, loc),
             rounding,
+            shadow,
             alpha,
             effect: now.and_then(|now| self.window_effect(window, now)),
             slid: None,

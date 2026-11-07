@@ -32,7 +32,8 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Default)]
 pub struct Options {
     /// The config file (TOML). `[animations]` defaults to off, so results
-    /// don't depend on timing; `[keyboard]` to the US layout.
+    /// don't depend on timing; `[shadow]` to off, so pixels near a window are
+    /// its own; `[keyboard]` to the US layout.
     pub config: String,
     /// `--headless-outputs`.
     pub outputs: Option<String>,
@@ -59,6 +60,9 @@ fn full_config(config: &str) -> String {
     let mut text = config.to_string();
     if !config.contains("[animations]") {
         text.push_str("\n[animations]\nenabled = false\n");
+    }
+    if !config.contains("[shadow]") {
+        text.push_str("\n[shadow]\nenabled = false\n");
     }
     if !config.contains("[keyboard]") {
         text.push_str("\n[keyboard]\nlayout = \"us\"\n");

@@ -18,8 +18,12 @@
 //!   its shape changes (e.g. the radius in a reloaded config), since no
 //!   client commit says so.
 //!
-//! Both shaders are compiled on first use and kept in the renderer's EGL
-//! context; if either fails to compile, windows are drawn square.
+//! - A window's shadow (`[shadow]` in the config, `Shadow`) is `ShadowElement`'s
+//!   pixel shader, from its distance to the shape. It leaves the shape itself
+//!   clear: what's behind a translucent window shows through without it.
+//!
+//! The shaders are compiled on first use and kept in the renderer's EGL
+//! context; if one fails to compile, windows are drawn square and no shadows.
 
 use std::cell::RefCell;
 
@@ -222,11 +226,48 @@ void main() {
 }
 ";
 
+/// Pixel shader: a window's shadow. `v_coords` runs 0..1 over the element and
+/// `size` is its physical size; the rest is in physical pixels from its corner.
+const SHADOW_FRAG: &str = "
+precision highp float;
+uniform float alpha;
+uniform vec2 size;
+varying vec2 v_coords;
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+uniform vec4 color;
+uniform vec2 frame_center;
+uniform vec2 frame_half;
+uniform vec2 offset;
+uniform float radius;
+uniform float extent;
+
+// Distance from p to the frame's rounded rect: negative inside.
+float distance_to_frame(vec2 p) {
+    vec2 q = abs(p - frame_center) - frame_half + radius;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+void main() {
+    vec2 p = v_coords * size;
+    float t = clamp(1.0 - distance_to_frame(p - offset) / extent, 0.0, 1.0);
+    float clear = clamp(distance_to_frame(p) + 0.5, 0.0, 1.0);
+    vec4 c = color * t * t * (3.0 - 2.0 * t) * clear * alpha;
+#if defined(DEBUG_FLAGS)
+    if (tint == 1.0)
+        c = vec4(0.0, 0.2, 0.0, 0.2) + c * 0.8;
+#endif
+    gl_FragColor = c;
+}
+";
+
 /// The compiled shaders, kept in the EGL context's user data.
 #[derive(Clone)]
 pub struct Shaders {
     texture: GlesTexProgram,
     solid: GlesPixelProgram,
+    shadow: GlesPixelProgram,
 }
 
 /// `None` if the shaders failed to compile (then windows are drawn square).
@@ -265,9 +306,24 @@ impl Shaders {
                 UniformName::new("radii", UniformType::_4f),
             ],
         );
-        match (texture, solid) {
-            (Ok(texture), Ok(solid)) => Some(Shaders { texture, solid }),
-            (Err(err), _) | (_, Err(err)) => {
+        let shadow = renderer.compile_custom_pixel_shader(
+            SHADOW_FRAG,
+            &[
+                UniformName::new("color", UniformType::_4f),
+                UniformName::new("frame_center", UniformType::_2f),
+                UniformName::new("frame_half", UniformType::_2f),
+                UniformName::new("offset", UniformType::_2f),
+                UniformName::new("radius", UniformType::_1f),
+                UniformName::new("extent", UniformType::_1f),
+            ],
+        );
+        match (texture, solid, shadow) {
+            (Ok(texture), Ok(solid), Ok(shadow)) => Some(Shaders {
+                texture,
+                solid,
+                shadow,
+            }),
+            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
                 warn!(
                     ?err,
                     "rounded corners: shader compilation failed; corners stay square"
@@ -542,6 +598,182 @@ impl RenderElement<GlesRenderer> for RoundedSolid {
             &[
                 Uniform::new("color", color.components()),
                 Uniform::new("radii", self.radii),
+            ],
+        )
+    }
+
+    fn underlying_storage(&self, _renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
+        None
+    }
+}
+
+/// The shadow under a window, in space coordinates (logical).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    /// The window geometry, with the title bar on top if it has one.
+    pub frame: Rectangle<i32, Logical>,
+    /// Of the frame's corners.
+    pub radius: f64,
+    /// How far it reaches past the frame.
+    pub size: i32,
+    pub offset: Point<i32, Logical>,
+    /// Premultiplied.
+    pub color: [f32; 4],
+}
+
+impl Shadow {
+    /// All it can draw on.
+    pub fn rect(&self) -> Rectangle<i32, Logical> {
+        let moved = Rectangle::new(self.frame.loc + self.offset, self.frame.size);
+        Rectangle::new(
+            moved.loc - Point::from((self.size, self.size)),
+            (moved.size.w + 2 * self.size, moved.size.h + 2 * self.size).into(),
+        )
+    }
+}
+
+/// Per-window record of the shadow last drawn, kept in its user data.
+struct ShadowState {
+    id: Id,
+    commit: CommitCounter,
+    /// The shadow wherever it is, and the alpha.
+    last: Option<(Shadow, f32)>,
+}
+
+/// A window's shadow, behind everything of it. What changes it other than by
+/// moving is a new commit, and only that damages it: it takes a frame's work
+/// only where something over it or under it changed.
+pub struct ShadowElement {
+    id: Id,
+    commit: CommitCounter,
+    program: GlesPixelProgram,
+    rect: Rectangle<i32, Physical>,
+    color: [f32; 4],
+    frame_center: [f32; 2],
+    frame_half: [f32; 2],
+    offset: [f32; 2],
+    radius: f32,
+    extent: f32,
+    alpha: f32,
+}
+
+impl ShadowElement {
+    pub fn new(
+        window: &Window,
+        shadow: &Shadow,
+        shaders: &Shaders,
+        alpha: f32,
+        origin: Point<i32, Logical>,
+        scale: Scale<f64>,
+    ) -> Self {
+        window.user_data().insert_if_missing(|| {
+            RefCell::new(ShadowState {
+                id: Id::new(),
+                commit: CommitCounter::default(),
+                last: None,
+            })
+        });
+        let mut state = window
+            .user_data()
+            .get::<RefCell<ShadowState>>()
+            .expect("inserted above")
+            .borrow_mut();
+        let mut look = *shadow;
+        look.frame.loc = Point::default();
+        let look = Some((look, alpha));
+        if state.last != look {
+            state.last = look;
+            state.commit.increment();
+        }
+        let physical = |rect: Rectangle<i32, Logical>| -> Rectangle<i32, Physical> {
+            Rectangle::new(rect.loc - origin, rect.size).to_physical_precise_round(scale)
+        };
+        let rect = physical(shadow.rect());
+        let frame = physical(shadow.frame);
+        let half = [frame.size.w as f32 / 2.0, frame.size.h as f32 / 2.0];
+        let offset = shadow.offset.to_f64().to_physical(scale);
+        Self {
+            id: state.id.clone(),
+            commit: state.commit,
+            program: shaders.shadow.clone(),
+            rect,
+            color: shadow.color,
+            frame_center: [
+                (frame.loc.x - rect.loc.x) as f32 + half[0],
+                (frame.loc.y - rect.loc.y) as f32 + half[1],
+            ],
+            frame_half: half,
+            offset: [offset.x as f32, offset.y as f32],
+            radius: (shadow.radius * scale.x) as f32,
+            extent: ((f64::from(shadow.size) * scale.x) as f32).max(1.0),
+            alpha,
+        }
+    }
+}
+
+impl Element for ShadowElement {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.commit
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        Rectangle::from_size((self.rect.size.w, self.rect.size.h).into()).to_f64()
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.rect
+    }
+
+    fn damage_since(
+        &self,
+        _scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        if commit == Some(self.commit) {
+            DamageSet::default()
+        } else {
+            DamageSet::from_slice(&[Rectangle::from_size(self.rect.size)])
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        self.alpha
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::Unspecified
+    }
+}
+
+impl RenderElement<GlesRenderer> for ShadowElement {
+    fn draw(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        _src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        _opaque_regions: &[Rectangle<i32, Physical>],
+    ) -> Result<(), GlesError> {
+        // With src the whole buffer and size = dst's, `v_coords` runs 0..1.
+        let size: Size<i32, Buffer> = (dst.size.w, dst.size.h).into();
+        frame.render_pixel_shader_to(
+            &self.program,
+            Rectangle::from_size(size.to_f64()),
+            dst,
+            size,
+            Some(damage),
+            self.alpha,
+            &[
+                Uniform::new("color", self.color),
+                Uniform::new("frame_center", self.frame_center),
+                Uniform::new("frame_half", self.frame_half),
+                Uniform::new("offset", self.offset),
+                Uniform::new("radius", self.radius),
+                Uniform::new("extent", self.extent),
             ],
         )
     }

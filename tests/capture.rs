@@ -445,6 +445,44 @@ fn a_blurred_window_has_its_backdrop_in_a_capture_of_the_screen_only() {
 }
 
 #[test]
+fn a_shadow_is_in_a_capture_of_the_screen_but_not_of_the_window() {
+    let mut pila = TestPila::with_config(
+        "[shadow]\nsize = 24\noffset = [0, 0]\ncolor = \"#000000ff\"\n\
+         [colors]\nbackground = \"#ffffff\"\n\
+         [[window-rule]]\napp-id = \"a\"\ntitle-bar = false\n\
+         size = [200, 200]\nposition = [540, 300]\n",
+    );
+    let client = pila.client();
+    client.window("a").color([255, 255, 0, 0]).create();
+    pila.wait_focus("a");
+    pila.settle();
+    // Just below the window, in a capture of that part of the screen.
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output_region(
+        0,
+        &client.output("HEADLESS-1"),
+        540,
+        500,
+        200,
+        20,
+        &client.qh,
+        "copy".into(),
+    );
+    client.flush();
+    client.wait_logged("copy", "BufferDone");
+    let (buffer, file) = client.capture_buffer((200, 20), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("copy", "Ready");
+    let [r, g, b] = read_pixel(&file, 200, 100, 3);
+    assert!(r < 50 && g < 50 && b < 50, "no shadow: {r},{g},{b}");
+    // A capture of the window alone is the window's size.
+    let source = window_source(&client, "a");
+    let (_session, size) = session(&client, &source, "session");
+    assert_eq!(size, (200, 200));
+}
+
+#[test]
 fn screencopy_with_damage_starts_over_when_the_scale_changes() {
     let mut pila = TestPila::start();
     let client = pila.client();

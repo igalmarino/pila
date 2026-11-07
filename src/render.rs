@@ -34,9 +34,13 @@ use smithay::{
 use crate::{
     animation::{self, AnimTextures, SceneGhost, Snapshot, WindowEffect},
     blur::BlurCache,
+    config::Colors,
     cursor::{CursorTheme, NamedCursor},
     decoration::{self, TitleBarPart},
-    rounded::{self, Corners, RoundedSolid, RoundedSurface, Rounding, ShapeDamage, SurfaceElement},
+    rounded::{
+        self, Corners, RoundedSolid, RoundedSurface, Rounding, Shadow, ShadowElement, ShapeDamage,
+        SurfaceElement,
+    },
     workspace_slide::SceneSlide,
 };
 
@@ -49,6 +53,7 @@ smithay::backend::renderer::element::render_elements! {
     RoundedSurface=RoundedSurface,
     RoundedSolid=RoundedSolid,
     ShapeDamage=ShapeDamage,
+    Shadow=ShadowElement,
 }
 
 impl From<SurfaceElement> for PilaRenderElement {
@@ -115,8 +120,6 @@ enum Start {
     Window(usize),
 }
 
-/// Behind all windows and layer surfaces.
-const BACKGROUND: [f32; 4] = [0.12, 0.13, 0.15, 1.0];
 /// Background while the session is locked and the locker hasn't drawn yet.
 const LOCKED_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
@@ -125,7 +128,7 @@ pub fn clear_color(scene: &Scene) -> [f32; 4] {
     if scene.locked {
         LOCKED_BACKGROUND
     } else {
-        BACKGROUND
+        scene.colors.background
     }
 }
 
@@ -153,6 +156,7 @@ pub struct Scene {
     pub lower: Vec<SceneLayer>,
     /// `corner-radius` from the config, for the snap preview.
     pub corner_radius: u32,
+    pub colors: Colors,
 }
 
 impl Scene {
@@ -194,6 +198,8 @@ pub struct SceneWindow {
     pub flash: Option<(SolidColorBuffer, Rectangle<i32, Logical>)>,
     /// Its rounded corners, if any (`rounded.rs`).
     pub rounding: Option<Rounding>,
+    /// The shadow pila draws under it, if any (`rounded.rs`).
+    pub shadow: Option<Shadow>,
     /// Its opacity (a window rule's `opacity`), title bar included.
     pub alpha: f32,
     /// While it animates: drawn through a texture (`animation.rs`).
@@ -224,6 +230,9 @@ impl SceneWindow {
         if let Some((_, flash)) = &self.flash {
             rect = rect.merge(*flash);
         }
+        if let Some(shadow) = &self.shadow {
+            rect = rect.merge(shadow.rect());
+        }
         rect
     }
 
@@ -251,6 +260,7 @@ pub struct SceneTitleBar {
     pub rect: Rectangle<i32, Logical>,
     pub focused: bool,
     pub hover: Option<TitleBarPart>,
+    pub colors: Colors,
 }
 
 /// Elements for `scene` (front to back), relative to an output whose top-left
@@ -489,7 +499,7 @@ fn window_elements(
 ) -> Vec<PilaRenderElement> {
     let shaders = windows
         .iter()
-        .any(|entry| entry.rounding.is_some())
+        .any(|entry| entry.rounding.is_some() || entry.shadow.is_some())
         .then(|| rounded::Shaders::get(renderer))
         .flatten();
     let ghosts_before = |i: usize| {
@@ -538,8 +548,8 @@ pub enum Surfaces {
 }
 
 /// One window's elements (front to back): its flash, surfaces and popups,
-/// its title bar, then its blurred backdrop, which is part of it wherever it's
-/// drawn (a texture that animates, or a slide).
+/// its title bar, its blurred backdrop, then its shadow. The last two are part
+/// of it wherever it's drawn (a texture that animates, or a slide).
 fn single_window_elements(
     renderer: &mut GlesRenderer,
     entry: &SceneWindow,
@@ -613,6 +623,7 @@ fn single_window_elements(
             rect,
             bar.focused,
             bar.hover,
+            &bar.colors,
             rounding.map(|r| r.radius),
             entry.alpha,
             scale,
@@ -623,6 +634,16 @@ fn single_window_elements(
             // Whole whatever its opacity: that's of what it draws.
             elements.extend(backdrop(&surface, output_location, scale, 1.0));
         }
+    }
+    if let (Some(shadow), Some(shaders)) = (&entry.shadow, shaders) {
+        elements.push(PilaRenderElement::Shadow(ShadowElement::new(
+            &entry.window,
+            shadow,
+            shaders,
+            entry.alpha,
+            output_location,
+            scale,
+        )));
     }
     elements
 }
@@ -1039,9 +1060,7 @@ pub fn snapshot_window(
     backdrop: Backdrop<'_>,
 ) -> Option<Snapshot> {
     let rect = entry.content_rect();
-    let shaders = entry
-        .rounding
-        .is_some()
+    let shaders = (entry.rounding.is_some() || entry.shadow.is_some())
         .then(|| rounded::Shaders::get(renderer))
         .flatten();
     // A window whose client already took its buffer away has nothing left.

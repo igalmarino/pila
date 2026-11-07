@@ -295,6 +295,26 @@ fn invalid_rules_are_refused() {
 }
 
 #[test]
+fn a_window_rule_can_only_set_shadow_on_or_off() {
+    let dir = std::env::temp_dir().join(format!("pila-shadow-rule-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    let check = |config: &str| {
+        std::fs::write(&path, config).unwrap();
+        std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+            .args(["--check-config", "--config"])
+            .arg(&path)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(check("[[window-rule]]\nshadow = true\n"));
+    assert!(check("[[window-rule]]\nshadow = false\n"));
+    assert!(!check("[[window-rule]]\nshadow = 1\n"));
+}
+
+#[test]
 fn a_window_rule_can_only_set_blur_on_or_off() {
     let dir = std::env::temp_dir().join(format!("pila-blur-rule-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

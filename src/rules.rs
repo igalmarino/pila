@@ -85,6 +85,7 @@ pub struct WindowRuleFile {
     corner_radius: Option<u32>,
     opacity: Option<f64>,
     blur: Option<bool>,
+    shadow: Option<bool>,
 }
 
 /// The range of `opacity`: never fully transparent.
@@ -142,6 +143,9 @@ pub struct WindowProps {
     /// `true`: blur behind all of it; `false`: never; unset: where the
     /// client asks (ext-background-effect).
     pub blur: Option<bool>,
+    /// `true`: pila draws one, even if the client draws its own; `false`:
+    /// never; unset: `[shadow]`, for a window that doesn't draw its own.
+    pub shadow: Option<bool>,
 }
 
 impl WindowProps {
@@ -156,6 +160,7 @@ impl WindowProps {
         self.corner_radius = other.corner_radius.or(self.corner_radius);
         self.opacity = other.opacity.or(self.opacity);
         self.blur = other.blur.or(self.blur);
+        self.shadow = other.shadow.or(self.shadow);
     }
 
     /// Whether `kind` plays for this window.
@@ -272,6 +277,7 @@ impl WindowRuleFile {
                 corner_radius: self.corner_radius,
                 opacity: self.opacity,
                 blur: self.blur,
+                shadow: self.shadow,
             },
         })
     }

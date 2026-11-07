@@ -39,6 +39,29 @@
 # bar's height (28).
 # corner-radius = 10
 
+# The shadow under each window, stronger for the focused one. None for a
+# maximized or fullscreen window, or one whose app draws its own (past its
+# geometry, as GTK's do); a window rule's `shadow` can say otherwise. The defaults:
+# [shadow]
+# enabled = true
+# size = 24                        # how far it reaches, in logical pixels: 0 to 64
+# offset = [0, 6]                  # right and down, -64 to 64
+# color = "#00000066"              # #rrggbb or #rrggbbaa
+# inactive-color = "#00000033"
+
+# The colors of what pila draws, as #rrggbb. The defaults:
+# [colors]
+# bar = "#2f3136"                  # title bar of the focused window
+# bar-inactive = "#26272b"
+# icon = "#dfe1e5"                 # its title and buttons
+# icon-inactive = "#80838a"
+# hover = "#3f4249"                # a button under the pointer
+# hover-icon = "#f2f3f5"
+# close-hover = "#c42b1c"          # the close button under the pointer
+# close-hover-icon = "#ffffff"
+# background = "#1f2126"           # behind everything, without a wallpaper
+# snap-preview = "#4477cc4d"       # where a dragged window would snap; #rrggbbaa too
+
 # Short, subtle animations. `enabled = false` turns them all off; `speed`
 # multiplies every duration (0.25 to 4: 2 is twice as slow). Each one takes
 # its duration in ms (1 to 1000), or false to turn it off.
@@ -211,6 +234,7 @@ tap = true
 # blur = true                      # blur what's seen through it, title bar
 #                                  # included (false: never; unset: where the
 #                                  # app asks for it)
+# shadow = false                   # (true: even if the app draws its own)
 #
 # [[window-rule]]
 # app-id = "thunderbird"

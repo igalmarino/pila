@@ -35,6 +35,7 @@ use smithay::{
 use tracing::warn;
 
 use crate::{
+    config::Colors,
     grabs::resize_grab::ResizeEdge,
     render::PilaRenderElement,
     rounded::{self, Corners, RoundedSolid},
@@ -55,16 +56,6 @@ const MIN_TITLE_WIDTH: i32 = 24;
 const BORDER: i32 = 6;
 /// Distance from a corner, along each edge, that resizes diagonally.
 const CORNER: i32 = 20;
-
-// Neutral dark greys; focus is shown by the bar and icon brightness.
-const BAR_FOCUSED: [f32; 4] = [0.184, 0.192, 0.212, 1.0]; // #2f3136
-const BAR_UNFOCUSED: [f32; 4] = [0.149, 0.153, 0.169, 1.0]; // #26272b
-const ICON_FOCUSED: [f32; 3] = [0.875, 0.882, 0.898]; // #dfe1e5
-const ICON_UNFOCUSED: [f32; 3] = [0.502, 0.514, 0.541]; // #80838a
-const HOVER_BG: [f32; 3] = [0.247, 0.259, 0.286]; // #3f4249
-const HOVER_ICON: [f32; 3] = [0.949, 0.953, 0.961]; // #f2f3f5
-const CLOSE_HOVER_BG: [f32; 3] = [0.769, 0.169, 0.110]; // #c42b1c
-const CLOSE_HOVER_ICON: [f32; 3] = [1.0, 1.0, 1.0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleBarPart {
@@ -222,20 +213,12 @@ enum Icon {
     Restore,
 }
 
-/// A button's colors: depends on window focus and pointer hover.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Look {
-    Focused,
-    Unfocused,
-    Hover,
-}
-
 /// A rasterized button and what it was drawn for, so it's only redrawn
-/// (and re-uploaded) when the icon or look changes.
+/// (and re-uploaded) when the icon or its colors change.
 struct ButtonTexture {
-    /// Icon, look, buffer scale and the rounded corner it's cut by (in
-    /// buffer pixels; the close button's, at the bar's top-right).
-    key: (Icon, Look, i32, i32),
+    /// Icon, background, icon color, buffer scale and the rounded corner it's
+    /// cut by (in buffer pixels; the close button's, at the bar's top-right).
+    key: (Icon, Option<[f32; 3]>, [f32; 3], i32, i32),
     buffer: MemoryRenderBuffer,
 }
 
@@ -251,10 +234,10 @@ struct TitleBarBuffers {
     title: Option<TitleTexture>,
 }
 
-/// The rendered title and what it was rendered for (text, width, focus,
+/// The rendered title and what it was rendered for (text, width, color,
 /// buffer scale), so it's only re-shaped when one of those changes.
 struct TitleTexture {
-    key: (String, i32, bool, i32),
+    key: (String, i32, [f32; 3], i32),
     buffer: MemoryRenderBuffer,
     /// Width of the rendered text in logical pixels, for centering.
     width: i32,
@@ -312,6 +295,7 @@ pub fn title_bar_elements(
     rect: Rectangle<i32, Logical>,
     focused: bool,
     hover: Option<TitleBarPart>,
+    colors: &Colors,
     radius: Option<f64>,
     alpha: f32,
     scale: Scale<f64>,
@@ -337,10 +321,16 @@ pub fn title_bar_elements(
 
     let maximized = is_maximized(window);
     let buffer_scale = crate::scale::buffer_scale(scale);
-    let look = |part| match (hover == Some(part), focused) {
-        (true, _) => Look::Hover,
-        (false, true) => Look::Focused,
-        (false, false) => Look::Unfocused,
+    let icon_color = if focused {
+        colors.icon
+    } else {
+        colors.icon_inactive
+    };
+    // Background (none: the bar shows through) and icon color.
+    let button_colors = |part| match (hover == Some(part), part) {
+        (true, TitleBarPart::Close) => (Some(colors.close_hover), colors.close_hover_icon),
+        (true, _) => (Some(colors.hover), colors.hover_icon),
+        (false, _) => (None, icon_color),
     };
     let close_loc = Point::from((rect.loc.x + rect.size.w - BUTTON_WIDTH, rect.loc.y));
     let maximize_loc = close_loc - Point::from((BUTTON_WIDTH, 0));
@@ -373,17 +363,12 @@ pub fn title_bar_elements(
     let title_width = rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING;
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
-            let key = (text, title_width, focused, buffer_scale);
+            let key = (text, title_width, icon_color, buffer_scale);
             if title.as_ref().is_none_or(|texture| texture.key != key) {
-                let color = if focused {
-                    ICON_FOCUSED
-                } else {
-                    ICON_UNFOCUSED
-                };
                 // None until the fonts have loaded; then the next frame draws it.
                 *title = crate::text::render_title(
                     &key.0,
-                    color,
+                    icon_color,
                     title_width,
                     TITLE_BAR_HEIGHT,
                     buffer_scale,
@@ -431,18 +416,26 @@ pub fn title_bar_elements(
             }
             _ => 0,
         };
-        let key = (icon, look(part), buffer_scale, corner);
+        let (background, color) = button_colors(part);
+        let key = (icon, background, color, buffer_scale, corner);
         if slot.as_ref().is_none_or(|texture| texture.key != key) {
             *slot = Some(ButtonTexture {
                 key,
-                buffer: button_buffer(icon, key.1, buffer_scale, corner),
+                buffer: button_buffer(icon, background, color, buffer_scale, corner),
             });
         }
         let buffer = &slot.as_ref().unwrap().buffer;
         elements.extend(upload(renderer, buffer, loc).map(Into::into));
     }
 
-    bar.update(rect.size, if focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
+    bar.update(
+        rect.size,
+        if focused {
+            colors.bar
+        } else {
+            colors.bar_inactive
+        },
+    );
     let loc: Point<i32, Physical> = rect.loc.to_physical_precise_round(scale);
     let bar = SolidColorRenderElement::from_buffer(bar, loc, scale, alpha, Kind::Unspecified);
     elements.push(match (radius, &shaders) {
@@ -459,13 +452,13 @@ pub fn title_bar_elements(
 /// hovered, so the bar shows through) and an anti-aliased 10px glyph in the
 /// middle. A nonzero `corner` (buffer pixels) rounds off the top-right
 /// corner: the close button's, when windows have rounded corners.
-fn button_buffer(icon: Icon, look: Look, scale: i32, corner: i32) -> MemoryRenderBuffer {
-    let (background, color) = match (look, icon) {
-        (Look::Hover, Icon::Close) => (Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON),
-        (Look::Hover, _) => (Some(HOVER_BG), HOVER_ICON),
-        (Look::Focused, _) => (None, ICON_FOCUSED),
-        (Look::Unfocused, _) => (None, ICON_UNFOCUSED),
-    };
+fn button_buffer(
+    icon: Icon,
+    background: Option<[f32; 3]>,
+    color: [f32; 3],
+    scale: i32,
+    corner: i32,
+) -> MemoryRenderBuffer {
     let pixels = rasterize_button(icon, background, color, scale, corner);
     MemoryRenderBuffer::from_slice(
         &pixels,
@@ -613,7 +606,7 @@ mod tests {
 
     #[test]
     fn button_glyphs_are_crisp_and_centered() {
-        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 1, 0);
+        let px = rasterize_button(Icon::Maximize, None, Colors::default().icon, 1, 0);
         // The square's left edge (x = 13.5) lands on pixel column 13.
         assert_eq!(alpha_at(&px, 13, TITLE_BAR_HEIGHT / 2), 255);
         assert_eq!(alpha_at(&px, 12, TITLE_BAR_HEIGHT / 2), 0);
@@ -621,18 +614,25 @@ mod tests {
         assert_eq!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2), 0);
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
-        let px = rasterize_button(Icon::Close, None, ICON_FOCUSED, 1, 0);
+        let px = rasterize_button(Icon::Close, None, Colors::default().icon, 1, 0);
         assert!(alpha_at(&px, BUTTON_WIDTH / 2, TITLE_BAR_HEIGHT / 2) > 200); // the cross
         assert_eq!(alpha_at(&px, 0, 0), 0);
 
         // Hovered buttons fill their whole cell.
-        let px = rasterize_button(Icon::Close, Some(CLOSE_HOVER_BG), CLOSE_HOVER_ICON, 1, 0);
+        let colors = Colors::default();
+        let px = rasterize_button(
+            Icon::Close,
+            Some(colors.close_hover),
+            colors.close_hover_icon,
+            1,
+            0,
+        );
         assert!(px.chunks(4).all(|p| p[3] == 255));
     }
 
     #[test]
     fn buttons_at_scale_2_have_crisp_2px_strokes() {
-        let px = rasterize_button(Icon::Maximize, None, ICON_FOCUSED, 2, 0);
+        let px = rasterize_button(Icon::Maximize, None, Colors::default().icon, 2, 0);
         assert_eq!(px.len() as i32, BUTTON_WIDTH * 2 * TITLE_BAR_HEIGHT * 2 * 4);
         // The left edge (logical x = 13.5, 1px wide) covers columns 26-27.
         let y = TITLE_BAR_HEIGHT;
