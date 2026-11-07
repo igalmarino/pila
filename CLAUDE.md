@@ -10,8 +10,8 @@ on **Smithay 0.7.x**.
 ## Environment
 
 - You run inside a dev container (Arch Linux base). The host is Arch Linux; the user logs
-  into pila itself through GDM (`scripts/install`), with GNOME kept only as a fallback
-  session.
+  into pila itself through GDM (`scripts/install`), and it's the only desktop there: a build
+  that doesn't start leaves no other session to fall back on, so try it with `scripts/tty` first.
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
   the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
   (`/run/host-wayland/wayland-0`, which `scripts/link-wayland` makes for whichever session
