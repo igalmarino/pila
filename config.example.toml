@@ -102,6 +102,7 @@ tap = true
 # accel-profile = "flat"
 # middle-emulation = false
 
+[bindings]
 # Key bindings: add new ones, replace defaults, or remove them with "none".
 # Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
 # xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).
@@ -156,13 +157,13 @@ tap = true
 #   "Mod+Shift+Page_Up"   = "move-to-workspace-prev"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
-[bindings]
 # "Mod+Shift+Return" = "spawn kitty -e htop"
 # "XF86AudioRaiseVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
 # "XF86AudioLowerVolume" = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
 # "XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
 # "Mod+J" = "none"
 
+[gestures]
 # Touchpad swipes pila handles itself (on a TTY), as "swipe-<fingers>-<way>"
 # with 3 to 5 fingers and left, right, up or down (the way the fingers move).
 # Values are the same actions as [bindings]. pila keeps every swipe with a
@@ -177,7 +178,6 @@ tap = true
 #   "swipe-3-down"  = "restore"
 #   "swipe-4-left"  = "workspace-next"
 #   "swipe-4-right" = "workspace-prev"
-[gestures]
 # "swipe-3-down" = "minimize"
 # "swipe-4-up" = "snap-left"
 # "swipe-4-down" = "snap-right"

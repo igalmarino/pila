@@ -773,6 +773,29 @@ impl OutputConfig {
 }
 
 /// `transform` in `[[output]]`: wl_output's names.
+/// A TOML error as one line that starts with where and what ("line 3,
+/// column 3: unknown field ..."): notifications show only their first lines,
+/// and toml's own text starts with a snippet of the file.
+fn toml_error(text: &str, err: &toml::de::Error) -> String {
+    let message = err.message().trim();
+    let place = err.span().map(|span| {
+        let before = &text[..span.start.min(text.len())];
+        let line = before.matches('\n').count() + 1;
+        let column = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
+        format!("line {line}, column {column}: ")
+    });
+    // A key combination outside [bindings], most likely from taking the `#`
+    // off a binding above the table's header: the fields that table expected
+    // don't help then.
+    let misplaced = message
+        .strip_prefix("unknown field `")
+        .and_then(|rest| rest.split('`').next())
+        .filter(|field| field.contains('+'))
+        .map(|field| format!("unknown field `{field}`: key bindings go under [bindings]"));
+    let message = misplaced.unwrap_or_else(|| message.to_string());
+    format!("{}{message}", place.unwrap_or_default())
+}
+
 fn parse_transform(text: &str) -> Result<Transform, String> {
     Ok(match text {
         "normal" => Transform::Normal,
@@ -1252,7 +1275,7 @@ impl Config {
         env: &dyn Fn(&str) -> Option<String>,
         default_mod: ModKey,
     ) -> Result<Self, String> {
-        let file: ConfigFile = toml::from_str(text).map_err(|err| err.to_string())?;
+        let file: ConfigFile = toml::from_str(text).map_err(|err| toml_error(text, &err))?;
 
         let mod_key = match env("PILA_MOD").or(file.mod_key) {
             Some(name) => ModKey::parse(&name)?,
@@ -2011,6 +2034,44 @@ mod tests {
         if let Err(err) = Config::from_toml(include_str!("../config.example.toml"), &no_env) {
             panic!("config.example.toml: {err}");
         }
+    }
+
+    #[test]
+    fn example_defaults_uncomment_into_their_tables() {
+        // A tester took the `#` off a line of the defaults list, which then
+        // sat above [bindings] and so landed in [input.mouse].
+        let example = include_str!("../config.example.toml");
+        let uncomment = |line: &str| {
+            assert!(example.contains(line), "{line:?} not in the example");
+            example.replacen(line, line.trim_start_matches('#'), 1)
+        };
+        let config = Config::from_toml(&uncomment(r#"#   "Mod+Shift+Q" = "close""#), &no_env)
+            .unwrap_or_else(|err| panic!("a default binding uncommented: {err}"));
+        assert!(config
+            .bindings
+            .iter()
+            .any(|(_, action)| *action == Action::CloseFocused));
+        let text = uncomment(r#"#   "swipe-3-left"  = "cycle-focus""#);
+        if let Err(err) = Config::from_toml(&text, &no_env) {
+            panic!("a default gesture uncommented: {err}");
+        }
+    }
+
+    #[test]
+    fn a_toml_error_starts_with_what_is_wrong() {
+        // Notifications show the first lines: they must say what's wrong,
+        // not a source snippet.
+        let err = Config::from_toml(
+            "[input.mouse]\n# natural-scroll = false\n  \"Mod+Return\" = \"terminal\"\n",
+            &no_env,
+        )
+        .unwrap_err();
+        let first = err.lines().next().unwrap();
+        assert!(first.contains("line 3"), "{err}");
+        assert!(first.contains("unknown field `Mod+Return`"), "{err}");
+        assert!(err.contains("[bindings]"), "{err}");
+        let err = Config::from_toml("[keyboard]\nrepeat-rate = \"x\"\n", &no_env).unwrap_err();
+        assert!(!err.contains("[bindings]"), "{err}");
     }
 
     #[test]
