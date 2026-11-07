@@ -23,13 +23,14 @@ body:
     attributes:
       label: pila version
       description: The output of `pila --version`.
-      placeholder: pila 0.2.1 (v0.2.1)
+      placeholder: pila 0.3.0 (v0.3.0)
     validations:
       required: true
   - type: dropdown
     id: started
     attributes:
       label: How pila was started
+      description: "A nested run doesn't test your GPU's real path (DRM/KMS). For a GPU report, run `scripts/check` on a TTY too."
       multiple: true
       options:
         - Nested, in another desktop
