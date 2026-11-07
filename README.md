@@ -19,9 +19,10 @@ replaced when an `ext-` version lands.
 
 pila is **alpha**: usable day to day (its author runs it as their only desktop and
 develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
-with an external monitor, on Arch Linux. A tester has run it on an Intel laptop, and `nix run`
-has been confirmed on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups are exactly
-what testing is needed for: please [report](#reporting-bugs) what works and what doesn't.
+with an external monitor, on Arch Linux with GDM. Testers report it working on Intel integrated
+GPUs, on Debian with SDDM and on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups
+are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
+doesn't.
 
 Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs (pila uses the
 seat's primary one).
@@ -33,9 +34,9 @@ now, in this order:
 
 - **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs. On a laptop with two
   GPUs, pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
-- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros** beyond building:
-  [Debian, Ubuntu, Fedora](#debian-ubuntu-and-fedora), [NixOS](#nix-and-nixos);
-- **display managers** other than GDM (SDDM, greetd, LightDM);
+- **no systemd** (Void, Alpine, with elogind or seatd), and other **distros**, such as
+  [Ubuntu and Fedora](#debian-ubuntu-and-fedora);
+- **display managers** other than GDM and SDDM (greetd, LightDM);
 - **monitors:** high refresh rates, 4K, mixed scales, several at once;
 - **other shells and apps:** bars, launchers, games, Steam, Electron.
 
@@ -148,8 +149,8 @@ sudo dnf install ./pila-*.rpm    # Fedora
 
 They install the same files as `scripts/install` in `/usr`, and there's no repository yet, so
 updating means installing a newer one. Each package is installed on a clean system and started
-headless before it's attached to a release, but a real session on these distros hasn't been
-tried yet: please [report](#help-test-pila) how it goes.
+headless before it's attached to a release. A tester reports a real session working on Debian, with
+SDDM; on Ubuntu and Fedora it hasn't been tried yet: please [report](#help-test-pila) how it goes.
 
 ### Nix and NixOS
 
