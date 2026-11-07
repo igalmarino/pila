@@ -51,6 +51,9 @@ overrides:
       - libnotify-bin
       - xdg-utils
       - wl-clipboard
+    # Not installed by default: a shell such as Noctalia has its own lock
+    # screen, and only pila-report uses lspci.
+    suggests:
       - swaylock
       - pciutils
   rpm:
@@ -72,5 +75,8 @@ overrides:
       - libnotify
       - xdg-utils
       - wl-clipboard
+    # Not installed by default: a shell such as Noctalia has its own lock
+    # screen, and only pila-report uses lspci.
+    suggests:
       - swaylock
       - pciutils

@@ -275,7 +275,8 @@ Host packages for a full session (names are the same on most distros):
   a click on a link does nothing, and says nothing
 - `wl-clipboard`: `wl-copy`, which Mod+Shift+S needs to put a region of the screen on the clipboard;
   without it, that binding does nothing
-- `swaylock`: locking the session (bind it, or run it from swayidle)
+- `swaylock`: locking the session (bind it, or run it from swayidle); a shell with its own
+  lock screen, such as Noctalia, doesn't need it
 - `pciutils`: `lspci`, with which `pila-report` names the GPU and its driver
 
 ```bash
