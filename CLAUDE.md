@@ -10,8 +10,9 @@ on **Smithay 0.7.x**.
 ## Environment
 
 - You run inside a dev container (Arch Linux base). The host is Arch Linux; the user logs
-  into pila itself through GDM (`scripts/install`), and it's the only desktop there: a build
-  that doesn't start leaves no other session to fall back on, so try it with `scripts/tty` first.
+  into pila itself through Noctalia's greeter (`scripts/install`), and it's the only desktop
+  there: a build that doesn't start leaves no other session to fall back on, so try it with
+  `scripts/tty` first.
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
   the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
   (`/run/host-wayland/wayland-0`, which `scripts/link-wayland` makes for whichever session
@@ -110,7 +111,7 @@ isn't.
 ## Distro policy
 
 pila must not assume a distro, init system or display manager. This machine is Arch with
-systemd and GDM, but the code and the host-side scripts (`scripts/`, `resources/session/`)
+systemd and Noctalia's greeter, but the code and the host-side scripts (`scripts/`, `resources/session/`)
 must also work elsewhere (Debian, Fedora, Void, Alpine, ...), including without systemd
 (elogind or seatd, no per-user D-Bus bus, no journal): check for optional tools
 (`systemd-cat`, `logger`, `dbus-run-session`) and degrade, use `/usr/bin/env bash`, and keep
