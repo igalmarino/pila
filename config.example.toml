@@ -33,13 +33,6 @@
 # screens; Mod+1..N goes to one, Mod+Shift+1..N moves the window there.
 # workspaces = 4
 
-# Turn a laptop's built-in screen (eDP, LVDS or DSI connector) off while an
-# external monitor is on (default false). It comes back on when the external
-# monitor is unplugged. An `enabled` set in the built-in screen's [[output]]
-# section (below) wins; wlr-randr and display settings can still turn it back
-# on. TTY only.
-# disable-internal-display = true
-
 # Rounded window corners: the radius in logical pixels, 0 (the default, square
 # corners) to 64. Maximized and fullscreen windows stay square. The radius is
 # at most half the window's shorter side, and with a title bar at most the

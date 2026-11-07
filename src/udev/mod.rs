@@ -66,13 +66,11 @@ mod input;
 mod outputs;
 
 use self::{draw::*, gamma::*, input::*, outputs::*};
-pub use outputs::{apply_output_config, is_internal};
+pub use outputs::apply_output_config;
 
 use crate::{
     backend::Backend,
-    config::{
-        AccelProfile, ClickMethod, InputConfig, InternalDisplay, OutputConfig, PointerConfig,
-    },
+    config::{AccelProfile, ClickMethod, InputConfig, OutputConfig, PointerConfig},
     cursor::CursorTheme,
     frame,
     output_management::{HeadInfo, ModeInfo},
@@ -125,10 +123,6 @@ pub struct UdevData {
     /// every event.
     recovering: bool,
     loop_handle: LoopHandle<'static, Pila>,
-    /// Connectors found connected by the scan in progress and not set up
-    /// yet: an external one among them already turns the built-in screen
-    /// off, so it isn't lit for a moment while the scan goes on.
-    scan_pending: Vec<String>,
     /// Last: see the struct docs.
     pub session: LibSeatSession,
 }
@@ -621,7 +615,6 @@ pub fn init_udev(
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
-        scan_pending: Vec::new(),
     })));
 
     scan_connectors(state);
@@ -641,55 +634,13 @@ mod tests {
 
     #[test]
     fn built_in_screens_are_recognized_by_connector() {
+        use super::outputs::is_internal;
         for name in ["eDP-1", "LVDS-1", "DSI-2"] {
             assert!(is_internal(name), "{name}");
         }
         for name in ["HDMI-A-1", "DP-2", "DVI-D-1", "eDP"] {
             assert!(!is_internal(name), "{name}");
         }
-    }
-
-    #[test]
-    fn the_built_in_screen_goes_off_only_for_an_external_one_that_is_on() {
-        let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let all_on = |_: &str| true;
-        // An external monitor on: off.
-        assert!(internal_off(
-            true,
-            "eDP-1",
-            names(&["eDP-1", "HDMI-A-1"]),
-            all_on
-        ));
-        // The rule not set: on.
-        assert!(!internal_off(
-            false,
-            "eDP-1",
-            names(&["eDP-1", "HDMI-A-1"]),
-            all_on
-        ));
-        // Alone: on.
-        assert!(!internal_off(true, "eDP-1", names(&["eDP-1"]), all_on));
-        // The external one off by its config: on.
-        assert!(!internal_off(
-            true,
-            "eDP-1",
-            names(&["eDP-1", "DP-1"]),
-            |n| n != "DP-1"
-        ));
-        // Another built-in screen doesn't count.
-        assert!(!internal_off(
-            true,
-            "eDP-1",
-            names(&["eDP-1", "eDP-2"]),
-            all_on
-        ));
-        // An external monitor is never turned off by the rule.
-        assert!(!internal_off(
-            true,
-            "HDMI-A-1",
-            names(&["eDP-1", "HDMI-A-1"]),
-            all_on
-        ));
     }
 
     #[test]

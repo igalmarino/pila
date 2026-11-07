@@ -64,8 +64,7 @@ A short report helps even if everything works:
   position, maximized or fullscreen, title bar, corner radius, opacity and blur per app;
   blur and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
-  and (fractional) scale; optionally, a laptop's built-in screen turns off while an
-  external monitor is on.
+  and (fractional) scale.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers

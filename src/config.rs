@@ -861,7 +861,6 @@ struct ConfigFile {
     output: Vec<OutputFile>,
     input: InputFile,
     workspaces: Option<usize>,
-    disable_internal_display: Option<bool>,
     corner_radius: Option<u32>,
     animations: AnimationsFile,
     #[serde(rename = "window-rule")]
@@ -897,8 +896,6 @@ pub struct Config {
     pub input: InputConfig,
     /// How many workspaces there are (`workspaces.rs`).
     pub workspaces: usize,
-    /// When the built-in screen goes off for an external one (`udev/`).
-    pub internal_display: InternalDisplay,
     /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
     pub corner_radius: u32,
     /// Which animations play and how long they last (`animation.rs`).
@@ -906,15 +903,6 @@ pub struct Config {
     /// `[[window-rule]]` and `[[layer-rule]]`, in order (`rules.rs`).
     pub window_rules: Vec<crate::rules::WindowRule>,
     pub layer_rules: Vec<crate::rules::LayerRule>,
-}
-
-/// `disable-internal-display`: whether a laptop's built-in screen (eDP,
-/// LVDS, DSI) is turned off while an external monitor is on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum InternalDisplay {
-    #[default]
-    Never,
-    Always,
 }
 
 /// Terminals tried in order when `terminal` isn't set.
@@ -1022,10 +1010,6 @@ impl Config {
         let terminal = env("PILA_TERMINAL").or(file.terminal);
         let launcher = env("PILA_LAUNCHER").or(file.launcher);
 
-        let internal_display = match file.disable_internal_display {
-            Some(true) => InternalDisplay::Always,
-            Some(false) | None => InternalDisplay::Never,
-        };
         let workspaces = match file.workspaces {
             None => DEFAULT_WORKSPACES,
             Some(n @ 1..=MAX_WORKSPACES) => n,
@@ -1132,7 +1116,6 @@ impl Config {
             outputs,
             input,
             workspaces,
-            internal_display,
             corner_radius,
             animations,
             window_rules,
@@ -1687,19 +1670,9 @@ mod tests {
     }
 
     #[test]
-    fn internal_display_parses() {
-        let parse = |text: &str| Config::from_toml(text, &no_env).map(|c| c.internal_display);
-        assert_eq!(parse(""), Ok(InternalDisplay::Never));
-        assert_eq!(
-            parse("disable-internal-display = true"),
-            Ok(InternalDisplay::Always)
-        );
-        assert_eq!(
-            parse("disable-internal-display = false"),
-            Ok(InternalDisplay::Never)
-        );
-        // The words it used to take.
-        assert!(parse(r#"disable-internal-display = "always""#).is_err());
+    fn the_removed_internal_display_key_is_refused_by_name() {
+        let error = Config::from_toml("disable-internal-display = true", &no_env).unwrap_err();
+        assert!(error.contains("disable-internal-display"), "{error}");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Monitors: connectors found and lost, outputs set up, enabled and disabled,
-//! `[[output]]` applied, and `disable-internal-display`.
+//! `[[output]]` applied.
 
 use super::*;
 
@@ -61,37 +61,15 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
         })
         .collect();
 
-    // Built-in screens off for an external one keep their place.
-    let held: Vec<crtc::Handle> = configs
-        .iter()
-        .filter(|(_, c)| off_by_rule(state, &c.name))
-        .map(|(crtc, _)| *crtc)
-        .collect();
-
     // Enabling and disabling first: they change what the space holds.
-    // Enabling goes first, so a built-in screen is only turned off for an
-    // external one that actually came on.
     for (crtc, config) in &configs {
         if config.enabled.unwrap_or(true) {
             applied &= enable_output(state, *crtc);
         }
     }
-    // Then the others, and the built-in screens held by the rule last, once
-    // it's known whether anything else is still on.
-    let off: Vec<crtc::Handle> = configs
-        .iter()
-        .filter(|(_, config)| !config.enabled.unwrap_or(true))
-        .map(|(crtc, _)| *crtc)
-        .collect();
-    for crtc in off.iter().filter(|crtc| !held.contains(crtc)) {
-        disable_output(state, *crtc);
-    }
-    for crtc in off.iter().filter(|crtc| held.contains(crtc)) {
-        if others_enabled(state, &held) {
+    for (crtc, config) in &configs {
+        if !config.enabled.unwrap_or(true) {
             disable_output(state, *crtc);
-        } else {
-            // Never leave no output on (as `apply_internal_display`).
-            keep_on(state, *crtc);
         }
     }
 
@@ -165,9 +143,6 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             vrr.push((crtc, on));
         }
         if !surface.enabled {
-            if held.contains(&crtc) {
-                right_edge = right_edge.max(loc.x + width);
-            }
             continue;
         }
         right_edge = right_edge.max(loc.x + width);
@@ -186,40 +161,6 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
     applied
 }
 
-/// Whether an output other than `held` (built-in screens off by
-/// `disable-internal-display`) is on.
-pub(super) fn others_enabled(state: &Pila, held: &[crtc::Handle]) -> bool {
-    let Some(Backend::Udev(data)) = &state.backend else {
-        return false;
-    };
-    data.outputs
-        .iter()
-        .any(|(crtc, s)| s.enabled && !held.contains(crtc))
-}
-
-/// Keep the built-in screen on `crtc` on (or turn it back on) because no
-/// other output is.
-pub(super) fn keep_on(state: &mut Pila, crtc: crtc::Handle) {
-    let Some(Backend::Udev(data)) = &state.backend else {
-        return;
-    };
-    let Some(surface) = data.outputs.get(&crtc) else {
-        return;
-    };
-    if surface.enabled {
-        return;
-    }
-    let name = surface.output.name();
-    if enable_output(state, crtc) {
-        warn!(name, "no external monitor is on: built-in screen kept on");
-    } else {
-        warn!(
-            name,
-            "no external monitor is on, and the built-in screen failed to come on"
-        );
-    }
-}
-
 /// Set up newly connected monitors and drop disconnected ones.
 pub(super) fn scan_connectors(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
@@ -232,16 +173,6 @@ pub(super) fn scan_connectors(state: &mut Pila) {
             return;
         }
     };
-    data.scan_pending = events
-        .iter()
-        .filter_map(|event| match event {
-            DrmScanEvent::Connected {
-                connector,
-                crtc: Some(_),
-            } => Some(connector_name(connector)),
-            _ => None,
-        })
-        .collect();
     for event in events {
         match event {
             DrmScanEvent::Connected {
@@ -254,12 +185,8 @@ pub(super) fn scan_connectors(state: &mut Pila) {
             _ => {}
         }
     }
-    if let Some(Backend::Udev(data)) = &mut state.backend {
-        data.scan_pending.clear();
-    }
-    // Once every new output is set up (or failed to be): the built-in
-    // screen goes off for an external one, or stays on if none came up.
-    apply_internal_display(state);
+    // Once every new output is set up (or failed to be).
+    keep_a_screen_on(state);
 }
 
 /// A connector's name as outputs are known by, e.g. `eDP-1`.
@@ -317,15 +244,13 @@ pub(super) fn connector_connected(
     let transform = output_config.transform.unwrap_or(Transform::Normal);
     let enabled = output_config.enabled.unwrap_or(true);
 
-    // Where the config puts it, else right of the outputs already there
-    // (a built-in screen turned off for an external one keeps its place, so
-    // it doesn't overlap when it comes back).
+    // Where the config puts it, else right of the outputs already there.
     let (x, y) = output_config.position.unwrap_or_else(|| {
         let x = match &state.backend {
             Some(Backend::Udev(data)) => data
                 .outputs
                 .values()
-                .filter(|s| s.enabled || off_by_rule(state, &s.output.name()))
+                .filter(|s| s.enabled)
                 .map(|s| {
                     let o = &s.output;
                     let scale = o.current_scale().fractional_scale();
@@ -384,18 +309,8 @@ pub(super) fn connector_connected(
             gamma: None,
         },
     );
-    // Known now; it stayed pending until here so that it counted as an
-    // external monitor while its place was worked out.
-    data.scan_pending.retain(|n| *n != name);
     if !enabled {
-        if off_by_rule(state, &name) {
-            info!(
-                name,
-                "output connected, off while an external monitor is on"
-            );
-        } else {
-            info!(name, "output connected, disabled by its config");
-        }
+        info!(name, "output connected, disabled by its config");
         state.refresh_output_heads();
         return;
     }
@@ -523,24 +438,13 @@ pub(super) fn set_vrr(data: &UdevData, crtc: crtc::Handle, on: bool) {
     }
 }
 
-/// `[[output]]` for `name`, turned off by `disable-internal-display` if it's
-/// the built-in screen and that applies now, with what a display tool set at
-/// runtime on top (`Pila::outputs.overrides`).
+/// `[[output]]` for `name`, with what a display tool set at runtime on top
+/// (`Pila::outputs.overrides`).
 pub(super) fn effective_output_config(state: &Pila, name: &str) -> OutputConfig {
-    let mut file = state
+    let file = state
         .output_section(name)
         .unwrap_or_else(|| OutputConfig::named(name));
-    if off_by_rule(state, name) {
-        file.enabled = Some(false);
-    }
     with_overrides(state, file)
-}
-
-/// Whether `disable-internal-display` (rather than the file) turns output
-/// `name` off now. Such an output keeps its place in the layout.
-pub(super) fn off_by_rule(state: &Pila, name: &str) -> bool {
-    state.output_section(name).and_then(|c| c.enabled).is_none()
-        && internal_display_off(state, name)
 }
 
 pub(super) fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
@@ -551,97 +455,34 @@ pub(super) fn with_overrides(state: &Pila, file: OutputConfig) -> OutputConfig {
 }
 
 /// A laptop's built-in screen, by its connector type.
-pub fn is_internal(name: &str) -> bool {
+pub(super) fn is_internal(name: &str) -> bool {
     ["eDP-", "LVDS-", "DSI-"]
         .iter()
         .any(|prefix| name.starts_with(prefix))
 }
 
-/// Whether `disable-internal-display` turns the built-in screen `name` off
-/// now: it's on and another connected monitor, an external one, is on
-/// by its own config. That's decided from the config, not from which
-/// outputs are running, so it doesn't depend on the order outputs are set
-/// up in.
-pub(super) fn internal_display_off(state: &Pila, name: &str) -> bool {
-    let Some(Backend::Udev(data)) = &state.backend else {
-        return false;
-    };
-    let applies = state.config.internal_display == InternalDisplay::Always;
-    // Set up, or found by the scan in progress and about to be.
-    let connected = data
-        .outputs
-        .values()
-        .map(|s| s.output.name())
-        .chain(data.scan_pending.iter().cloned());
-    internal_off(applies, name, connected, |other| {
-        let config = state
-            .output_section(other)
-            .unwrap_or_else(|| OutputConfig::named(other));
-        with_overrides(state, config).enabled.unwrap_or(true)
-    })
-}
-
-/// The decision of `internal_display_off`: the rule `applies`, `name` is a
-/// built-in screen, and among the `connected` outputs another one,
-/// external, is on by its own config (`enabled_by_config`).
-pub(super) fn internal_off(
-    applies: bool,
-    name: &str,
-    connected: impl IntoIterator<Item = String>,
-    enabled_by_config: impl Fn(&str) -> bool,
-) -> bool {
-    applies
-        && is_internal(name)
-        && connected
-            .into_iter()
-            .any(|other| other != name && !is_internal(&other) && enabled_by_config(&other))
-}
-
-/// Turn built-in screens on or off as `disable-internal-display` says now
-/// (an external monitor came or went). Never leaves no output on: if every
-/// external one failed, the built-in screen stays.
-pub(super) fn apply_internal_display(state: &mut Pila) {
+/// With no output left on (the external monitor went, and the config turns the
+/// built-in screen off), the built-in screen comes back: there'd be nothing to
+/// see otherwise, not even how to change that.
+pub(super) fn keep_a_screen_on(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
-    let internal: Vec<(crtc::Handle, String, bool)> = data
+    if data.outputs.values().any(|s| s.enabled) {
+        return;
+    }
+    let internal: Vec<crtc::Handle> = data
         .outputs
         .iter()
-        .map(|(crtc, s)| (*crtc, s.output.name(), s.enabled))
-        .filter(|(_, name, _)| is_internal(name))
+        .filter(|(_, s)| is_internal(&s.output.name()))
+        .map(|(crtc, _)| *crtc)
         .collect();
     if internal.is_empty() {
         return;
     }
-    for (crtc, name, _) in &internal {
-        if effective_output_config(state, name).enabled.unwrap_or(true) {
-            enable_output(state, *crtc);
-        } else {
-            disable_output(state, *crtc);
-        }
-    }
-    let Some(Backend::Udev(data)) = &state.backend else {
-        return;
-    };
-    if !data.outputs.values().any(|s| s.enabled) {
-        warn!("no external monitor is on: keeping the built-in screen on");
-        for (crtc, _, _) in &internal {
-            enable_output(state, *crtc);
-        }
-    }
-    let Some(Backend::Udev(data)) = &state.backend else {
-        return;
-    };
-    let changed = internal
-        .iter()
-        .any(|(crtc, _, was)| data.outputs.get(crtc).is_some_and(|s| s.enabled != *was));
-    if !changed {
-        return;
-    }
-    for (crtc, name, was) in &internal {
-        if !*was && data.outputs.get(crtc).is_some_and(|s| s.enabled) {
-            info!(name, "built-in screen back on");
-        }
+    warn!("no output is on: turning the built-in screen on");
+    for crtc in internal {
+        enable_output(state, crtc);
     }
     state.fixup_windows();
     state.refit_maximized();
@@ -659,9 +500,9 @@ pub(super) fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
     };
     info!(name = surface.output.name(), "output disconnected");
     state.outputs.monitors.remove(&surface.output.name());
-    // The built-in screen comes back first, so the windows of the monitor
-    // that went away move onto it.
-    apply_internal_display(state);
+    // Before it's unmapped: the windows of the monitor that went away move
+    // onto the built-in screen, if that has to come back.
+    keep_a_screen_on(state);
     if let Some(global) = surface.global {
         crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     }

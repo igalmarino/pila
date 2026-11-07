@@ -165,18 +165,7 @@ impl Pila {
                 old.output(name, monitor) == config.output(name, monitor)
             });
         }
-        // `disable-internal-display` decides which outputs are on, too. A
-        // display tool's applies pin every head's on/off state; a changed
-        // rule takes over the built-in screens from them.
-        let rule_changed = old.internal_display != self.config.internal_display;
-        if rule_changed {
-            for (name, over) in &mut self.outputs.overrides {
-                if crate::udev::is_internal(name) {
-                    over.enabled = None;
-                }
-            }
-        }
-        if outputs_changed || rule_changed {
+        if outputs_changed {
             self.apply_outputs();
         }
         self.queue_redraw();

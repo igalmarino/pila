@@ -99,22 +99,9 @@ Key flows and invariants:
   `wl_output` global goes through `state::retire_global`: disabled now, removed 10 s later,
   since binding a removed global is a protocol error and a client may be doing that as it
   hears the news.
-  `disable-internal-display` (a boolean; `Config::internal_display`: never / always)
-  turns a built-in screen (connector eDP/LVDS/DSI, `is_internal`) off while another,
-  external output is on by its own config: `effective_output_config` sets its `enabled`
-  to false unless its `[[output]]` sets `enabled` (overrides still on top), decided from
-  config rather than running outputs, counting connectors the scan in progress found
-  but hasn't set up yet (`UdevData::scan_pending`), so at startup the built-in screen is
-  never lit. An output off by the rule (`off_by_rule`) keeps its place in the
-  left-to-right layout (`connector_connected`, `apply_output_config`), so it doesn't
-  overlap when it comes back. `apply_internal_display` applies it (with a
-  never-zero-outputs fallback) at the end of `scan_connectors`, in
-  `connector_disconnected` before the gone output is unmapped (so its windows move
-  onto the built-in screen); config reloads (of `[[output]]` or of this key) and
-  wlr-output-management go through `apply_output_config`, which enables outputs before
-  disabling any, decides held built-in screens last and keeps the same fallback
-  (`others_enabled`, `keep_on`); a changed rule clears built-in screens' `enabled`
-  overrides, which display tools set for every head. There's
+  With no output left on, `keep_a_screen_on` brings a built-in screen back (connector
+  eDP/LVDS/DSI, `is_internal`) at the end of `scan_connectors` and in `connector_disconnected`
+  before the gone output is unmapped, so its windows move there. There's
   no lid handling: a clamshell mode was tried and dropped, since logind suspends a
   closed laptop while no external output is on (e.g. between sessions).
   `fullscreen_request` honors the requested output for mapped windows
