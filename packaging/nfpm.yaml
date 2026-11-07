@@ -49,6 +49,7 @@ overrides:
       - slurp
       - libnotify-bin
       - xdg-utils
+      - wl-clipboard
   rpm:
     depends:
       - mesa-libEGL
@@ -66,3 +67,4 @@ overrides:
       - slurp
       - libnotify
       - xdg-utils
+      - wl-clipboard

@@ -211,32 +211,57 @@ fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
 }
 
 #[test]
-fn the_report_says_whether_xdg_open_is_installed() {
+fn the_report_says_whether_the_tools_bindings_and_apps_need_are_installed() {
     use std::os::unix::fs::{symlink, PermissionsExt};
-    // Every program on the PATH but xdg-open, whatever this machine has.
-    let home = report_home("xdg-open");
-    let bin = home.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap()) {
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            if entry.file_name() != "xdg-open" {
-                let _ = symlink(entry.path(), bin.join(entry.file_name()));
+    for tool in ["xdg-open", "wl-copy"] {
+        // Every program on the PATH but this one, whatever this machine has.
+        let home = report_home(tool);
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap()) {
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                if entry.file_name() != tool {
+                    let _ = symlink(entry.path(), bin.join(entry.file_name()));
+                }
             }
         }
-    }
-    let report_text = || {
-        let out = report_on_path(&home, &bin.display().to_string());
-        assert!(out.status.success(), "{out:?}");
-        std::fs::read_to_string(home.join("pila-report.txt")).unwrap()
-    };
-    let text = report_text();
-    assert!(text.contains("xdg-open: missing"), "{text}");
+        let report_text = || {
+            let out = report_on_path(&home, &bin.display().to_string());
+            assert!(out.status.success(), "{out:?}");
+            std::fs::read_to_string(home.join("pila-report.txt")).unwrap()
+        };
+        let text = report_text();
+        assert!(text.contains(&format!("{tool}: missing")), "{text}");
 
-    let xdg_open = bin.join("xdg-open");
-    std::fs::write(&xdg_open, "#!/bin/sh\n").unwrap();
-    std::fs::set_permissions(&xdg_open, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let text = report_text();
-    assert!(text.contains("xdg-open: installed"), "{text}");
+        let program = bin.join(tool);
+        std::fs::write(&program, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let text = report_text();
+        assert!(text.contains(&format!("{tool}: installed")), "{text}");
+    }
+}
+
+#[test]
+fn the_report_hides_a_name_but_leaves_words_that_hold_it() {
+    let home = report_home("words");
+    std::fs::write(
+        home.join("state/pila/pila.log"),
+        "Failed to unsomebodyish a thing\n\
+         somebody opened it, as somebody-else and somebody.old\n\
+         the end for somebody\n",
+    )
+    .unwrap();
+    let out = report(&home);
+    assert!(out.status.success(), "{out:?}");
+    let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
+    // USER is somebody: an ordinary word that holds it stays as it is, and
+    // doesn't show which part of it was the name.
+    assert!(text.contains("Failed to unsomebodyish a thing"), "{text}");
+    assert!(
+        text.contains("<user> opened it, as <user>-else and <user>.old"),
+        "{text}"
+    );
+    assert!(text.contains("the end for <user>"), "{text}");
 }
 
 #[test]

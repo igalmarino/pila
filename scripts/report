@@ -24,15 +24,34 @@ esac
 user="${USER:-$(id -un 2>/dev/null || true)}"
 host="$(uname -n 2>/dev/null || true)"
 
+# `word` in `replaced` becomes `with`, as a whole word only: inside another one
+# (a user "roy" in "destroy") it stays, as replacing it would mangle the text and
+# show what the name is.
+replace_word() {
+    local word="$1" with="$2" text="$replaced" before after out=""
+    while [[ "$text" == *"$word"* ]]; do
+        before="${text%%"$word"*}"
+        after="${text#*"$word"}"
+        if [[ "$before" =~ [[:alnum:]_]$ || "$after" =~ ^[[:alnum:]_] ]]; then
+            out+="$before$word"
+        else
+            out+="$before$with"
+        fi
+        text="$after"
+    done
+    replaced="$out$text"
+}
+
 # The host first: it often has the user name in it. Short names are left
-# alone, or they'd mangle ordinary words.
+# alone, as they're easily ordinary words.
 redact() {
-    local line
+    local line replaced
     while IFS= read -r line || [ -n "$line" ]; do
         [ -n "${HOME:-}" ] && line="${line//"$HOME"/\~}"
-        [ "${#host}" -ge 3 ] && line="${line//"$host"/<host>}"
-        [ "${#user}" -ge 3 ] && line="${line//"$user"/<user>}"
-        printf '%s\n' "$line"
+        replaced="$line"
+        [ "${#host}" -ge 3 ] && replace_word "$host" "<host>"
+        [ "${#user}" -ge 3 ] && replace_word "$user" "<user>"
+        printf '%s\n' "$replaced"
     done
 }
 
@@ -67,6 +86,7 @@ section_system() {
     echo "Wayland display: ${WAYLAND_DISPLAY:-unset}"
     echo "Xwayland: $(command -v Xwayland >/dev/null && echo installed || echo missing)"
     echo "xdg-open: $(command -v xdg-open >/dev/null && echo installed || echo missing)"
+    echo "wl-copy: $(command -v wl-copy >/dev/null && echo installed || echo missing)"
 }
 
 section_gpu() {
