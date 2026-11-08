@@ -26,13 +26,18 @@ host="$(uname -n 2>/dev/null || true)"
 
 # `word` in `replaced` becomes `with`, as a whole word only: inside another one
 # (a user "roy" in "destroy") it stays, as replacing it would mangle the text and
-# show what the name is.
+# show what the name is. So does a directory of the kernel's and the system's
+# trees (a user "dev" in "/dev/dri/card1" or "/proc/net/dev"), which never holds
+# a user's name; elsewhere ("/run/media/dev") it's hidden.
 replace_word() {
-    local word="$1" with="$2" text="$replaced" before after out=""
+    local word="$1" with="$2" text="$replaced" before after path out=""
     while [[ "$text" == *"$word"* ]]; do
         before="${text%%"$word"*}"
         after="${text#*"$word"}"
-        if [[ "$before" =~ [[:alnum:]_]$ || "$after" =~ ^[[:alnum:]_] ]]; then
+        # The path the word is in, up to it.
+        path="${before##*[^[:alnum:]_./~-]}"
+        if [[ "$before" =~ [[:alnum:]_]$ || "$after" =~ ^[[:alnum:]_] ||
+            "$path" == / || "$path" =~ ^/(dev|proc|sys|usr|etc|lib|lib64|bin|sbin|boot)/ ]]; then
             out+="$before$word"
         else
             out+="$before$with"

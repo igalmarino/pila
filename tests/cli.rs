@@ -136,11 +136,11 @@ fn report_home(name: &str) -> std::path::PathBuf {
 /// Run scripts/report in `home`, with this build first on the `PATH`.
 fn report(home: &std::path::Path) -> std::process::Output {
     let path = std::env::var("PATH").unwrap();
-    report_on_path(home, &path)
+    report_on_path(home, &path, "somebody")
 }
 
-/// Run scripts/report in `home`, with this build first on `path`.
-fn report_on_path(home: &std::path::Path, path: &str) -> std::process::Output {
+/// Run scripts/report in `home` as `user`, with this build first on `path`.
+fn report_on_path(home: &std::path::Path, path: &str, user: &str) -> std::process::Output {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/report");
     let bin = std::path::Path::new(env!("CARGO_BIN_EXE_pila"))
         .parent()
@@ -150,7 +150,7 @@ fn report_on_path(home: &std::path::Path, path: &str) -> std::process::Output {
         .current_dir(home)
         .env("PATH", path)
         .env("HOME", home)
-        .env("USER", "somebody")
+        .env("USER", user)
         .env("XDG_STATE_HOME", home.join("state"))
         .env_remove("XDG_CONFIG_HOME")
         .output()
@@ -226,7 +226,7 @@ fn the_report_says_whether_the_tools_bindings_and_apps_need_are_installed() {
             }
         }
         let report_text = || {
-            let out = report_on_path(&home, &bin.display().to_string());
+            let out = report_on_path(&home, &bin.display().to_string(), "somebody");
             assert!(out.status.success(), "{out:?}");
             std::fs::read_to_string(home.join("pila-report.txt")).unwrap()
         };
@@ -262,6 +262,33 @@ fn the_report_hides_a_name_but_leaves_words_that_hold_it() {
         "{text}"
     );
     assert!(text.contains("the end for <user>"), "{text}");
+}
+
+#[test]
+fn the_report_leaves_system_directories_named_like_the_user() {
+    let home = report_home("dev");
+    std::fs::write(
+        home.join("state/pila/pila.log"),
+        "2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n\
+         opened \"/dev/input/event3\" for dev\n\
+         stats from network=/proc/net/dev\n\
+         mounted /run/media/dev/disk\n",
+    )
+    .unwrap();
+    let path = std::env::var("PATH").unwrap();
+    let out = report_on_path(&home, &path, "dev");
+    assert!(out.status.success(), "{out:?}");
+    let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
+    // USER is dev: the kernel's and the system's directories of that name
+    // aren't the user; the word after "for" and a directory named after the
+    // user elsewhere are.
+    assert!(text.contains("In use by Pila: /dev/dri/card1"), "{text}");
+    assert!(
+        text.contains("opened \"/dev/input/event3\" for <user>"),
+        "{text}"
+    );
+    assert!(text.contains("network=/proc/net/dev"), "{text}");
+    assert!(text.contains("mounted /run/media/<user>/disk"), "{text}");
 }
 
 #[test]
