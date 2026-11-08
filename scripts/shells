@@ -1,0 +1,556 @@
+#!/usr/bin/env bash
+# Compatibility run for the desktop shells pila supports: Noctalia and Dux
+# Shell (DMS). Each shell runs on a headless pila with two outputs (one at
+# scale 1.5), with a terminal and an X11 window open, while its own IPC walks
+# through every feature that depends on the compositor: bar, panels,
+# launcher, workspaces, taskbar, window switcher, notifications, OSD,
+# clipboard, screenshots, night light, display power, display settings and
+# the lock screen. The run checks the shell's answers and pila's state
+# after each step, then judges the logs. It prints PASS/FAIL per check
+# and exits 1 if any failed.
+#
+#   scripts/shells                      every shell that's installed
+#   scripts/shells noctalia | dms       one of them
+#   scripts/shells --judge <dir>        judge an earlier run again
+#
+# Results go to pila-shells/<shell>/: pila's log (pila.log), the shell's own
+# log, what each IPC call answered (steps.log) and a screenshot (grim, so
+# through screencopy) after each visible step, to look at.
+#
+# Each run is sealed off from your session: a temporary HOME, XDG
+# directories and runtime directory, and a private D-Bus session bus. Your
+# shell's config, wallpaper, clipboard and notifications aren't touched, and
+# the shell under test can't reach your running one. Without a system bus,
+# logind or PipeWire (a container), the shells log errors about those. They
+# aren't pila's, and the checks don't count them.
+#
+# Needs: python3, grim, dbus-run-session (package dbus), the shell itself;
+# foot (or kitty) and xterm when installed. Uses target/release/pila, or
+# PILA_BIN.
+#
+# Behavior is tested by the integration tests (`cargo test`); this run is for
+# what they can't reach: real shells on top of pila's protocols.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# --- Inside pila (started with -c): the steps ---------------------------------
+
+if [ "${1:-}" = "--workload" ]; then
+    # A failed step is a check that failed, not the end of the run.
+    set +e
+    shell_name=$2
+    out=$3
+    # Programs' output goes to pila's log: the judge finds these there.
+    mark() { echo "shells: $*"; }
+    n=0
+    # A screenshot of every output, through screencopy.
+    shot() {
+        n=$((n + 1))
+        local file
+        file=$(printf '%s/%02d-%s.png' "$out" "$n" "$1")
+        grim "$file" 2>>"$out/steps.log" || mark "check failed: grim takes a screenshot after $1"
+    }
+    # Run an IPC call (or any command), record its answer. Quickshell's IPC
+    # (dms ipc) exits 0 on a bad call too: its error answers count as a
+    # failure.
+    step() {
+        local name=$1
+        shift
+        local answer status
+        answer=$(timeout 15 "$@" 2>&1)
+        status=$?
+        printf '$ %s\n%s\n' "$*" "$answer" >>"$out/steps.log"
+        if [ "$status" -ne 0 ]; then
+            mark "check failed: $name (exit status $status)"
+        elif grep -qE '^(Too few arguments|Too many arguments|Function not found|Target not found|error:)' <<<"$answer"; then
+            mark "check failed: $name (answered: $(head -n 1 <<<"$answer"))"
+        else
+            mark "step ok: $name"
+        fi
+    }
+    # A request to pila's control socket (headless), JSON in and out.
+    ctl() {
+        python3 -I - "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.control" "$1" <<'EOF'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+s.sendall(sys.argv[2].encode() + b"\n")
+data = b""
+while not data.endswith(b"\n"):
+    chunk = s.recv(65536)
+    if not chunk:
+        break
+    data += chunk
+print(data.decode().strip())
+EOF
+    }
+    # Whether a Python expression over pila's state (`s`) holds, within
+    # `timeout` seconds (default 5): a check of its own.
+    expect() {
+        local label=$1 expr=$2 timeout=${3:-5}
+        if python3 -I - "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.control" "$expr" "$timeout" <<'EOF'; then
+import json, socket, sys, time
+path, expr, timeout = sys.argv[1], sys.argv[2], float(sys.argv[3])
+def state():
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(path)
+    s.sendall(b'{"cmd":"state"}\n')
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(1 << 20)
+        if not chunk:
+            break
+        data += chunk
+    return json.loads(data)
+def layers(s, prefix):
+    return [l for l in s["layers"] if l["namespace"].startswith(prefix)]
+end = time.monotonic() + timeout
+while True:
+    s = state()
+    if eval(expr, {"s": s, "layers": layers}):
+        sys.exit(0)
+    if time.monotonic() > end:
+        print(json.dumps(s, indent=1)[:4000], file=sys.stderr)
+        sys.exit(1)
+    time.sleep(0.1)
+EOF
+            mark "check ok: $label"
+        else
+            mark "check failed: $label"
+        fi
+    }
+    # Whether a command's output matches a pattern (an IPC answer), within
+    # 5 seconds (panels close with an animation).
+    answers() {
+        local label=$1 pattern=$2
+        shift 2
+        local answer i
+        for ((i = 0; i < 10; i++)); do
+            answer=$(timeout 15 "$@" 2>&1)
+            if grep -qE -- "$pattern" <<<"$answer"; then
+                echo "\$ $* -> $answer" >>"$out/steps.log"
+                mark "check ok: $label"
+                return
+            fi
+            sleep 0.5
+        done
+        echo "\$ $* -> $answer" >>"$out/steps.log"
+        mark "check failed: $label (answered: $(head -c 200 <<<"$answer" | tr '\n' ' '))"
+    }
+    # Wait until a command succeeds (the shell is up), up to $2 seconds.
+    wait_for() {
+        local label=$1 seconds=$2
+        shift 2
+        local i
+        for ((i = 0; i < seconds * 4; i++)); do
+            if "$@" >/dev/null 2>&1; then
+                mark "check ok: $label"
+                return 0
+            fi
+            sleep 0.25
+        done
+        mark "check failed: $label (not within ${seconds}s)"
+        return 1
+    }
+    still_running() {
+        if kill -0 "$1" 2>/dev/null; then
+            mark "check ok: $shell_name kept running to the end"
+        else
+            mark "check failed: $shell_name kept running to the end (it exited; see $shell_name.log)"
+        fi
+    }
+    # The pointer to the middle of output 1 or 2 (logical: 1920x1080 at 0,0;
+    # 1920x1080 at scale 1.5 is 1280x720, at 1920,0).
+    pointer_on() {
+        case $1 in
+            1) ctl '{"cmd":"move","x":960.5,"y":540.25}' >/dev/null ;;
+            2) ctl '{"cmd":"move","x":2560.5,"y":360.25}' >/dev/null ;;
+        esac
+    }
+    windows() {
+        for terminal in foot kitty; do
+            if command -v "$terminal" >/dev/null; then
+                "$terminal" &
+                break
+            fi
+        done
+        if command -v xterm >/dev/null; then
+            xterm &
+        fi
+    }
+    finish() {
+        mark "$shell_name done"
+        sleep 0.5
+        ctl '{"cmd":"quit"}' >/dev/null
+        exit 0
+    }
+
+    mark "$shell_name begin"
+    pointer_on 1
+    case $shell_name in
+    noctalia)
+        noctalia >"$out/noctalia.log" 2>&1 &
+        shell=$!
+        wait_for "Noctalia answers on its socket" 20 noctalia msg status || finish
+        expect "the bar is on both outputs" \
+            "{l['output'] for l in layers(s, 'noctalia-bar')} == {'eDP-1', 'DP-1'}" 10
+        expect "the wallpaper is on both outputs" \
+            "{l['output'] for l in layers(s, 'noctalia-wallpaper')} == {'eDP-1', 'DP-1'}" 10
+        windows
+        expect "the windows mapped" "sum(w['mapped'] for w in s['windows']) >= 1" 10
+        sleep 2
+        shot start
+
+        for panel in launcher control-center clipboard wallpaper session; do
+            step "open the $panel panel" noctalia msg panel-open "$panel"
+            answers "the $panel panel is open" "\"activePanelId\": \"$panel\"" noctalia msg status
+            sleep 1
+            shot "panel-$panel"
+            step "close the $panel panel" noctalia msg panel-close
+        done
+        step "open the launcher" noctalia msg panel-open launcher
+        expect "the launcher has the keyboard" "s['keyboard_focus_layer'] is not None and s['keyboard_focus_layer'].startswith('noctalia')"
+        ctl '{"cmd":"key","key":"f"}' >/dev/null
+        ctl '{"cmd":"key","key":"o"}' >/dev/null
+        sleep 0.5
+        shot launcher-typed
+        ctl '{"cmd":"key","key":"Escape"}' >/dev/null
+        answers "Escape closes the launcher" '"panelOpen": false' noctalia msg status
+        for tab in audio monitor network notifications power screen_time system; do
+            step "control center: $tab" noctalia msg panel-open control-center "$tab"
+            sleep 0.4
+        done
+        shot control-center-system
+        step "close the control center" noctalia msg panel-close
+        # Noctalia opens panels on the monitor of the active window (its
+        # wlr-foreign-toplevel state and output), then the pointer's.
+        # Window bindings act on the window with the keyboard, which the
+        # closing panel holds until Noctalia has animated it away.
+        expect "the keyboard is back on the window" "s['keyboard_focus_layer'] is None"
+        ctl '{"cmd":"combo","keys":"Super+Shift+o"}' >/dev/null
+        expect "the focused window moved to DP-1" \
+            "any(w['focused'] and w['output'] == 'DP-1' for w in s['windows'])"
+        step "open the launcher" noctalia msg panel-open launcher
+        expect "it opens on the active window's output" \
+            "any(l['output'] == 'DP-1' for l in s['layers'] if l['namespace'] == 'noctalia-panel')"
+        sleep 0.5
+        shot launcher-output-2
+        step "close it" noctalia msg panel-close
+        ctl '{"cmd":"combo","keys":"Super+Shift+o"}' >/dev/null
+        step "open settings" noctalia msg settings-open
+        expect "the settings window maps" "any(w['mapped'] and 'octalia' in (w['app_id'] or '') for w in s['windows'])" 10
+        sleep 1
+        shot settings
+        step "close settings" noctalia msg settings-close
+
+        step "window switcher" noctalia msg window-switcher
+        sleep 1
+        shot window-switcher
+        step "close the window switcher" noctalia msg window-switcher close
+        step "next workspace" noctalia msg workspace-switch next
+        expect "the workspace switch reached pila" "s['workspace'] == 2"
+        sleep 0.5
+        shot workspace-2
+        step "previous workspace" noctalia msg workspace-switch prev
+        expect "and back" "s['workspace'] == 1"
+
+        step "notification" noctalia msg notification-show "pila" "a notification"
+        expect "the notification shows" "len(layers(s, 'noctalia')) > 0"
+        sleep 1
+        shot notification
+        step "OSD" noctalia msg osd-show volume-high 40
+        sleep 0.5
+        shot osd
+        step "hide the bar" noctalia msg bar-hide
+        step "show the bar" noctalia msg bar-show
+        step "bar on the overlay layer" noctalia msg bar-layer-set overlay
+        expect "the bar moved to the overlay layer" \
+            "all(l['layer'] == 'overlay' for l in layers(s, 'noctalia-bar'))"
+        step "bar back on the top layer" noctalia msg bar-layer-set top
+        step "dock" noctalia msg dock-toggle
+        sleep 0.5
+        shot dock
+        step "dock again" noctalia msg dock-toggle
+
+        step "copy to the clipboard" noctalia msg clipboard-copy pila-shells
+        answers "the clipboard reads back (ext-data-control)" "pila-shells" noctalia msg clipboard-text
+        step "caffeine on" noctalia msg caffeine-enable
+        step "caffeine off" noctalia msg caffeine-disable
+        step "night light" noctalia msg nightlight-force-toggle
+        expect "night light sets gamma ramps (wlr-gamma-control)" "all(o['gamma_set'] for o in s['outputs'])"
+        step "night light off" noctalia msg nightlight-force-toggle
+
+        step "screenshot: fullscreen" noctalia msg screenshot-fullscreen
+        sleep 1.5
+        step "screenshot: region" noctalia msg screenshot-region
+        expect "the region selector takes the keyboard" \
+            "s['keyboard_focus_layer'] is not None and s['keyboard_focus_layer'].startswith('noctalia')" 5
+        sleep 0.5
+        shot screenshot-region
+        ctl '{"cmd":"key","key":"Escape"}' >/dev/null
+        expect "Escape cancels it" "s['keyboard_focus_layer'] is None" 5
+        step "screenshot: window" noctalia msg screenshot-window
+        sleep 1.5
+        ctl '{"cmd":"key","key":"Escape"}' >/dev/null
+
+        # Noctalia 5.4's dpms-off/on on a compositor it doesn't know runs
+        # `wlr-randr --off` without an --output, which wlr-randr refuses
+        # everywhere: a Noctalia bug. What it means to do works on pila.
+        if noctalia msg dpms-off >>"$out/steps.log" 2>&1; then
+            mark "step ok: display power off (dpms-off)"
+            noctalia msg dpms-on >>"$out/steps.log" 2>&1
+        else
+            mark "known: Noctalia's dpms-off runs wlr-randr --off without --output, which wlr-randr refuses (a Noctalia bug)"
+        fi
+        if command -v wlr-randr >/dev/null; then
+            step "turn DP-1 off (wlr-randr, output management)" wlr-randr --output DP-1 --off
+            expect "DP-1 went off" "any(o['name'] == 'DP-1' and not o['enabled'] for o in s['outputs'])"
+            step "and on" wlr-randr --output DP-1 --on
+            expect "DP-1 came back" "all(o['enabled'] for o in s['outputs'])"
+            expect "Noctalia's bar came back on it" \
+                "{l['output'] for l in layers(s, 'noctalia-bar')} == {'eDP-1', 'DP-1'}" 10
+        fi
+
+        # Last: there's no unlocking without a password.
+        step "lock" noctalia msg session lock
+        expect "pila is locked" "s['locked'] is True" 10
+        answers "Noctalia reports the lock" '"locked": true' noctalia msg status
+        sleep 1.5
+        shot locked
+        still_running "$shell"
+        ;;
+    dms)
+        dms run >"$out/dms.log" 2>&1 &
+        shell=$!
+        wait_for "Dux Shell answers on its IPC" 30 dms ipc call bar status || finish
+        expect "the bar is on both outputs" \
+            "{l['output'] for l in layers(s, 'dms:bar')} == {'eDP-1', 'DP-1'}" 10
+        windows
+        expect "the windows mapped" "sum(w['mapped'] for w in s['windows']) >= 1" 10
+        sleep 2
+        shot start
+
+        for target in spotlight control-center clipboard powermenu processlist notifications; do
+            step "open $target" dms ipc call "$target" open
+            sleep 1.2
+            shot "$target"
+            case $target in
+                control-center) step "close $target" dms ipc call "$target" hide ;;
+                *) step "close $target" dms ipc call "$target" close ;;
+            esac
+            sleep 0.3
+        done
+        step "spotlight with a query" dms ipc call spotlight openQuery foot
+        expect "the launcher has the keyboard" "s['keyboard_focus_layer'] is not None and s['keyboard_focus_layer'].startswith('dms')"
+        sleep 0.5
+        shot spotlight-query
+        ctl '{"cmd":"key","key":"Escape"}' >/dev/null
+        expect "Escape closes it" "s['keyboard_focus_layer'] is None" 5
+        pointer_on 2
+        step "spotlight with the pointer on output 2" dms ipc call spotlight open
+        expect "it opens on the output under the pointer" \
+            "any(l['output'] == 'DP-1' for l in layers(s, 'dms:spotlight'))"
+        step "close it" dms ipc call spotlight close
+        pointer_on 1
+        for tab in overview media wallpaper weather; do
+            step "dash: $tab" dms ipc call dash open "$tab"
+            sleep 0.5
+        done
+        shot dash
+        step "close the dash" dms ipc call dash close
+        step "open settings: displays" dms ipc call settings openWith displays
+        sleep 2
+        shot settings-displays
+        step "close settings" dms ipc call settings close
+        step "dock" dms ipc call dock reveal
+        step "dock hidden" dms ipc call dock hide
+        step "toast" dms ipc call toast info "pila"
+        sleep 0.5
+        shot toast
+
+        # The second workspace pill on output 1's bar (ext-workspace activate).
+        ctl '{"cmd":"move","x":93.5,"y":20.5}' >/dev/null
+        ctl '{"cmd":"button","button":"left","state":"click"}' >/dev/null
+        expect "a click on a workspace pill switches pila's workspace (ext-workspace)" "s['workspace'] == 2"
+        sleep 0.5
+        shot workspace-2
+        ctl '{"cmd":"move","x":61.5,"y":20.5}' >/dev/null
+        ctl '{"cmd":"button","button":"left","state":"click"}' >/dev/null
+        expect "and back" "s['workspace'] == 1"
+        pointer_on 1
+        step "notification" notify-send pila "a notification"
+        expect "the notification pops up" "len(layers(s, 'dms:notification')) > 0"
+        sleep 1
+        shot notification
+        step "copy (ext-data-control)" dms cl copy pila-shells
+        answers "the clipboard history has it" "pila-shells" dms cl history
+        step "idle inhibit" dms ipc call inhibit toggle
+        step "idle inhibit off" dms ipc call inhibit toggle
+        step "night mode" dms ipc call night enable
+        expect "night mode sets gamma ramps (wlr-gamma-control)" "all(o['gamma_set'] for o in s['outputs'])"
+        step "night mode off" dms ipc call night disable
+        answers "outputs (wlr-output-management)" "DP-1" dms randr
+        answers "display power (wlr-output-power)" "eDP-1" dms dpms list
+        step "display power off" dms dpms off DP-1
+        expect "DP-1 went off" "any(o['name'] == 'DP-1' and o['power'] is False for o in s['outputs'])"
+        step "display power on" dms dpms on DP-1
+        expect "and back on" "all(o['power'] is not False for o in s['outputs'])"
+        dms screenshot full --stdout >"$out/dms-screenshot.png" 2>>"$out/steps.log"
+        if [ "$(head -c 4 "$out/dms-screenshot.png" | tail -c 3)" = PNG ]; then
+            mark "check ok: dms screenshot takes a picture (screencopy)"
+        else
+            mark "check failed: dms screenshot takes a picture (screencopy)"
+        fi
+        answers "blur (ext-background-effect)" "[Ss]upported|true|yes" dms blur check
+        answers "dms doctor sees pila" "pila" dms doctor
+
+        step "lock" dms ipc call lock lock
+        expect "pila is locked" "s['locked'] is True" 10
+        answers "Dux Shell reports the lock" "true" dms ipc call lock isLocked
+        sleep 1.5
+        shot locked
+        step "unlock" dms ipc call lock unlock
+        expect "pila is unlocked" "s['locked'] is False" 10
+        sleep 1
+        shot unlocked
+        still_running "$shell"
+        ;;
+    esac
+    kill "$shell" 2>/dev/null || true
+    sleep 1
+    finish
+fi
+
+# --- Outside: run pila per shell, then judge ------------------------------------
+
+failed=0
+pass() { printf 'PASS  %s\n' "$*"; }
+fail() {
+    printf 'FAIL  %s\n' "$*"
+    failed=1
+}
+skip() { printf 'SKIP  %s\n' "$*"; }
+
+judge() {
+    local name=$1 dir=$2 log=$2/pila.log
+    echo
+    echo "== $name ($dir) =="
+    if [ ! -f "$log" ]; then
+        fail "$name ran (no $log)"
+        return
+    fi
+    grep -q "shells: $name done" "$log" || fail "the steps finished (pila quit or crashed before; see $log)"
+    if grep -q "panicked" "$log"; then
+        fail "pila didn't panic"
+    else
+        pass "pila didn't panic"
+    fi
+    local errors
+    errors=$(grep "client disconnected by a protocol error" "$log" || true)
+    if [ -n "$errors" ]; then
+        fail "no client was disconnected for a protocol error:"
+        sed 's/^/      /' <<<"$errors"
+    else
+        pass "no client was disconnected for a protocol error"
+    fi
+    local steps ok
+    ok=$(grep -c "shells: step ok:" "$log" || true)
+    pass "$ok IPC calls answered"
+    steps=$(grep -oE "shells: (check (ok|failed)|known): .*" "$log" || true)
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case $line in
+            "shells: check ok: "*) pass "${line#shells: check ok: }" ;;
+            "shells: known: "*) printf 'NOTE  %s\n' "${line#shells: known: }" ;;
+            *) fail "${line#shells: check failed: }" ;;
+        esac
+    done <<<"$steps"
+}
+
+if [ "${1:-}" = "--judge" ]; then
+    dir=${2:?usage: scripts/shells --judge <dir>}
+    judge "$(basename "$dir")" "$dir"
+    exit "$failed"
+fi
+
+shells=("$@")
+if [ ${#shells[@]} -eq 0 ]; then
+    shells=(noctalia dms)
+fi
+for tool in python3 grim dbus-run-session; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "scripts/shells needs $tool" >&2
+        exit 1
+    fi
+done
+bin="${PILA_BIN:-target/release/pila}"
+if [ ! -x "$bin" ]; then
+    echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
+    exit 1
+fi
+if [ -z "${PILA_BIN:-}" ]; then
+    newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null || true)"
+    if [ -n "$newer" ]; then
+        echo "$bin is older than the sources (e.g. $newer); rebuild it: cargo build --release" >&2
+        exit 1
+    fi
+fi
+bin=$(realpath "$bin")
+script=$(realpath "$0")
+
+for name in "${shells[@]}"; do
+    case $name in
+        noctalia) program=noctalia ;;
+        dms) program=dms ;;
+        *)
+            echo "unknown shell $name (noctalia or dms)" >&2
+            exit 1
+            ;;
+    esac
+    if ! command -v "$program" >/dev/null; then
+        echo
+        skip "$name ($program not installed)"
+        continue
+    fi
+    out="$PWD/pila-shells/$name"
+    rm -rf "$out"
+    mkdir -p "$out"
+    sealed=$(mktemp -d)
+    mkdir -p "$sealed/home" "$sealed/run"
+    chmod 700 "$sealed/run"
+    cat >"$sealed/config.toml" <<'EOF'
+# Written by scripts/shells.
+mod = "super"
+
+[[output]]
+name = "DP-1"
+scale = 1.5
+EOF
+    echo "Running $name on a headless pila (about a minute)..."
+    # Outputs named like monitors: Dux Shell's night mode leaves out
+    # outputs named HEADLESS-*.
+    # Sealed off from the session it's run from (see the top).
+    env -u WAYLAND_DISPLAY -u DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
+        -u NIRI_SOCKET -u SWAYSOCK -u I3SOCK -u HYPRLAND_INSTANCE_SIGNATURE \
+        -u XDG_SESSION_DESKTOP -u DESKTOP_SESSION -u PILA_SOCKET \
+        HOME="$sealed/home" XDG_RUNTIME_DIR="$sealed/run" \
+        XDG_CONFIG_HOME="$sealed/home/.config" XDG_STATE_HOME="$sealed/home/.local/state" \
+        XDG_CACHE_HOME="$sealed/home/.cache" XDG_DATA_HOME="$sealed/home/.local/share" \
+        RUST_LOG="info,pila=debug,pila::frames=info" \
+        timeout 300 dbus-run-session -- "$bin" --backend headless \
+        --headless-outputs "eDP-1:1920x1080@60,DP-1:1920x1080@60" \
+        --config "$sealed/config.toml" -c "$script --workload $name $out" \
+        >"$out/pila.log" 2>&1 || true
+    chmod -R u+w "$sealed" 2>/dev/null || true
+    rm -rf "$sealed"
+    judge "$name" "$out"
+done
+
+echo
+if [ "$failed" -eq 0 ]; then
+    echo "All checks passed. Screenshots in pila-shells/: look at them for anything misplaced."
+else
+    echo "Some checks failed: see pila-shells/<shell>/pila.log, steps.log and the shell's log."
+fi
+exit "$failed"

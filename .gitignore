@@ -5,5 +5,7 @@
 /*.log.old
 # Screenshot scripts/check takes
 /pila-check.png
+# What scripts/shells writes
+/pila-shells/
 # What scripts/report writes
 /pila-report.txt

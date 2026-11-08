@@ -258,6 +258,34 @@ namespace = "noctalia-*"
 animations = false
 ```
 
+Noctalia opens its panels on the monitor of the window you're using. Its `dpms-off` and `dpms-on`
+commands don't work on pila (Noctalia 5.4 runs `wlr-randr --off` without naming a monitor); for
+that, `wlr-randr --output DP-1 --off` works.
+
+**With Dux Shell** (DankMaterialShell):
+
+```toml
+autostart = ["dms run"]
+launcher = "dms ipc call spotlight toggle"         # Mod+D opens its launcher
+
+# Dux Shell animates its own panels; without this, pila animates them as well.
+[[layer-rule]]
+namespace = "dms:*"
+animations = false
+
+# Its settings and welcome windows draw their own title bar.
+[[window-rule]]
+app-id = "dev.duxlabs.shell"
+title-bar = false
+```
+
+Both shells work on pila through standard protocols: bar, workspaces, taskbar and dock, launcher,
+notifications, clipboard history, screenshots, night light, display settings and power, idle and
+the lock screen. Neither knows pila by name yet, so the features they build on a compositor's own
+commands are missing: Dux Shell's overview, window rules and keybinding editor, and switching the
+keyboard layout from either shell's bar (pila's keyboard settings and `Mod` bindings still work).
+`dms doctor` says "No supported Wayland compositor found"; that line is all it means.
+
 **With separate tools**, for example:
 
 ```toml
