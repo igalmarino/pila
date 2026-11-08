@@ -45,7 +45,7 @@ now, in this order:
   GPUs, Pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
 - **no systemd** (Void, Alpine, with elogind or seatd), and other **distros**, such as
   [Ubuntu and Fedora](#debian-ubuntu-and-fedora);
-- **display managers** other than GDM and SDDM (greetd, LightDM);
+- **display managers** other than GDM, SDDM and greetd (LightDM, for instance);
 - **monitors:** high refresh rates, 4K, mixed scales, several at once;
 - **other shells and apps:** bars, launchers, games, Steam, Electron.
 
