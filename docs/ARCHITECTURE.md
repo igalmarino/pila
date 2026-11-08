@@ -552,6 +552,15 @@ Key flows and invariants:
   move/resize/center go through `apply_rect`, which also configures X11 windows.
   `Side` also names the four quarters (`snap-top-left`, ... or a drag near a corner:
   `edge_target`); a quarter is tiled only on the edges it touches.
+- **Window menu** (`window_menu.rs`): opened by a right press on pila's title bar
+  (`on_decoration_press`) or `show_window_menu` (checked like a move request, `check_grab`),
+  as `Pila::window_menu` plus a pointer grab (`WindowMenuGrab`): the pointer reaches no client
+  while it's open, a release over a row runs it, a press outside closes it. Inside the grab the
+  pointer is locked, so the grab ends itself through its `handle` and runs the item from an idle
+  callback (with the `wake` ping); `close_window_menu` (keys, `forget_window`, a lock, a
+  workspace switch) ends it through the pointer. The keyboard filter gives it every press while
+  open (`InputState::menu_key`). Drawn first by `output_elements` from `Scene::window_menu`, its
+  label textures and solid buffers kept in `MenuBuffers`.
 - **Urgency** (`urgency.rs`): a mark in a window's user data (`set_urgent`, `is_urgent`), set by
   an activation whose token had no serial (`UrgentOnlyToken`, accepted for any client in
   `token_created`; as niri) or X11's `WM_HINTS` urgency hint (`property_notify` `Hints`), never

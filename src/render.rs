@@ -157,6 +157,8 @@ pub struct Scene {
     /// A drag's icon and its top-left (global): above everything but the
     /// cursor, never while locked.
     pub dnd_icon: Option<(WlSurface, Point<i32, Logical>)>,
+    /// The window menu, above everything but the cursor (`window_menu.rs`).
+    pub window_menu: Option<crate::window_menu::SceneMenu>,
     /// `corner-radius` from the config, for the snap preview.
     pub corner_radius: u32,
     pub colors: Colors,
@@ -1289,7 +1291,11 @@ pub fn output_elements(
         output_geo.size,
         scale,
     );
-    let mut elements = dnd_icon_elements(renderer, scene, origin, scale);
+    let mut elements = match scene.window_menu.as_ref().filter(|_| !scene.locked) {
+        Some(menu) => crate::window_menu::elements(renderer, menu, &scene.colors, origin, scale),
+        None => Vec::new(),
+    };
+    elements.extend(dnd_icon_elements(renderer, scene, origin, scale));
     elements.extend(scene_elements(
         renderer,
         scene,

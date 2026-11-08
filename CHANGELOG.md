@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+- **Smithay's main branch:** pila now builds against Smithay's development branch (a git
+  dependency pinned to one commit, as niri and cosmic-comp do) instead of the 0.7.0 release
+  from June 2025, so fixes reach pila without waiting for a release. Building pila needs
+  network access to GitHub for it (the AUR package and Nix flake fetch it by its commit).
+- **Quickshell shells (Dux Shell/DMS, …) no longer crash:** a shell that hid a panel or
+  launcher, or unlocked the screen, by destroying the surface's role and then committing it
+  with no buffer was disconnected by a protocol error. Dux Shell lost its connection each
+  time its launcher closed.
+- **Virtual keyboards** (`wtype`, on-screen keyboards, a clipboard history pasting) are
+  keyboards now: their keys can use pila's bindings and count as activity (the screen doesn't
+  blank while you type on one), and they type with their own keymap. Your keymap, layout and
+  Caps/Num Lock come back with the next key you press or when the tool exits.
+- **Window menu:** right-clicking a title bar, pila's or an app's own (GTK, browsers), opens a
+  menu to minimize, maximize, keep the window on top or on all workspaces, or close it.
+- **Windows asking for attention** (a chat message, an X11 app's urgency hint) get an amber title
+  bar (`[colors] bar-urgent`) and mark their workspace in bars that show workspaces, until you
+  focus them.
+- **Window rules follow title changes:** a rule on a title applies when a window takes that title
+  later (a browser's page) and stops when it changes again; what applies when a window opens
+  still only applies then.
+- **Clicking a notification opens its app in front:** a notification or panel (which takes no
+  keyboard) may pass the click on to the app it opens, which then gets the focus.
+- **Launchers and dialogs above the windows get the keyboard when they appear** if they ask
+  for it on demand (Noctalia's welcome dialog, some launchers), instead of after a click.
+- **Dragging shows what you drag:** the icon an app gives a drag (a file, a tab) follows the
+  pointer until the drop; pila never drew it before.
+- **Panels hidden and shown again come back:** a layer surface (panel, launcher, dock) hidden
+  by committing no buffer is shown again by its next initial commit, as the protocol says.
+- **A window mapped again keeps its decorations:** a client that hid a window and showed it
+  again lost the title bar.
+- **X11 apps can start minimized** (they ask with `WM_HINTS`), instead of opening and taking
+  the focus.
+- **X11 apps with client-side shadows** (`_GTK_FRAME_EXTENTS`, GTK 3) are measured without the
+  shadows.
+
 ## 0.3.1 (2026-11-07)
 
 - **Config errors say what's wrong:** a notification about an invalid config used to show only

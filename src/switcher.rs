@@ -167,6 +167,7 @@ impl Pila {
     /// A managed window went away, for whatever reason: nothing of pila's
     /// keeps it, on screen or off.
     pub fn forget_window(&mut self, window: &Window) {
+        self.close_window_menu_of(window);
         self.remove_foreign_toplevel(window);
         self.windows.focus_history.retain(|w| w != window);
         self.forget_in_switch(window);

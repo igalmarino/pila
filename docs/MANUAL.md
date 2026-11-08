@@ -88,6 +88,9 @@ in [Keyboard, mouse and touchpad](#keyboard-mouse-and-touchpad).
 and close buttons: drag the bar to move the window, and drag any edge or corner to resize it.
 Apps that draw their own title bar (GTK apps, browsers) work the way they always do. Mod plus
 the left button moves any window from anywhere in it, and Mod plus the right button resizes it.
+Right-clicking a title bar, pila's or an app's own, opens the window menu: minimize, maximize,
+always on top, on all workspaces, close. Up, Down and Enter work in it too; Escape or a click
+elsewhere closes it.
 
 **Snapping.** Drag a window with the pointer at the left or right edge of a monitor to make it
 fill that half, near a corner to fill that quarter, or at the top edge to maximize it. A preview

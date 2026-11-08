@@ -177,6 +177,8 @@ pub struct Pila {
     /// The icon of the drag in progress (`handlers/mod.rs`), drawn at the
     /// pointer plus its offset.
     pub dnd_icon: Option<crate::render::DndIcon>,
+    /// The window menu, while open (`window_menu.rs`).
+    pub window_menu: Option<crate::window_menu::WindowMenu>,
 
     /// Nested-only: set by `init_winit`. It lives here (not in the redraw closure) so
     /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
@@ -221,6 +223,8 @@ pub struct InputState {
     /// The configured keymap as text, kept while a virtual keyboard's is in
     /// place; reset when the keyboard config is applied.
     pub configured_keymap: Option<smithay::input::keyboard::KeymapFile>,
+    /// A key pressed while the window menu is open, for it (`window_menu.rs`).
+    pub menu_key: Option<smithay::input::keyboard::Keysym>,
 }
 
 /// The state of Smithay's protocols (`Pila::protocols`), which its handler
@@ -420,6 +424,7 @@ impl Pila {
             seat,
             cursor_status: CursorImageStatus::default_named(),
             dnd_icon: None,
+            window_menu: None,
             backend: None,
         }
     }
@@ -605,6 +610,7 @@ impl Pila {
                 let at = self.pointer_location().to_i32_round() + icon.offset;
                 (icon.surface.clone(), at)
             }),
+            window_menu: self.window_menu.as_ref().map(|menu| menu.scene()),
             corner_radius: self.config.corner_radius,
             colors: self.config.colors,
             ..Default::default()

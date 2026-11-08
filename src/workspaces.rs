@@ -161,6 +161,7 @@ impl Pila {
             return;
         }
         debug!(index, "switching workspace");
+        self.close_window_menu();
         self.show_workspace(index);
     }
 

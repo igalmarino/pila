@@ -61,6 +61,7 @@ mod transients;
 mod udev;
 mod urgency;
 mod virtual_keyboard;
+mod window_menu;
 mod winit;
 mod workspace_slide;
 mod workspaces;

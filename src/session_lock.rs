@@ -216,6 +216,7 @@ impl SessionLockHandler for Pila {
     }
 
     fn lock(&mut self, confirmation: SessionLocker) {
+        self.close_window_menu();
         let held = self
             .session_lock
             .lock

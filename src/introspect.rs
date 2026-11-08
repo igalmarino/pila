@@ -312,6 +312,13 @@ impl Pila {
                 "constrained": self.input.constrained.is_some(),
             },
             "keyboard_grabbed": self.seat.get_keyboard().is_some_and(|k| k.is_grabbed()),
+            "window_menu": self.window_menu.as_ref().map(|menu| json!({
+                "window": crate::foreign_toplevel::title_and_app_id(&menu.window).1,
+                "geometry": rect(menu.rect),
+                "items": menu.labels(),
+                "checked": menu.checked(),
+                "hover": menu.hover,
+            })),
             "locked": self.is_locked(),
             "lock_pending": self.lock_pending(),
             "snap_preview": self.snap_preview.map(rect),

@@ -17,7 +17,7 @@ use smithay::{
             Resource,
         },
     },
-    utils::{Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Serial, SERIAL_COUNTER},
     wayland::shell::xdg::{
         decoration::XdgDecorationHandler, PopupSurface, PositionerState, ToplevelSurface,
         XdgShellHandler, XdgShellState,
@@ -109,6 +109,30 @@ impl XdgShellHandler for Pila {
         });
         self.unconstrain_popup(&surface);
         surface.send_repositioned(token);
+    }
+
+    /// An app that draws its own title bar asks for the window menu (a right
+    /// click on it), at `location` relative to its window geometry.
+    fn show_window_menu(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        location: Point<i32, Logical>,
+    ) {
+        let Some(seat) = Seat::from_resource(&seat) else {
+            return;
+        };
+        let Some(start_data) = check_grab(&seat, surface.wl_surface(), serial) else {
+            return;
+        };
+        let Some(window) = self.window_for_surface(surface.wl_surface()) else {
+            return;
+        };
+        let Some(origin) = self.space.element_location(&window) else {
+            return;
+        };
+        self.open_window_menu(&window, origin + location, start_data, serial);
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {

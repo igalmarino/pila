@@ -104,6 +104,12 @@ impl Pila {
                         )));
                     }
                 }
+                // The window menu takes every press while it's open.
+                if key_state == KeyState::Pressed && state.window_menu.is_some() {
+                    state.input.suppressed_keys.insert(keycode);
+                    state.input.menu_key = Some(handle.modified_sym());
+                    return FilterResult::Intercept(None);
+                }
                 match key_state {
                     // Any key can be bound (media keys need no Mod), so
                     // every press is looked up.
@@ -135,6 +141,9 @@ impl Pila {
             },
         );
 
+        if let Some(sym) = self.input.menu_key.take() {
+            self.window_menu_key(sym);
+        }
         if let Some(action) = action.flatten() {
             self.run_action(action, serial);
         }
@@ -388,6 +397,12 @@ impl Pila {
         start_data: PointerGrabStartData<Pila>,
         serial: Serial,
     ) {
+        // A right click on a title bar opens the window menu where it is.
+        if start_data.button == BTN_RIGHT && matches!(decoration, Decoration::TitleBar(_)) {
+            let at = start_data.location.to_i32_round();
+            self.open_window_menu(&window, at, start_data, serial);
+            return;
+        }
         if start_data.button != BTN_LEFT {
             return;
         }
