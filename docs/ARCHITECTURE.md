@@ -391,7 +391,10 @@ Key flows and invariants:
   client's dma-buf (device and modifiers from `Pila::capture.dmabuf`, set by the backend),
   or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A
   session's first frame is copied at once (idle), later ones in `after_frames` only when
-  the session's own damage tracker sees a change. Size changes re-send constraints and
+  the session's own damage tracker sees a change. A copy that fails (at once or on the GPU)
+  starts the session over (`Session::start_over`: new tracker, next frame copied at once and
+  whole), since its tracker already counted the changes as seen and a still source would
+  never send the next frame. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
   window captures wait. A window capture's `capture` request sends frame callbacks to the
   window's surfaces shown on no output (covered, or the whole window when it's off the space:
@@ -408,7 +411,8 @@ Key flows and invariants:
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
   after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
-  checked from `after_frames`. A mode/scale change or a removed output fails the frame.
+  checked from `after_frames`; a copy that fails drops that tracker, for the same reason as
+  `Session::start_over`. A mode/scale change or a removed output fails the frame.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

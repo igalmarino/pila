@@ -248,6 +248,27 @@ fn a_window_on_another_workspace_being_captured_keeps_drawing() {
 }
 
 #[test]
+fn a_failed_copy_doesnt_lose_the_next_frame() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let (session, size) = shared_window(&client, "a");
+    // A change, copied into a buffer that doesn't fit: that frame fails.
+    let (failed, _) = capture(&client, &session, (100, 100), "failed");
+    client.with_window(a, |w| w.color = [255, 0, 255, 0]);
+    client.draw(a, None);
+    client.wait_logged("failed", "BufferConstraints");
+    failed.destroy();
+    // The change was never delivered: the next frame has it, with the
+    // screen still.
+    let (_next, file) = capture(&client, &session, size, "next");
+    client.wait_logged("next", "Ready");
+    assert_eq!(read_pixel(&file, 400, 200, 150), [0, 255, 0]);
+}
+
+#[test]
 fn a_buffer_of_the_wrong_size_fails() {
     let pila = TestPila::start();
     let client = pila.client();

@@ -212,6 +212,14 @@ impl Session {
         }
     }
 
+    /// A copy failed after the damage tracker saw its changes: the next
+    /// frame is copied at once and whole, as a session's first is, or a
+    /// still source would never send it.
+    fn start_over(&mut self) {
+        self.tracker = None;
+        self.captured_once = false;
+    }
+
     fn fail(&mut self, reason: FailureReason) {
         self.pending = false;
         if let Some(frame) = &self.frame {
@@ -388,26 +396,34 @@ impl Pila {
         let tracker = session
             .tracker
             .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-        let damage: Vec<Rectangle<i32, Physical>> = match tracker.damage_output(1, &elements) {
-            Ok((Some(damage), _)) => damage.clone(),
-            Ok((None, _)) => Vec::new(),
-            Err(err) => {
-                warn!(?err, "capture: damage tracking failed");
-                Vec::new()
+        let damage: Option<Vec<Rectangle<i32, Physical>>> =
+            match tracker.damage_output(1, &elements) {
+                Ok((Some(damage), _)) => Some(damage.clone()),
+                Ok((None, _)) => Some(Vec::new()),
+                Err(err) => {
+                    warn!(?err, "capture: damage tracking failed");
+                    None
+                }
+            };
+        let damage = match damage {
+            Some(damage) if session.captured_once => {
+                if damage.is_empty() {
+                    return;
+                }
+                damage
             }
-        };
-        let damage = if session.captured_once {
-            if damage.is_empty() {
-                return;
+            Some(_) => vec![Rectangle::from_size(size)],
+            // What changed is unknown: all of it, with a new tracker.
+            None => {
+                session.tracker = None;
+                vec![Rectangle::from_size(size)]
             }
-            damage
-        } else {
-            vec![Rectangle::from_size(size)]
         };
 
         let copied = match copy_frame(renderer, &buffer, size, scale, &elements, clear) {
             Ok(copied) => copied,
             Err(err) => {
+                session.start_over();
                 session.fail(copy_failure(err));
                 return;
             }
@@ -415,8 +431,13 @@ impl Pila {
         session.pending = false;
         session.captured_once = true;
         let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
-        self.when_copied(copied, move |_, result| {
+        let resource = session.resource.clone();
+        self.when_copied(copied, move |state, result| {
             if let Err(err) = result {
+                let sessions = &mut state.capture.sessions;
+                if let Some(session) = sessions.iter_mut().find(|s| s.resource == resource) {
+                    session.start_over();
+                }
                 frame.failed(copy_failure(err));
                 return;
             }
@@ -486,7 +507,9 @@ pub(crate) type Finish = Box<dyn FnOnce(&mut GlesRenderer) -> Result<(), CopyErr
 
 impl Pila {
     /// Run `then` once `copied` is complete: now, or when the GPU is done with
-    /// it, without waiting on the event loop.
+    /// it, without waiting on the event loop. A copy still on the GPU never
+    /// completes within this call, so `then` may look up the sessions
+    /// `process_captures` holds meanwhile.
     pub(crate) fn when_copied(
         &mut self,
         copied: Copied,
@@ -521,9 +544,12 @@ impl Pila {
             },
         );
         if let Err(err) = inserted {
-            // `finish` waits for the GPU by itself.
+            // `finish` waits for the GPU by itself; after this iteration, as
+            // from the source.
             warn!(err = %err.error, "can't wait for a capture's fence");
-            run(self, &pending);
+            self.loop_handle
+                .insert_idle(move |state| run(state, &pending));
+            self.wake.ping();
         }
     }
 }

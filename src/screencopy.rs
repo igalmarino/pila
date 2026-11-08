@@ -249,18 +249,18 @@ impl Pila {
         ));
 
         let mut damage = Vec::new();
+        let key = (
+            manager.id(),
+            output.name(),
+            (region.loc.x, region.loc.y, region.size.w, region.size.h),
+            // A tracker keeps its scale, and the size stays for another one.
+            scale.x.to_bits(),
+        );
         if with_damage {
             let tracker = self
                 .capture
                 .screencopy_trackers
-                .entry((
-                    manager.id(),
-                    output.name(),
-                    (region.loc.x, region.loc.y, region.size.w, region.size.h),
-                    // A tracker keeps its scale, and the size stays for
-                    // another one.
-                    scale.x.to_bits(),
-                ))
+                .entry(key.clone())
                 .or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
             match tracker.damage_output(1, &elements) {
                 Ok((Some(rects), _)) if !rects.is_empty() => damage = rects.clone(),
@@ -276,6 +276,9 @@ impl Pila {
         let copied = match capture::copy_frame(renderer, &buffer, size, scale, &elements, clear) {
             Ok(copied) => copied,
             Err(err) => {
+                // The tracker saw changes that were never delivered: the
+                // next frame starts over with a new one, all damaged.
+                self.capture.screencopy_trackers.remove(&key);
                 log_failure(err);
                 frame.failed();
                 return true;
@@ -283,8 +286,9 @@ impl Pila {
         };
         let (hi, lo, nanos) = capture::split_timestamp(self.clock.now().into());
         let frame = frame.clone();
-        self.when_copied(copied, move |_, result| {
+        self.when_copied(copied, move |state, result| {
             if let Err(err) = result {
+                state.capture.screencopy_trackers.remove(&key);
                 log_failure(err);
                 frame.failed();
                 return;
