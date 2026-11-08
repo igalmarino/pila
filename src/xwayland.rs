@@ -8,10 +8,10 @@
 //! whenever it moves it (`Pila::x11_window_moved`).
 //!
 //! The startup command waits until X is ready (or failed), so `pila -c xterm`
-//! works.
+//! works. Xwayland dying before it's ready counts as failed (`XWaylandSource`).
 
 use std::{
-    os::fd::OwnedFd,
+    os::fd::{AsRawFd, BorrowedFd, OwnedFd},
     process::Stdio,
     time::{Duration, Instant},
 };
@@ -19,7 +19,9 @@ use std::{
 use smithay::{
     desktop::Window,
     input::pointer::GrabStartData as PointerGrabStartData,
-    reexports::calloop::RegistrationToken,
+    reexports::calloop::{
+        EventSource, Poll, PostAction, Readiness, RegistrationToken, Token, TokenFactory,
+    },
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::CompositorHandler,
@@ -134,6 +136,73 @@ pub struct XwaylandState {
     pub restarts: Vec<Instant>,
 }
 
+/// Smithay's Xwayland event source, plus the one failure it misses: Xwayland
+/// dying before it's ready (a crash, a broken install) closes the pipe it
+/// writes its display number to, and Smithay takes that end of file for "not
+/// yet". Watched level-triggered, the pipe then wakes the event loop forever
+/// and the startup commands, waiting for X, never run.
+struct XWaylandSource(XWayland);
+
+impl EventSource for XWaylandSource {
+    type Event = XWaylandEvent;
+    type Metadata = ();
+    type Ret = ();
+    type Error = std::io::Error;
+
+    fn process_events<F>(
+        &mut self,
+        readiness: Readiness,
+        token: Token,
+        mut callback: F,
+    ) -> std::io::Result<PostAction>
+    where
+        F: FnMut(XWaylandEvent, &mut ()),
+    {
+        if readiness.readable && closed_unwritten(self.0.poll_fd()) {
+            callback(XWaylandEvent::Error, &mut ());
+            return Ok(PostAction::Disable);
+        }
+        self.0.process_events(readiness, token, callback)
+    }
+
+    fn register(
+        &mut self,
+        poll: &mut Poll,
+        factory: &mut TokenFactory,
+    ) -> smithay::reexports::calloop::Result<()> {
+        self.0.register(poll, factory)
+    }
+
+    fn reregister(
+        &mut self,
+        poll: &mut Poll,
+        factory: &mut TokenFactory,
+    ) -> smithay::reexports::calloop::Result<()> {
+        self.0.reregister(poll, factory)
+    }
+
+    fn unregister(&mut self, poll: &mut Poll) -> smithay::reexports::calloop::Result<()> {
+        self.0.unregister(poll)
+    }
+}
+
+/// Whether the pipe's writer is gone with nothing left in it to read: what
+/// Xwayland wrote before dying is still read first.
+fn closed_unwritten(fd: BorrowedFd<'_>) -> bool {
+    let mut poll = libc::pollfd {
+        fd: fd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one valid pollfd, no wait.
+    let hung_up = unsafe { libc::poll(&mut poll, 1, 0) } == 1 && poll.revents & libc::POLLHUP != 0;
+    let mut unread: libc::c_int = 0;
+    // SAFETY: FIONREAD writes one c_int.
+    hung_up
+        && unsafe { libc::ioctl(fd.as_raw_fd(), libc::FIONREAD, &mut unread) } == 0
+        && unread == 0
+}
+
 impl Pila {
     /// Start Xwayland; the `startup` commands run once X is ready (or failed
     /// to start).
@@ -159,35 +228,37 @@ impl Pila {
                 return;
             }
         };
-        let inserted = self
-            .loop_handle
-            .insert_source(xwayland, move |event, _, state| {
-                match event {
-                    XWaylandEvent::Ready {
-                        x11_socket,
-                        display_number,
-                    } => {
-                        // Nested and on a TTY alike, Xwayland runs at scale 1.
-                        state.client_compositor_state(&client).set_client_scale(1.0);
-                        match X11Wm::start_wm(
-                            state.loop_handle.clone(),
-                            &state.display_handle,
+        let inserted =
+            self.loop_handle
+                .insert_source(XWaylandSource(xwayland), move |event, _, state| {
+                    match event {
+                        XWaylandEvent::Ready {
                             x11_socket,
-                            client.clone(),
-                        ) {
-                            Ok(wm) => {
-                                info!(display = display_number, "Xwayland ready");
-                                state.xwayland.wm = Some(wm);
-                                state.xwayland.display = Some(display_number);
+                            display_number,
+                        } => {
+                            // Nested and on a TTY alike, Xwayland runs at scale 1.
+                            state.client_compositor_state(&client).set_client_scale(1.0);
+                            match X11Wm::start_wm(
+                                state.loop_handle.clone(),
+                                &state.display_handle,
+                                x11_socket,
+                                client.clone(),
+                            ) {
+                                Ok(wm) => {
+                                    info!(display = display_number, "Xwayland ready");
+                                    state.xwayland.wm = Some(wm);
+                                    state.xwayland.display = Some(display_number);
+                                }
+                                Err(err) => warn!(?err, "failed to start the X11 window manager"),
                             }
-                            Err(err) => warn!(?err, "failed to start the X11 window manager"),
+                        }
+                        XWaylandEvent::Error => {
+                            warn!("Xwayland failed to start; X11 apps won't run")
                         }
                     }
-                    XWaylandEvent::Error => warn!("Xwayland failed to start; X11 apps won't run"),
-                }
-                let startup = std::mem::take(&mut state.pending_startup);
-                state.start_session(startup);
-            });
+                    let startup = std::mem::take(&mut state.pending_startup);
+                    state.start_session(startup);
+                });
         match inserted {
             Ok(token) => {
                 self.xwayland.token = Some(token);

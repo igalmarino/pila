@@ -587,7 +587,9 @@ Key flows and invariants:
   checks.
 - **X11** (`xwayland.rs`, `focus.rs`): Pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
-  waits for X (`pending_startup`). If it dies (`XwmHandler::disconnected`, `xwayland_gone`) its
+  waits for X (`pending_startup`), or for it to fail: dying before it's ready, which Smithay's
+  event source misses (it takes the closed display pipe for "not yet"), is caught by
+  `XWaylandSource`, and isn't retried. If it dies later (`XwmHandler::disconnected`, `xwayland_gone`) its
   windows go, nothing else gets its `DISPLAY` and it's started again, at most `MAX_RESTARTS`
   times in `RESTART_WINDOW`. X11 windows are `Window::new_x11_window` in the same
   `Space`, so code that handles windows must not assume `window.toplevel()` is `Some`: use

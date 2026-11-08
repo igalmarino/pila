@@ -897,3 +897,31 @@ fn an_unfocused_x11_app_cant_read_the_clipboard() {
         .unwrap();
     assert_ne!(String::from_utf8_lossy(&reply.value), "secret");
 }
+
+/// An Xwayland that dies before it's ready (a broken install, a crash)
+/// leaves X11 apps out, not the session: the startup command still runs.
+#[test]
+fn the_session_starts_when_xwayland_dies_at_startup() {
+    let bin = std::env::temp_dir().join(format!("pila-xwayland-dies-{}", std::process::id()));
+    std::fs::create_dir_all(&bin).unwrap();
+    let xwayland = bin.join("Xwayland");
+    std::fs::write(&xwayland, "#!/bin/sh\nkill -ABRT $$\n").unwrap();
+    std::fs::set_permissions(
+        &xwayland,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut pila = TestPila::start_with(Options {
+        command: Some("echo started > $XDG_RUNTIME_DIR/ran".into()),
+        env: vec![("PATH".into(), path)],
+        ..Options::default()
+    });
+    assert_eq!(pila.wait_file("ran"), "started\n");
+    pila.wait_log("Xwayland failed to start");
+    let _ = std::fs::remove_dir_all(&bin);
+}
