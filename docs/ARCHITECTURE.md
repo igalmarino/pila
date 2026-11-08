@@ -42,6 +42,24 @@ Key flows and invariants:
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted, and sandboxed apps can't make any), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
   builds, to the lock).
+- **Virtual keyboards** (`virtual_keyboard.rs`, zwp_virtual_keyboard_v1): Smithay hands
+  their events in like a device's, and they are keyboards: keys go through
+  `process_input_event` (bindings, `suppressed_keys`, idle activity) with the device's own
+  `KeyboardSource` (`on_keyboard`), so a virtual release never releases a key the user holds.
+  A device's keymap replaces the seat's while it types (`activate_virtual_keymap`;
+  `InputState::virtual_keymap` says whose); the next physical key or the device going away
+  brings the configured one back (`restore_configured_keymap`) from its saved text
+  (`InputState::configured_keymap`, no recompile), with the layout and Caps/Num Lock from
+  before. A device with no keymap, or the configured one, doesn't swap. `apply_keyboard_config`
+  drops both.
+- **Drag and drop:** a client's `start_drag` reaches `dnd_requested`
+  (`handlers/mod.rs`), which runs Smithay's `DnDGrab` on the pointer or touch point that
+  started it; Smithay's default would cancel every drag. Its icon (`Pila::dnd_icon`) is
+  `Scene::dnd_icon`, drawn by `output_elements` at the pointer plus its offset (moved by the
+  icon's `buffer_delta`, `handle_dnd_icon_commit`) above everything but the cursor, given frame
+  callbacks with the cursor (`frame::other_trees`), redrawn as the pointer moves, and dropped
+  by `DndGrabHandler::dropped`/`cancelled`. Smithay never sends the source
+  `wl_data_source.target`.
 - **Backends** (`backend.rs`): `Pila::backend` is a `Backend` enum, `Winit` (nested,
   `winit.rs`), `Udev` (DRM/KMS + libinput + libseat on a TTY, `udev/`) or `Headless`
   (tests, `headless.rs`), chosen by `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY`
@@ -154,7 +172,12 @@ Key flows and invariants:
   space). A client unmapping it (a null-buffer commit, `unmap_if_buffer_removed`) takes it
   out of the space, taskbars (`remove_foreign_toplevel`, which also stops its capture
   sessions), Mod+Tab and focus, and puts a new `Window` for the toplevel in `unmapped`:
-  it maps again like a new window. `handle_xdg_commit` sends the initial configure, then on the first commit with a
+  it maps again like a new window. Smithay resets the toplevel's state in that very commit
+  (xdg-shell discards title, app id and decoration mode on unmap), so the unmapping commit
+  never answers as an initial commit: the client's next one does, and the decoration mode
+  it had (`ChosenDecoration`) goes out again with that configure, since a decoration object
+  outlives the unmap and its client doesn't ask again.
+  `handle_xdg_commit` sends the initial configure, then on the first commit with a
   buffer moves it into `space` via `place_new_window` (centered on the pointer's output, or
   where its session restores it, see "Session management"; cascaded by `CASCADE_STEP` if
   the spot is taken). Lookups that must find unmapped windows
@@ -239,11 +262,21 @@ Key flows and invariants:
   toplevel bounds use `usable_geometry_at` (the output minus exclusive zones); fullscreen
   uses the whole output. When the zone or output size changes, `refit_maximized` re-applies
   fill states. A mapped Top/Overlay surface with exclusive keyboard interactivity
-  (`exclusive_layer`) keeps keyboard focus: `focus_window` then only raises. Popups may
-  have a layer-surface root (`unconstrain_popup`, popup `grab`).
+  (`exclusive_layer`) keeps keyboard focus: `focus_window` then only raises. A Top/Overlay
+  surface with on-demand interactivity gets the keyboard when it maps
+  (`takes_keyboard_on_map`, `MapChange::Mapped`), as on niri and COSMIC; else on a click. Popups may
+  have a layer-surface root (`unconstrain_popup`, popup `grab`). Smithay resets a layer
+  surface's or popup's role in the commit that unmaps it (null buffer); that commit is never
+  answered as an initial commit (`state::unmapped_by_commit`): a layer surface's next commit
+  is its new initial one, and a popup can't map again (its parent is gone).
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
-  must return is kept (`Pila::globals`).
+  must return is kept (`Pila::globals`). Every Smithay protocol dispatches through its
+  user data (`Dispatch2`, one `delegate_dispatch2!(Pila)` in `state.rs`); pila's own
+  protocols implement `Dispatch` on `Pila` with user data of their own. A Smithay global
+  that can't take a filter but must be hidden from sandboxed clients is re-created with
+  `state::Privileged` as its data (`hide_from_sandboxes`: keyboard-shortcuts-inhibit,
+  idle-notify).
 - **Animations** (`animation.rs`, `[animations]` in the config:
   `config::AnimationsConfig`, all on by default, each a duration in ms or `false`, plus
   a global `enabled` and `speed`): short and subtle. So far a window rises and fades in
@@ -443,7 +476,9 @@ Key flows and invariants:
   signal source is created first thing in `main`, before any thread, so no thread can
   take the signal instead.
 - **Activation** (`handlers/xdg_activation.rs`, xdg-activation): a token is issued only
-  to the client holding keyboard focus, for a serial newer than that focus's enter. Tokens
+  for a serial newer than the keyboard focus's enter to the client holding it, or newer
+  than the pointer focus's enter to the client under the pointer (a clicked notification or
+  panel, which take no keyboard; niri accepts either serial from any client). Tokens
   are single-use and expire after `TOKEN_TIMEOUT`. A request switches to the window's
   workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped.
 - **Session management** (`session_management.rs`, xdg-session-management-v1, on bindings
@@ -470,9 +505,9 @@ Key flows and invariants:
   `focus_window`/`focus_layer` keep the keyboard on a lock surface, popup and move/resize
   grabs are refused and bindings don't run (Quit still works in debug builds). Any new
   input or focus path must respect `is_locked()`. The lock is confirmed (`confirm_lock`)
-  only after a full locked frame is submitted. Smithay 0.7 calls `unlock()` even for a
-  rogue client's `unlock_and_destroy`, so `unlock` defers to `finish_unlock`, which only
-  unlocks once the holder's lock object is gone. A dead locker leaves the session locked;
+  only after a full locked frame is submitted. `unlock` defers to `finish_unlock`, which only
+  unlocks once the holder's lock object is gone (Smithay 0.7 called `unlock()` even for a
+  rogue client's `unlock_and_destroy`; its main branch checks the lock, and pila still does). A dead locker leaves the session locked;
   a new locker may take over.
 - **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event calls
   `notify_activity`; Smithay runs the notification timers on `loop_handle`. Idle inhibitors
@@ -496,8 +531,11 @@ Key flows and invariants:
   `x11_surface()` where X11 differs. Keyboard focus is `focus::KeyboardFocus` (Wayland
   surface or X11 window, so Smithay sets the X input focus); compare surfaces through
   `Pila::keyboard_focus()`. Whenever pila moves a managed X11 window it must tell X
-  (`x11_window_moved`); focusing raises it in X too. Override-redirect windows (menus,
-  tooltips) go where X puts them. X11 maximize/fullscreen go through `set_fill_state`
+  (`x11_window_moved`); focusing raises it in X too. Where X has a window, and the size it
+  was configured to, is `X11Surface::last_configure()`; `geometry()` is only its visible
+  area within its buffer (minus `_GTK_FRAME_EXTENTS`). A window that maps hidden (Smithay
+  turns `WM_HINTS` IconicState into `_NET_WM_STATE_HIDDEN`) is minimized, not focused, by
+  `place_new_window_with`. Override-redirect windows (menus, tooltips) go where X puts them. X11 maximize/fullscreen go through `set_fill_state`
   (`_NET_WM_STATE` + a direct configure); resize grabs configure X11 windows per motion.
   Selections are bridged both ways (`SelectionHandler` in `handlers/mod.rs`, XwmHandler
   selection methods); only a focused X11 app may read.

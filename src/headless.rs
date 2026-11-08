@@ -25,7 +25,7 @@ use smithay::{
             GestureBeginEvent, GestureEndEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, InputBackend,
-            KeyState, KeyboardKeyEvent, Keycode, PointerAxisEvent, PointerButtonEvent,
+            InputTime, KeyState, KeyboardKeyEvent, Keycode, PointerAxisEvent, PointerButtonEvent,
             PointerMotionEvent, UnusedEvent,
         },
         renderer::{
@@ -450,6 +450,11 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
                 .monitor
                 .as_ref()
                 .map_or("headless".into(), |m| m.model.clone()),
+            serial_number: spec
+                .monitor
+                .as_ref()
+                .and_then(|m| m.serial.clone())
+                .unwrap_or_default(),
         },
     );
     if let Some(monitor) = &spec.monitor {
@@ -830,16 +835,17 @@ impl Device for TestDevice {
     }
 }
 
-/// Microseconds since pila started, as input event times.
-pub fn event_time(state: &Pila) -> u64 {
-    state.start_time.elapsed().as_micros() as u64
+/// Input event times: microseconds of `CLOCK_MONOTONIC`, libinput's clock
+/// and the one of the events pila makes up (`InputTime::now`).
+pub fn event_time() -> u64 {
+    InputTime::now().micros()
 }
 
 macro_rules! test_event {
     ($ty:ident) => {
         impl Event<TestInput> for $ty {
-            fn time(&self) -> u64 {
-                self.time
+            fn time(&self) -> InputTime {
+                InputTime::from_micros(self.time)
             }
             fn device(&self) -> TestDevice {
                 TestDevice

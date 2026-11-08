@@ -237,7 +237,7 @@ impl Pila {
         self.space.unmap_elem(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
-            let _ = x11.set_suspended(true);
+            let _ = x11.set_hidden(true);
         }
         self.workspaces.parked.push(window.clone());
     }
@@ -256,7 +256,7 @@ impl Pila {
             self.space
                 .map_element(window.clone(), space_location(&window), false);
             if let Some(x11) = window.x11_surface() {
-                let _ = x11.set_suspended(false);
+                let _ = x11.set_hidden(false);
             }
             self.x11_window_moved(&window);
         }

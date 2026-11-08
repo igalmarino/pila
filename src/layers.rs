@@ -21,7 +21,7 @@ use smithay::{
 };
 
 use crate::{
-    state::{fill_state, has_buffer},
+    state::{fill_state, has_buffer, MapChange},
     workspaces::is_override_redirect,
     Pila,
 };
@@ -30,6 +30,13 @@ use crate::{
 fn takes_keyboard(layer: &LayerSurface) -> bool {
     layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
         && has_buffer(layer.wl_surface())
+}
+
+/// A surface above the windows that takes the keyboard on demand: it gets it
+/// when it maps.
+fn takes_keyboard_on_map(layer: &LayerSurface) -> bool {
+    matches!(layer.layer(), Layer::Top | Layer::Overlay)
+        && layer.cached_state().keyboard_interactivity == KeyboardInteractivity::OnDemand
 }
 
 /// Layer surfaces with their global locations, front to back.
@@ -173,7 +180,9 @@ impl Pila {
                 .get::<LayerSurfaceData>()
                 .is_some_and(|data| data.lock().unwrap().initial_configure_sent)
         });
-        if !initial_configure_sent {
+        // Hidden by this commit: shown again by the next one.
+        let change = crate::state::commit_map_change(surface);
+        if !initial_configure_sent && change != MapChange::Unmapped {
             self.send_initial_scale(surface, Some(output.clone()));
             layer.layer_surface().send_configure();
         }
@@ -192,6 +201,11 @@ impl Pila {
             // The focused layer surface was hidden (committed without a buffer).
             None if !has_buffer(surface) && self.has_keyboard_focus(surface) => {
                 self.focus_top_window(serial);
+            }
+            // A launcher or dialog above the windows that takes the keyboard
+            // on demand gets it when it shows up (as on niri and COSMIC).
+            None if change == MapChange::Mapped && takes_keyboard_on_map(&layer) => {
+                self.focus_layer(&layer, serial);
             }
             None => {}
         }

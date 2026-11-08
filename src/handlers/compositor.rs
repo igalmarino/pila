@@ -3,7 +3,6 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         renderer::{utils::on_commit_buffer_handler, ImportDma},
     },
-    delegate_compositor, delegate_dmabuf, delegate_drm_syncobj, delegate_shm,
     reexports::{
         calloop::{EventSource, Interest},
         wayland_server::{
@@ -75,10 +74,34 @@ impl CompositorHandler for Pila {
             self.keep_transients_above(&moved);
         }
         crate::cursor::handle_commit(&self.cursor_status, surface);
+        self.handle_dnd_icon_commit(surface);
     }
 }
 
 impl Pila {
+    /// The drag icon moves by the offset its client gives a new buffer.
+    fn handle_dnd_icon_commit(&mut self, surface: &WlSurface) {
+        let Some(icon) = self
+            .dnd_icon
+            .as_mut()
+            .filter(|icon| icon.surface == *surface)
+        else {
+            return;
+        };
+        let delta = with_states(surface, |states| {
+            states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .current()
+                .buffer_delta
+                .take()
+        });
+        if let Some(delta) = delta {
+            icon.offset += delta;
+        }
+        self.queue_redraw();
+    }
+
     /// Called before a commit applies: if it brings a dmabuf the client's GPU
     /// is still rendering to, hold the commit back until it's done: until its
     /// acquire point if it gave one (linux-drm-syncobj), else its implicit
@@ -139,7 +162,6 @@ impl DrmSyncobjHandler for Pila {
         self.protocols.syncobj.as_mut()
     }
 }
-delegate_drm_syncobj!(Pila);
 
 /// A window's size at its last commit, to log when it changes.
 #[derive(Default)]
@@ -198,7 +220,3 @@ impl DmabufHandler for Pila {
         }
     }
 }
-
-delegate_compositor!(Pila);
-delegate_dmabuf!(Pila);
-delegate_shm!(Pila);

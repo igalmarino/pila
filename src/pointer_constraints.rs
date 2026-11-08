@@ -12,7 +12,6 @@
 //! a confined pointer ignores motion that would leave the region.
 
 use smithay::{
-    delegate_pointer_constraints,
     desktop::WindowSurfaceType,
     input::pointer::PointerHandle,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
@@ -217,4 +216,3 @@ impl PointerConstraintsHandler for Pila {
         }
     }
 }
-delegate_pointer_constraints!(Pila);

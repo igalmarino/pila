@@ -96,7 +96,6 @@ pub fn notify_after_startup(
 const CASCADE_STEP: i32 = 32;
 
 pub struct Pila {
-    pub start_time: std::time::Instant,
     /// The clock presentation-time timestamps use (CLOCK_MONOTONIC).
     pub clock: Clock<Monotonic>,
     pub socket_name: OsString,
@@ -175,12 +174,19 @@ pub struct Pila {
     pub seat: Seat<Self>,
     /// Cursor most recently requested by the client under the pointer.
     pub cursor_status: CursorImageStatus,
+    /// The icon of the drag in progress (`handlers/mod.rs`), drawn at the
+    /// pointer plus its offset.
+    pub dnd_icon: Option<crate::render::DndIcon>,
 
     /// Nested-only: set by `init_winit`. It lives here (not in the redraw closure) so
     /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
     /// needs its own renderer handle here instead.
     pub backend: Option<Backend>,
 }
+
+// Every Smithay protocol's `Dispatch`, through its user data (`Dispatch2`):
+// the one macro that replaced the per-protocol `delegate_*!`.
+smithay::delegate_dispatch2!(Pila);
 
 /// Windows off the `Space`, and the order they were used in (`Pila::windows`).
 #[derive(Default)]
@@ -209,6 +215,12 @@ pub struct InputState {
     pub host_pointer: Option<Point<f64, Logical>>,
     /// A touchpad swipe pila is handling itself (`gestures.rs`).
     pub swipe: Option<crate::gestures::Swipe>,
+    /// A virtual keyboard's keymap the seat has now, in place of the
+    /// configured one (`virtual_keyboard.rs`).
+    pub virtual_keymap: Option<crate::virtual_keyboard::ActiveKeymap>,
+    /// The configured keymap as text, kept while a virtual keyboard's is in
+    /// place; reset when the keyboard config is applied.
+    pub configured_keymap: Option<smithay::input::keyboard::KeymapFile>,
 }
 
 /// The state of Smithay's protocols (`Pila::protocols`), which its handler
@@ -280,7 +292,6 @@ impl Pila {
         display: Display<Self>,
         config: Config,
     ) -> Self {
-        let start_time = std::time::Instant::now();
         let clock = Clock::new();
         let dh = display.handle();
 
@@ -349,7 +360,6 @@ impl Pila {
         let loop_signal = event_loop.get_signal();
 
         Self {
-            start_time,
             clock,
             socket_name,
             ipc_socket: None,
@@ -409,6 +419,7 @@ impl Pila {
             idle_inhibitors: IdleInhibitors::default(),
             seat,
             cursor_status: CursorImageStatus::default_named(),
+            dnd_icon: None,
             backend: None,
         }
     }
@@ -590,6 +601,10 @@ impl Pila {
             windows,
             ghosts,
             lower: layers(self.lower_layers()),
+            dnd_icon: self.dnd_icon.as_ref().map(|icon| {
+                let at = self.pointer_location().to_i32_round() + icon.offset;
+                (icon.surface.clone(), at)
+            }),
             corner_radius: self.config.corner_radius,
             colors: self.config.colors,
             ..Default::default()
@@ -1003,6 +1018,14 @@ impl Pila {
         {
             debug!(target: "pila::rules", app_id, workspace = index + 1, "opens on workspace");
             self.park(&window, index);
+            self.refresh_pointer_focus();
+            return;
+        }
+        // An X11 app that asked to start minimized (`WM_HINTS` IconicState,
+        // which Smithay turns into hidden): no focus, straight to minimized.
+        if window.x11_surface().is_some_and(|x11| x11.is_hidden()) {
+            debug!(app_id, "starts minimized");
+            self.minimize_window(&window);
             self.refresh_pointer_focus();
             return;
         }
@@ -1764,6 +1787,42 @@ pub fn has_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }
 
+/// Whether a surface had a buffer at its last commit (`commit_map_change`).
+struct WasMapped(std::sync::atomic::AtomicBool);
+
+/// What a commit did to a layer surface or popup (`commit_map_change`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MapChange {
+    /// Its first buffer, or the first after being hidden.
+    Mapped,
+    /// A null buffer after a buffer. Smithay resets the role in that very
+    /// commit, initial configure included, but the configure that maps it
+    /// again must answer the client's next commit, its new initial one.
+    Unmapped,
+    Unchanged,
+}
+
+/// Called once per commit of a layer surface or popup.
+pub fn commit_map_change(surface: &WlSurface) -> MapChange {
+    let mapped = has_buffer(surface);
+    let was = smithay::wayland::compositor::with_states(surface, |states| {
+        states
+            .data_map
+            .insert_if_missing_threadsafe(|| WasMapped(Default::default()));
+        states
+            .data_map
+            .get::<WasMapped>()
+            .unwrap()
+            .0
+            .swap(mapped, std::sync::atomic::Ordering::Relaxed)
+    });
+    match (was, mapped) {
+        (false, true) => MapChange::Mapped,
+        (true, false) => MapChange::Unmapped,
+        _ => MapChange::Unchanged,
+    }
+}
+
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
@@ -1805,6 +1864,44 @@ macro_rules! privileged_global {
     };
 }
 pub(crate) use privileged_global;
+
+/// Global data of a Smithay global that Smithay can't filter, re-created by
+/// pila (`hide_from_sandboxes`) to be hidden like the privileged ones: binding
+/// is Smithay's (`GlobalData`), only `can_view` is pila's.
+pub struct Privileged;
+
+impl<I: Resource> smithay::wayland::GlobalDispatch2<I, Pila> for Privileged
+where
+    smithay::wayland::GlobalData: smithay::wayland::GlobalDispatch2<I, Pila>,
+{
+    fn bind(
+        &self,
+        state: &mut Pila,
+        handle: &DisplayHandle,
+        client: &Client,
+        resource: smithay::reexports::wayland_server::New<I>,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Pila>,
+    ) {
+        smithay::wayland::GlobalData.bind(state, handle, client, resource, data_init);
+    }
+
+    fn can_view(&self, client: &Client) -> bool {
+        is_privileged(client)
+    }
+}
+
+/// Replace the global `global` (of interface `I`, at `version`), which Smithay
+/// made visible to every client, by one only privileged clients see.
+pub fn hide_from_sandboxes<I: Resource + 'static>(
+    dh: &DisplayHandle,
+    global: smithay::reexports::wayland_server::backend::GlobalId,
+    version: u32,
+) where
+    Pila: smithay::reexports::wayland_server::GlobalDispatch<I, Privileged>,
+{
+    dh.remove_global::<Pila>(global);
+    dh.create_global::<Pila, I, _>(version, Privileged);
+}
 
 pub fn is_privileged(client: &Client) -> bool {
     if client.get_data::<XWaylandClientData>().is_some() {

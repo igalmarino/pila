@@ -72,6 +72,12 @@ impl X11 {
 
     /// A mapped window of `size` with WM_CLASS `class`, in `color` (RGB).
     fn window(&self, class: &str, size: (u16, u16), color: u32) -> u32 {
+        self.window_in_state(class, size, color, false)
+    }
+
+    /// A window that asks to start minimized (`WM_HINTS` IconicState) if
+    /// `iconic`.
+    fn window_in_state(&self, class: &str, size: (u16, u16), color: u32, iconic: bool) -> u32 {
         let id = self.conn.generate_id().unwrap();
         self.conn
             .create_window(
@@ -119,6 +125,19 @@ impl X11 {
         self.conn
             .change_property32(PropMode::REPLACE, id, protocols, AtomEnum::ATOM, &[delete])
             .unwrap();
+        if iconic {
+            // flags StateHint, input, initial_state IconicState, then unused fields.
+            let hints = [2, 0, 3, 0, 0, 0, 0, 0, 0];
+            self.conn
+                .change_property32(
+                    PropMode::REPLACE,
+                    id,
+                    AtomEnum::WM_HINTS,
+                    AtomEnum::WM_HINTS,
+                    &hints,
+                )
+                .unwrap();
+        }
         self.conn.map_window(id).unwrap();
         self.conn.flush().unwrap();
         id
@@ -524,6 +543,23 @@ fn clicking_an_x11_window_focuses_it() {
     pila.click_at((gx + 5) as f64, (gy + 5) as f64);
     pila.wait_focus("XApp");
     x.wait_event("the click", |e| matches!(e, Event::ButtonPress(_)));
+}
+
+/// An X11 app may ask to start minimized (`WM_HINTS` IconicState): it maps
+/// minimized, and the window that had the focus keeps it.
+#[test]
+fn an_x11_window_can_start_minimized() {
+    let mut pila = TestPila::start();
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    x.window("XApp", (300, 200), 0xff0000);
+    pila.wait_focus("XApp");
+    x.window_in_state("Iconic", (300, 200), 0x00ff00, true);
+    let state = pila.wait("Iconic minimized", |s| {
+        window_in(s, "Iconic").is_some_and(|w| w["minimized"] == true)
+    });
+    assert_eq!(state["focused"], "XApp");
 }
 
 #[test]

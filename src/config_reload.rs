@@ -187,10 +187,13 @@ impl Pila {
         applied
     }
 
-    fn apply_keyboard_config(&mut self) {
+    pub(crate) fn apply_keyboard_config(&mut self) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        // Replaces a virtual keyboard's keymap too (`virtual_keyboard.rs`).
+        self.input.virtual_keymap = None;
+        self.input.configured_keymap = None;
         let kb = self.config.keyboard.clone();
         if let Err(err) = keyboard.set_xkb_config(self, crate::state::xkb_config(&kb)) {
             warn!(

@@ -1,14 +1,14 @@
 //! xdg_activation_v1: lets a client bring a window (its own or another app's)
 //! to the front, e.g. a browser raising itself when a link is opened.
 //!
-//! Focus-stealing policy: a token is only issued if the client asked for it
-//! in response to user input it received while it had keyboard focus. Tokens
-//! are single-use and expire after `TOKEN_TIMEOUT`.
+//! Focus-stealing policy: a token is only issued for user input the client
+//! received while it had the keyboard focus, or the pointer (a click on a
+//! notification or panel, which take no keyboard). Tokens are single-use and
+//! expire after `TOKEN_TIMEOUT`.
 
 use std::time::Duration;
 
 use smithay::{
-    delegate_xdg_activation,
     input::Seat,
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     utils::SERIAL_COUNTER,
@@ -67,29 +67,41 @@ impl XdgActivationHandler for Pila {
         }
     }
 }
-delegate_xdg_activation!(Pila);
 
 impl Pila {
     fn token_is_valid(&self, data: &XdgActivationTokenData) -> bool {
         let Some((serial, seat)) = &data.serial else {
             return false;
         };
-        let Some(keyboard) = self.seat.get_keyboard() else {
+        if Seat::from_resource(seat).as_ref() != Some(&self.seat) || data.client_id.is_none() {
             return false;
+        }
+        let client_of = |surface: &WlSurface| {
+            self.display_handle
+                .get_client(surface.id())
+                .ok()
+                .map(|client| client.id())
         };
-        // The serial must come from an event sent after the current focus
-        // was entered, and the requesting client must own that focus.
-        let fresh = keyboard
-            .last_enter()
-            .is_some_and(|enter| serial.is_no_older_than(&enter));
-        let focused_client = keyboard
-            .current_focus()
-            .and_then(|focus| focus.surface())
-            .and_then(|focus| self.display_handle.get_client(focus.id()).ok())
-            .map(|client| client.id());
-        Seat::from_resource(seat).as_ref() == Some(&self.seat)
-            && fresh
-            && focused_client.is_some()
-            && focused_client == data.client_id
+        // A key (or anything after the keyboard focus was entered) of the
+        // client holding the keyboard focus.
+        let keyboard = self.seat.get_keyboard().is_some_and(|keyboard| {
+            keyboard
+                .last_enter()
+                .is_some_and(|enter| serial.is_no_older_than(&enter))
+                && keyboard
+                    .current_focus()
+                    .and_then(|focus| focus.surface().and_then(|s| client_of(&s)))
+                    == data.client_id
+        });
+        // A click (or motion) on a surface of the client under the pointer:
+        // a notification or a panel, which take no keyboard (as niri, which
+        // doesn't check the client).
+        let pointer = self.seat.get_pointer().is_some_and(|pointer| {
+            pointer
+                .last_enter()
+                .is_some_and(|enter| serial.is_no_older_than(&enter))
+                && pointer.current_focus().and_then(|s| client_of(&s)) == data.client_id
+        });
+        keyboard || pointer
     }
 }

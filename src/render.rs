@@ -154,6 +154,9 @@ pub struct Scene {
     /// Layer surfaces below the windows (Bottom, Background; also Top while
     /// a fullscreen window is on top).
     pub lower: Vec<SceneLayer>,
+    /// A drag's icon and its top-left (global): above everything but the
+    /// cursor, never while locked.
+    pub dnd_icon: Option<(WlSurface, Point<i32, Logical>)>,
     /// `corner-radius` from the config, for the snap preview.
     pub corner_radius: u32,
     pub colors: Colors,
@@ -1218,6 +1221,13 @@ pub fn named_cursor_elements(
     .unwrap_or_default()
 }
 
+/// The icon a client gave its drag (`wl_data_device.start_drag`), drawn at
+/// the pointer plus `offset`, which its `wl_surface.offset`s move.
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
+
 /// What drawing a frame needs from `Pila` (`Pila::frame_input`), taken
 /// before the backend's renderer is borrowed.
 pub struct FrameInput {
@@ -1279,7 +1289,8 @@ pub fn output_elements(
         output_geo.size,
         scale,
     );
-    scene_elements(
+    let mut elements = dnd_icon_elements(renderer, scene, origin, scale);
+    elements.extend(scene_elements(
         renderer,
         scene,
         origin,
@@ -1287,6 +1298,28 @@ pub fn output_elements(
         &mut |surface, origin, scale, alpha| {
             blur.element(surface, output_name, origin, scale, alpha)
         },
+    ));
+    elements
+}
+
+/// The drag icon's elements, relative to `origin` (front of the scene).
+fn dnd_icon_elements(
+    renderer: &mut GlesRenderer,
+    scene: &Scene,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let Some((surface, location)) = scene.dnd_icon.as_ref().filter(|_| !scene.locked) else {
+        return Vec::new();
+    };
+    let location = (*location - origin).to_physical_precise_round(scale);
+    render_elements_from_surface_tree(
+        renderer,
+        surface,
+        location,
+        scale,
+        1.0,
+        Kind::ScanoutCandidate,
     )
 }
 

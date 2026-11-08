@@ -17,7 +17,6 @@ use std::{
 };
 
 use smithay::{
-    delegate_xwayland_shell,
     desktop::Window,
     input::pointer::GrabStartData as PointerGrabStartData,
     reexports::calloop::RegistrationToken,
@@ -145,6 +144,7 @@ impl Pila {
                 &self.display_handle,
                 None,
                 std::iter::empty::<(String, String)>(),
+                std::iter::empty::<String>(),
                 true,
                 Stdio::null(),
                 Stdio::null(),
@@ -169,8 +169,12 @@ impl Pila {
                     } => {
                         // Nested and on a TTY alike, Xwayland runs at scale 1.
                         state.client_compositor_state(&client).set_client_scale(1.0);
-                        match X11Wm::start_wm(state.loop_handle.clone(), x11_socket, client.clone())
-                        {
+                        match X11Wm::start_wm(
+                            state.loop_handle.clone(),
+                            &state.display_handle,
+                            x11_socket,
+                            client.clone(),
+                        ) {
                             Ok(wm) => {
                                 info!(display = display_number, "Xwayland ready");
                                 state.xwayland.wm = Some(wm);
@@ -266,7 +270,7 @@ impl Pila {
             return;
         }
         if let Some(loc) = self.space.element_location(window) {
-            let _ = x11.configure(Rectangle::new(loc, x11.geometry().size));
+            let _ = x11.configure(Rectangle::new(loc, x11.last_configure().size));
         }
     }
 
@@ -284,7 +288,6 @@ impl XWaylandShellHandler for Pila {
         &mut self.xwayland.shell_state
     }
 }
-delegate_xwayland_shell!(Pila);
 
 impl XwmHandler for Pila {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
@@ -312,7 +315,7 @@ impl XwmHandler for Pila {
         // A size from window rules first: placing it uses its size.
         let props = self.resolve_window_rules(&window);
         if let Some((w, h)) = props.size {
-            let loc = surface.geometry().loc;
+            let loc = surface.last_configure().loc;
             debug!(target: "pila::rules", app_id = surface.class(), w, h, "initial size");
             let _ = surface.configure(Rectangle::new(loc, (w, h).into()));
         }
@@ -333,7 +336,7 @@ impl XwmHandler for Pila {
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, surface: X11Surface) {
         // Menus and tooltips: exactly where X put them, on top, unfocused.
-        let location = surface.geometry().loc;
+        let location = surface.last_configure().loc;
         self.space
             .map_element(Window::new_x11_window(surface), location, false);
         self.queue_redraw();
@@ -373,7 +376,7 @@ impl XwmHandler for Pila {
     ) {
         // Sizes are honored. Positions only before pila manages the window:
         // once mapped, pila decides where it goes (like for Wayland windows).
-        let mut geo = surface.geometry();
+        let mut geo = surface.last_configure();
         if let Some(w) = w {
             geo.size.w = w as i32;
         }

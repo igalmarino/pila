@@ -245,7 +245,7 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
                 other => return Err(format!("bad axis source {other:?}")),
             };
             let event = AxisEvent {
-                time: event_time(state),
+                time: event_time(),
                 source,
                 amount: (
                     f64_field(request, "h", Some(0.0))?,
@@ -343,7 +343,7 @@ fn keycode(state: &mut Pila, name: &str) -> Result<Keycode, String> {
 
 fn key(state: &mut Pila, key: Keycode, key_state: KeyState) {
     let event = KeyEvent {
-        time: event_time(state),
+        time: event_time(),
         key,
         state: key_state,
     };
@@ -352,7 +352,7 @@ fn key(state: &mut Pila, key: Keycode, key_state: KeyState) {
 
 fn motion(state: &mut Pila, delta: (f64, f64)) {
     let event = MotionEvent {
-        time: event_time(state),
+        time: event_time(),
         delta,
     };
     state.process_input_event(InputEvent::<TestInput>::PointerMotion { event });
@@ -360,7 +360,7 @@ fn motion(state: &mut Pila, delta: (f64, f64)) {
 
 fn mouse_button(state: &mut Pila, button: u32, button_state: ButtonState) {
     let event = ButtonEvent {
-        time: event_time(state),
+        time: event_time(),
         button,
         state: button_state,
     };
@@ -369,7 +369,7 @@ fn mouse_button(state: &mut Pila, button: u32, button_state: ButtonState) {
 
 fn gesture(state: &mut Pila, request: &Value) -> Result<(), String> {
     let event = GestureEvent {
-        time: event_time(state),
+        time: event_time(),
         fingers: f64_field(request, "fingers", Some(3.0))? as u32,
         delta: (
             f64_field(request, "dx", Some(0.0))?,

@@ -274,3 +274,23 @@ fn a_popup_closes_with_its_window() {
         s["popups"].as_array().unwrap().is_empty() && window_in(s, "a").is_none()
     });
 }
+
+/// A popup hidden with a null commit is gone (Smithay drops its parent, so
+/// it can't map again): its hiding commit isn't answered with a configure.
+#[test]
+fn a_popup_hidden_with_a_null_commit_isnt_configured_again() {
+    let (mut pila, client, window, _) = window_at_its_place();
+    let (menu, _) = client.popup("menu", Ok(window), &Placement::default(), false, BLUE);
+    client.wait_surface_configured(menu);
+    pila.wait("the popup", |s| mapped_popup(s, "a"));
+    let surface = client.wl_surface_of(menu);
+    client.surface_data(menu, |s| s.auto_draw = false);
+    surface.attach(None, 0, 0);
+    surface.commit();
+    client.roundtrip();
+    client.roundtrip();
+    pila.wait("no popup shown", |s| !mapped_popup(s, "a"));
+    let configures = client.surface_data(menu, |s| s.configures.len());
+    assert_eq!(configures, 1, "a configure answered the hiding commit");
+    assert_eq!(client.error(), None);
+}

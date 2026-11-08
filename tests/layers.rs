@@ -267,8 +267,13 @@ fn an_on_demand_layer_gets_the_keyboard_when_clicked() {
     client.wait_surface_configured(panel);
     let l = wait_layer(&mut pila, "panel");
     assert_eq!(rect(&l["geometry"]), (490, 760, 300, 40));
-    let state = pila.settle();
-    assert_eq!(state["focused"], "a");
+    // It took the keyboard when it showed up; the window takes it back.
+    pila.wait("the panel has the keyboard", |s| {
+        s["keyboard_focus"] == "layer:panel"
+    });
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.click_at((x + 10) as f64, (y + 10) as f64);
+    pila.wait_focus("a");
     pila.click_at(600.0, 780.0);
     pila.wait("the panel has the keyboard", |s| {
         s["keyboard_focus"] == "layer:panel"
@@ -369,4 +374,99 @@ fn layer_surfaces_on_a_removed_output_are_closed() {
     pila.request(json!({ "cmd": "output_remove", "name": "B" }));
     client.wait_surface_closed(bar);
     pila.wait("no layer", |s| layer_in(s, "bar").is_none());
+}
+
+/// Qt hides a layer shell window by destroying its role object, then
+/// committing the bare surface with no buffer (DMS's launcher does it each
+/// time it closes): that must not cost the client its connection.
+#[test]
+fn a_surface_committed_after_its_layer_surface_is_destroyed_keeps_the_client() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let spec = LayerSpec {
+        layer: Layer::Overlay,
+        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+        keyboard: KeyboardInteractivity::Exclusive,
+        exclusive_zone: -1,
+        ..LayerSpec::default()
+    };
+    let (launcher, layer) = client.layer_surface("launcher", &spec, BLUE);
+    client.wait_surface_configured(launcher);
+    wait_layer(&mut pila, "launcher");
+    let surface = client.wl_surface_of(launcher);
+    layer.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    client.roundtrip();
+    pila.wait("no layer", |s| layer_in(s, "launcher").is_none());
+    assert_eq!(client.error(), None);
+}
+
+/// A layer surface hidden with a null commit goes back to its state right
+/// after creation; the configure that maps it again answers the client's new
+/// initial commit, not the hiding one (wlr-layer-shell; what niri does).
+#[test]
+fn a_layer_surface_hidden_and_shown_again_maps_again() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let spec = top_bar(30);
+    let (bar, layer) = client.layer_surface("bar", &spec, BLUE);
+    client.wait_surface_configured(bar);
+    wait_layer(&mut pila, "bar");
+    let surface = client.wl_surface_of(bar);
+    client.surface_data(bar, |s| s.auto_draw = false);
+    surface.attach(None, 0, 0);
+    surface.commit();
+    client.roundtrip();
+    client.roundtrip();
+    let configures = client.surface_data(bar, |s| s.configures.len());
+    assert_eq!(configures, 1, "a configure answered the hiding commit");
+
+    // Shown again: its state anew, then a new initial commit.
+    client.surface_data(bar, |s| s.auto_draw = true);
+    layer.set_size(spec.size.0, spec.size.1);
+    layer.set_anchor(spec.anchor);
+    layer.set_exclusive_zone(spec.exclusive_zone);
+    surface.commit();
+    client.flush();
+    client.wait("the configure answering it", |s| {
+        s.surfaces[bar.0].configures.len() == 2
+    });
+    wait_layer(&mut pila, "bar");
+    assert_eq!(client.error(), None);
+}
+
+/// A Top or Overlay surface that takes the keyboard on demand gets it when it
+/// shows up (a launcher, a welcome dialog), as on niri and COSMIC, and gives it
+/// back when it goes; one below the windows doesn't take it.
+#[test]
+fn an_on_demand_layer_gets_the_keyboard_when_it_maps() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let on_demand = |layer| LayerSpec {
+        layer,
+        anchor: Anchor::Bottom,
+        size: (300, 40),
+        keyboard: KeyboardInteractivity::OnDemand,
+        ..LayerSpec::default()
+    };
+    let (dock, _) = client.layer_surface("dock", &on_demand(Layer::Bottom), GREEN);
+    client.wait_surface_configured(dock);
+    wait_layer(&mut pila, "dock");
+    pila.stays(
+        "the window keeps the keyboard",
+        std::time::Duration::from_millis(100),
+        |s| s["keyboard_focus"] == "a",
+    );
+    let (launcher, layer) = client.layer_surface("launcher", &on_demand(Layer::Overlay), BLUE);
+    client.wait_surface_configured(launcher);
+    pila.wait("the launcher has the keyboard", |s| {
+        s["keyboard_focus"] == "layer:launcher"
+    });
+    layer.destroy();
+    client.wl_surface_of(launcher).destroy();
+    client.flush();
+    pila.wait("the window has it back", |s| s["keyboard_focus"] == "a");
 }

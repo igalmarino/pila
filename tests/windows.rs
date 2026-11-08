@@ -215,10 +215,7 @@ fn a_window_unmapped_by_its_client_leaves_and_maps_again() {
         window_in(s, "a").is_none() && s["unmapped"].as_array().unwrap().len() == 1
     });
     // A client maps again with a new initial commit, then a buffer.
-    client.set_auto_draw(a, true);
-    let surface = client.surface(a);
-    surface.commit();
-    client.flush();
+    client.remap(a);
     pila.wait_window("a");
     pila.wait_focus("a");
 }
@@ -337,6 +334,42 @@ fn title_and_app_id_changes_show_in_the_state() {
     });
 }
 
+/// Unmapping discards a toplevel's state, decoration mode included, but its
+/// decoration object lives on and the client doesn't ask again: mapped again,
+/// it keeps the decorations it had, a title bar or none.
+#[test]
+fn a_window_mapped_again_keeps_its_decorations() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let ssd = client.window("ssd").size(400, 300).create();
+    let csd = client
+        .window("csd")
+        .size(400, 300)
+        .decorations(Decorations::Client)
+        .create();
+    pila.wait_window("ssd");
+    pila.wait_window("csd");
+    for window in [ssd, csd] {
+        client.set_auto_draw(window, false);
+        client.unmap(window);
+    }
+    pila.wait("both unmapped", |s| {
+        window_in(s, "ssd").is_none() && window_in(s, "csd").is_none()
+    });
+    client.remap(ssd);
+    client.remap(csd);
+    let w = pila.wait_window("ssd");
+    assert_eq!(
+        (w["ssd"].clone(), w["title_bar"].clone()),
+        (true.into(), true.into())
+    );
+    let w = pila.wait_window("csd");
+    assert_eq!(
+        (w["ssd"].clone(), w["title_bar"].clone()),
+        (false.into(), false.into())
+    );
+}
+
 #[test]
 fn an_unmapped_window_leaves_taskbars_and_comes_back_as_a_new_one() {
     use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
@@ -359,9 +392,7 @@ fn an_unmapped_window_leaves_taskbars_and_comes_back_as_a_new_one() {
     pila.stays("still other", std::time::Duration::from_millis(100), |s| {
         s["focused"] == "other"
     });
-    client.set_auto_draw(a, true);
-    client.surface(a).commit();
-    client.flush();
+    client.remap(a);
     pila.wait_focus("a");
     taskbar.wait("a second handle", |s| {
         s.log

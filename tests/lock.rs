@@ -144,6 +144,25 @@ fn a_second_lock_while_locked_is_refused() {
     other.wait_logged("lock", "Finished");
 }
 
+/// Lock surfaces belong to a lock object, not to a client: the locker's own
+/// second, refused lock can't put a surface over its real lock screen.
+#[test]
+fn a_refused_lock_cant_cover_the_screen() {
+    let (mut pila, _apps, locker, _lock) = locked();
+    let second = locker.lock_session();
+    locker.wait("the second lock refused", |s| {
+        s.log
+            .iter()
+            .filter(|l| l.tag == "lock" && l.event == "Finished")
+            .count()
+            == 1
+    });
+    let _surf = locker.lock_surface(&second, "HEADLESS-1", [255, 200, 0, 0]);
+    locker.roundtrip();
+    pila.settle();
+    assert_eq!(pila.pixel(640.0, 400.0), LOCK_RGBA);
+}
+
 #[test]
 fn destroying_the_lock_without_unlocking_keeps_it_locked() {
     let (mut pila, _apps, locker, lock) = locked();
@@ -181,4 +200,28 @@ fn popup_grabs_and_moves_are_refused_while_locked() {
     });
     pila.release("left");
     pila.key_release("Super");
+}
+
+/// After unlocking, Qt destroys a lock surface's role object, then commits
+/// the bare surface with no buffer (DMS does it on every unlock): that must
+/// not cost the locker its connection.
+#[test]
+fn a_surface_committed_after_its_lock_surface_is_destroyed_keeps_the_client() {
+    let mut pila = TestPila::start();
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    let (surf, lock_surface) = locker.lock_surface_object(&lock, "HEADLESS-1", LOCK_COLOR);
+    locker.wait_surface_configured(surf);
+    locker.wait_logged("lock", "Locked");
+    pila.wait("locked", |s| {
+        s["locked"] == true && s["lock_pending"] == false
+    });
+    lock.unlock_and_destroy();
+    let surface = locker.wl_surface_of(surf);
+    lock_surface.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    locker.roundtrip();
+    pila.wait("unlocked", |s| s["locked"] == false);
+    assert_eq!(locker.error(), None);
 }

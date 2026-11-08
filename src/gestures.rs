@@ -121,7 +121,7 @@ impl Pila {
             self,
             &GestureSwipeBeginEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 fingers,
             },
         );
@@ -147,7 +147,7 @@ impl Pila {
         pointer.gesture_swipe_update(
             self,
             &GestureSwipeUpdateEvent {
-                time: event.time_msec(),
+                time: event.time(),
                 delta: event.delta(),
             },
         );
@@ -166,7 +166,7 @@ impl Pila {
             self,
             &GestureSwipeEndEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 cancelled: event.cancelled(),
             },
         );
@@ -198,7 +198,7 @@ impl Pila {
             self,
             &GesturePinchBeginEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 fingers: event.fingers(),
             },
         );
@@ -214,7 +214,7 @@ impl Pila {
         pointer.gesture_pinch_update(
             self,
             &GesturePinchUpdateEvent {
-                time: event.time_msec(),
+                time: event.time(),
                 delta: event.delta(),
                 scale: event.scale(),
                 rotation: event.rotation(),
@@ -230,7 +230,7 @@ impl Pila {
             self,
             &GesturePinchEndEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 cancelled: event.cancelled(),
             },
         );
@@ -247,7 +247,7 @@ impl Pila {
             self,
             &GestureHoldBeginEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 fingers: event.fingers(),
             },
         );
@@ -261,7 +261,7 @@ impl Pila {
             self,
             &GestureHoldEndEvent {
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time_msec(),
+                time: event.time(),
                 cancelled: event.cancelled(),
             },
         );

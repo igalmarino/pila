@@ -178,9 +178,7 @@ fn a_window_mapped_again_without_restoring_is_a_new_one() {
     client.set_auto_draw(window, false);
     client.unmap(window);
     wait_gone(&mut pila);
-    client.set_auto_draw(window, true);
-    client.surface(window).commit();
-    client.flush();
+    client.remap(window);
     assert_eq!(rect(&pila.wait_window("a")["geometry"]), CENTER);
 }
 

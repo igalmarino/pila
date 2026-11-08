@@ -26,7 +26,6 @@
 use std::time::{Duration, Instant};
 
 use smithay::{
-    delegate_commit_timing, delegate_fifo,
     output::Output,
     reexports::{
         calloop::{
@@ -78,8 +77,6 @@ pub fn init_globals(dh: &DisplayHandle) {
     FifoManagerState::new::<Pila>(dh);
     CommitTimingManagerState::unmanaged::<Pila>(dh);
 }
-delegate_fifo!(Pila);
-delegate_commit_timing!(Pila);
 
 /// The first vblank after `now`, given the time of an earlier one.
 pub fn next_vblank(last: Duration, now: Duration, period: Duration) -> Duration {

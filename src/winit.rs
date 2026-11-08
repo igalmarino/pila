@@ -52,6 +52,7 @@ pub fn init_winit(
             subpixel: Subpixel::Unknown,
             make: "pila".into(),
             model: "nested".into(),
+            serial_number: String::new(),
         },
     );
     let _global = output.create_global::<Pila>(display_handle);
@@ -259,11 +260,11 @@ fn make_surface_current(backend: &mut WinitGraphicsBackend<GlesRenderer>) -> boo
 
 /// Show the client's requested cursor on the host window. Client-drawn cursor
 /// surfaces are rendered by pila itself (see `cursor`), so the host's is hidden.
-pub fn apply_cursor(window: &WinitWindow, status: &CursorImageStatus) {
+pub fn apply_cursor(window: &dyn WinitWindow, status: &CursorImageStatus) {
     match status {
         CursorImageStatus::Hidden => window.set_cursor_visible(false),
         CursorImageStatus::Named(icon) => {
-            window.set_cursor(*icon);
+            window.set_cursor((*icon).into());
             window.set_cursor_visible(true);
         }
         CursorImageStatus::Surface(_) => window.set_cursor_visible(false),

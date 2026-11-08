@@ -34,6 +34,7 @@ fn other_trees<'a>(
         .lock_surfaces
         .iter()
         .map(|(surface, _)| surface)
+        .chain(scene.dnd_icon.as_ref().map(|(surface, _)| surface))
         .chain(cursor)
 }
 
@@ -51,6 +52,7 @@ pub fn update_primary_outputs(
             surface,
             output,
             data,
+            None,
             states,
             default_primary_scanout_output_compare,
         );
@@ -82,7 +84,7 @@ pub fn presentation_feedback(
 ) -> OutputPresentationFeedback {
     let mut feedback = OutputPresentationFeedback::new(output);
     let flags = |surface: &WlSurface, _: &_| {
-        surface_presentation_feedback_flags_from_states(surface, states)
+        surface_presentation_feedback_flags_from_states(surface, None, states)
     };
     for entry in &scene.windows {
         entry.window.take_presentation_feedback(

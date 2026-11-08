@@ -1,7 +1,8 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+        InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        PointerMotionEvent,
     },
     desktop::Window,
     input::{
@@ -30,7 +31,10 @@ const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 
 impl Pila {
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>)
+    where
+        I::Device: 'static,
+    {
         self.notify_activity();
         match event {
             InputEvent::Keyboard { event, .. } => self.on_keyboard::<I>(event),
@@ -57,17 +61,32 @@ impl Pila {
         }
     }
 
-    fn on_keyboard<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent) {
+    fn on_keyboard<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent)
+    where
+        I::Device: 'static,
+    {
         let serial = SERIAL_COUNTER.next_serial();
-        let time = Event::time_msec(&event);
+        let time = Event::time(&event);
         let keycode = event.key_code();
         let key_state = event.state();
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        // Keys of a virtual keyboard (`virtual_keyboard.rs`) are tracked apart
+        // from the physical ones; a physical key brings the configured keymap
+        // back.
+        let device = event.device();
+        let source = match crate::virtual_keyboard::virtual_device(&device) {
+            Some(device) => device.source(),
+            None => {
+                self.restore_configured_keymap();
+                smithay::input::keyboard::KeyboardSource::MAIN
+            }
+        };
         let inhibited = self.shortcuts_inhibited();
 
-        let action = keyboard.input::<Option<Action>, _>(
+        let action = keyboard.input_from_source::<Option<Action>, _>(
+            source,
             self,
             keycode,
             key_state,
@@ -149,7 +168,7 @@ impl Pila {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let time = self.start_time.elapsed().as_millis() as u32;
+        let time = InputTime::now();
         for keycode in keyboard.pressed_keys() {
             let serial = SERIAL_COUNTER.next_serial();
             keyboard.input::<(), _>(
@@ -193,13 +212,7 @@ impl Pila {
             .map(|last| location - last)
             .unwrap_or_default();
         self.input.host_pointer = Some(location);
-        self.pointer_motion(
-            location,
-            delta,
-            delta,
-            Event::time(&event),
-            event.time_msec(),
-        );
+        self.pointer_motion(location, delta, delta, Event::time(&event));
     }
 
     /// Relative motion (libinput): move by the delta, staying on the outputs.
@@ -214,7 +227,6 @@ impl Pila {
             event.delta(),
             event.delta_unaccel(),
             Event::time(&event),
-            event.time_msec(),
         );
     }
 
@@ -244,8 +256,7 @@ impl Pila {
         location: Point<f64, Logical>,
         delta: Point<f64, Logical>,
         delta_unaccel: Point<f64, Logical>,
-        utime: u64,
-        time_msec: u32,
+        time: InputTime,
     ) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -268,7 +279,7 @@ impl Pila {
             &RelativeMotionEvent {
                 delta,
                 delta_unaccel,
-                utime,
+                time,
             },
         );
         match constraint {
@@ -299,10 +310,14 @@ impl Pila {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: time_msec,
+                time,
             },
         );
         pointer.frame(self);
+        // A drag's icon follows the pointer.
+        if self.dnd_icon.is_some() {
+            self.queue_redraw();
+        }
 
         if !pointer.is_grabbed() {
             // Over pila's own decorations no client sets the cursor, so pila does.
@@ -335,7 +350,7 @@ impl Pila {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: self.start_time.elapsed().as_millis() as u32,
+                time: InputTime::now(),
             },
         );
         pointer.frame(self);
@@ -476,7 +491,7 @@ impl Pila {
                 button,
                 state: button_state,
                 serial,
-                time: event.time_msec(),
+                time: event.time(),
             },
         );
         pointer.frame(self);
@@ -493,7 +508,7 @@ impl Pila {
         let horizontal = amount(Axis::Horizontal);
         let vertical = amount(Axis::Vertical);
 
-        let mut frame = AxisFrame::new(event.time_msec()).source(source);
+        let mut frame = AxisFrame::new(event.time()).source(source);
         if horizontal != 0.0 {
             frame = frame.value(Axis::Horizontal, horizontal);
             if let Some(discrete) = event.amount_v120(Axis::Horizontal) {

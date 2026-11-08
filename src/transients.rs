@@ -16,11 +16,13 @@
 //! have been instead of trusting the relation to be a tree.
 
 use smithay::{
-    delegate_xdg_dialog,
     desktop::Window,
     wayland::{
         compositor::with_states,
-        shell::xdg::{dialog::XdgDialogHandler, ToplevelSurface, XdgToplevelSurfaceData},
+        shell::xdg::{
+            dialog::{ToplevelDialogHint, XdgDialogHandler},
+            ToplevelSurface, XdgToplevelSurfaceData,
+        },
     },
 };
 
@@ -50,14 +52,19 @@ fn is_modal(window: &Window) -> bool {
             states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
-                .and_then(|data| data.lock().ok().map(|data| data.modal))
+                .and_then(|data| {
+                    data.lock()
+                        .ok()
+                        .map(|data| data.dialog_hint == ToplevelDialogHint::Modal)
+                })
                 .unwrap_or(false)
         })
     })
 }
 
 impl XdgDialogHandler for Pila {
-    fn modal_changed(&mut self, toplevel: ToplevelSurface, is_modal: bool) {
+    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, hint: ToplevelDialogHint) {
+        let is_modal = hint == ToplevelDialogHint::Modal;
         // A dialog turning modal takes the focus from its parent.
         let Some(window) = self.window_for_surface(toplevel.wl_surface()) else {
             return;
@@ -69,7 +76,6 @@ impl XdgDialogHandler for Pila {
         }
     }
 }
-delegate_xdg_dialog!(Pila);
 
 impl Pila {
     /// Who gets the focus when `window` should: its topmost modal child on

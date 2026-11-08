@@ -12,7 +12,6 @@ use std::{
 
 use smithay::{
     backend::renderer::element::solid::SolidColorBuffer,
-    delegate_xdg_system_bell,
     desktop::Window,
     reexports::{
         calloop::timer::{TimeoutAction, Timer},
@@ -113,4 +112,3 @@ impl XdgSystemBellHandler for Pila {
         }
     }
 }
-delegate_xdg_system_bell!(Pila);

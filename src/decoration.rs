@@ -101,9 +101,12 @@ pub fn has_title_bar(window: &Window) -> bool {
         return is_ssd(window) && !x11.is_fullscreen();
     }
     window.toplevel().is_some_and(|t| {
-        let state = t.current_state();
-        state.decoration_mode == Some(DecorationMode::ServerSide)
-            && !state.states.contains(xdg_toplevel::State::Fullscreen)
+        t.with_committed_state(|state| {
+            state.is_some_and(|state| {
+                state.decoration_mode == Some(DecorationMode::ServerSide)
+                    && !state.states.contains(xdg_toplevel::State::Fullscreen)
+            })
+        })
     })
 }
 
@@ -259,9 +262,9 @@ fn is_maximized(window: &Window) -> bool {
         return x11.is_maximized();
     }
     window.toplevel().is_some_and(|t| {
-        t.current_state()
-            .states
-            .contains(xdg_toplevel::State::Maximized)
+        t.with_committed_state(|state| {
+            state.is_some_and(|s| s.states.contains(xdg_toplevel::State::Maximized))
+        })
     })
 }
 

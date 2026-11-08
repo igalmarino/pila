@@ -50,7 +50,12 @@ rustPlatform.buildRustPackage {
     ];
   };
 
-  cargoLock.lockFile = ./Cargo.lock;
+  cargoLock = {
+    lockFile = ./Cargo.lock;
+    # Smithay is a git dependency (its main branch, as niri and cosmic-comp
+    # use it); Cargo.lock pins its commit, which builtins.fetchGit fetches.
+    allowBuiltinFetchGit = true;
+  };
 
   nativeBuildInputs = [
     makeWrapper

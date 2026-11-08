@@ -310,14 +310,14 @@ impl UdevData {
             surface.drm_output = None;
             surface.frame_pending = false;
             surface.lock_frame = LockFrame::None;
-            if let Err(err) = drm.try_to_restore_modifiers(renderer, &elements) {
+            if let Err(err) = drm.lock().try_to_restore_modifiers(renderer, &elements) {
                 debug!(?err, "couldn't restore modifiers after powering off");
             }
             info!(name, "output powered off");
             return true;
         }
         let planes = drm.device().planes(&crtc).ok();
-        match drm.initialize_output(
+        match drm.lock().initialize_output(
             crtc,
             surface.mode,
             &[surface.connector],
@@ -499,7 +499,7 @@ pub fn init_udev(
         gbm.clone(),
         GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
     );
-    let exporter = GbmFramebufferExporter::new(gbm.clone(), Some(render_node));
+    let exporter = GbmFramebufferExporter::new(gbm.clone(), render_node.into());
     let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
     let drm = DrmOutputManager::new(
         drm,
@@ -561,7 +561,7 @@ pub fn init_udev(
                     // seat may have left the connectors on other CRTCs than
                     // pila's, and moving them over piecemeal fails
                     // (EINVAL). Disabling everything costs one modeset.
-                    if let Err(err) = data.drm.activate(true) {
+                    if let Err(err) = data.drm.lock().activate(true) {
                         error!(?err, "failed to resume the DRM device");
                     }
                     data.recovering = false;

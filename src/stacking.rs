@@ -277,6 +277,7 @@ mod tests {
                 subpixel: Subpixel::Unknown,
                 make: String::new(),
                 model: String::new(),
+                serial_number: String::new(),
             },
         )
     }

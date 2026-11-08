@@ -42,6 +42,7 @@ use smithay::{
         Texture,
     },
     desktop::Window,
+    utils::user_data::UserDataMap,
     utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 use tracing::warn;
@@ -445,9 +446,25 @@ impl Element for RoundedSurface {
     fn kind(&self) -> Kind {
         self.inner.kind()
     }
+
+    // A wrapper passes the framebuffer-effect protocol through (Smithay's
+    // changelog: hand-written wrappers must).
+    fn is_framebuffer_effect(&self) -> bool {
+        self.inner.is_framebuffer_effect()
+    }
 }
 
 impl RenderElement<GlesRenderer> for RoundedSurface {
+    fn capture_framebuffer(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), GlesError> {
+        self.inner.capture_framebuffer(frame, src, dst, cache)
+    }
+
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
@@ -455,6 +472,7 @@ impl RenderElement<GlesRenderer> for RoundedSurface {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         let matrix = match self.inner.texture() {
             WaylandSurfaceTexture::Texture(texture) => {
@@ -463,7 +481,9 @@ impl RenderElement<GlesRenderer> for RoundedSurface {
             WaylandSurfaceTexture::SolidColor(_) => None,
         };
         let Some(matrix) = matrix else {
-            return self.inner.draw(frame, src, dst, damage, opaque_regions);
+            return self
+                .inner
+                .draw(frame, src, dst, damage, opaque_regions, cache);
         };
         let size = self.shape.rect.size;
         frame.override_default_tex_program(
@@ -480,7 +500,9 @@ impl RenderElement<GlesRenderer> for RoundedSurface {
                 ),
             ],
         );
-        let result = self.inner.draw(frame, src, dst, damage, opaque_regions);
+        let result = self
+            .inner
+            .draw(frame, src, dst, damage, opaque_regions, cache);
         frame.clear_tex_program_override();
         result
     }
@@ -584,6 +606,7 @@ impl RenderElement<GlesRenderer> for RoundedSolid {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         // With src the whole buffer and size = dst's, `v_coords` runs 0..1.
         let size: Size<i32, Buffer> = (dst.size.w, dst.size.h).into();
@@ -757,6 +780,7 @@ impl RenderElement<GlesRenderer> for ShadowElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         // With src the whole buffer and size = dst's, `v_coords` runs 0..1.
         let size: Size<i32, Buffer> = (dst.size.w, dst.size.h).into();
@@ -874,6 +898,7 @@ impl RenderElement<GlesRenderer> for ShapeDamage {
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         Ok(())
     }
@@ -957,7 +982,7 @@ fn transform_matrix(transform: Transform) -> Matrix {
     [[a, b, 0.0], [c, d, 0.0], [0.0, 0.0, 1.0]]
 }
 
-/// Smithay 0.7's `build_texture_mat` (GLES renderer): from a position in
+/// Smithay's `build_texture_mat` (GLES renderer): from a position in
 /// `dst` (physical, relative to its top-left) to texture coordinates, plus
 /// the flip `render_texture_from_to` applies to y-inverted textures.
 fn texture_matrix(
@@ -1113,12 +1138,17 @@ mod tests {
     #[test]
     fn transform_matrices_match_smithays() {
         for transform in TRANSFORMS {
-            // cgmath: columns `x`, `y`, each with rows `x`, `y`.
-            let theirs = transform.matrix();
+            // glam: columns `x_axis`, `y_axis`, each with rows `x`, `y`.
+            let theirs = transform.matrix().matrix2;
             let ours = transform_matrix(transform);
             assert_eq!(
                 [ours[0][0], ours[0][1], ours[1][0], ours[1][1]],
-                [theirs.x.x, theirs.y.x, theirs.x.y, theirs.y.y],
+                [
+                    theirs.x_axis.x,
+                    theirs.y_axis.x,
+                    theirs.x_axis.y,
+                    theirs.y_axis.y
+                ],
                 "{transform:?}"
             );
         }

@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # pila: a stacking Wayland compositor
 
 A daily-driver **stacking** Wayland compositor (crate/binary name `pila`) written in **Rust**
-on **Smithay 0.7.x**.
+on **Smithay**'s main branch (a git dependency pinned to a `rev` in `Cargo.toml`, as niri
+and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 
 ## Environment
 
@@ -231,5 +232,7 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 
 Smithay's `smallvil` (minimal stacking compositor) and `anvil` (full-featured) examples are
 the canonical references. Clone `https://github.com/Smithay/smithay` outside `/workspace`
-(e.g. `/tmp`) at the tag matching the locked `smithay` version in `Cargo.lock` (`v0.7.0`)
-and read them before inventing new patterns.
+(e.g. `/tmp`) at the `rev` of the `smithay` dependency in `Cargo.toml` and read them before
+inventing new patterns. Moving `rev` forward is a change of its own: read Smithay's
+`CHANGELOG.md` and log since the old one, run the whole suite and `scripts/check --nested`,
+and have the user check bare metal (`udev/`).

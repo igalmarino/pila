@@ -2,7 +2,6 @@
 // The window-management side lives in `layers.rs`.
 
 use smithay::{
-    delegate_layer_shell,
     desktop::{layer_map_for_output, LayerSurface},
     output::Output,
     reexports::wayland_server::protocol::wl_output,
@@ -68,4 +67,3 @@ impl WlrLayerShellHandler for Pila {
         self.remove_layer(surface.wl_surface());
     }
 }
-delegate_layer_shell!(Pila);

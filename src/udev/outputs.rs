@@ -96,7 +96,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             if surface.output.current_mode() != Some(wl_mode) {
                 // Powered off: the mode is set when the CRTC comes back.
                 let result = match surface.drm_output {
-                    Some(_) => drm.use_mode(
+                    Some(_) => drm.lock().use_mode(
                         &crtc,
                         mode,
                         renderer,
@@ -229,6 +229,10 @@ pub(super) fn connector_connected(
         Some(monitor) => (monitor.make.clone(), monitor.model.clone()),
         None => ("Unknown".to_string(), "Unknown".to_string()),
     };
+    let serial_number = monitor
+        .as_ref()
+        .and_then(|m| m.serial.clone())
+        .unwrap_or_default();
     info!(name, make, model, "monitor");
     match monitor {
         Some(monitor) => state.outputs.monitors.insert(name.clone(), monitor),
@@ -279,6 +283,7 @@ pub(super) fn connector_connected(
             subpixel: connector.subpixel().into(),
             make,
             model,
+            serial_number,
         },
     );
     let wl_mode = WlMode::from(drm_mode);
@@ -361,7 +366,7 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
         return false;
     }
     let planes = drm.device().planes(&crtc).ok();
-    match drm.initialize_output::<_, PilaRenderElement>(
+    match drm.lock().initialize_output::<_, PilaRenderElement>(
         crtc,
         surface.mode,
         &[surface.connector],

@@ -1,5 +1,4 @@
 use smithay::{
-    delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
         find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
         PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window,
@@ -216,7 +215,6 @@ impl XdgShellHandler for Pila {
         }
     }
 }
-delegate_xdg_shell!(Pila);
 
 // zxdg_decoration_manager_v1
 //
@@ -238,15 +236,48 @@ impl XdgDecorationHandler for Pila {
         set_decoration_mode(&toplevel, DecorationMode::ServerSide);
     }
 }
-delegate_xdg_decoration!(Pila);
+
+/// The decoration mode a toplevel settled on with pila, kept in its surface
+/// data: unmapping discards the toplevel's state, decoration mode included,
+/// but the decoration object lives on and its client won't ask again, so the
+/// mode goes out again with the initial configure of the new mapping.
+struct ChosenDecoration(std::sync::Mutex<DecorationMode>);
 
 fn set_decoration_mode(toplevel: &ToplevelSurface, mode: DecorationMode) {
     toplevel.with_pending_state(|state| {
         state.decoration_mode = Some(mode);
     });
+    smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .insert_if_missing_threadsafe(|| ChosenDecoration(std::sync::Mutex::new(mode)));
+        *states
+            .data_map
+            .get::<ChosenDecoration>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap() = mode;
+    });
     // The protocol requires a configure in response, even if the mode is unchanged.
     if toplevel.is_initial_configure_sent() {
         toplevel.send_configure();
+    }
+}
+
+/// Before an initial configure: a toplevel mapping again gets the decoration
+/// mode it had (`ChosenDecoration`); a new one has none yet.
+fn restore_decoration_mode(toplevel: &ToplevelSurface) {
+    let chosen = smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<ChosenDecoration>()
+            .map(|chosen| *chosen.0.lock().unwrap())
+    });
+    if let Some(mode) = chosen {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode.get_or_insert(mode);
+        });
     }
 }
 
@@ -272,7 +303,11 @@ fn check_grab(
 impl Pila {
     /// Called on every `wl_surface.commit`.
     pub fn handle_xdg_commit(&mut self, surface: &WlSurface) {
-        self.unmap_if_buffer_removed(surface);
+        // The unmapping commit isn't the new initial commit (Smithay has reset
+        // the initial configure by now): the client's next commit is.
+        if self.unmap_if_buffer_removed(surface) {
+            return;
+        }
         if let Some(index) = self
             .windows
             .unmapped
@@ -282,6 +317,7 @@ impl Pila {
             let window = self.windows.unmapped[index].clone();
             let toplevel = window.toplevel().unwrap();
             if !toplevel.is_initial_configure_sent() {
+                restore_decoration_mode(toplevel);
                 self.send_initial_scale(surface, self.session_output(&window));
                 self.begin_session_restore(&window);
                 self.apply_initial_rules(&window);
@@ -294,7 +330,11 @@ impl Pila {
 
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(ref xdg)) = self.popups.find_popup(surface) {
-            if !xdg.is_initial_configure_sent() {
+            // A popup hidden by this commit lost its parent (Smithay resets
+            // the role): nothing to configure.
+            let hidden =
+                crate::state::commit_map_change(surface) == crate::state::MapChange::Unmapped;
+            if !xdg.is_initial_configure_sent() && !hidden {
                 let output = self.output_for_surface(surface);
                 self.send_initial_scale(surface, output);
                 // The initial configure is always allowed.
@@ -309,24 +349,24 @@ impl Pila {
     /// A new `Window` waits in `unmapped`, so nothing of the old mapping
     /// (taskbar handle, rules, restore geometry) carries over; the old one's
     /// close animation, started by `watch_unmap`, fades out on its own.
-    fn unmap_if_buffer_removed(&mut self, surface: &WlSurface) {
+    fn unmap_if_buffer_removed(&mut self, surface: &WlSurface) -> bool {
         let waiting = self
             .windows
             .unmapped
             .iter()
             .any(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
         if has_buffer(surface) || waiting {
-            return;
+            return false;
         }
         let Some(window) = self.window_for_surface(surface) else {
-            return;
+            return false;
         };
         let Some(toplevel) = window
             .toplevel()
             .filter(|t| t.wl_surface() == surface)
             .cloned()
         else {
-            return;
+            return false;
         };
         let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
         debug!(app_id, "window unmapped by its client");
@@ -341,6 +381,7 @@ impl Pila {
         }
         self.refresh_pointer_focus();
         self.queue_redraw();
+        true
     }
 
     fn update_fill(

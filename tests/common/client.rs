@@ -85,6 +85,8 @@ pub enum Ev {
     },
     Modifiers {
         depressed: u32,
+        locked: u32,
+        group: u32,
     },
     PointerEnter {
         window: Option<usize>,
@@ -185,6 +187,8 @@ pub struct Shared {
     /// The current selection offers: clipboard, primary, data-control's
     /// clipboard and primary.
     pub data_offer: Option<wayland_client::protocol::wl_data_offer::WlDataOffer>,
+    /// The offer of the drag over this client, and its enter serial.
+    pub dnd_offer: Option<(wayland_client::protocol::wl_data_offer::WlDataOffer, u32)>,
     pub primary_offer: Option<
         wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1,
     >,
@@ -641,6 +645,20 @@ impl Client {
         self.flush();
     }
 
+    /// Map an unmapped window again, as a client following xdg-shell does:
+    /// unmapping discarded its attributes, so it sets its app id again, then
+    /// makes a new initial commit (it draws on the configure that answers).
+    pub fn remap(&self, window: Window) {
+        self.with_window(window, |w| {
+            w.auto_draw = true;
+            if let Some(toplevel) = &w.toplevel {
+                toplevel.set_app_id(w.app_id.clone());
+            }
+            w.surface.commit();
+        });
+        self.flush();
+    }
+
     /// Destroy the toplevel (as an app closing the window).
     pub fn destroy(&self, window: Window) {
         self.with_window(window, |w| {
@@ -800,12 +818,15 @@ pub fn paint(
     surface.commit();
 }
 
-/// Read what an fd holds (a keymap, a selection's data).
+/// Read a file a compositor sent (e.g. a keymap) from its start: as real
+/// clients map it, its offset is shared with every other client that got the
+/// same file, and one that read it first must not leave this one at its end.
 fn read_fd(fd: OwnedFd, size: usize) -> String {
-    use std::io::Read;
-    let mut file = std::fs::File::from(fd);
-    let mut data = Vec::with_capacity(size);
-    let _ = file.read_to_end(&mut data);
+    use std::os::unix::fs::FileExt;
+    let file = std::fs::File::from(fd);
+    let mut data = vec![0; size];
+    let read = file.read_at(&mut data, 0).unwrap_or(0);
+    data.truncate(read);
     String::from_utf8_lossy(&data)
         .trim_end_matches('\0')
         .to_string()
@@ -1089,8 +1110,15 @@ impl Dispatch<WlKeyboard, ()> for Handler {
                     pressed: key_state == WEnum::Value(wl_keyboard::KeyState::Pressed),
                 }
             }
-            wl_keyboard::Event::Modifiers { mods_depressed, .. } => Ev::Modifiers {
+            wl_keyboard::Event::Modifiers {
+                mods_depressed,
+                mods_locked,
+                group,
+                ..
+            } => Ev::Modifiers {
                 depressed: mods_depressed,
+                locked: mods_locked,
+                group,
             },
             _ => return,
         };

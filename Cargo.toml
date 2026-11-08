@@ -27,8 +27,8 @@ serde_json = "1"
 # wayland-protocols release has them.
 wayland-scanner = "0.31"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
-# Connector scanning for the DRM backend; same source as the copy in Smithay
-# v0.7.0's tree. Its EDID support (`display-info`) is off: it binds
+# Connector scanning for the DRM backend; same source as the copy in Smithay's
+# tree. Its EDID support (`display-info`) is off: it binds
 # libdisplay-info 0.1/0.2 and current distros ship 0.3. `edid.rs` reads what
 # pila needs.
 smithay-drm-extras = { version = "0.1", default-features = false }
@@ -37,8 +37,12 @@ xcursor = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Smithay's main branch, as niri and cosmic-comp use it: fixes reach pila
+# without waiting for a release (0.7.0 is from June 2025). Move `rev` forward
+# on purpose, with a full test run and a bare-metal check.
 [dependencies.smithay]
-version = "0.7"
+git = "https://github.com/Smithay/smithay.git"
+rev = "65aa86fa5236e41775c313408102a5d5c2d1e2ca"
 default-features = false
 features = [
     "backend_winit",

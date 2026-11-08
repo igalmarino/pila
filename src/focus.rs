@@ -8,6 +8,7 @@
 use std::borrow::Cow;
 
 use smithay::{
+    backend::input::InputTime,
     backend::input::KeyState,
     desktop::PopupKind,
     input::{
@@ -22,6 +23,9 @@ use smithay::{
 
 use crate::Pila;
 
+// `X11Surface` is large (over 400 bytes), but focus targets are cloned on
+// input paths, where a `Box` would add an allocation to every clone.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyboardFocus {
     Surface(WlSurface),
@@ -126,7 +130,7 @@ impl KeyboardTarget<Pila> for KeyboardFocus {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match self {
             KeyboardFocus::Surface(surface) => {

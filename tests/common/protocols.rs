@@ -312,8 +312,12 @@ impl Dispatch<WlDataDevice, String> for Handler {
         _: &QueueHandle<Self>,
     ) {
         log(state, tag, proxy.id(), format!("{event:?}"));
-        if let wl_data_device::Event::Selection { id } = event {
-            state.lock().data_offer = id;
+        match event {
+            wl_data_device::Event::Selection { id } => state.lock().data_offer = id,
+            wl_data_device::Event::Enter { id, serial, .. } => {
+                state.lock().dnd_offer = id.map(|offer| (offer, serial));
+            }
+            _ => {}
         }
     }
     event_created_child!(Handler, WlDataDevice, [
@@ -628,6 +632,24 @@ impl Client {
             .unwrap_or_else(|| panic!("pila offers no {interface}"))
     }
 
+    /// Bind the first `wl_output` global again, as a client that binds an
+    /// output late does (a new wl_output object for the same output).
+    pub fn bind_output_again(&self) -> WlOutput {
+        let s = self.lock();
+        let (name, _, offered) = s
+            .globals
+            .iter()
+            .find(|(_, i, _)| i == "wl_output")
+            .expect("a wl_output")
+            .clone();
+        let registry = s.registry.clone().expect("a registry");
+        drop(s);
+        let output: WlOutput = registry.bind(name, offered.min(4), &self.qh, ());
+        self.lock().outputs.push((output.clone(), String::new()));
+        self.flush();
+        output
+    }
+
     pub fn try_bind<I>(&self, interface: &str, version: u32) -> Option<I>
     where
         I: Proxy + 'static,
@@ -888,11 +910,30 @@ impl Client {
 
     /// A lock surface on the output named `output`.
     pub fn lock_surface(&self, lock: &ExtSessionLockV1, output: &str, color: [u8; 4]) -> Surf {
+        self.lock_surface_object(lock, output, color).0
+    }
+
+    /// A lock surface on the output named `output`, with its role object.
+    pub fn lock_surface_object(
+        &self,
+        lock: &ExtSessionLockV1,
+        output: &str,
+        color: [u8; 4],
+    ) -> (Surf, ExtSessionLockSurfaceV1) {
         let output = self.output(output);
         let (surf, surface) = self.new_surface("lock", color, (0, 0));
-        let _lock_surface = lock.get_lock_surface(&surface, &output, &self.qh, surf.0);
+        let lock_surface = lock.get_lock_surface(&surface, &output, &self.qh, surf.0);
         self.flush();
-        surf
+        (surf, lock_surface)
+    }
+
+    /// A surface with no role yet showing `color` at `size` (a drag icon).
+    pub fn painted_surface(&self, color: [u8; 4], size: (i32, i32)) -> WlSurface {
+        let (_, surface) = self.new_surface("icon", color, size);
+        let shm = self.lock().shm.clone().expect("wl_shm");
+        paint(&shm, &self.qh, &surface, color, size);
+        self.flush();
+        surface
     }
 
     /// A data source offering `text` as text/plain, tagged `tag`.

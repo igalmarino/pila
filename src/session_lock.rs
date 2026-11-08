@@ -10,14 +10,14 @@
 //! Locking is confirmed to the client (`SessionLocker::lock`) only after a
 //! locked frame has been rendered (`Pila::confirm_lock`, from the backend).
 //!
-//! Smithay 0.7 calls `SessionLockHandler::unlock` for an `unlock_and_destroy`
-//! on *any* lock object, even one that never got the lock (it posts a protocol
-//! error but still calls `unlock`). So `unlock` only schedules a check: the
+//! Smithay 0.7 called `SessionLockHandler::unlock` for an `unlock_and_destroy`
+//! on *any* lock object, even one that never got the lock (it posted a protocol
+//! error but still called `unlock`); its main branch checks the lock first, and
+//! pila still does. `unlock` only schedules a check: the
 //! session unlocks once the lock object of the client holding the lock is
 //! gone, which a genuine `unlock_and_destroy` (a destructor) guarantees.
 
 use smithay::{
-    delegate_session_lock,
     desktop::utils::under_from_surface_tree,
     desktop::WindowSurfaceType,
     input::pointer::{CursorImageStatus, MotionEvent},
@@ -185,7 +185,7 @@ impl Pila {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: self.start_time.elapsed().as_millis() as u32,
+                time: smithay::backend::input::InputTime::now(),
             },
         );
         pointer.frame(self);
@@ -245,7 +245,8 @@ impl SessionLockHandler for Pila {
         // Drop menus, drags and keyboard focus so nothing keeps input.
         self.dismiss_popup_grab();
         if let Some(pointer) = self.seat.get_pointer() {
-            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+            let time = smithay::backend::input::InputTime::now();
+            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
         }
         self.focus_lock_surface(SERIAL_COUNTER.next_serial());
         self.set_cursor(CursorImageStatus::default_named());
@@ -259,10 +260,11 @@ impl SessionLockHandler for Pila {
     }
 
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
-        // Only the client holding the lock may cover the screen.
-        let holder = self.session_lock.lock.as_ref().and_then(|l| l.client());
-        if !self.is_locked() || holder.is_none() || surface.wl_surface().client() != holder {
-            warn!("ignoring a lock surface from a client that doesn't hold the lock");
+        // Only the lock in force may cover the screen (Smithay already skips
+        // locks that were refused; several may be in flight).
+        let ours = self.session_lock.lock.as_ref() == Some(surface.ext_session_lock());
+        if !self.is_locked() || !ours {
+            warn!("ignoring a lock surface of a lock that isn't in force");
             return;
         }
         let Some(output) = Output::from_resource(&output) else {
@@ -283,4 +285,3 @@ impl SessionLockHandler for Pila {
         self.refresh_pointer_focus();
     }
 }
-delegate_session_lock!(Pila);

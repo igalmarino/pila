@@ -93,6 +93,26 @@ const MINIMIZED: u32 = 1;
 const ACTIVATED: u32 = 2;
 const FULLSCREEN: u32 = 3;
 
+/// A taskbar that binds an output after a window was listed (a monitor
+/// plugged in, a bar per output starting late) is told the window is on it,
+/// without waiting for something else to change (as niri does).
+#[test]
+fn an_output_bound_later_is_entered_by_its_windows() {
+    let (mut pila, _app, taskbar) = taskbar_with(&["a"]);
+    let a = handle(&taskbar, "a");
+    let id = wayland_client::Proxy::id(&a);
+    let enters = |s: &common::client::Shared| {
+        s.log
+            .iter()
+            .filter(|l| l.object == id && l.event.starts_with("OutputEnter"))
+            .count()
+    };
+    taskbar.wait("a's output", |s| enters(s) == 1);
+    pila.settle();
+    let _second = taskbar.bind_output_again();
+    taskbar.wait("a enters the new wl_output too", |s| enters(s) == 2);
+}
+
 fn taskbar_with(names: &[&str]) -> (TestPila, Client, Client) {
     let mut pila = TestPila::start();
     let app = pila.client();

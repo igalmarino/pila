@@ -118,7 +118,7 @@ impl Pila {
         self.space.unmap_elem(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
-            let _ = x11.set_suspended(true);
+            let _ = x11.set_hidden(true);
         }
         self.windows.minimized.push(window.clone());
         for child in self.transient_children(window) {
@@ -143,7 +143,7 @@ impl Pila {
         self.space
             .map_element(window.clone(), space_location(window), false);
         if let Some(x11) = window.x11_surface() {
-            let _ = x11.set_suspended(false);
+            let _ = x11.set_hidden(false);
         }
         // Back on screen even if its output went away meanwhile.
         self.fixup_windows();
