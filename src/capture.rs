@@ -16,7 +16,9 @@
 //!
 //! Frames are rendered offscreen from the same scene the backends draw
 //! (`render.rs`), at the source's scale: an output at its own scale, a window
-//! at the scale of the output it's on. A window is captured without pila's
+//! at the scale of the output it's drawn for (`Pila::window_output`), or off
+//! every output at the scale its client was last told, so a share keeps its
+//! size when the window is minimized. A window is captured without pila's
 //! title bar. While the session is locked, outputs capture the lock screen
 //! and window captures wait. With `paint_cursors`, the cursor is included
 //! (nested, only client-drawn cursors: the host draws named ones).
@@ -81,8 +83,11 @@ use smithay::{
     },
     utils::{Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::{
+        compositor::with_states,
         dmabuf::get_dmabuf,
         foreign_toplevel_list::ForeignToplevelHandle,
+        fractional_scale::with_fractional_scale,
+        seat::WaylandFocus,
         shm::{with_buffer_contents, with_buffer_contents_mut},
     },
 };
@@ -254,8 +259,12 @@ impl Session {
 
 impl Pila {
     /// The size (physical pixels) and scale `target` is captured at, or
-    /// `None` if it's gone.
-    fn capture_geometry(&self, target: &Target) -> Option<(Size<i32, Physical>, Scale<f64>)> {
+    /// `None` if it's gone. `last`: the geometry advertised before, if any.
+    fn capture_geometry(
+        &self,
+        target: &Target,
+        last: Option<(Size<i32, Physical>, Scale<f64>)>,
+    ) -> Option<(Size<i32, Physical>, Scale<f64>)> {
         match target {
             Target::Output(output) => {
                 let output = output.upgrade()?;
@@ -270,12 +279,7 @@ impl Pila {
             }
             Target::Toplevel(identifier) => {
                 let window = self.window_for_identifier(identifier)?;
-                let scale = self
-                    .space
-                    .outputs_for_element(&window)
-                    .first()
-                    .map(output_scale)
-                    .unwrap_or_else(|| Scale::from(1.0));
+                let scale = self.window_capture_scale(&window, last.map(|(_, scale)| scale));
                 let size = window
                     .geometry()
                     .size
@@ -286,6 +290,26 @@ impl Pila {
             }
             Target::Gone => None,
         }
+    }
+
+    /// The scale a window is captured at: its output's (`window_output`, the
+    /// one it's drawn for, so a window across two outputs doesn't flip
+    /// between them), else, off every output (minimized, on another
+    /// workspace), the scale its client was last told and still draws at,
+    /// else the one captured at before. A share keeps its size when the
+    /// window leaves the screen, instead of renegotiating its buffers.
+    fn window_capture_scale(&self, window: &Window, last: Option<Scale<f64>>) -> Scale<f64> {
+        if let Some(output) = self.window_output(window) {
+            return output_scale(&output);
+        }
+        let told = window.wl_surface().and_then(|surface| {
+            with_states(&surface, |states| {
+                with_fractional_scale(states, |fractional| fractional.preferred_scale())
+            })
+        });
+        told.map(Scale::from)
+            .or(last)
+            .unwrap_or_else(|| Scale::from(1.0))
     }
 
     /// Copy every pending frame whose source changed (or that is a
@@ -305,7 +329,7 @@ impl Pila {
     }
 
     fn process_capture(&mut self, session: &mut Session) {
-        let Some(geometry) = self.capture_geometry(&session.target) else {
+        let Some(geometry) = self.capture_geometry(&session.target, session.geometry) else {
             session.stop();
             return;
         };
@@ -911,7 +935,7 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     captured_once: false,
                     stopped: false,
                 };
-                match state.capture_geometry(&session.target) {
+                match state.capture_geometry(&session.target, None) {
                     Some(geometry) => {
                         session.send_constraints(geometry, state.capture.dmabuf.as_ref())
                     }

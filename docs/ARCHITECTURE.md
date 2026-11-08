@@ -386,7 +386,10 @@ Key flows and invariants:
   redraws forever. Layer and lock surfaces use their own output. Xwayland stays at scale 1 (upscaled).
 - **Screen capture** (`capture.rs`, ext-image-capture-source + ext-image-copy-capture, on
   the `wayland-protocols` bindings): sources are an output or a window (by its
-  foreign-toplevel identifier). Sessions live in `Pila::capture.sessions`; frames are rendered
+  foreign-toplevel identifier), a window at its `window_output`'s scale or, off every output,
+  at the fractional scale its client was last told (`window_capture_scale`), so minimizing or
+  switching workspace doesn't renegotiate a share's buffers. Sessions live in
+  `Pila::capture.sessions`; frames are rendered
   from `scene()` (window sources: only the window, no title bar) straight into the
   client's dma-buf (device and modifiers from `Pila::capture.dmabuf`, set by the backend),
   or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A

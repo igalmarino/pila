@@ -332,6 +332,34 @@ fn a_scaled_output_is_captured_at_its_pixel_size() {
 }
 
 #[test]
+fn a_window_leaving_the_screen_keeps_its_capture_scale() {
+    let mut pila = TestPila::with_config("[[output]]\nname = \"HEADLESS-1\"\nscale = 2\n");
+    let client = pila.client();
+    let a = client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let source = window_source(&client, "a");
+    let (session, size) = session(&client, &source, "session");
+    assert_eq!(size, (800, 600));
+    let (first, _) = capture(&client, &session, size, "first");
+    client.wait_logged("first", "Ready");
+    first.destroy();
+    // Minimized, it's still drawn at that scale: the share goes on at the
+    // same size, with no new constraints.
+    client.request(a, |t| t.set_minimized());
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    // A change, then the next frame: it has the change.
+    client.with_window(a, |w| w.color = [255, 0, 255, 0]);
+    client.draw(a, None);
+    let (_next, file) = capture(&client, &session, size, "next");
+    client.wait_logged("next", "Ready");
+    assert!(!client.has_logged("next", "BufferConstraints"));
+    assert_eq!(read_pixel(&file, 800, 400, 300), [0, 255, 0]);
+}
+
+#[test]
 fn window_captures_wait_while_locked() {
     let mut pila = TestPila::start();
     let client = pila.client();
