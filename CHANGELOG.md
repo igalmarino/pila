@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-08)
 
 - **Smithay's main branch:** pila now builds against Smithay's development branch (a git
   dependency pinned to one commit, as niri and cosmic-comp do) instead of the 0.7.0 release
@@ -32,8 +32,11 @@
   Sway or Hyprland don't drive that compositor instead.
 - **Why a client went away is in the log:** a program pila disconnects for a protocol error is
   logged as a warning with its process id and the error.
-- **`scripts/shells`** runs Noctalia and Dux Shell on a headless pila and checks every feature
-  of theirs that depends on the compositor (see `docs/MANUAL.md`, "Building your desktop").
+- **Noctalia and Dux Shell checked feature by feature:** `scripts/shells` runs each on a headless
+  pila and goes through everything of theirs that depends on the compositor (bar, launcher,
+  workspaces, taskbar, notifications, clipboard, screenshots, night light, display settings and
+  power, lock screen). Both work; the manual has a Dux Shell setup now, and says what neither
+  can do until it knows pila by name ("Building your desktop").
 - **Dragging shows what you drag:** the icon an app gives a drag (a file, a tab) follows the
   pointer until the drop; pila never drew it before.
 - **Panels hidden and shown again come back:** a layer surface (panel, launcher, dock) hidden
