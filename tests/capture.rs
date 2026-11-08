@@ -5,6 +5,7 @@ mod common;
 
 use std::time::Duration;
 
+use common::client::Window;
 use common::protocols::{read_pixel, LayerSpec};
 use common::*;
 use wayland_client::protocol::wl_shm::Format;
@@ -164,6 +165,86 @@ fn a_later_frame_waits_for_damage() {
     client.draw(a, None);
     client.wait_logged("second", "Ready");
     assert_eq!(read_pixel(&file, 400, 200, 150), [0, 255, 0]);
+}
+
+/// Capture `window` the way a screen share does while its client animates:
+/// a frame callback with every commit, the next capture asked for after
+/// each frame copied. How long six such frames took.
+fn share_six_frames(
+    client: &Client,
+    window: Window,
+    session: &ExtImageCopyCaptureSessionV1,
+    size: (i32, i32),
+) -> Duration {
+    let surface = client.surface(window);
+    let started = std::time::Instant::now();
+    for n in 0..6 {
+        let callback = format!("callback{n}");
+        let _callback = surface.frame(&client.qh, callback.clone());
+        client.draw(window, None);
+        let tag = format!("frame{n}");
+        let (frame, _) = capture(client, session, size, &tag);
+        client.wait_logged(&callback, "Done");
+        client.wait_logged(&tag, "Ready");
+        frame.destroy();
+    }
+    started.elapsed()
+}
+
+/// A window session whose first frame is copied already.
+fn shared_window(client: &Client, app_id: &str) -> (ExtImageCopyCaptureSessionV1, (i32, i32)) {
+    let source = window_source(client, app_id);
+    let (session, size) = session(client, &source, "session");
+    let (first, _) = capture(client, &session, size, "first");
+    client.wait_logged("first", "Ready");
+    first.destroy();
+    (session, size)
+}
+
+#[test]
+fn a_covered_window_being_captured_keeps_its_frame_rate() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    client.window("cover").fullscreen().create();
+    pila.wait("the cover", |s| {
+        window_in(s, "cover").is_some_and(|w| rect(&w["geometry"]) == (0, 0, 1280, 800))
+    });
+    pila.settle();
+    let (session, size) = shared_window(&client, "a");
+    // Paced by the screen it would get one frame callback a second: at
+    // least 5 s.
+    let took = share_six_frames(&client, window, &session, size);
+    assert!(took < Duration::from_secs(4), "6 frames in {took:?}");
+}
+
+#[test]
+fn a_minimized_window_being_captured_keeps_drawing() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (session, size) = shared_window(&client, "a");
+    client.request(window, |t| t.set_minimized());
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    let took = share_six_frames(&client, window, &session, size);
+    assert!(took < Duration::from_secs(4), "6 frames in {took:?}");
+}
+
+#[test]
+fn a_window_on_another_workspace_being_captured_keeps_drawing() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (session, size) = shared_window(&client, "a");
+    pila.combo("Super+2");
+    pila.wait("workspace 2", |s| s["workspace"] == 2);
+    let took = share_six_frames(&client, window, &session, size);
+    assert!(took < Duration::from_secs(4), "6 frames in {took:?}");
 }
 
 #[test]

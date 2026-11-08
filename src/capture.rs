@@ -43,6 +43,7 @@ use smithay::{
             Bind, BufferType, ExportMem, Offscreen, TextureMapping,
         },
     },
+    desktop::{utils::surface_primary_scanout_output, Window},
     output::{Output, WeakOutput},
     reexports::{
         calloop::{generic::Generic, Interest, Mode, PostAction},
@@ -425,6 +426,27 @@ impl Pila {
             }
             frame.presentation_time(hi, lo, nanos);
             frame.ready();
+        });
+    }
+
+    /// Frame callbacks for the surfaces of a captured `window` that aren't
+    /// shown on any output (covered, minimized, on another workspace), sent
+    /// when the next frame is asked for: the screen paces only the ones it
+    /// shows (hidden ones get one a second, off-space ones none), and a
+    /// client that draws on frame callbacks would stall the share. Shown
+    /// surfaces keep the screen's pace. Not frame pacing by pila: the
+    /// capture client sets the rate, one window frame per captured frame.
+    fn send_capture_frames(&self, window: &Window) {
+        let Some(output) = self.space.outputs().next().cloned() else {
+            return;
+        };
+        // Off the space a surface keeps the primary output it last had:
+        // nothing draws it to update that.
+        let shown = self.space.element_location(window).is_some();
+        let time = self.clock.now();
+        window.send_frame(&output, time, None, |surface, data| {
+            let hidden = !shown || surface_primary_scanout_output(surface, data).is_none();
+            hidden.then(|| output.clone())
         });
     }
 
@@ -1042,6 +1064,13 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                     state
                         .loop_handle
                         .insert_idle(|state| state.process_captures());
+                }
+                if let Target::Toplevel(identifier) = session.target.clone() {
+                    if !state.is_locked() {
+                        if let Some(window) = state.window_for_identifier(&identifier) {
+                            state.send_capture_frames(&window);
+                        }
+                    }
                 }
             }
             frame::Request::Destroy => {}

@@ -142,7 +142,8 @@ Key flows and invariants:
   output it is (surfaces shown nowhere: once a second, `HIDDEN_FRAME_THROTTLE`, so a
   covered animating client doesn't spin; `schedule_hidden_frames`, from `after_frames`,
   asks for a redraw after that second while such a surface waits, since nothing
-  else may redraw); frame callback times and
+  else may redraw; a captured window's hidden surfaces, off-space ones included, get theirs
+  from its capture instead: see "Screen capture"); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
   iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs captures,
   screencopies, `space.refresh()`, taskbar updates and `popups.cleanup()`, then a flush. Buffer age (for partial repaints) needs the window's EGL
@@ -392,7 +393,11 @@ Key flows and invariants:
   session's first frame is copied at once (idle), later ones in `after_frames` only when
   the session's own damage tracker sees a change. Size changes re-send constraints and
   fail the frame; a gone source stops the session (`stop_captures_of`). While locked,
-  window captures wait. Cursor sessions are created stopped; `paint_cursors` is honored.
+  window captures wait. A window capture's `capture` request sends frame callbacks to the
+  window's surfaces shown on no output (covered, or the whole window when it's off the space:
+  minimized, parked; `send_capture_frames`), so a client drawing on frame callbacks keeps
+  drawing for a share at the capture client's rate, one window frame per captured frame,
+  instead of once a second or never; shown surfaces keep the screen's pace. Cursor sessions are created stopped; `paint_cursors` is honored.
   `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
   (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
   `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
