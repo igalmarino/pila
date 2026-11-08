@@ -41,17 +41,23 @@ jobs:
       - run: rustup update stable && rustup default stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo build --release --locked
-      # As root through seatd, as a TTY session would get the devices. It's
-      # still running when its time is up: SIGTERM, which pila quits on,
-      # logging its last frame statistics.
+      # As root through seatd, as a TTY session would get the devices: the
+      # seatd the package started, else one of its own. It's still running
+      # when its time is up: SIGTERM, which pila quits on, logging its last
+      # frame statistics.
       - name: Run pila on vkms
         run: |
           runtime="$(mktemp -d)"
           chmod 700 "$runtime"
+          launch=()
+          if [ ! -S /run/seatd.sock ]; then
+            launch=(seatd-launch --)
+          fi
+          ls -l /sys/class/drm/*/device/driver 2>/dev/null || true
           status=0
           sudo env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd \
             RUST_LOG=info,pila::frames=debug \
-            seatd-launch -- timeout -s TERM 20 \
+            "${launch[@]}" timeout -s TERM 20 \
             target/release/pila --backend udev -c weston-simple-egl \
             >pila-vkms.log 2>&1 || status=$?
           tail -n 40 pila-vkms.log
