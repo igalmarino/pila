@@ -115,7 +115,13 @@ Key flows and invariants:
   there), the connector's `fallback_order` follows (same size at lower refresh, then smaller
   sizes, nothing heavier, at most 8 tries), and the one that works becomes the output's mode;
   after a power-on, `output_power.rs` then calls `Pila::fit_to_outputs`. A mode change asked
-  for explicitly (`apply_output_config`) doesn't fall back: it fails and says so. The session lock is
+  for explicitly (`apply_output_config`) doesn't fall back: it fails and says so. After every
+  connector scan (a udev change event comes with it) `retrain_bad_links` looks for enabled
+  outputs whose `link-status` the kernel set to bad (DisplayPort link training failed, e.g.
+  after a resume or through a dock), which show nothing until the compositor acts: on an
+  atomic device a commit sets it back to good with `ALLOW_MODESET`, so the kernel sets the
+  same mode again (Smithay doesn't handle the property); otherwise, or if that fails, the
+  output is powered off and on. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
   releases held keys; `ActivateSession` scans the connectors and re-applies the outputs,
   since a monitor plugged in meanwhile can't come on without DRM master (`enable_output`

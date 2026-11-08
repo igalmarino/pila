@@ -46,7 +46,10 @@ use smithay::{
             EventLoop, LoopHandle,
         },
         drm::{
-            control::{connector, crtc, Device as _, Mode as DrmMode, ModeFlags, ModeTypeFlags},
+            control::{
+                atomic::AtomicModeReq, connector, crtc, property, AtomicCommitFlags, Device as _,
+                Mode as DrmMode, ModeFlags, ModeTypeFlags,
+            },
             Device as _,
         },
         input::{self as libinput, Libinput},

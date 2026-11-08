@@ -314,8 +314,84 @@ pub(super) fn scan_connectors(state: &mut Pila) {
             _ => {}
         }
     }
+    retrain_bad_links(state);
     // Once every new output is set up (or failed to be).
     keep_a_screen_on(state);
+}
+
+/// `link-status` values (`drm_mode.h`).
+const LINK_STATUS_GOOD: u64 = 0;
+const LINK_STATUS_BAD: u64 = 1;
+
+/// The connector's `link-status` property and its value, if it has one.
+fn link_status(
+    drm: &PilaDrmOutputManager,
+    connector: connector::Handle,
+) -> Option<(property::Handle, u64)> {
+    let device = drm.device();
+    let props = device.get_properties(connector).ok()?;
+    props.into_iter().find_map(|(handle, value)| {
+        let info = device.get_property(handle).ok()?;
+        (info.name().to_str() == Ok("link-status")).then_some((handle, value))
+    })
+}
+
+/// Outputs whose link the kernel marked bad (DisplayPort link training
+/// failed, typically after a resume or through a dock) show nothing until
+/// the compositor sets them up again: it sends a hotplug event and waits.
+/// Checked after every connector scan. On an atomic device the property is
+/// set back to good, which makes the kernel set the mode again (the same
+/// one); otherwise, or if that fails, the output is turned off and on.
+fn retrain_bad_links(state: &mut Pila) {
+    let Some(Backend::Udev(data)) = &mut state.backend else {
+        return;
+    };
+    let bad: Vec<(crtc::Handle, Output, Option<property::Handle>)> = data
+        .outputs
+        .iter()
+        .filter(|(_, s)| s.enabled && s.drm_output.is_some())
+        .filter_map(|(crtc, s)| {
+            let (prop, value) = link_status(&data.drm, s.connector)?;
+            (value == LINK_STATUS_BAD).then(|| (*crtc, s.output.clone(), Some(prop)))
+        })
+        .collect();
+    for (crtc, output, prop) in bad {
+        let name = output.name();
+        warn!(name, "the monitor's link went bad: setting it up again");
+        let connector = data.outputs[&crtc].connector;
+        let retrained = data.drm.device().is_atomic()
+            && prop.is_some_and(|prop| {
+                let mut request = AtomicModeReq::new();
+                request.add_property(
+                    connector,
+                    prop,
+                    property::Value::UnsignedRange(LINK_STATUS_GOOD),
+                );
+                match data
+                    .drm
+                    .device()
+                    .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, request)
+                {
+                    Ok(()) => true,
+                    Err(err) => {
+                        warn!(name, ?err, "couldn't set the link back to good");
+                        false
+                    }
+                }
+            });
+        if !retrained
+            && !(data.set_output_power(&output, false) && data.set_output_power(&output, true))
+        {
+            warn!(name, "couldn't set the output up again");
+            continue;
+        }
+        // A frame in flight still gets its vblank (`frame_finish`).
+        if let Some(surface) = data.outputs.get_mut(&crtc) {
+            surface.redraw_needed = true;
+        }
+        info!(name, "link set up again");
+    }
+    data.queue_redraw();
 }
 
 /// A connector's name as outputs are known by, e.g. `eDP-1`.
