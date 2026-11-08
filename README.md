@@ -7,6 +7,11 @@ Windows float and overlap, with server-side title bars, like a classic desktop; 
 launchers, wallpapers and lock screens come from the usual Wayland tools (waybar, fuzzel,
 swaybg, swaylock, ...).
 
+Why Pila: Noctalia and Dux Shell usually run on tiling compositors such as niri or Hyprland;
+Pila gives them a classic desktop of overlapping windows, with subtle animations, blur and a
+config applied as you save it. labwc keeps the Openbox look and its XML config, Wayfire is
+built around Compiz-style effects, and COSMIC's floating mode comes with the rest of COSMIC.
+
 Pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
 The wlroots protocols that panels and shells still need and that have no standard
 replacement yet (layer shell, screencopy, foreign toplevel management, gamma control,
@@ -21,7 +26,7 @@ How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`
 
 Pila is **alpha**: usable day to day (its author runs it as their only desktop and
 develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
-with an external monitor, on Arch Linux with GDM. Testers report it working on Intel integrated
+with an external monitor, on Arch Linux with Noctalia's greeter. Testers report it working on Intel integrated
 GPUs, on Debian with SDDM and on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
