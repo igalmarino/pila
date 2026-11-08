@@ -293,6 +293,42 @@ fn an_output_is_captured_into_a_dmabuf() {
 }
 
 #[test]
+fn capture_textures_are_kept_while_captures_go_on() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let textures = |s: &Value| s["capture"]["textures"].as_u64().unwrap();
+    // An output and a window: a texture for each size.
+    let output = output_source(&client, "HEADLESS-1");
+    let (screen, screen_size) = session(&client, &output, "screen");
+    let (frame, _) = capture(&client, &screen, screen_size, "screen_frame");
+    client.wait_logged("screen_frame", "Ready");
+    frame.destroy();
+    let (window, window_size) = shared_window(&client, "a");
+    pila.wait("two textures", |s| textures(s) == 2);
+    // Another frame of the screen reuses its texture, and has the change.
+    client.with_window(a, |w| w.color = [255, 0, 255, 0]);
+    client.draw(a, None);
+    let (frame, file) = capture(&client, &screen, screen_size, "screen_again");
+    client.wait_logged("screen_again", "Ready");
+    frame.destroy();
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    assert_eq!(
+        read_pixel(&file, 1280, (x + 50) as i32, (y + 50) as i32),
+        [0, 255, 0]
+    );
+    assert_eq!(textures(&pila.settle()), 2);
+    // No capture left: they go at the next frame.
+    screen.destroy();
+    window.destroy();
+    let _ = window_size;
+    client.draw(a, None);
+    pila.wait("no texture", |s| textures(s) == 0);
+}
+
+#[test]
 fn a_buffer_of_the_wrong_size_fails() {
     let pila = TestPila::start();
     let client = pila.client();

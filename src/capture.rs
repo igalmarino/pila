@@ -47,7 +47,7 @@ use smithay::{
             damage::OutputDamageTracker,
             element::AsRenderElements,
             gles::{GlesMapping, GlesRenderer, GlesTexture},
-            Bind, BufferType, ExportMem, Offscreen, TextureMapping,
+            Bind, BufferType, ExportMem, Offscreen, Texture, TextureMapping,
         },
     },
     desktop::{utils::surface_primary_scanout_output, Window},
@@ -175,6 +175,32 @@ pub struct Captures {
     /// elements, then the copy if it changed), for `Pila::record_capture`;
     /// `None` if it went no further than its checks.
     pub building: Option<Instant>,
+    /// Offscreen textures shm copies were rendered into, by size, for the
+    /// next ones (`MAX_SHM_TEXTURES`): kept while captures go on, dropped
+    /// once none does (`trim_textures`), since a 4K one is 33 MB.
+    shm_textures: Vec<GlesTexture>,
+}
+
+/// How many sizes of offscreen textures `Captures` keeps: an output and a
+/// window or two captured at once.
+const MAX_SHM_TEXTURES: usize = 4;
+
+impl Captures {
+    /// Drop the offscreen textures when no capture may want them: no
+    /// session, no screencopy waiting, no screencopy client keeping damage.
+    pub fn trim_textures(&mut self) {
+        if self.sessions.is_empty()
+            && self.screencopies.is_empty()
+            && self.screencopy_trackers.is_empty()
+        {
+            self.shm_textures.clear();
+        }
+    }
+
+    /// Offscreen textures kept, for tests (`Pila::state_json`).
+    pub fn texture_count(&self) -> usize {
+        self.shm_textures.len()
+    }
 }
 
 /// A capture session (`Captures::sessions`).
@@ -462,8 +488,7 @@ impl Pila {
             }
         };
 
-        let dmabuf = capture.dmabuf.as_ref();
-        let copied = match copy_frame(renderer, &buffer, dmabuf, size, scale, &elements, clear) {
+        let copied = match copy_frame(renderer, &buffer, capture, size, scale, &elements, clear) {
             Ok(copied) => copied,
             Err(err) => {
                 session.start_over();
@@ -625,19 +650,24 @@ pub(crate) fn split_timestamp(time: Duration) -> (u32, u32, u32) {
 
 /// Copy `elements` into the client's `buffer`: rendered straight into a
 /// dma-buf, or offscreen and read back into shm.
-/// A dma-buf must be of a format and modifier `dmabuf` offers.
+/// A dma-buf must be of a format and modifier `capture.dmabuf` offers; shm
+/// copies reuse `capture`'s offscreen textures.
 pub(crate) fn copy_frame(
     renderer: &mut GlesRenderer,
     buffer: &WlBuffer,
-    dmabuf: Option<&DmabufTarget>,
+    capture: &mut Captures,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
     clear: [f32; 4],
 ) -> Result<Copied, CopyError> {
     match buffer_type(buffer) {
-        Some(BufferType::Shm) => copy_to_shm(renderer, buffer, size, scale, elements, clear),
+        Some(BufferType::Shm) => {
+            let textures = &mut capture.shm_textures;
+            copy_to_shm(renderer, textures, buffer, size, scale, elements, clear)
+        }
         Some(BufferType::Dma) => {
+            let dmabuf = capture.dmabuf.as_ref();
             render_to_dmabuf(renderer, buffer, dmabuf, size, scale, elements, clear)
         }
         _ => Err(CopyError::Constraints),
@@ -715,6 +745,7 @@ fn render_to_dmabuf(
 /// Render `elements` offscreen and copy the pixels into the shm `buffer`.
 fn copy_to_shm(
     renderer: &mut GlesRenderer,
+    textures: &mut Vec<GlesTexture>,
     buffer: &WlBuffer,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
@@ -736,9 +767,12 @@ fn copy_to_shm(
         _ => return Err(CopyError::Constraints),
     };
 
-    let mut texture =
-        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, (w, h).into())
-            .map_err(|e| render_error(&e))?;
+    // One of this size from an earlier copy, or a new one.
+    let mut texture = match textures.iter().position(|t| t.size() == (w, h).into()) {
+        Some(i) => textures.remove(i),
+        None => Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, (w, h).into())
+            .map_err(|e| render_error(&e))?,
+    };
     let mut target = renderer.bind(&mut texture).map_err(|e| render_error(&e))?;
     let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
     // The read-back below comes after the drawing in the same context.
@@ -756,6 +790,11 @@ fn copy_to_shm(
         ),
     };
     drop(target);
+    // The read-back above is ordered before anything drawn into it next.
+    textures.push(texture);
+    if textures.len() > MAX_SHM_TEXTURES {
+        textures.remove(0);
+    }
     // Reading the pixels waits for the GPU: with a fence to wait on, that's
     // after it signals, off the event loop's back.
     let display = renderer.egl_context().display().clone();

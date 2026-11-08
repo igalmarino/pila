@@ -392,7 +392,10 @@ Key flows and invariants:
   `Pila::capture.sessions`; frames are rendered
   from `scene()` (window sources: only the window, no title bar) straight into the
   client's dma-buf (device and modifiers from `Pila::capture.dmabuf`, set by the backend),
-  or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed). A
+  or offscreen and read back into shm (GL reads rows bottom-up, so they're reversed); the
+  offscreen textures are kept by size (up to 4) for the next copies, and dropped from
+  `after_frames` once no session, waiting screencopy or screencopy damage tracker is left
+  (`Captures::trim_textures`). A
   session's first frame is copied at once (idle), later ones in `after_frames` only when
   the session's own damage tracker sees a change. A copy that fails (at once or on the GPU)
   starts the session over (`Session::start_over`: new tracker, next frame copied at once and

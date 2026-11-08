@@ -282,9 +282,8 @@ impl Pila {
             }
         }
 
-        let dmabuf = capture.dmabuf.as_ref();
         let copied =
-            match capture::copy_frame(renderer, &buffer, dmabuf, size, scale, &elements, clear) {
+            match capture::copy_frame(renderer, &buffer, capture, size, scale, &elements, clear) {
                 Ok(copied) => copied,
                 Err(err) => {
                     // The tracker saw changes that were never delivered: the

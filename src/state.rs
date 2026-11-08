@@ -1408,6 +1408,7 @@ impl Pila {
         self.apply_unblocked_commits();
         self.process_captures();
         self.process_screencopies();
+        self.capture.trim_textures();
         // The space knows which outputs each window is on only after its
         // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();
