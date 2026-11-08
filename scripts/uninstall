@@ -13,8 +13,8 @@ cd "$(dirname "$0")/.."
 source scripts/install-paths
 
 if [ -z "$DESTDIR" ] && [ "${XDG_SESSION_DESKTOP:-}" = pila ]; then
-    echo "This is a pila session. It keeps running after the uninstall (the binary"
-    echo "is unlinked, not stopped), but the next login won't offer pila."
+    echo "This is a Pila session. It keeps running after the uninstall (the binary"
+    echo "is unlinked, not stopped), but the next login won't offer Pila."
     read -r -p "Uninstall anyway? [y/N] " answer
     case "$answer" in
         y | Y | yes) ;;

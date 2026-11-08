@@ -126,11 +126,11 @@ gpu_in_use() {
     [ -n "$(find_log)" ] || return 0
     gpu="$(gpu_device)"
     if [ -z "$gpu" ]; then
-        echo "In use by pila: not in the log"
+        echo "In use by Pila: not in the log"
         return 0
     fi
     driver="$(basename "$(readlink -f "/sys/class/drm/${gpu##*/}/device/driver" 2>/dev/null)" 2>/dev/null)"
-    echo "In use by pila: $gpu${driver:+ (driver $driver)}"
+    echo "In use by Pila: $gpu${driver:+ (driver $driver)}"
 }
 
 # Only what the kernel lists: no EDID, which has the monitor's serial number.
@@ -149,7 +149,7 @@ section_monitors() {
         mode="$(head -n 1 "$connector/modes" 2>/dev/null)"
         note=""
         if [ -n "$used" ] && [ "$card" != "$used" ]; then
-            note=" (on $card, not the GPU pila uses: not supported yet, so pila doesn't show it)"
+            note=" (on $card, not the GPU Pila uses: not supported yet, so Pila doesn't show it)"
         fi
         echo "${name#"$card"-}: preferred mode ${mode:-unknown}$note"
     done
@@ -192,7 +192,7 @@ pila="$(find_pila)"
 # Only for the user until they've read it.
 umask 077
 if ! {
-    echo "# pila report"
+    echo "# Pila report"
     if [ -n "$pila" ]; then
         "$pila" --version 2>&1
     else

@@ -234,7 +234,7 @@ if [ "${1:-}" = "--workload" ]; then
         fi
         pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
     done
-    mark "pila not found among the ancestors; quit it with Mod+Shift+E"
+    mark "Pila not found among the ancestors; quit it with Mod+Shift+E"
     exit 0
 fi
 
@@ -292,7 +292,7 @@ EOF
     fi
     export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug"
 
-    echo "Runs pila with scripted scenarios for about a minute; it quits by itself."
+    echo "Runs Pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
     workload="$PWD/scripts/check --workload"
     if $nested; then
@@ -367,7 +367,7 @@ lacks() {
 echo
 echo "== Checks ($log) =="
 if ! grep -q "check: done" "$log"; then
-    fail "the scenarios finished (pila quit or crashed before; see the log)"
+    fail "the scenarios finished (Pila quit or crashed before; see the log)"
 fi
 if grep -q "panicked" "$log"; then
     fail "no panic"
@@ -392,8 +392,8 @@ fi
 if ran noctalia; then
     s=$(section noctalia)
     has "$s" "Noctalia's surfaces match the noctalia-* rule" 'layer rules namespace="noctalia-'
-    has "$s" "the rule turns pila's animations off for them" 'off by rule what="layer-in" id="noctalia-'
-    lacks "$s" "pila doesn't animate any of them" 'starts what="layer-[a-z]*" id="noctalia-'
+    has "$s" "the rule turns Pila's animations off for them" 'off by rule what="layer-in" id="noctalia-'
+    lacks "$s" "Pila doesn't animate any of them" 'starts what="layer-[a-z]*" id="noctalia-'
 fi
 
 # Frame statistics, over the whole run (the performance pillar).

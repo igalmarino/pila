@@ -2,7 +2,7 @@
 """Minimize, unminimize, maximize or unmaximize every window, as a taskbar
 would: a minimal
 wlr-foreign-toplevel-management client (standard library only), for
-scripted tests such as scripts/check. Run it inside pila (it uses
+scripted tests such as scripts/check. Run it inside Pila (it uses
 WAYLAND_DISPLAY).
 
     scripts/toplevel-action min|unmin|max|unmax

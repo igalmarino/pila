@@ -65,7 +65,7 @@ if [ -z "$DESTDIR" ]; then
     if ! error="$(target/release/pila --version 2>&1 >/dev/null)"; then
         echo "target/release/pila doesn't run on this system:" >&2
         echo "$error" >&2
-        echo "Update the system's packages, or build pila here (cargo build --release)." >&2
+        echo "Update the system's packages, or build Pila here (cargo build --release)." >&2
         exit 1
     fi
     # Another pila session entry under the other usual prefix (e.g. a distro
@@ -74,7 +74,7 @@ if [ -z "$DESTDIR" ]; then
     for other in /usr/share /usr/local/share; do
         entry="$other/wayland-sessions/pila.desktop"
         if [ "$other" != "$DATADIR" ] && [ -e "$entry" ]; then
-            echo "warning: $entry exists too (another pila install): the login screen" >&2
+            echo "warning: $entry exists too (another Pila install): the login screen" >&2
             echo "may start that one. Remove it: scripts/uninstall with its PREFIX, or" >&2
             echo "uninstall the package that owns it." >&2
         fi
@@ -97,9 +97,9 @@ for entry in "${install_files[@]}"; do
 done
 
 echo
-echo "Installed. Log out and pick \"pila\" in the login screen's session menu."
+echo "Installed. Log out and pick \"Pila\" in the login screen's session menu."
 echo "Log: ~/.local/state/pila/pila.log (and journalctl -t pila -b with systemd)."
 if [ "$DATADIR" = /usr/local/share ]; then
-    echo "If the login screen doesn't list pila (LightDM and some SDDM setups only"
+    echo "If the login screen doesn't list Pila (LightDM and some SDDM setups only"
     echo "read /usr/share/wayland-sessions), uninstall and use PREFIX=/usr."
 fi

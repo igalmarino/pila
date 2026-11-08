@@ -207,7 +207,7 @@ fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
     let out = report(&home);
     assert!(out.status.success(), "{out:?}");
     let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
-    assert!(text.contains("In use by pila: /dev/dri/card1"), "{text}");
+    assert!(text.contains("In use by Pila: /dev/dri/card1"), "{text}");
 }
 
 #[test]

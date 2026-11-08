@@ -249,7 +249,7 @@ EOF
         shot window-switcher
         step "close the window switcher" noctalia msg window-switcher close
         step "next workspace" noctalia msg workspace-switch next
-        expect "the workspace switch reached pila" "s['workspace'] == 2"
+        expect "the workspace switch reached Pila" "s['workspace'] == 2"
         sleep 0.5
         shot workspace-2
         step "previous workspace" noctalia msg workspace-switch prev
@@ -314,7 +314,7 @@ EOF
 
         # Last: there's no unlocking without a password.
         step "lock" noctalia msg session lock
-        expect "pila is locked" "s['locked'] is True" 10
+        expect "Pila is locked" "s['locked'] is True" 10
         answers "Noctalia reports the lock" '"locked": true' noctalia msg status
         sleep 1.5
         shot locked
@@ -372,7 +372,7 @@ EOF
         # The second workspace pill on output 1's bar (ext-workspace activate).
         ctl '{"cmd":"move","x":93.5,"y":20.5}' >/dev/null
         ctl '{"cmd":"button","button":"left","state":"click"}' >/dev/null
-        expect "a click on a workspace pill switches pila's workspace (ext-workspace)" "s['workspace'] == 2"
+        expect "a click on a workspace pill switches Pila's workspace (ext-workspace)" "s['workspace'] == 2"
         sleep 0.5
         shot workspace-2
         ctl '{"cmd":"move","x":61.5,"y":20.5}' >/dev/null
@@ -403,15 +403,15 @@ EOF
             mark "check failed: dms screenshot takes a picture (screencopy)"
         fi
         answers "blur (ext-background-effect)" "[Ss]upported|true|yes" dms blur check
-        answers "dms doctor sees pila" "pila" dms doctor
+        answers "dms doctor sees Pila" "pila" dms doctor
 
         step "lock" dms ipc call lock lock
-        expect "pila is locked" "s['locked'] is True" 10
+        expect "Pila is locked" "s['locked'] is True" 10
         answers "Dux Shell reports the lock" "true" dms ipc call lock isLocked
         sleep 1.5
         shot locked
         step "unlock" dms ipc call lock unlock
-        expect "pila is unlocked" "s['locked'] is False" 10
+        expect "Pila is unlocked" "s['locked'] is False" 10
         sleep 1
         shot unlocked
         still_running "$shell"
@@ -440,11 +440,11 @@ judge() {
         fail "$name ran (no $log)"
         return
     fi
-    grep -q "shells: $name done" "$log" || fail "the steps finished (pila quit or crashed before; see $log)"
+    grep -q "shells: $name done" "$log" || fail "the steps finished (Pila quit or crashed before; see $log)"
     if grep -q "panicked" "$log"; then
-        fail "pila didn't panic"
+        fail "Pila didn't panic"
     else
-        pass "pila didn't panic"
+        pass "Pila didn't panic"
     fi
     local errors
     errors=$(grep "client disconnected by a protocol error" "$log" || true)
@@ -527,7 +527,7 @@ mod = "super"
 name = "DP-1"
 scale = 1.5
 EOF
-    echo "Running $name on a headless pila (about a minute)..."
+    echo "Running $name on a headless Pila (about a minute)..."
     # Outputs named like monitors: Dux Shell's night mode leaves out
     # outputs named HEADLESS-*.
     # Sealed off from the session it's run from (see the top).

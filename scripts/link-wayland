@@ -47,7 +47,7 @@ if [ "${PILA_DEV_PRIVILEGED:-}" != 1 ]; then
         esac
     elif [ "${XDG_CURRENT_DESKTOP:-}" = pila ]; then
         echo "link-wayland: python3 not found (package python), and without it the" >&2
-        echo "container would get pila's own socket: screen capture and a virtual" >&2
+        echo "container would get Pila's own socket: screen capture and a virtual" >&2
         echo "keyboard. Install it, or accept that with PILA_DEV_PRIVILEGED=1." >&2
         exit 1
     fi
