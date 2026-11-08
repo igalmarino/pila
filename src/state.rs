@@ -154,6 +154,8 @@ pub struct Pila {
     pub workspace_slide: Option<crate::workspace_slide::WorkspaceSlide>,
     /// Each output's frame statistics, by name (`frame_stats.rs`).
     pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
+    /// The screen captures' frames (`frame_stats.rs`, `Pila::record_capture`).
+    pub capture_stats: crate::frame_stats::FrameStats,
 
     /// Mapped windows, in stacking order (back to front).
     pub space: Space<Window>,
@@ -437,6 +439,7 @@ impl Pila {
             animations: Default::default(),
             workspace_slide: None,
             frame_stats: HashMap::new(),
+            capture_stats: Default::default(),
             space: Space::default(),
             popups,
             session_lock: SessionLock::default(),

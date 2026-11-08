@@ -13,6 +13,13 @@
 //! `winit.rs`), where the host decides when frames are shown. At trace level
 //! every frame is logged: when it was queued (at a vblank or not) and the
 //! vblank that showed it.
+//!
+//! Screen captures (`capture.rs`, `screencopy.rs`) build their frames on
+//! the event loop too, after the outputs' (`Pila::after_frames`): a frame's
+//! scene, elements and damage while one is waiting, and its copy when the
+//! source changed. That's CPU time on top of the outputs' frames, logged on
+//! its own line, `captures`, with the same fields (`passes` for frames), so
+//! the outputs' own budget stays readable.
 
 use std::time::Duration;
 
@@ -117,6 +124,17 @@ fn log_report(output: &str, report: &Report) {
     );
 }
 
+fn log_capture_report(report: &Report) {
+    debug!(
+        target: "pila::frames",
+        secs = (report.secs * 10.0).round() / 10.0,
+        passes = report.frames,
+        cpu_avg_ms = ms(report.cpu_avg),
+        cpu_max_ms = ms(report.cpu_max),
+        "captures"
+    );
+}
+
 fn ms(duration: Duration) -> f64 {
     (duration.as_secs_f64() * 1e5).round() / 100.0
 }
@@ -146,13 +164,26 @@ impl Pila {
         }
     }
 
-    /// Log what each output drew since its last report (pila is quitting).
+    /// A capture built its frame (and copied it if it changed), taking
+    /// `cpu` (see the module docs).
+    pub fn record_capture(&mut self, cpu: Duration) {
+        let now = self.animation_time();
+        if let Some(report) = self.capture_stats.record(now, cpu) {
+            log_capture_report(&report);
+        }
+    }
+
+    /// Log what each output drew since its last report, and the captures
+    /// (pila is quitting).
     pub fn report_frames(&mut self) {
         let now = self.animation_time();
         for (name, stats) in &mut self.frame_stats {
             if let Some(report) = stats.take(now) {
                 log_report(name, &report);
             }
+        }
+        if let Some(report) = self.capture_stats.take(now) {
+            log_capture_report(&report);
         }
     }
 

@@ -13,7 +13,7 @@
 //! frame (`Pila::after_frames`). A region is in the output's logical
 //! coordinates, copied at the output's scale.
 
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Instant};
 
 use smithay::{
     backend::renderer::{buffer_type, damage::OutputDamageTracker, BufferType},
@@ -180,7 +180,11 @@ impl Pila {
         }
         let frames = std::mem::take(&mut self.capture.screencopies);
         for frame in frames {
-            if !self.process_screencopy(&frame) {
+            let done = self.process_screencopy(&frame);
+            if let Some(started) = self.capture.building.take() {
+                self.record_capture(started.elapsed());
+            }
+            if !done {
                 self.capture.screencopies.push(frame);
             }
         }
@@ -223,6 +227,7 @@ impl Pila {
         }
 
         // Everything taken from `self` before borrowing the renderer.
+        self.capture.building = Some(Instant::now());
         let input = self.frame_input();
         let origin = geo.loc + region.loc;
         let scale = output_scale(&output);

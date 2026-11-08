@@ -30,7 +30,12 @@
 //! (`state::is_privileged`) may capture, as with other compositors.
 
 use std::{
-    cell::RefCell, collections::HashMap, os::fd::OwnedFd, rc::Rc, sync::Mutex, time::Duration,
+    cell::RefCell,
+    collections::HashMap,
+    os::fd::OwnedFd,
+    rc::Rc,
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use smithay::{
@@ -166,6 +171,10 @@ pub struct Captures {
     /// of `copy_with_damage` (`screencopy.rs`).
     pub screencopies: Vec<ZwlrScreencopyFrameV1>,
     pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
+    /// When the frame being processed started to be built (its scene and
+    /// elements, then the copy if it changed), for `Pila::record_capture`;
+    /// `None` if it went no further than its checks.
+    pub building: Option<Instant>,
 }
 
 /// A capture session (`Captures::sessions`).
@@ -322,6 +331,9 @@ impl Pila {
         let mut sessions = std::mem::take(&mut self.capture.sessions);
         for session in sessions.iter_mut().filter(|s| s.pending) {
             self.process_capture(session);
+            if let Some(started) = self.capture.building.take() {
+                self.record_capture(started.elapsed());
+            }
         }
         // Sessions created meanwhile (none expected) are kept too.
         sessions.append(&mut self.capture.sessions);
@@ -359,6 +371,7 @@ impl Pila {
         };
 
         // Everything taken from `self` before borrowing the renderer.
+        self.capture.building = Some(Instant::now());
         let input = self.frame_input();
         let scene = &input.scene;
         let (origin, window) = match &session.target {

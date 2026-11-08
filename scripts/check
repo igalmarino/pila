@@ -322,6 +322,7 @@ fi
 
 failed=0
 pass() { printf 'PASS  %s\n' "$*"; }
+info() { printf 'INFO  %s\n' "$*"; }
 fail() {
     printf 'FAIL  %s\n' "$*"
     failed=1
@@ -412,6 +413,16 @@ else
     else
         fail "CPU per frame on average within 4 ms (worst average ${worst_avg} ms)"
     fi
+fi
+
+# Screen captures build their frames on top of the outputs' (`frame_stats.rs`):
+# measured, with no budget of their own yet.
+captures=$(grep 'pila::frames: captures' "$log" || true)
+if [ -n "$captures" ]; then
+    passes=$(grep -o 'passes=[0-9]*' <<<"$captures" | cut -d= -f2 | awk '{ s += $1 } END { print s + 0 }')
+    worst_avg=$(grep -o 'cpu_avg_ms=[0-9.]*' <<<"$captures" | cut -d= -f2 | sort -g | tail -1)
+    worst=$(grep -o 'cpu_max_ms=[0-9.]*' <<<"$captures" | cut -d= -f2 | sort -g | tail -1)
+    info "captures: $passes frames built, CPU worst average ${worst_avg} ms, worst ${worst} ms"
 fi
 
 # Bare metal only: nothing else reads an EDID (`edid.rs`).
