@@ -2,9 +2,11 @@
 # test suite can't run, on vkms, the kernel's virtual KMS driver, loaded into
 # the runner's own kernel (a VM): a session from seatd, the device opened,
 # modesetting, vblank-paced frames and their statistics, a client drawing,
-# a night light's gamma change (a GAMMA_LUT commit that doesn't wait), without
-# real hardware. It stops early, saying so, if the runner's kernel
-# has no vkms module. Actions are pinned by commit, as in ci.yml.
+# a night light's gamma change (a GAMMA_LUT commit that doesn't wait), and a
+# second monitor plugged in and out (vkms through configfs, kernel 7.0 and
+# later), without real hardware. It stops early, saying so, if the runner's
+# kernel has no vkms or no configfs for it. Actions are pinned by commit, as
+# in ci.yml.
 name: KMS on vkms
 
 on:
@@ -21,16 +23,43 @@ jobs:
     name: udev backend on vkms
     runs-on: ubuntu-24.04
     steps:
-      - name: Load vkms
+      # No default device: one made through configfs, with two connectors,
+      # the second unplugged, to plug in and out while pila runs. The VM's
+      # own display (Hyper-V) is unbound, so the only GPU pila can take is
+      # this one.
+      - name: Load vkms with two connectors
         run: |
           sudo apt-get update
           # Where Ubuntu keeps the less common drivers, vkms among them.
           sudo apt-get install -y --no-install-recommends "linux-modules-extra-$(uname -r)" || true
-          if ! sudo modprobe vkms enable_cursor=1; then
+          if ! sudo modprobe vkms create_default_dev=0; then
             echo "::error::the runner's kernel ($(uname -r)) has no vkms module"
             exit 1
           fi
-          ls -l /dev/dri
+          mountpoint -q /sys/kernel/config || sudo mount -t configfs none /sys/kernel/config
+          if [ ! -d /sys/kernel/config/vkms ]; then
+            echo "::error::vkms has no configfs on the runner's kernel ($(uname -r))"
+            exit 1
+          fi
+          base=/sys/kernel/config/vkms/pila
+          sudo mkdir "$base"
+          for i in 0 1; do
+            sudo mkdir "$base/planes/plane$i" "$base/crtcs/crtc$i" \
+              "$base/encoders/encoder$i" "$base/connectors/connector$i"
+            echo 1 | sudo tee "$base/planes/plane$i/type" >/dev/null # primary
+            sudo ln -s "$base/crtcs/crtc$i" "$base/planes/plane$i/possible_crtcs"
+            sudo ln -s "$base/crtcs/crtc$i" "$base/encoders/encoder$i/possible_crtcs"
+            sudo ln -s "$base/encoders/encoder$i" "$base/connectors/connector$i/possible_encoders"
+          done
+          echo 2 | sudo tee "$base/connectors/connector1/status" >/dev/null # disconnected
+          echo 1 | sudo tee "$base/enabled" >/dev/null
+          for dev in /sys/bus/vmbus/drivers/hyperv_drm/*-*; do
+            if [ -e "$dev" ]; then
+              basename "$dev" | sudo tee /sys/bus/vmbus/drivers/hyperv_drm/unbind >/dev/null
+            fi
+          done
+          ls -l /dev/dri /sys/class/drm/*/device/driver 2>/dev/null || true
+          echo "VKMS_CONNECTOR=$base/connectors/connector1/status" >>"$GITHUB_ENV"
       # README.md's build packages for Ubuntu, plus seatd to start the session,
       # Mesa's software drivers (vkms has no GPU to render with), a client and
       # a gamma client (wlr-gamma-control).
@@ -45,9 +74,10 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo build --release --locked
       # As root through seatd, as a TTY session would get the devices: the
-      # seatd the package started, else one of its own. It's still running
-      # when its time is up: SIGTERM, which pila quits on, logging its last
-      # frame statistics.
+      # seatd the package started, else one of its own. Meanwhile the second
+      # monitor is plugged in (8 s) and out (13 s). It's still running when
+      # its time is up: SIGTERM, which pila quits on, logging its last frame
+      # statistics.
       - name: Run pila on vkms
         run: |
           runtime="$(mktemp -d)"
@@ -56,7 +86,12 @@ jobs:
           if [ ! -S /run/seatd.sock ]; then
             launch=(seatd-launch --)
           fi
-          ls -l /sys/class/drm/*/device/driver 2>/dev/null || true
+          (
+            sleep 8
+            echo 1 | sudo tee "$VKMS_CONNECTOR" >/dev/null && echo "plugged in at $(date +%T.%N)"
+            sleep 5
+            echo 2 | sudo tee "$VKMS_CONNECTOR" >/dev/null && echo "unplugged at $(date +%T.%N)"
+          ) &
           status=0
           sudo env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd \
             RUST_LOG=info,pila::frames=debug \
@@ -64,14 +99,18 @@ jobs:
             target/release/pila --backend udev \
             -c 'weston-simple-egl & sleep 3; gammastep -m wayland -O 4000 & wait' \
             >pila-vkms.log 2>&1 || status=$?
+          wait || true
           tail -n 40 pila-vkms.log
           echo "exit status: $status"
           test "$status" = 124
       - name: Judge the log
         run: |
           fail=0
+          verdict() {
+            if "${@:2}"; then echo "PASS  $1"; else echo "FAIL  $1"; fail=1; fi
+          }
           check() {
-            if grep -qE "$2" pila-vkms.log; then echo "PASS  $1"; else echo "FAIL  $1"; fail=1; fi
+            verdict "$1" grep -qE "$2" pila-vkms.log
           }
           check "the session started" 'session started'
           check "the vkms device was opened" 'using GPU'
@@ -79,8 +118,14 @@ jobs:
           check "frames were drawn and measured" 'pila::frames: frames .*frames=[1-9]'
           check "the client connected" 'weston-simple-egl|app_id="weston-simple-egl"|mapping window'
           check "a gamma change went out without blocking" 'pila::frames: gamma ms=[0-3]\.[0-9]* how="commit"'
+          outputs=$( (grep -oE 'output connected name="[^"]+"' pila-vkms.log || true) | sort -u | wc -l)
+          verdict "a monitor plugged in came on ($outputs outputs)" [ "$outputs" -ge 2 ]
+          check "the monitor unplugged went away" 'output disconnected name='
+          drawn=$( (grep -oE 'pila::frames: frames output="[^"]+" .*frames=[1-9]' pila-vkms.log || true) |
+            grep -oE 'output="[^"]+"' | sort -u | wc -l)
+          verdict "both monitors were drawn on ($drawn)" [ "$drawn" -ge 2 ]
           if grep -q 'panicked' pila-vkms.log; then echo "FAIL  no panic"; fail=1; else echo "PASS  no panic"; fi
-          grep -E 'pila::frames: (frames|gamma)' pila-vkms.log || true
+          grep -E 'pila::frames: (frames|gamma)|output (dis)?connected' pila-vkms.log || true
           exit "$fail"
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
