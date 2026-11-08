@@ -233,9 +233,9 @@
 # overriding an earlier one field by field. `RUST_LOG=pila=debug` logs each
 # new window's app id ("mapping window") and layer surface's namespace ("new
 # layer surface"). Rules are matched when a window or layer surface appears,
-# and again for all of them when this file is saved; a title changing later
-# doesn't re-match. The open-* properties, size, position, always-on-top and
-# all-workspaces only apply when a window opens.
+# again for all of them when this file is saved, and again for a window whose
+# title or app id changes. The open-* properties, size, position,
+# always-on-top and all-workspaces only apply when a window opens.
 # The rules below are examples: take the `#` off a whole one, header included.
 #
 # [[window-rule]]

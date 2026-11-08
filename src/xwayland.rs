@@ -420,6 +420,9 @@ impl XwmHandler for Pila {
         ) {
             if let Some(window) = self.window_for_x11(&surface) {
                 self.update_foreign_toplevel_x11(&window);
+                if property != WmWindowProperty::MotifHints {
+                    self.rules_maybe_changed(&window);
+                }
             }
             self.queue_redraw();
         }

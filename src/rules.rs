@@ -10,8 +10,9 @@
 //! What they set is resolved when a window or layer surface appears and
 //! kept in its user data (`WindowRuleProps`, `LayerRuleProps`), so nothing
 //! is matched per frame; a config reload resolves it again for everything
-//! already there (`Pila::refresh_rule_props`). A window's title changing
-//! later doesn't re-evaluate its rules.
+//! already there (`Pila::refresh_rule_props`), and a window's title or app
+//! id changing does for that window (`rules_maybe_changed`). What applies only
+//! when a window opens (size, position, workspace, fill, on top) stays.
 
 use std::cell::RefCell;
 
@@ -438,6 +439,24 @@ impl Pila {
             *stored.0.borrow_mut() = props;
         }
         props
+    }
+
+    /// A window's title or app id changed: resolve its rules again (a rule
+    /// may match its new title), and lay it out again if they changed.
+    pub fn rules_maybe_changed(&mut self, window: &Window) {
+        let before = window
+            .user_data()
+            .get::<WindowRuleProps>()
+            .map(|stored| stored.0.borrow().clone());
+        let after = self.resolve_window_rules(window);
+        if before.as_ref() == Some(&after) {
+            return;
+        }
+        if before.is_some_and(|before| before.title_bar != after.title_bar) {
+            // A title bar shown or hidden changes where filled windows go.
+            self.refit_maximized();
+        }
+        self.queue_redraw();
     }
 
     /// The config changed: resolve the rules again for every window and

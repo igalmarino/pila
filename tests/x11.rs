@@ -613,6 +613,31 @@ fn rules_size_and_fill_x11_windows() {
     });
 }
 
+/// A rule on an X11 window's title follows its `WM_NAME`.
+#[test]
+fn rules_follow_an_x11_title() {
+    let mut pila = TestPila::with_config("[[window-rule]]\ntitle = \"two\"\nopacity = 0.3\n");
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    let id = x.window("XApp", (300, 200), 0xff0000);
+    let state = pila.wait_focus("XApp");
+    assert!(x11_window(&state, "XApp").unwrap()["opacity"].is_null());
+    x.conn
+        .change_property8(
+            PropMode::REPLACE,
+            id,
+            AtomEnum::WM_NAME,
+            AtomEnum::STRING,
+            b"two",
+        )
+        .unwrap();
+    x.conn.flush().unwrap();
+    pila.wait("the title rule applied", |s| {
+        x11_window(s, "XApp").is_some_and(|w| w["opacity"] == 0.3)
+    });
+}
+
 #[test]
 fn an_x11_window_on_another_workspace_is_hidden_from_x_too() {
     let mut pila = TestPila::start();

@@ -343,8 +343,10 @@ Key flows and invariants:
   (`resolve_window_rules` from `place_new_window`, `resolve_layer_rules` from
   `new_layer_surface`), read by `rules::window_props`/`layer_props`, and re-resolved for
   every window and layer surface on a reload that changes the rules
-  (`refresh_rule_props` from `apply_config`): never matched per frame. A title change
-  doesn't re-match. Window properties: `animations` (all or per kind), and, only when
+  (`refresh_rule_props` from `apply_config`) and for a window whose title or app id
+  changes (`rules_maybe_changed`, from `title_changed`/`app_id_changed` and X11's
+  `property_notify`; it lays out again only if the result changed): never matched per frame.
+  Window properties: `animations` (all or per kind), and, only when
   it opens: `size` and `open-maximized`/`open-fullscreen` before an xdg toplevel's
   initial configure (`apply_initial_rules` from `handle_xdg_commit`; X11: size by
   `configure`, fill after placing, in `map_window_request`), `position` (from the

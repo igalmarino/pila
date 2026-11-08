@@ -209,7 +209,7 @@ fn later_rules_win_field_by_field() {
 }
 
 #[test]
-fn rules_are_resolved_again_on_reload_but_not_on_title_changes() {
+fn rules_are_resolved_again_on_reload_and_on_title_changes() {
     let mut pila = TestPila::start();
     let client = pila.client();
     let a = client.window("a").title("one").size(400, 300).create();
@@ -220,18 +220,25 @@ fn rules_are_resolved_again_on_reload_but_not_on_title_changes() {
         window_in(s, "a").unwrap()["opacity"] == 0.7
     });
     assert_eq!(window_in(&state, "a").unwrap()["title_bar"], false);
-    // A rule matching the title doesn't follow title changes.
-    pila.write_config("[[window-rule]]\ntitle = \"two\"\nopacity = 0.3\n");
+    // A rule matching the title follows title changes (a browser's page),
+    // both ways; what applies when a window opens doesn't apply again.
+    pila.write_config("[[window-rule]]\ntitle = \"two\"\nopacity = 0.3\nopen-maximized = true\n");
     pila.wait("the old rule gone", |s| {
         window_in(s, "a").unwrap()["opacity"].is_null()
     });
-    client.request(a, |t| t.set_title("two".into()));
-    client.surface(a).commit();
-    client.flush();
-    pila.wait("the new title", |s| {
-        window_in(s, "a").unwrap()["title"] == "two"
+    let set_title = |title: &str| {
+        let title = title.to_string();
+        client.request(a, move |t| t.set_title(title));
+        client.surface(a).commit();
+        client.flush();
+    };
+    set_title("two");
+    let state = pila.wait("the title rule applied", |s| {
+        window_in(s, "a").unwrap()["opacity"] == 0.3
     });
-    pila.stays("no re-match", std::time::Duration::from_millis(100), |s| {
+    assert_eq!(window_in(&state, "a").unwrap()["maximized"], false);
+    set_title("three");
+    pila.wait("the title rule gone", |s| {
         window_in(s, "a").unwrap()["opacity"].is_null()
     });
 }

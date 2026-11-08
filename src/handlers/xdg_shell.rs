@@ -71,6 +71,19 @@ impl XdgShellHandler for Pila {
         }
     }
 
+    // A rule may match the new title or app id (`rules.rs`).
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.rules_maybe_changed(&window);
+        }
+    }
+
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.rules_maybe_changed(&window);
+        }
+    }
+
     fn parent_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.transient_parent_changed(&window);

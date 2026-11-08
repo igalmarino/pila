@@ -335,8 +335,10 @@ refresh rate.
 Rules change how particular windows or panels behave. A `[[window-rule]]` matches windows by
 app id, title or tag, with `*` for any text, and can set: animations, the workspace to open on,
 size, position, opening maximized or fullscreen, staying above the others or on all
-workspaces, the title bar, corner radius, opacity, blur and shadow. A `[[layer-rule]]` matches
-bars, launchers and notifications by namespace, and sets their animations and blur.
+workspaces, the title bar, corner radius, opacity, blur and shadow. A window's rules follow its
+title as it changes (a browser's page title), except what applies when it opens. A
+`[[layer-rule]]` matches bars, launchers and notifications by namespace, and sets their
+animations and blur.
 
 ```toml
 [[window-rule]]
