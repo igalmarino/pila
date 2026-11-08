@@ -176,6 +176,15 @@ impl Pila {
     /// backend could do all of it.
     pub(crate) fn apply_outputs(&mut self) -> bool {
         let applied = crate::backend::apply_output_config(self);
+        self.fit_to_outputs();
+        applied
+    }
+
+    /// Fit layer surfaces, windows, lock surfaces and the heads clients
+    /// see to the outputs' current modes, scales and places: after
+    /// `apply_outputs`, or a mode the backend had to change by itself (a
+    /// lighter one when an output came back on, `udev::outputs`).
+    pub(crate) fn fit_to_outputs(&mut self) {
         for output in self.space.outputs().cloned().collect::<Vec<_>>() {
             layer_map_for_output(&output).arrange();
         }
@@ -184,7 +193,6 @@ impl Pila {
         self.configure_lock_surfaces();
         self.refresh_output_heads();
         self.queue_redraw();
-        applied
     }
 
     pub(crate) fn apply_keyboard_config(&mut self) {

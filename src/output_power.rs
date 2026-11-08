@@ -126,6 +126,7 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
             return;
         }
         debug!(output = output.name(), on, "output power request");
+        let mode_before = output.current_mode();
         let done = state
             .backend
             .as_mut()
@@ -138,6 +139,10 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
             resource.failed();
             state.outputs.power.retain(|(r, _)| r != resource);
             return;
+        }
+        if output.current_mode() != mode_before {
+            // Back on with a lighter mode: the one it had didn't fit.
+            state.fit_to_outputs();
         }
         if !on {
             // Nothing draws there until it's back; what's kept for it is big.

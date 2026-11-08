@@ -148,6 +148,9 @@ A window rule's `open-on-workspace` opens an app's windows on a given workspace.
 
 Pila uses every monitor that's plugged in, and takes monitors plugged in or out while it runs.
 Without settings, a monitor uses its preferred mode at scale 1, to the right of the others.
+If that mode doesn't come on (two 4K monitors on one dock can be more than its link carries),
+Pila tries the same resolution at lower refresh rates, then smaller ones, and says in its log
+which mode it used.
 
 `[[output]]` sections in the configuration set a monitor's mode (resolution and refresh rate),
 scale (fractional scales such as 1.25 work), position, rotation and variable refresh rate, or

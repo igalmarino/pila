@@ -38,6 +38,135 @@ pub(super) fn pick_mode(
         .copied()
 }
 
+/// How many modes `initialize_with_fallback` tries, the one asked for
+/// included: each failure costs test commits, paid when a monitor comes on.
+const MAX_MODE_ATTEMPTS: usize = 8;
+
+/// What `fallback_order` compares of a mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ModeKey {
+    w: i32,
+    h: i32,
+    refresh_mhz: i32,
+    interlaced: bool,
+}
+
+impl From<&DrmMode> for ModeKey {
+    fn from(mode: &DrmMode) -> Self {
+        let wl = WlMode::from(*mode);
+        Self {
+            w: wl.size.w,
+            h: wl.size.h,
+            refresh_mhz: wl.refresh,
+            interlaced: mode.flags().contains(ModeFlags::INTERLACE),
+        }
+    }
+}
+
+impl ModeKey {
+    fn area(&self) -> i64 {
+        i64::from(self.w) * i64::from(self.h)
+    }
+}
+
+/// The modes to try, as indices into `modes`, when `first` may not come
+/// on (typically: two monitors beyond a dock's bandwidth): `first`, then the
+/// same size at lower refresh rates, then smaller sizes, largest first,
+/// each from its highest refresh rate down. Never one asking more than
+/// `first`, nor an interlaced one or a duplicate; at most
+/// `MAX_MODE_ATTEMPTS`.
+pub(super) fn fallback_order(first: usize, modes: &[ModeKey]) -> Vec<usize> {
+    let Some(asked) = modes.get(first) else {
+        return Vec::new();
+    };
+    let lighter = |m: &ModeKey| {
+        let same_size = (m.w, m.h) == (asked.w, asked.h);
+        !m.interlaced
+            && ((same_size && m.refresh_mhz < asked.refresh_mhz)
+                || (!same_size && m.area() < asked.area()))
+    };
+    let mut rest: Vec<usize> = (0..modes.len()).filter(|&i| lighter(&modes[i])).collect();
+    rest.sort_by_key(|&i| {
+        let m = &modes[i];
+        (
+            std::cmp::Reverse(m.area()),
+            std::cmp::Reverse(m.refresh_mhz),
+        )
+    });
+    let mut order = vec![first];
+    for i in rest {
+        if !order.iter().any(|&j| modes[j] == modes[i]) {
+            order.push(i);
+        }
+    }
+    order.truncate(MAX_MODE_ATTEMPTS);
+    order
+}
+
+/// Set `surface`'s CRTC up with its mode or, if that fails, with the first
+/// of its `fallback_order` that works, which then becomes its mode (and its
+/// `Output`'s). `None` if none did.
+pub(super) fn initialize_with_fallback(
+    drm: &mut PilaDrmOutputManager,
+    renderer: &mut GlesRenderer,
+    crtc: crtc::Handle,
+    surface: &mut OutputSurface,
+) -> Option<PilaDrmOutput> {
+    let name = surface.output.name();
+    let keys: Vec<ModeKey> = surface.modes.iter().map(ModeKey::from).collect();
+    let candidates: Vec<DrmMode> = match surface.modes.iter().position(|m| *m == surface.mode) {
+        Some(first) => fallback_order(first, &keys)
+            .into_iter()
+            .map(|i| surface.modes[i])
+            .collect(),
+        None => vec![surface.mode],
+    };
+    let describe = |mode: &DrmMode| {
+        let wl = WlMode::from(*mode);
+        format!(
+            "{}x{}@{:.3}",
+            wl.size.w,
+            wl.size.h,
+            wl.refresh as f64 / 1000.0
+        )
+    };
+    for mode in &candidates {
+        let planes = drm.device().planes(&crtc).ok();
+        match drm.lock().initialize_output::<_, PilaRenderElement>(
+            crtc,
+            *mode,
+            &[surface.connector],
+            &surface.output,
+            planes,
+            renderer,
+            &DrmOutputRenderElements::default(),
+        ) {
+            Ok(drm_output) => {
+                if *mode != surface.mode {
+                    warn!(
+                        name,
+                        asked = describe(&surface.mode),
+                        using = describe(mode),
+                        "the mode asked for didn't come on; using a lighter one"
+                    );
+                    surface.mode = *mode;
+                    surface.output.change_current_state(
+                        Some(WlMode::from(*mode)),
+                        None,
+                        None,
+                        None,
+                    );
+                }
+                return Some(drm_output);
+            }
+            Err(err) => warn!(name, mode = describe(mode), ?err, "failed to set up output"),
+        }
+    }
+    let tried: Vec<String> = candidates.iter().map(describe).collect();
+    warn!(name, ?tried, "no mode came on: the output stays off");
+    None
+}
+
 /// Re-apply `[[output]]` (mode, scale, position) to the connected outputs
 /// after the config changed. Outputs keep their left-to-right order; those
 /// without a position go right of the ones placed before them. Whether every
@@ -323,6 +452,8 @@ pub(super) fn connector_connected(
     if !enable_output(state, crtc) {
         return;
     }
+    // A lighter one if that one didn't come on.
+    let wl_mode = output.current_mode().unwrap_or(wl_mode);
     info!(
         name,
         mode = ?wl_mode.size,
@@ -366,22 +497,10 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
         debug!(name, "session inactive: output left off until it's back");
         return false;
     }
-    let planes = drm.device().planes(&crtc).ok();
-    match drm.lock().initialize_output::<_, PilaRenderElement>(
-        crtc,
-        surface.mode,
-        &[surface.connector],
-        &surface.output,
-        planes,
-        renderer,
-        &DrmOutputRenderElements::default(),
-    ) {
-        Ok(drm_output) => surface.drm_output = Some(drm_output),
-        Err(err) => {
-            warn!(name, ?err, "failed to set up output");
-            return false;
-        }
-    }
+    let Some(drm_output) = initialize_with_fallback(drm, renderer, crtc, surface) else {
+        return false;
+    };
+    surface.drm_output = Some(drm_output);
     surface.enabled = true;
     surface.frame_pending = false;
     surface.redraw_needed = true;
@@ -548,4 +667,66 @@ pub(super) fn is_non_desktop(drm: &PilaDrmOutputManager, connector: &connector::
                 && info.value_type().convert_value(value).as_boolean() == Some(true)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mode(w: i32, h: i32, hz: i32) -> ModeKey {
+        ModeKey {
+            w,
+            h,
+            refresh_mhz: hz * 1000,
+            interlaced: false,
+        }
+    }
+
+    /// A 4K high-refresh monitor's modes, as a connector lists them.
+    fn monitor() -> Vec<ModeKey> {
+        vec![
+            mode(3840, 2160, 144),
+            mode(3840, 2160, 120),
+            mode(3840, 2160, 60),
+            mode(2560, 1440, 165),
+            mode(2560, 1440, 144),
+            mode(1920, 1080, 60),
+            ModeKey {
+                interlaced: true,
+                ..mode(1920, 1080, 60)
+            },
+            // Another timing of a mode already listed.
+            mode(3840, 2160, 60),
+        ]
+    }
+
+    #[test]
+    fn the_preferred_mode_falls_back_to_lower_refresh_then_smaller_sizes() {
+        assert_eq!(fallback_order(0, &monitor()), [0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn a_configured_mode_falls_back_to_nothing_heavier() {
+        // 4K at 60 Hz: never 4K faster, nor larger.
+        assert_eq!(fallback_order(2, &monitor()), [2, 3, 4, 5]);
+        assert_eq!(fallback_order(4, &monitor()), [4, 5]);
+    }
+
+    #[test]
+    fn a_lone_mode_has_nothing_to_fall_back_to() {
+        assert_eq!(fallback_order(0, &[mode(1920, 1080, 60)]), [0]);
+        assert_eq!(
+            fallback_order(5, &[mode(1920, 1080, 60)]),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn fallbacks_are_capped() {
+        let modes: Vec<ModeKey> = (0..20).map(|i| mode(3840 - i * 100, 2160, 60)).collect();
+        assert_eq!(
+            fallback_order(0, &modes),
+            (0..MAX_MODE_ATTEMPTS).collect::<Vec<_>>()
+        );
+    }
 }

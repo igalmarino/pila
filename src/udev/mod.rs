@@ -46,7 +46,7 @@ use smithay::{
             EventLoop, LoopHandle,
         },
         drm::{
-            control::{connector, crtc, Device as _, Mode as DrmMode, ModeTypeFlags},
+            control::{connector, crtc, Device as _, Mode as DrmMode, ModeFlags, ModeTypeFlags},
             Device as _,
         },
         input::{self as libinput, Libinput},
@@ -321,28 +321,17 @@ impl UdevData {
             info!(name, "output powered off");
             return true;
         }
-        let planes = drm.device().planes(&crtc).ok();
-        match drm.lock().initialize_output(
-            crtc,
-            surface.mode,
-            &[surface.connector],
-            &surface.output,
-            planes,
-            renderer,
-            &elements,
-        ) {
-            Ok(drm_output) => {
-                surface.drm_output = Some(drm_output);
-                surface.frame_pending = false;
-                surface.redraw_needed = true;
-                surface.recovery = Recovery::default();
-                info!(name, "output powered on");
-            }
-            Err(err) => {
-                warn!(name, ?err, "failed to power the output on");
-                return false;
-            }
-        }
+        // Another monitor may have taken the bandwidth meanwhile: then
+        // the mode changes (`Pila::fit_to_outputs` follows it).
+        let Some(drm_output) = initialize_with_fallback(drm, renderer, crtc, surface) else {
+            warn!(name, "failed to power the output on");
+            return false;
+        };
+        surface.drm_output = Some(drm_output);
+        surface.frame_pending = false;
+        surface.redraw_needed = true;
+        surface.recovery = Recovery::default();
+        info!(name, "output powered on");
         self.reapply_gamma(crtc);
         self.queue_redraw();
         true

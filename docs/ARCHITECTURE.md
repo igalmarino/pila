@@ -109,7 +109,13 @@ Key flows and invariants:
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
   a queued frame, `ActivateSession` or the output coming on; the retry takes DRM master
-  first), so one broken output never stops the others. The session lock is
+  first), so one broken output never stops the others. Setting a CRTC up (`enable_output`,
+  `set_output_power`) goes through `initialize_with_fallback`: if the mode asked for fails
+  (Smithay's `initialize_output` test-commits it, so a mode beyond the link's bandwidth fails
+  there), the connector's `fallback_order` follows (same size at lower refresh, then smaller
+  sizes, nothing heavier, at most 8 tries), and the one that works becomes the output's mode;
+  after a power-on, `output_power.rs` then calls `Pila::fit_to_outputs`. A mode change asked
+  for explicitly (`apply_output_config`) doesn't fall back: it fails and says so. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
   releases held keys; `ActivateSession` scans the connectors and re-applies the outputs,
   since a monitor plugged in meanwhile can't come on without DRM master (`enable_output`
