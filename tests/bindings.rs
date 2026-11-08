@@ -396,6 +396,43 @@ fn spawned_commands_get_the_session_environment() {
     }
 }
 
+/// A pila started from inside another compositor's session (nested, or a
+/// TTY run from a terminal there) doesn't pass on that compositor's IPC
+/// sockets: shells such as Noctalia and Dux Shell pick their backend by
+/// them, and would drive the other compositor instead of pila.
+#[test]
+fn spawned_commands_dont_see_another_compositors_sockets() {
+    let others = [
+        "NIRI_SOCKET",
+        "SWAYSOCK",
+        "I3SOCK",
+        "HYPRLAND_INSTANCE_SIGNATURE",
+        "MANGO_INSTANCE_SIGNATURE",
+        "UMBRIEL_SOCKET",
+        "LABWC_PID",
+        "MIRACLESOCK",
+        "AQUEOUS_SOCKET",
+        "SCROLLSOCK",
+        "KDE_FULL_SESSION",
+    ];
+    let mut pila = TestPila::start_with(Options {
+        config: "[bindings]\n\"Mod+x\" = \"spawn env > $XDG_RUNTIME_DIR/env\"\n".into(),
+        env: others
+            .iter()
+            .map(|name| (name.to_string(), "/elsewhere".to_string()))
+            .collect(),
+        ..Options::default()
+    });
+    pila.combo("Super+x");
+    let env = pila.wait_file("env");
+    for name in others {
+        assert!(
+            !env.lines().any(|l| l.starts_with(&format!("{name}="))),
+            "{name} reached the command:\n{env}"
+        );
+    }
+}
+
 #[test]
 fn digits_past_the_workspaces_reach_the_client() {
     let (mut pila, client, _, _) = one_window("workspaces = 4\n");

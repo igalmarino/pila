@@ -263,6 +263,24 @@ const SESSION_ENV: [&str; 4] = [
     "XDG_SESSION_TYPE",
 ];
 
+/// Other compositors' IPC sockets and markers, which pila's children don't
+/// inherit when it's started from inside another session (nested, or a TTY
+/// run from one of its terminals): shells such as Noctalia and Dux Shell pick
+/// their compositor backend by them, and would drive that compositor.
+const OTHER_COMPOSITORS_ENV: [&str; 11] = [
+    "NIRI_SOCKET",
+    "SWAYSOCK",
+    "I3SOCK",
+    "HYPRLAND_INSTANCE_SIGNATURE",
+    "MANGO_INSTANCE_SIGNATURE",
+    "UMBRIEL_SOCKET",
+    "LABWC_PID",
+    "MIRACLESOCK",
+    "AQUEOUS_SOCKET",
+    "SCROLLSOCK",
+    "KDE_FULL_SESSION",
+];
+
 /// How long the startup programs wait for the session bus to take pila's
 /// environment (`export_environment`).
 const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -1633,6 +1651,9 @@ impl Pila {
         cmd.env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_CURRENT_DESKTOP", DESKTOP_NAME)
             .env("XDG_SESSION_TYPE", "wayland");
+        for var in OTHER_COMPOSITORS_ENV {
+            cmd.env_remove(var);
+        }
         match &self.ipc_socket {
             Some(path) => cmd.env("PILA_SOCKET", path),
             None => cmd.env_remove("PILA_SOCKET"),

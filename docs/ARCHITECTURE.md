@@ -463,6 +463,9 @@ Key flows and invariants:
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
   pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila`, `XDG_SESSION_TYPE=wayland`
   and `PILA_SOCKET` (`ipc.rs`); `spawn` adds `PILA_OUTPUT`, the output under the pointer.
+  Other compositors' IPC sockets and markers (`OTHER_COMPOSITORS_ENV`: `NIRI_SOCKET`,
+  `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`, …) are removed, for a pila started from inside
+  another session: shells such as Noctalia and Dux Shell pick their compositor backend by them.
   Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
   which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in

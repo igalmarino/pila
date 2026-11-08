@@ -26,6 +26,10 @@
   keyboard) may pass the click on to the app it opens, which then gets the focus.
 - **Launchers and dialogs above the windows get the keyboard when they appear** if they ask
   for it on demand (Noctalia's welcome dialog, some launchers), instead of after a click.
+- **Shells started by a pila inside another session find pila:** programs pila starts no
+  longer inherit another compositor's sockets (`NIRI_SOCKET`, `SWAYSOCK`,
+  `HYPRLAND_INSTANCE_SIGNATURE`, …), so Noctalia or Dux Shell in a pila started from niri,
+  Sway or Hyprland don't drive that compositor instead.
 - **Dragging shows what you drag:** the icon an app gives a drag (a file, a tab) follows the
   pointer until the drop; pila never drew it before.
 - **Panels hidden and shown again come back:** a layer surface (panel, launcher, dock) hidden
