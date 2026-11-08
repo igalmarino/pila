@@ -21,6 +21,8 @@ ENV TZ="${TZ}" \
 #   - Rust toolchain manager + fast linker
 #   - Smithay build/runtime deps (winit + future DRM/udev/libinput backends)
 #   - Wayland test clients to run inside your compositor
+#   - a machine id: without one D-Bus can't start a session bus, and notify-send
+#     (scripts/check's Noctalia scenario) fails
 RUN pacman -Syu --noconfirm --needed \
         git openssh github-cli less vim nano jq ripgrep fd unzip \
         rustup clang mold pkgconf gdb shellcheck cargo-audit \
@@ -30,7 +32,8 @@ RUN pacman -Syu --noconfirm --needed \
         fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
         grim slurp wtype wlopm wlsunset noctalia quickshell dux-shell \
-    && rm -rf /var/cache/pacman/pkg/*
+    && rm -rf /var/cache/pacman/pkg/* \
+    && dbus-uuidgen --ensure=/etc/machine-id
 
 # Non-root user. On Linux, the Dev Containers tooling rewrites this UID/GID to
 # match your host user (updateRemoteUserUID), which is what lets the container
