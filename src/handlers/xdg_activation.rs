@@ -35,6 +35,14 @@ impl XdgActivationHandler for Pila {
             .xdg_activation
             .retain_tokens(|_, d| d.timestamp.elapsed() < TOKEN_TIMEOUT);
 
+        // No serial: no user input asked for it, so it can only make its
+        // window urgent (`urgency.rs`; not specified, but what clients mean).
+        if data.serial.is_none() {
+            data.user_data
+                .insert_if_missing(|| crate::urgency::UrgentOnlyToken);
+            debug!(app_id = ?data.app_id, "urgency token requested");
+            return true;
+        }
         let valid = self.token_is_valid(&data);
         debug!(valid, app_id = ?data.app_id, "activation token requested");
         valid
@@ -54,6 +62,14 @@ impl XdgActivationHandler for Pila {
         let Some(window) = self.window_for_surface(&surface) else {
             return;
         };
+        if token_data
+            .user_data
+            .get::<crate::urgency::UrgentOnlyToken>()
+            .is_some()
+        {
+            self.set_urgent(&window, true);
+            return;
+        }
         // On another workspace: go there; minimized: bring it back (as a
         // taskbar's activate does).
         self.reveal_workspace_of(&window);

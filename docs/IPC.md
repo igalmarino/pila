@@ -69,7 +69,7 @@ ext-foreign-toplevel-list), `app_id`, `title`, `workspace` (from 1), `output` (a
 screen), `focused`, `x`, `y`, `width`, `height` (logical pixels; where it comes back to if it's off
 screen; the title bar isn't included), `minimized`, `maximized`, `fullscreen`, `snapped` (`left`,
 `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right` or null), `always_on_top`,
-`all_workspaces`, `x11`. Titles and app ids are what programs set: they can hold anything,
+`all_workspaces`, `urgent` (asking for attention), `x11`. Titles and app ids are what programs set: they can hold anything,
 terminal escapes included. Text from `pila msg` without `--json` has control characters replaced.
 
 **An output:** `name`, `make`, `model`, `x`, `y`, `width`, `height` (logical pixels), `refresh`

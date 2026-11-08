@@ -59,6 +59,7 @@ mod text;
 mod toplevel_management;
 mod transients;
 mod udev;
+mod urgency;
 mod virtual_keyboard;
 mod winit;
 mod workspace_slide;

@@ -408,6 +408,13 @@ impl XwmHandler for Pila {
     }
 
     fn property_notify(&mut self, _xwm: XwmId, surface: X11Surface, property: WmWindowProperty) {
+        // The urgency hint (`urgency.rs`).
+        if property == WmWindowProperty::Hints {
+            if let Some(window) = self.window_for_x11(&surface) {
+                let urgent = surface.hints().is_some_and(|hints| hints.urgent);
+                self.set_urgent(&window, urgent);
+            }
+        }
         if property == WmWindowProperty::TransientFor {
             if let Some(window) = self.window_for_x11(&surface) {
                 self.transient_parent_changed(&window);

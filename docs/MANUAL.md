@@ -108,6 +108,10 @@ toggles between the last two. Keep Mod held and press Tab again to go further ba
 comes forward as you reach it, and releasing Mod settles on it. `Mod+Shift+Tab` goes the other
 way. Clicking a window, or a taskbar entry in your bar, focuses it too.
 
+**Windows asking for attention.** An app can ask for your attention without taking the focus
+(a chat message, a finished download): its title bar turns amber (`[colors] bar-urgent`), and
+bars that show workspaces mark its workspace. Focusing the window clears it.
+
 **Minimizing.** `Mod+N` or the title bar's button hides a window. It comes back through `Mod+Tab`
 (it shows while it's selected) or by clicking it in a taskbar. `Mod+H` minimizes all the windows
 of the workspace at once, and again brings them back.

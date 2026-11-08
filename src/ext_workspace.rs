@@ -42,7 +42,8 @@ struct Manager {
     group: ExtWorkspaceGroupHandleV1,
     /// Indexed by workspace.
     workspaces: Vec<ExtWorkspaceHandleV1>,
-    active: usize,
+    /// The state each workspace's handle was last sent.
+    states: Vec<workspace::State>,
     outputs: Vec<WlOutput>,
     /// Asked to activate this workspace, on the next `commit`.
     pending: Option<usize>,
@@ -53,12 +54,19 @@ pub fn init_global(dh: &DisplayHandle) {
     dh.create_global::<Pila, ExtWorkspaceManagerV1, ()>(VERSION, ());
 }
 
-fn state(active: bool) -> workspace::State {
-    if active {
-        workspace::State::Active
-    } else {
-        workspace::State::empty()
+/// Each workspace's state: active, and urgent while it holds an urgent
+/// window (`urgency.rs`).
+fn workspace_states(state: &Pila) -> Vec<workspace::State> {
+    let mut states = vec![workspace::State::empty(); state.config.workspaces];
+    if let Some(active) = states.get_mut(state.workspaces.active) {
+        *active |= workspace::State::Active;
     }
+    for window in state.urgent_windows() {
+        if let Some(urgent) = states.get_mut(state.workspace_of(window)) {
+            *urgent |= workspace::State::Urgent;
+        }
+    }
+    states
 }
 
 impl Manager {
@@ -79,7 +87,12 @@ impl Manager {
         handle.id(name.clone());
         handle.name(name);
         handle.coordinates((index as u32).to_ne_bytes().to_vec());
-        handle.state(state(index == self.active));
+        let state = self
+            .states
+            .get(index)
+            .copied()
+            .unwrap_or(workspace::State::empty());
+        handle.state(state);
         handle.capabilities(WorkspaceCapabilities::Activate);
         self.group.workspace_enter(&handle);
         self.workspaces.push(handle);
@@ -89,10 +102,10 @@ impl Manager {
     fn update(
         &mut self,
         dh: &DisplayHandle,
-        count: usize,
-        active: usize,
+        states: &[workspace::State],
         outputs: &[WlOutput],
     ) -> bool {
+        let count = states.len();
         let mut changed = false;
         while self.workspaces.len() > count {
             let handle = self.workspaces.pop().unwrap();
@@ -100,16 +113,18 @@ impl Manager {
             handle.removed();
             changed = true;
         }
-        if self.active != active {
-            if let Some(old) = self.workspaces.get(self.active) {
-                old.state(state(false));
+        for (handle, (sent, wanted)) in self
+            .workspaces
+            .iter()
+            .zip(self.states.iter_mut().zip(states))
+        {
+            if sent != wanted {
+                handle.state(*wanted);
+                *sent = *wanted;
+                changed = true;
             }
-            if let Some(new) = self.workspaces.get(active) {
-                new.state(state(true));
-            }
-            self.active = active;
-            changed = true;
         }
+        self.states = states.to_vec();
         while self.workspaces.len() < count {
             self.add_workspace(dh, self.workspaces.len());
             changed = true;
@@ -151,14 +166,14 @@ impl Pila {
             return;
         }
         let dh = self.display_handle.clone();
-        let (count, active) = (self.config.workspaces, self.workspaces.active);
+        let states = workspace_states(self);
         let mut managers = std::mem::take(&mut self.ext_workspaces.managers);
         for m in &mut managers {
             let outputs = match m.manager.client() {
                 Some(client) => self.client_outputs(&client),
                 None => Vec::new(),
             };
-            if m.update(&dh, count, active, &outputs) {
+            if m.update(&dh, &states, &outputs) {
                 m.manager.done();
             }
         }
@@ -200,17 +215,12 @@ impl GlobalDispatch<ExtWorkspaceManagerV1, ()> for Pila {
             manager,
             group,
             workspaces: Vec::new(),
-            active: state.workspaces.active,
+            states: Vec::new(),
             outputs: Vec::new(),
             pending: None,
         };
         let outputs = state.client_outputs(client);
-        m.update(
-            dh,
-            state.config.workspaces,
-            state.workspaces.active,
-            &outputs,
-        );
+        m.update(dh, &workspace_states(state), &outputs);
         m.manager.done();
         state.ext_workspaces.managers.push(m);
     }

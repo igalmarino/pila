@@ -58,6 +58,7 @@
 [colors]
 # bar = "#2f3136"                  # title bar of the focused window
 # bar-inactive = "#26272b"         # title bar of the others
+# bar-urgent = "#8a5712"           # of one asking for attention
 # icon = "#dfe1e5"                 # its title and buttons
 # icon-inactive = "#80838a"
 # hover = "#3f4249"                # a button under the pointer

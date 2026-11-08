@@ -552,6 +552,13 @@ Key flows and invariants:
   move/resize/center go through `apply_rect`, which also configures X11 windows.
   `Side` also names the four quarters (`snap-top-left`, ... or a drag near a corner:
   `edge_target`); a quarter is tiled only on the edges it touches.
+- **Urgency** (`urgency.rs`): a mark in a window's user data (`set_urgent`, `is_urgent`), set by
+  an activation whose token had no serial (`UrgentOnlyToken`, accepted for any client in
+  `token_created`; as niri) or X11's `WM_HINTS` urgency hint (`property_notify` `Hints`), never
+  on the focused window, and cleared when it gets the keyboard (`SeatHandler::focus_changed`,
+  from the surface it's given: Smithay holds the keyboard's lock there, so asking it for the
+  focus deadlocks). Shown by the title bar (`colors.bar_urgent`), ext-workspace's `urgent`
+  state (`workspace_states`, one state per workspace per manager) and `pila msg`.
 - **Always on top, all workspaces** (`stacking.rs`): two marks in a window's user data, from a
   rule when it opens or a binding, shared by its transient family (`mark_new_window`,
   `inherit_marks`). `keep_on_top` puts the marked ones back above the others in their order, doing

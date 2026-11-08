@@ -980,6 +980,8 @@ fn parse_color(name: &str, text: &str, alpha: bool) -> Result<[f32; 4], String> 
 pub struct Colors {
     pub bar: [f32; 4],
     pub bar_inactive: [f32; 4],
+    /// The title bar of an unfocused window asking for attention (`urgency.rs`).
+    pub bar_urgent: [f32; 4],
     /// Title and buttons of the focused window.
     pub icon: [f32; 3],
     pub icon_inactive: [f32; 3],
@@ -1000,6 +1002,7 @@ impl Default for Colors {
         Self {
             bar: [0.184, 0.192, 0.212, 1.0],          // #2f3136
             bar_inactive: [0.149, 0.153, 0.169, 1.0], // #26272b
+            bar_urgent: [0.541, 0.341, 0.071, 1.0],   // #8a5712
             icon: [0.875, 0.882, 0.898],              // #dfe1e5
             icon_inactive: [0.502, 0.514, 0.541],     // #80838a
             hover: [0.247, 0.259, 0.286],             // #3f4249
@@ -1018,6 +1021,7 @@ impl Default for Colors {
 struct ColorsFile {
     bar: Option<String>,
     bar_inactive: Option<String>,
+    bar_urgent: Option<String>,
     icon: Option<String>,
     icon_inactive: Option<String>,
     hover: Option<String>,
@@ -1049,6 +1053,7 @@ impl ColorsFile {
                 defaults.bar_inactive,
                 false,
             )?,
+            bar_urgent: rgba("bar-urgent", self.bar_urgent, defaults.bar_urgent, false)?,
             icon: rgb("icon", self.icon, defaults.icon)?,
             icon_inactive: rgb("icon-inactive", self.icon_inactive, defaults.icon_inactive)?,
             hover: rgb("hover", self.hover, defaults.hover)?,

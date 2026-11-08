@@ -435,6 +435,8 @@ pub fn title_bar_elements(
         rect.size,
         if focused {
             colors.bar
+        } else if crate::urgency::is_urgent(window) {
+            colors.bar_urgent
         } else {
             colors.bar_inactive
         },

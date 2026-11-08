@@ -613,6 +613,48 @@ fn rules_size_and_fill_x11_windows() {
     });
 }
 
+/// An X11 app sets the urgency hint (`WM_HINTS` UrgencyHint) when it wants
+/// attention: the window is urgent until it has the focus.
+#[test]
+fn an_x11_urgency_hint_makes_the_window_urgent() {
+    let mut pila = TestPila::start();
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    let id = x.window("XApp", (300, 200), 0xff0000);
+    pila.wait_focus("XApp");
+    let client = pila.client();
+    client.window("editor").create();
+    pila.wait_focus("editor");
+    // flags UrgencyHint, then unused fields.
+    x.conn
+        .change_property32(
+            PropMode::REPLACE,
+            id,
+            AtomEnum::WM_HINTS,
+            AtomEnum::WM_HINTS,
+            &[256, 0, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
+    x.conn.flush().unwrap();
+    pila.wait("XApp urgent", |s| {
+        x11_window(s, "XApp").is_some_and(|w| w["urgent"] == true)
+    });
+    x.conn
+        .change_property32(
+            PropMode::REPLACE,
+            id,
+            AtomEnum::WM_HINTS,
+            AtomEnum::WM_HINTS,
+            &[0; 9],
+        )
+        .unwrap();
+    x.conn.flush().unwrap();
+    pila.wait("XApp no longer urgent", |s| {
+        x11_window(s, "XApp").is_some_and(|w| w["urgent"] == false)
+    });
+}
+
 /// A rule on an X11 window's title follows its `WM_NAME`.
 #[test]
 fn rules_follow_an_x11_title() {

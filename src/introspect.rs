@@ -68,6 +68,7 @@ impl Pila {
             "snapped": snap::snapped_side(window).map(snap::Side::name),
             "always_on_top": crate::stacking::is_always_on_top(window),
             "all_workspaces": crate::stacking::is_on_all_workspaces(window),
+            "urgent": crate::urgency::is_urgent(window),
             "ssd": decoration::is_ssd(window),
             "title_bar": decoration::has_title_bar(window),
             "focused": focused,

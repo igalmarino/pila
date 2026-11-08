@@ -395,6 +395,7 @@ impl Pila {
             "snapped": snap::snapped_side(window).map(snap::Side::name),
             "always_on_top": is_always_on_top(window),
             "all_workspaces": is_on_all_workspaces(window),
+            "urgent": crate::urgency::is_urgent(window),
             "x11": window.x11_surface().is_some(),
         }))
     }

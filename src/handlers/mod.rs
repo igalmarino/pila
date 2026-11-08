@@ -74,6 +74,14 @@ impl SeatHandler for Pila {
         let client = focused.as_ref().and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
+        // The user is looking at it now (`urgency.rs`). From `focused`: Smithay
+        // calls this with the keyboard locked, so asking it would deadlock.
+        let window = focused
+            .map(|surface| self.popup_root(&surface).unwrap_or(surface))
+            .and_then(|surface| self.window_for_surface(&surface));
+        if let Some(window) = window {
+            self.set_urgent(&window, false);
+        }
     }
 }
 

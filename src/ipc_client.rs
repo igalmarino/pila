@@ -111,6 +111,7 @@ fn window_line(window: &Value) -> String {
         ("fullscreen", "fullscreen"),
         ("always_on_top", "on-top"),
         ("all_workspaces", "all-workspaces"),
+        ("urgent", "urgent"),
         ("x11", "x11"),
     ] {
         if window[field] == true {
