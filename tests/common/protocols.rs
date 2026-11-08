@@ -635,12 +635,19 @@ impl Client {
     /// Bind the first `wl_output` global again, as a client that binds an
     /// output late does (a new wl_output object for the same output).
     pub fn bind_output_again(&self) -> WlOutput {
+        self.bind_output_global(0)
+    }
+
+    /// Bind the `nth` `wl_output` global (in the order they were announced),
+    /// as a client does when a monitor is plugged in.
+    pub fn bind_output_global(&self, nth: usize) -> WlOutput {
         let s = self.lock();
         let (name, _, offered) = s
             .globals
             .iter()
-            .find(|(_, i, _)| i == "wl_output")
-            .expect("a wl_output")
+            .filter(|(_, i, _)| i == "wl_output")
+            .nth(nth)
+            .expect("that wl_output")
             .clone();
         let registry = s.registry.clone().expect("a registry");
         drop(s);
@@ -773,6 +780,7 @@ impl Client {
             pending: (0, 0, 0, 0),
             auto_draw: true,
             closed: false,
+            outputs: Vec::new(),
         });
         (Surf(s.surfaces.len() - 1), surface)
     }

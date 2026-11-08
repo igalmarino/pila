@@ -233,6 +233,8 @@ pub struct SurfaceData {
     pub auto_draw: bool,
     /// Closed (layer surface), done (popup), or finished.
     pub closed: bool,
+    /// The outputs it entered (wl_surface.enter, less leave), by name.
+    pub outputs: Vec<String>,
 }
 
 impl Shared {
@@ -914,6 +916,19 @@ impl Dispatch<WlSurface, ()> for Handler {
                 .map(|(_, n)| n.clone())
                 .unwrap_or_default()
         };
+        if let Some(i) = s.surfaces.iter().position(|d| d.surface == *surface) {
+            match &event {
+                wl_surface::Event::Enter { output } => {
+                    let name = name_of(&s, output);
+                    s.surfaces[i].outputs.push(name);
+                }
+                wl_surface::Event::Leave { output } => {
+                    let name = name_of(&s, output);
+                    s.surfaces[i].outputs.retain(|n| *n != name);
+                }
+                _ => {}
+            }
+        }
         let Some(index) = s.window_of(surface) else {
             return;
         };

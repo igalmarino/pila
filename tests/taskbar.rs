@@ -113,6 +113,54 @@ fn an_output_bound_later_is_entered_by_its_windows() {
     taskbar.wait("a enters the new wl_output too", |s| enters(s) == 2);
 }
 
+/// A window moved to another monitor leaves its old wl_output and enters the
+/// new one: Noctalia and Dux Shell filter their per-monitor taskbars and
+/// docks by these.
+#[test]
+fn a_window_moved_to_another_output_leaves_the_old_one_and_enters_the_new() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        ..Options::default()
+    });
+    pila.move_to(100.0, 100.0);
+    let app = pila.client();
+    app.window("a").create();
+    pila.wait_focus("a");
+    let taskbar = pila.client();
+    let _manager: ZwlrForeignToplevelManagerV1 =
+        taskbar.bind("zwlr_foreign_toplevel_manager_v1", 3);
+    taskbar.flush();
+    let a = handle(&taskbar, "a");
+    let id = wayland_client::Proxy::id(&a);
+    let output_a = wayland_client::Proxy::id(&taskbar.output("A")).to_string();
+    let output_b = wayland_client::Proxy::id(&taskbar.output("B")).to_string();
+    let events = move |s: &common::client::Shared, kind: &str| -> Vec<String> {
+        s.log
+            .iter()
+            .filter(|l| l.object == id && l.event.starts_with(kind))
+            .map(|l| l.event.clone())
+            .collect()
+    };
+    let events_later = events.clone();
+    let (ea, eb) = (output_a.clone(), output_b.clone());
+    taskbar.wait("a is on A", move |s| {
+        let enters = events(s, "OutputEnter");
+        enters.len() == 1 && enters[0].contains(&ea) && !enters[0].contains(&eb)
+    });
+    pila.combo("Super+Shift+o");
+    pila.wait("a on B", |s| {
+        window_in(s, "a").is_some_and(|w| w["output"] == "B")
+    });
+    taskbar.wait("a left A and entered B", move |s| {
+        let enters = events_later(s, "OutputEnter");
+        let leaves = events_later(s, "OutputLeave");
+        leaves.len() == 1
+            && leaves[0].contains(&output_a)
+            && enters.len() == 2
+            && enters[1].contains(&output_b)
+    });
+}
+
 fn taskbar_with(names: &[&str]) -> (TestPila, Client, Client) {
     let mut pila = TestPila::start();
     let app = pila.client();
@@ -292,6 +340,37 @@ fn workspaces_are_listed_with_the_active_one() {
     assert!(active(&client, &workspace(&client, "1")));
     assert!(!active(&client, &workspace(&client, "2")));
     assert!(client.has_logged("workspace_group", "OutputEnter"));
+}
+
+/// pila's workspaces span every monitor: one group holds all the outputs, so
+/// a pager on each monitor (Noctalia, Dux Shell) shows the same workspaces,
+/// a monitor plugged in later included.
+#[test]
+fn the_workspace_group_holds_every_output() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    let _manager: ExtWorkspaceManagerV1 = client.bind("ext_workspace_manager_v1", 1);
+    client.wait_logged("ext_workspace_manager_v1", "Done");
+    let enters = |s: &common::client::Shared| {
+        s.log
+            .iter()
+            .filter(|l| l.tag == "workspace_group" && l.event.starts_with("OutputEnter"))
+            .count()
+    };
+    client.wait("the group entered A and B", |s| enters(s) == 2);
+    pila.request(serde_json::json!({ "cmd": "output_add", "spec": "C:800x600" }));
+    client.wait("C's wl_output global", |s| {
+        s.globals
+            .iter()
+            .filter(|(_, i, _)| i == "wl_output")
+            .count()
+            == 3
+    });
+    client.bind_output_global(2);
+    client.wait("the group entered C too", |s| enters(s) == 3);
 }
 
 #[test]

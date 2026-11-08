@@ -323,6 +323,60 @@ fn a_layer_goes_on_the_output_it_asks_for() {
     assert_eq!(rect(&state["outputs"][1]["usable"]), (1280, 25, 1024, 743));
 }
 
+/// A layer surface that names no output goes on the one under the pointer,
+/// and enters it: Noctalia maps such a surface to learn which monitor is the
+/// current one, and opens its panels there.
+#[test]
+fn a_layer_without_an_output_goes_under_the_pointer() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    pila.move_to(1500.5, 300.25);
+    let (probe, _) = client.layer_surface("probe", &LayerSpec::default(), BLUE);
+    client.wait_surface_configured(probe);
+    assert_eq!(wait_layer(&mut pila, "probe")["output"], "B");
+    client.wait("the probe entered B", |s| {
+        s.surfaces
+            .iter()
+            .any(|d| d.name == "probe" && d.outputs == ["B"])
+    });
+
+    pila.move_to(100.5, 300.25);
+    let (second, _) = client.layer_surface("second", &LayerSpec::default(), BLUE);
+    client.wait_surface_configured(second);
+    assert_eq!(wait_layer(&mut pila, "second")["output"], "A");
+    client.wait("the second probe entered A", |s| {
+        s.surfaces
+            .iter()
+            .any(|d| d.name == "second" && d.outputs == ["A"])
+    });
+}
+
+/// A layer surface can change layers (layer-shell v2's set_layer): Noctalia
+/// moves its bar between top and overlay.
+#[test]
+fn a_layer_surface_moves_to_another_layer() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let (bar, layer) = client.layer_surface("bar", &top_bar(25), BLUE);
+    client.wait_surface_configured(bar);
+    assert_eq!(wait_layer(&mut pila, "bar")["layer"], "top");
+    layer.set_layer(Layer::Overlay);
+    client.surface_data(bar, |d| d.surface.commit());
+    client.flush();
+    pila.wait("the bar on the overlay layer", |s| {
+        layer_in(s, "bar").is_some_and(|l| l["layer"] == "overlay")
+    });
+    layer.set_layer(Layer::Top);
+    client.surface_data(bar, |d| d.surface.commit());
+    client.flush();
+    pila.wait("the bar back on top", |s| {
+        layer_in(s, "bar").is_some_and(|l| l["layer"] == "top")
+    });
+}
+
 #[test]
 fn margins_and_anchors_place_a_layer() {
     let mut pila = TestPila::start();
