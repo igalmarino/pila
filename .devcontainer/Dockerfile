@@ -31,7 +31,7 @@ RUN pacman -Syu --noconfirm --needed \
         foot kitty weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
         fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
-        grim slurp wtype wlopm wlsunset noctalia \
+        grim slurp wtype wlopm wlsunset noctalia quickshell dux-shell \
         ipset bind iproute2 \
     && (command -v iptables >/dev/null || pacman -S --noconfirm iptables) \
     && rm -rf /var/cache/pacman/pkg/*
