@@ -311,20 +311,43 @@ pub(super) fn maybe_confirm_lock(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
-    // A powered-off output shows nothing, locked or not.
-    if data
+    let outputs = data
         .outputs
         .values()
-        .filter(|surface| surface.drm_output.is_some())
-        .all(|surface| surface.lock_frame == LockFrame::Shown)
-    {
+        .map(|surface| (surface.drm_output.is_some(), surface.lock_frame));
+    if lock_shown(outputs) {
         state.confirm_lock();
     }
+}
+
+/// Whether a pending lock can be confirmed, given each output's `(on, its
+/// lock frame)`: every output that's on shows a locked frame. One that's off
+/// shows nothing, locked or not; with none on, a locker would otherwise wait
+/// forever.
+fn lock_shown(outputs: impl IntoIterator<Item = (bool, LockFrame)>) -> bool {
+    outputs
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .all(|(_, frame)| frame == LockFrame::Shown)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lock_waits_for_every_output_on_to_show_it() {
+        use LockFrame::*;
+        assert!(lock_shown([(true, Shown), (true, Shown)]));
+        // Queued isn't shown yet, and an output not drawn yet isn't either.
+        assert!(!lock_shown([(true, Shown), (true, Queued)]));
+        assert!(!lock_shown([(true, None), (true, Shown)]));
+        // An output that's off doesn't count, whatever it last showed.
+        assert!(lock_shown([(true, Shown), (false, None)]));
+        // None on (or none at all): nothing to wait for.
+        assert!(lock_shown([(false, Queued)]));
+        assert!(lock_shown([]));
+    }
 
     #[test]
     fn an_output_at_rest_during_another_outputs_animation_misses_nothing() {
