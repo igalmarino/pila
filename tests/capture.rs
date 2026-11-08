@@ -269,6 +269,30 @@ fn a_failed_copy_doesnt_lose_the_next_frame() {
 }
 
 #[test]
+fn an_output_is_captured_into_a_dmabuf() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let source = output_source(&client, "HEADLESS-1");
+    let (session, size) = session(&client, &source, "session");
+    // A linear dma-buf, which GPUs render to; none without one (CI).
+    if !client.has_logged("session", "DmabufFormat") {
+        return;
+    }
+    let Some(buffer) = client.dmabuf_buffer(size) else {
+        return;
+    };
+    let frame = session.create_frame(&client.qh, "frame".into());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, size.0, size.1);
+    frame.capture();
+    client.flush();
+    client.wait_logged("frame", "Ready");
+}
+
+#[test]
 fn a_buffer_of_the_wrong_size_fails() {
     let pila = TestPila::start();
     let client = pila.client();

@@ -407,7 +407,12 @@ Key flows and invariants:
   `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
   (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
   `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
-  calloop source on the fence fd. Without one it waits, as before.
+  calloop source on the fence fd, unless the client destroyed the frame meanwhile: then
+  nothing is written into its buffer, which it may be using again. Without one it waits,
+  as before. A dma-buf must have a format and modifier the session offered
+  (`dmabuf_offered`: renderable, a subset of what linux-dmabuf imports), else the frame
+  fails with `buffer_constraints`, so the client allocates another, rather than `unknown`
+  when binding it fails.
 - **Screencopy** (`screencopy.rs`, wlr-screencopy v3, for clients that predate
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
   output-local); pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may

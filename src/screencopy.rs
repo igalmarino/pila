@@ -228,7 +228,12 @@ impl Pila {
         let scale = output_scale(&output);
         let clear = render::clear_color(&input.scene);
 
-        let Pila { backend, blur, .. } = self;
+        let Pila {
+            backend,
+            blur,
+            capture,
+            ..
+        } = self;
         let Some(backend) = backend.as_mut() else {
             frame.failed();
             return true;
@@ -257,8 +262,7 @@ impl Pila {
             scale.x.to_bits(),
         );
         if with_damage {
-            let tracker = self
-                .capture
+            let tracker = capture
                 .screencopy_trackers
                 .entry(key.clone())
                 .or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
@@ -273,38 +277,45 @@ impl Pila {
             }
         }
 
-        let copied = match capture::copy_frame(renderer, &buffer, size, scale, &elements, clear) {
-            Ok(copied) => copied,
-            Err(err) => {
-                // The tracker saw changes that were never delivered: the
-                // next frame starts over with a new one, all damaged.
-                self.capture.screencopy_trackers.remove(&key);
-                log_failure(err);
-                frame.failed();
-                return true;
-            }
-        };
+        let dmabuf = capture.dmabuf.as_ref();
+        let copied =
+            match capture::copy_frame(renderer, &buffer, dmabuf, size, scale, &elements, clear) {
+                Ok(copied) => copied,
+                Err(err) => {
+                    // The tracker saw changes that were never delivered: the
+                    // next frame starts over with a new one, all damaged.
+                    capture.screencopy_trackers.remove(&key);
+                    log_failure(err);
+                    frame.failed();
+                    return true;
+                }
+            };
         let (hi, lo, nanos) = capture::split_timestamp(self.clock.now().into());
         let frame = frame.clone();
-        self.when_copied(copied, move |state, result| {
-            if let Err(err) = result {
-                state.capture.screencopy_trackers.remove(&key);
-                log_failure(err);
-                frame.failed();
-                return;
-            }
-            // Rows come out top-down for both buffer kinds (`copy_frame`).
-            frame.flags(Flags::empty());
-            for rect in damage {
-                frame.damage(
-                    rect.loc.x as u32,
-                    rect.loc.y as u32,
-                    rect.size.w as u32,
-                    rect.size.h as u32,
-                );
-            }
-            frame.ready(hi, lo, nanos);
-        });
+        let wanted = frame.clone();
+        self.when_copied(
+            copied,
+            move || wanted.is_alive(),
+            move |state, result| {
+                if let Err(err) = result {
+                    state.capture.screencopy_trackers.remove(&key);
+                    log_failure(err);
+                    frame.failed();
+                    return;
+                }
+                // Rows come out top-down for both buffer kinds (`copy_frame`).
+                frame.flags(Flags::empty());
+                for rect in damage {
+                    frame.damage(
+                        rect.loc.x as u32,
+                        rect.loc.y as u32,
+                        rect.size.w as u32,
+                        rect.size.h as u32,
+                    );
+                }
+                frame.ready(hi, lo, nanos);
+            },
+        );
         true
     }
 

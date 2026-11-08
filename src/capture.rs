@@ -388,7 +388,12 @@ impl Pila {
                 .and_then(|o| self.space.output_geometry(&o).map(|geo| (o.name(), geo))),
             _ => None,
         };
-        let Pila { backend, blur, .. } = self;
+        let Pila {
+            backend,
+            blur,
+            capture,
+            ..
+        } = self;
         let Some(backend) = backend.as_mut() else {
             return;
         };
@@ -444,7 +449,8 @@ impl Pila {
             }
         };
 
-        let copied = match copy_frame(renderer, &buffer, size, scale, &elements, clear) {
+        let dmabuf = capture.dmabuf.as_ref();
+        let copied = match copy_frame(renderer, &buffer, dmabuf, size, scale, &elements, clear) {
             Ok(copied) => copied,
             Err(err) => {
                 session.start_over();
@@ -456,22 +462,27 @@ impl Pila {
         session.captured_once = true;
         let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
         let resource = session.resource.clone();
-        self.when_copied(copied, move |state, result| {
-            if let Err(err) = result {
-                let sessions = &mut state.capture.sessions;
-                if let Some(session) = sessions.iter_mut().find(|s| s.resource == resource) {
-                    session.start_over();
+        let wanted = frame.clone();
+        self.when_copied(
+            copied,
+            move || wanted.is_alive(),
+            move |state, result| {
+                if let Err(err) = result {
+                    let sessions = &mut state.capture.sessions;
+                    if let Some(session) = sessions.iter_mut().find(|s| s.resource == resource) {
+                        session.start_over();
+                    }
+                    frame.failed(copy_failure(err));
+                    return;
                 }
-                frame.failed(copy_failure(err));
-                return;
-            }
-            frame.transform(wl_output::Transform::Normal);
-            for rect in damage {
-                frame.damage(rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
-            }
-            frame.presentation_time(hi, lo, nanos);
-            frame.ready();
-        });
+                frame.transform(wl_output::Transform::Normal);
+                for rect in damage {
+                    frame.damage(rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+                }
+                frame.presentation_time(hi, lo, nanos);
+                frame.ready();
+            },
+        );
     }
 
     /// Frame callbacks for the surfaces of a captured `window` that aren't
@@ -533,10 +544,14 @@ impl Pila {
     /// Run `then` once `copied` is complete: now, or when the GPU is done with
     /// it, without waiting on the event loop. A copy still on the GPU never
     /// completes within this call, so `then` may look up the sessions
-    /// `process_captures` holds meanwhile.
+    /// `process_captures` holds meanwhile. If `wanted` says the client gave
+    /// up on the frame by then (destroyed it), neither the rest of the copy
+    /// (writing into its shm buffer, which it may have reused) nor `then`
+    /// runs.
     pub(crate) fn when_copied(
         &mut self,
         copied: Copied,
+        wanted: impl Fn() -> bool + 'static,
         then: impl FnOnce(&mut Pila, Result<(), CopyError>) + 'static,
     ) {
         let (fence, finish) = match copied {
@@ -545,13 +560,17 @@ impl Pila {
         };
         trace!("capture: waiting for the GPU's fence");
         // Taken by whichever runs it: the source, or this if it can't be added.
-        let pending = Rc::new(RefCell::new(Some((finish, then))));
-        fn run<T: FnOnce(&mut Pila, Result<(), CopyError>)>(
+        let pending = Rc::new(RefCell::new(Some((finish, wanted, then))));
+        fn run<W: Fn() -> bool, T: FnOnce(&mut Pila, Result<(), CopyError>)>(
             state: &mut Pila,
-            pending: &RefCell<Option<(Finish, T)>>,
+            pending: &RefCell<Option<(Finish, W, T)>>,
         ) {
             let taken = pending.borrow_mut().take();
-            if let Some((finish, then)) = taken {
+            if let Some((finish, wanted, then)) = taken {
+                if !wanted() {
+                    trace!("capture: the frame is gone; its copy is dropped");
+                    return;
+                }
                 let result = match state.backend.as_mut() {
                     Some(backend) => finish(backend.renderer()),
                     None => Err(CopyError::Render("no renderer".into())),
@@ -593,9 +612,11 @@ pub(crate) fn split_timestamp(time: Duration) -> (u32, u32, u32) {
 
 /// Copy `elements` into the client's `buffer`: rendered straight into a
 /// dma-buf, or offscreen and read back into shm.
+/// A dma-buf must be of a format and modifier `dmabuf` offers.
 pub(crate) fn copy_frame(
     renderer: &mut GlesRenderer,
     buffer: &WlBuffer,
+    dmabuf: Option<&DmabufTarget>,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
@@ -603,9 +624,24 @@ pub(crate) fn copy_frame(
 ) -> Result<Copied, CopyError> {
     match buffer_type(buffer) {
         Some(BufferType::Shm) => copy_to_shm(renderer, buffer, size, scale, elements, clear),
-        Some(BufferType::Dma) => render_to_dmabuf(renderer, buffer, size, scale, elements, clear),
+        Some(BufferType::Dma) => {
+            render_to_dmabuf(renderer, buffer, dmabuf, size, scale, elements, clear)
+        }
         _ => Err(CopyError::Constraints),
     }
+}
+
+/// Whether `target` offers dma-bufs of format `code` with `modifier`: what
+/// the renderer can draw into. linux-dmabuf accepts any format it can
+/// texture from, more than that, and a buffer it can't draw into would
+/// fail to bind with no hint for the client to allocate another.
+fn dmabuf_offered(target: Option<&DmabufTarget>, code: Fourcc, modifier: u64) -> bool {
+    target.is_some_and(|target| {
+        target
+            .formats
+            .iter()
+            .any(|(c, modifiers)| *c == code && modifiers.contains(&modifier))
+    })
 }
 
 /// Why a frame failed, for a copy that did, logged.
@@ -630,6 +666,7 @@ fn render_error(err: &dyn std::fmt::Debug) -> CopyError {
 fn render_to_dmabuf(
     renderer: &mut GlesRenderer,
     buffer: &WlBuffer,
+    offered: Option<&DmabufTarget>,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
     elements: &[PilaRenderElement],
@@ -639,8 +676,9 @@ fn render_to_dmabuf(
         .map_err(|_| CopyError::Constraints)?
         .clone();
     let buffer_size = dmabuf.size();
+    let format = dmabuf.format();
     if (buffer_size.w, buffer_size.h) != (size.w, size.h)
-        || !DMABUF_FORMATS.contains(&dmabuf.format().code)
+        || !dmabuf_offered(offered, format.code, u64::from(format.modifier))
     {
         return Err(CopyError::Constraints);
     }
@@ -1140,5 +1178,25 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                 session.pending = false;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dmabuf_must_be_of_a_format_and_modifier_offered() {
+        let target = DmabufTarget {
+            device: 0,
+            formats: vec![(Fourcc::Argb8888, vec![0, 42])],
+        };
+        assert!(dmabuf_offered(Some(&target), Fourcc::Argb8888, 0));
+        assert!(dmabuf_offered(Some(&target), Fourcc::Argb8888, 42));
+        // A modifier the GPU can only texture from (external-only).
+        assert!(!dmabuf_offered(Some(&target), Fourcc::Argb8888, 7));
+        assert!(!dmabuf_offered(Some(&target), Fourcc::Xrgb8888, 0));
+        // No dma-bufs offered at all.
+        assert!(!dmabuf_offered(None, Fourcc::Argb8888, 0));
     }
 }
