@@ -1002,6 +1002,7 @@ dependencies = [
  "bitflags",
  "calloop",
  "cosmic-text",
+ "drm-ffi",
  "libc",
  "serde",
  "serde_json",

@@ -2,7 +2,8 @@
 # test suite can't run, on vkms, the kernel's virtual KMS driver, loaded into
 # the runner's own kernel (a VM): a session from seatd, the device opened,
 # modesetting, vblank-paced frames and their statistics, a client drawing,
-# without real hardware. It stops early, saying so, if the runner's kernel
+# a night light's gamma change (a GAMMA_LUT commit that doesn't wait), without
+# real hardware. It stops early, saying so, if the runner's kernel
 # has no vkms module. Actions are pinned by commit, as in ci.yml.
 name: KMS on vkms
 
@@ -31,12 +32,14 @@ jobs:
           fi
           ls -l /dev/dri
       # README.md's build packages for Ubuntu, plus seatd to start the session,
-      # Mesa's software drivers (vkms has no GPU to render with) and a client.
+      # Mesa's software drivers (vkms has no GPU to render with), a client and
+      # a gamma client (wlr-gamma-control).
       - name: Packages
         run: |
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libseat-dev libinput-dev libudev-dev libgbm-dev \
-            libxkbcommon-dev libegl1 libegl-mesa0 libgl1-mesa-dri xwayland seatd weston
+            libxkbcommon-dev libegl1 libegl-mesa0 libgl1-mesa-dri xwayland seatd weston \
+            gammastep
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: rustup update stable && rustup default stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -58,7 +61,8 @@ jobs:
           sudo env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd \
             RUST_LOG=info,pila::frames=debug \
             "${launch[@]}" timeout -s TERM 20 \
-            target/release/pila --backend udev -c weston-simple-egl \
+            target/release/pila --backend udev \
+            -c 'weston-simple-egl & sleep 3; gammastep -m wayland -O 4000 & wait' \
             >pila-vkms.log 2>&1 || status=$?
           tail -n 40 pila-vkms.log
           echo "exit status: $status"
@@ -74,8 +78,9 @@ jobs:
           check "an output came on" 'output connected'
           check "frames were drawn and measured" 'pila::frames: frames .*frames=[1-9]'
           check "the client connected" 'weston-simple-egl|app_id="weston-simple-egl"|mapping window'
+          check "a gamma change went out without blocking" 'pila::frames: gamma ms=[0-3]\.[0-9]* how="commit"'
           if grep -q 'panicked' pila-vkms.log; then echo "FAIL  no panic"; fail=1; else echo "PASS  no panic"; fi
-          grep 'pila::frames: frames' pila-vkms.log || true
+          grep -E 'pila::frames: (frames|gamma)' pila-vkms.log || true
           exit "$fail"
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -425,11 +425,24 @@ if [ -n "$captures" ]; then
     info "captures: $passes frames built, CPU worst average ${worst_avg} ms, worst ${worst} ms"
 fi
 
-# Gamma goes through a blocking ioctl (`udev/gamma.rs`): how long it held the
-# event loop, if anything set it during the run (a night light).
-gamma=$(grep -o 'pila::frames: gamma ms=[0-9.]*' "$log" | cut -d= -f2 || true)
-if [ -n "$gamma" ]; then
-    info "gamma: $(wc -l <<<"$gamma") changes, worst $(sort -g <<<"$gamma" | tail -1) ms"
+# Gamma (`udev/gamma.rs`; bare metal, if a night light set it): a client's
+# changes go out as commits that don't wait; the blocking ioctl is left for
+# after a modeset and for drivers without GAMMA_LUT.
+gamma_ms() {
+    grep -o "pila::frames: gamma ms=[0-9.]* how=\"$1\"" "$log" | sed 's/.*ms=\([0-9.]*\).*/\1/' || true
+}
+commits=$(gamma_ms commit)
+if [ -n "$commits" ]; then
+    worst=$(sort -g <<<"$commits" | tail -1)
+    if awk -v v="$worst" 'BEGIN { exit !(v <= 4) }'; then
+        pass "gamma changes don't block ($(wc -l <<<"$commits"), worst ${worst} ms)"
+    else
+        fail "gamma changes don't block (worst ${worst} ms)"
+    fi
+fi
+ioctls=$(gamma_ms ioctl)
+if [ -n "$ioctls" ]; then
+    info "gamma set the blocking way: $(wc -l <<<"$ioctls") times, worst $(sort -g <<<"$ioctls" | tail -1) ms (after a modeset, or no GAMMA_LUT)"
 fi
 
 # Bare metal only: nothing else reads an EDID (`edid.rs`).

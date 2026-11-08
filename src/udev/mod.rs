@@ -155,6 +155,14 @@ struct OutputSurface {
     /// The gamma ramps a client set (`gamma_control.rs`), re-applied
     /// whenever the CRTC is set up again.
     gamma: Option<Vec<u16>>,
+    /// The CRTC's `GAMMA_LUT`, through which a client's ramps go out without
+    /// blocking (`gamma.rs`); `None` on a legacy device or driver.
+    gamma_lut: Option<property::Handle>,
+    /// Ramps set but not sent yet: they go out once no frame is on its way
+    /// (`commit_pending_gamma`).
+    gamma_pending: Option<Vec<u16>>,
+    /// The commit on its way (`frame_pending`) is a gamma change, not a frame.
+    gamma_in_flight: bool,
     /// Frames that failed at the DRM level (`recovery.rs`): drawing waits
     /// for a retry instead of failing again on every event.
     recovery: Recovery,
@@ -274,17 +282,30 @@ impl UdevData {
                 &linear
             }
         };
-        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+        let active = self.session.is_active();
+        let Some(surface) = self.outputs.get_mut(&crtc) else {
+            return false;
+        };
+        if surface.gamma_lut.is_some() && surface.drm_output.is_some() && active {
+            // Sent when the CRTC is free, without blocking (`gamma.rs`); a
+            // newer change before then replaces it.
+            surface.gamma_pending = Some(ramp.to_vec());
+            if !self.redraw_scheduled {
+                self.redraw_scheduled = true;
+                self.loop_handle.insert_idle(render_all);
+            }
+        } else if !apply_gamma(self.drm.device(), crtc, ramp, size) {
             return false;
         }
-        if let Some(surface) = self.outputs.get_mut(&crtc) {
-            surface.gamma = ramp_if_set(ramp, size);
-            info!(
-                name = surface.output.name(),
-                custom = surface.gamma.is_some(),
-                "gamma set"
-            );
-        }
+        let Some(surface) = self.outputs.get_mut(&crtc) else {
+            return false;
+        };
+        surface.gamma = ramp_if_set(ramp, size);
+        info!(
+            name = surface.output.name(),
+            custom = surface.gamma.is_some(),
+            "gamma set"
+        );
         true
     }
 
@@ -317,6 +338,7 @@ impl UdevData {
         if !on {
             surface.drm_output = None;
             surface.frame_pending = false;
+            surface.gamma_in_flight = false;
             surface.lock_frame = LockFrame::None;
             if let Err(err) = drm.lock().try_to_restore_modifiers(renderer, &elements) {
                 debug!(?err, "couldn't restore modifiers after powering off");
@@ -391,10 +413,13 @@ impl UdevData {
     /// another compositor had the device (VT switch back, mode change,
     /// power on): the remembered ramps, or linear when no client set any
     /// (whoever had the CRTC may have left theirs).
-    fn reapply_gamma(&self, crtc: crtc::Handle) {
-        let Some(surface) = self.outputs.get(&crtc) else {
+    /// Blocking, which a modeset is too. Ramps still pending go with it.
+    fn reapply_gamma(&mut self, crtc: crtc::Handle) {
+        let Some(surface) = self.outputs.get_mut(&crtc) else {
             return;
         };
+        surface.gamma_pending = None;
+        let surface = &self.outputs[&crtc];
         let Some(size) = self.gamma_size(&surface.output) else {
             return;
         };
@@ -566,6 +591,7 @@ pub fn init_udev(
                     for crtc in crtcs {
                         let surface = data.outputs.get_mut(&crtc).expect("listed");
                         surface.frame_pending = false;
+                        surface.gamma_in_flight = false;
                         // Failures while away were for lack of DRM master.
                         surface.recovery = Recovery::default();
                         // Another VT may have changed the LUTs.

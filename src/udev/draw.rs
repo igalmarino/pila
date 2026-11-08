@@ -30,6 +30,12 @@ pub(super) fn render_all(state: &mut Pila) {
 /// next vblank) or nothing changed. `at_vblank`: called right after one, so
 /// the frame is due at the next (`frame_stats.rs`).
 pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: bool) {
+    // A gamma change takes the CRTC first; drawing goes on at its vblank.
+    if let Some(Backend::Udev(data)) = &mut state.backend {
+        if commit_pending_gamma(data, crtc) {
+            return;
+        }
+    }
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
@@ -231,6 +237,13 @@ pub(super) fn frame_finish(
         return;
     };
     surface.frame_pending = false;
+    // A gamma change's vblank (`gamma.rs`), not a frame's: nothing new was
+    // shown, and `last_vblank` stays the last frame's, so a running
+    // animation counts this refresh as missed.
+    if std::mem::take(&mut surface.gamma_in_flight) {
+        render_output(state, crtc, true);
+        return;
+    }
     if surface.lock_frame == LockFrame::Queued {
         surface.lock_frame = LockFrame::Shown;
     }

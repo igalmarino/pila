@@ -5,9 +5,11 @@ Noctalia if installed: windows opening and closing, minimize, maximize, workspac
 launcher, a capture, a blurred window) and judges the log: the scenarios finished without a panic, animations
 ran (`starts` on `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a
 picture, monitors were identified from their EDID (bare metal), and the frame statistics (no
-missed refresh, CPU per frame on average within 4 ms). It prints PASS/FAIL per check and exits
-1 on a failure; INFO lines report without judging (the captures' CPU time, which has no budget
-yet, and how long setting gamma blocked, bare metal, if a night light set it).
+missed refresh, CPU per frame on average within 4 ms; bare metal, if a night light set gamma,
+its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
+and exits 1 on a failure; INFO lines report without judging (the captures' CPU time, which has
+no budget yet, and how long gamma set the blocking way took: after a modeset, or a driver
+without `GAMMA_LUT`).
 
 It doesn't test behavior: that's the integration tests' job (`scripts/toplevel-action` and
 `scripts/workspace-action` are its small taskbar and pager clients, standard-library Python).

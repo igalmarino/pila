@@ -517,6 +517,9 @@ pub(super) fn connector_connected(
             lock_frame: LockFrame::None,
             modes,
             gamma: None,
+            gamma_lut: gamma_lut_property(&data.drm, crtc),
+            gamma_pending: None,
+            gamma_in_flight: false,
             recovery: Recovery::default(),
         },
     );
@@ -605,6 +608,7 @@ pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
     surface.enabled = false;
     surface.drm_output = None;
     surface.frame_pending = false;
+    surface.gamma_in_flight = false;
     surface.lock_frame = LockFrame::None;
     let output = surface.output.clone();
     if let Some(global) = surface.global.take() {

@@ -17,6 +17,9 @@ bitflags = "2"
 # SIGINT/SIGTERM).
 calloop = { version = "0.14", features = ["signals"] }
 cosmic-text = "0.19"
+# Gamma tables as GAMMA_LUT blobs (`udev/gamma.rs`): `drm` only makes blobs of
+# fixed-size types. The version Smithay's `drm` uses.
+drm-ffi = "0.9"
 # sigprocmask, to start programs with no signals blocked (`Pila::session_env`).
 libc = "0.2"
 # The config file (`config.rs`).

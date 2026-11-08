@@ -464,13 +464,19 @@ Key flows and invariants:
   `focus_window`/`restore_window`, `minimize_window`/`show_window`, `set_fill_state(_on)`
   and `close_window`, and are ignored while locked.
 - **Gamma** (`gamma_control.rs`, wlr-gamma-control): one control per output, ramps set
-  through `Backend::set_gamma` (udev: the legacy `set_gamma` ioctl on the CRTC; remembered
-  in `OutputSurface.gamma` and re-applied after `ActivateSession`, a mode change and a
-  power on; nested: fails). Destroying the control restores linear. On atomic drivers the
-  kernel serves that ioctl with a blocking commit, which may hold the event loop up to a
-  refresh; `GAMMA_LUT` in the DRM compositor's own commits would avoid it, but Smithay can't
-  add it and a commit of Pila's own would race them, so for now the time it takes is logged
-  (`pila::frames` "gamma", once in the plain log past 4 ms; `scripts/check` reports it).
+  through `Backend::set_gamma` (nested: fails). Destroying the control restores linear.
+  udev (`udev/gamma.rs`): a client's ramps wait in `OutputSurface.gamma_pending` (a newer
+  change replaces them) until the CRTC is free, then go out as an atomic commit of
+  `GAMMA_LUT` alone that doesn't wait, with a page-flip event (`commit_pending_gamma`, first
+  thing in `render_output`): it takes the vblank a frame would (`frame_pending`,
+  `gamma_in_flight`), and at its event `frame_finish` presents nothing, leaves `last_vblank`
+  (a running animation counts the refresh missed) and draws. Smithay's DRM compositor can't
+  carry `GAMMA_LUT` in a frame's commit. The legacy `set_gamma` ioctl, which atomic drivers
+  serve with a blocking commit that holds the event loop a whole refresh, is left for
+  drivers without `GAMMA_LUT`, a refused commit, and re-applying the ramps remembered in
+  `OutputSurface.gamma` after `ActivateSession`, a mode change and a power on (modesets,
+  which block anyway). Each logs its time and way (`pila::frames` "gamma", `how`; once in
+  the plain log past 4 ms; `scripts/check` judges the commits).
 - **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
   `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on =
   `initialize_output` again with the stored connector and mode (`UdevData::set_output_power`).
