@@ -466,7 +466,11 @@ Key flows and invariants:
 - **Gamma** (`gamma_control.rs`, wlr-gamma-control): one control per output, ramps set
   through `Backend::set_gamma` (udev: the legacy `set_gamma` ioctl on the CRTC; remembered
   in `OutputSurface.gamma` and re-applied after `ActivateSession`, a mode change and a
-  power on; nested: fails). Destroying the control restores linear.
+  power on; nested: fails). Destroying the control restores linear. On atomic drivers the
+  kernel serves that ioctl with a blocking commit, which may hold the event loop up to a
+  refresh; `GAMMA_LUT` in the DRM compositor's own commits would avoid it, but Smithay can't
+  add it and a commit of Pila's own would race them, so for now the time it takes is logged
+  (`pila::frames` "gamma", once in the plain log past 4 ms; `scripts/check` reports it).
 - **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
   `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on =
   `initialize_output` again with the stored connector and mode (`UdevData::set_output_power`).

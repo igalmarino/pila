@@ -425,6 +425,13 @@ if [ -n "$captures" ]; then
     info "captures: $passes frames built, CPU worst average ${worst_avg} ms, worst ${worst} ms"
 fi
 
+# Gamma goes through a blocking ioctl (`udev/gamma.rs`): how long it held the
+# event loop, if anything set it during the run (a night light).
+gamma=$(grep -o 'pila::frames: gamma ms=[0-9.]*' "$log" | cut -d= -f2 || true)
+if [ -n "$gamma" ]; then
+    info "gamma: $(wc -l <<<"$gamma") changes, worst $(sort -g <<<"$gamma" | tail -1) ms"
+fi
+
 # Bare metal only: nothing else reads an EDID (`edid.rs`).
 if grep -q 'backend=Udev' "$log"; then
     monitors=$(grep -cE 'pila::udev(::[a-z_]+)?: monitor ' "$log" || true)
