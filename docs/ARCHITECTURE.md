@@ -409,6 +409,10 @@ Key flows and invariants:
   instead of once a second or never; shown surfaces keep the screen's pace. Cursor sessions are created stopped; `paint_cursors` is honored.
   `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
   (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
+  A frame's presentation time (ext's `presentation_time`, screencopy's `ready`) is when its
+  content shows (`Pila::presented_at`: `Backend::next_frame_time` of its output, since copies
+  follow the frame just queued there; now for a window off every output), which recorders
+  use to keep sound and picture in step.
   `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
   calloop source on the fence fd, unless the client destroyed the frame meanwhile: then
   nothing is written into its buffer, which it may be using again. Without one it waits,

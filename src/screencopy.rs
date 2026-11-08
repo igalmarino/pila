@@ -294,7 +294,8 @@ impl Pila {
                     return true;
                 }
             };
-        let (hi, lo, nanos) = capture::split_timestamp(self.clock.now().into());
+        let shown = self.presented_at(Some(&output));
+        let (hi, lo, nanos) = capture::split_timestamp(shown.into());
         let frame = frame.clone();
         let wanted = frame.clone();
         self.when_copied(

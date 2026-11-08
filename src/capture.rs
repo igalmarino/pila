@@ -86,7 +86,7 @@ use smithay::{
             Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
         },
     },
-    utils::{Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform},
     wayland::{
         compositor::with_states,
         dmabuf::get_dmabuf,
@@ -416,6 +416,11 @@ impl Pila {
             }
             Target::Gone => return,
         };
+        // Where the frame's content shows, for its presentation time.
+        let shown_on = match &session.target {
+            Target::Output(output) => output.upgrade(),
+            _ => window.as_ref().and_then(|w| self.window_output(w)),
+        };
         let clear = match window {
             Some(_) => TRANSPARENT,
             None => render::clear_color(scene),
@@ -498,7 +503,7 @@ impl Pila {
         };
         session.pending = false;
         session.captured_once = true;
-        let (hi, lo, nanos) = split_timestamp(self.clock.now().into());
+        let (hi, lo, nanos) = split_timestamp(self.presented_at(shown_on.as_ref()).into());
         let resource = session.resource.clone();
         let wanted = frame.clone();
         self.when_copied(
@@ -521,6 +526,20 @@ impl Pila {
                 frame.ready();
             },
         );
+    }
+
+    /// When a frame copied now shows on `output`: copies follow the frame
+    /// just queued there (`after_frames`), which shows at the next refresh
+    /// (`Backend::next_frame_time`: the next vblank on bare metal, one period
+    /// on nested). Shown on no output (a window off the screen): now. What
+    /// captures send as the frame's presentation time, which recorders use
+    /// to keep sound and picture in step.
+    pub(crate) fn presented_at(&self, output: Option<&Output>) -> Time<Monotonic> {
+        let now = self.clock.now();
+        match (output, &self.backend) {
+            (Some(output), Some(backend)) => backend.next_frame_time(output, now),
+            _ => now,
+        }
     }
 
     /// Frame callbacks for the surfaces of a captured `window` that aren't

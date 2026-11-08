@@ -779,20 +779,6 @@ fn a_fifo_client_going_away_with_commits_held_back_harms_nothing() {
 
 // --- wp-commit-timing (`commit_pacing.rs`) ---
 
-/// CLOCK_MONOTONIC, the clock wp_presentation announces, as pila reads it.
-fn monotonic_now() -> Duration {
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: a valid pointer to a timespec.
-    assert_eq!(
-        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) },
-        0
-    );
-    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
-}
-
 fn commit_timer_of(client: &Client, window: common::client::Window) -> WpCommitTimerV1 {
     let manager: WpCommitTimingManagerV1 = client.bind("wp_commit_timing_manager_v1", 1);
     manager.get_timer(&client.surface(window), &client.qh, "timer".to_string())

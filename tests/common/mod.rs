@@ -487,6 +487,20 @@ fn tail(text: &str, lines: usize) -> String {
 }
 
 /// The window with `app_id` in a state; panics if several match.
+/// CLOCK_MONOTONIC, the clock wp_presentation announces, as pila reads it.
+pub fn monotonic_now() -> Duration {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid pointer to a timespec.
+    assert_eq!(
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) },
+        0
+    );
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
 pub fn window_in<'a>(state: &'a Value, app_id: &str) -> Option<&'a Value> {
     let mut found = state["windows"]
         .as_array()?

@@ -328,6 +328,51 @@ fn capture_textures_are_kept_while_captures_go_on() {
     pila.wait("no texture", |s| textures(s) == 0);
 }
 
+/// The presentation time a frame got, from its logged event.
+fn presentation_time(client: &Client, tag: &str) -> Duration {
+    let event = client
+        .logged(tag)
+        .into_iter()
+        .find(|e| e.starts_with("PresentationTime"))
+        .expect("a presentation time");
+    let field = |name: &str| -> u64 {
+        let at = event.find(&format!("{name}: ")).unwrap() + name.len() + 2;
+        event[at..]
+            .split(|c: char| !c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let secs = (field("tv_sec_hi") << 32) | field("tv_sec_lo");
+    Duration::new(secs, field("tv_nsec") as u32)
+}
+
+#[test]
+fn a_frame_is_presented_at_the_next_refresh() {
+    // At 1 Hz, the next refresh is long after the frame is copied and sent.
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("SLOW:1280x800@1".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    let source = output_source(&client, "SLOW");
+    let (session, size) = session(&client, &source, "session");
+    let (_frame, _) = capture(&client, &session, size, "frame");
+    client.wait_logged("frame", "Ready");
+    let received = monotonic_now();
+    // When it shows on the output, not when it was copied (before the
+    // client got it).
+    let shown = presentation_time(&client, "frame");
+    assert!(
+        shown > received + Duration::from_millis(300),
+        "presented {:?} after the client got it",
+        shown.checked_sub(received)
+    );
+}
+
 #[test]
 fn a_buffer_of_the_wrong_size_fails() {
     let pila = TestPila::start();
