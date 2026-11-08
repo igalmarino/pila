@@ -169,6 +169,10 @@ struct OutputSurface {
     /// Adaptive sync as `[[output]]` asks for it, set again whenever the
     /// CRTC is set up again (`outputs::apply_vrr`).
     adaptive_sync: bool,
+    /// Whether the last frame shown was reported to clients with a variable
+    /// refresh, logged when it changes (`scripts/check --vrr` reads it);
+    /// forgotten while the CRTC is off.
+    presented_variable: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -350,6 +354,7 @@ impl UdevData {
             surface.lock_frame = LockFrame::None;
             // The vblanks of the dark gap aren't missed refreshes.
             surface.last_vblank = None;
+            surface.presented_variable = false;
             if let Err(err) = drm.lock().try_to_restore_modifiers(renderer, &elements) {
                 debug!(?err, "couldn't restore modifiers after powering off");
             }

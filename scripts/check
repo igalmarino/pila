@@ -19,6 +19,14 @@
 #   scripts/check --nested      nested, inside the current session (for
 #                               development; the release build); the log is
 #                               pila-check.log
+#   scripts/check --vrr         on bare metal, with adaptive sync asked of
+#                               every monitor: checks it comes on where the
+#                               monitor can do it, Pila reports a variable
+#                               refresh, and it's still on after powering the
+#                               monitors off and on (wlopm). Missed refreshes
+#                               count against vblanks that stretch to wait
+#                               for frames: take those numbers from a run
+#                               without it
 #   scripts/check --judge <log> judge an existing log again (no run)
 #   scripts/check [...] <config.toml>
 #                               start from that config (see below)
@@ -243,6 +251,21 @@ if [ "${1:-}" = "--workload" ]; then
         mark "noctalia end"
     fi
 
+    # Adaptive sync (--vrr): still on after the monitors power off and on,
+    # which sets their CRTCs up from scratch.
+    if [ "${PILA_CHECK_VRR:-}" = 1 ]; then
+        if ! command -v wlopm >/dev/null; then
+            mark "vrr skip (wlopm not installed)"
+        else
+            mark "vrr begin"
+            wlopm --off '*'
+            sleep 2
+            wlopm --on '*'
+            sleep 2
+            mark "vrr end"
+        fi
+    fi
+
     mark "done"
     sleep 1
     # Quit pila (SIGTERM quits cleanly): the nearest pila among this
@@ -271,11 +294,20 @@ if [ "${1:-}" = "--nested" ]; then
     nested=true
     shift
 fi
+vrr=false
+if [ "${1:-}" = "--vrr" ]; then
+    if $nested; then
+        echo "--vrr needs bare metal: run it from a TTY, without --nested" >&2
+        exit 2
+    fi
+    vrr=true
+    shift
+fi
 if ! $judge_only; then
     base_config=${1:-}
     case "$base_config" in
         -*)
-            echo "scripts/check: no option $base_config; usage: scripts/check [--nested] [<config.toml>], scripts/check --judge <log>" >&2
+            echo "scripts/check: no option $base_config; usage: scripts/check [--nested | --vrr] [<config.toml>], scripts/check --judge <log>" >&2
             exit 2
             ;;
     esac
@@ -296,6 +328,21 @@ if ! $judge_only; then
         awk '/^[ \t]*\[/ { skip = ($0 ~ /^[ \t]*\[(animations\]|\[window-rule\]\]|\[layer-rule\]\])/) }
              !skip' "$base_config" >"$config"
         echo "Base config: $base_config (without its [animations] and rules)."
+    fi
+    if $vrr; then
+        # The first [[output]] that matches a monitor applies: each of yours
+        # asks for adaptive sync, and so does one per connected connector
+        # (DRM's names, as Pila's: card1-DP-1 is DP-1).
+        awk '/^[ \t]*\[/ { out = ($0 ~ /^[ \t]*\[\[output\]\]/); print; if (out) print "adaptive-sync = true"; next }
+             out && /^[ \t]*adaptive-sync[ \t]*=/ { next }
+             { print }' "$config" >"$config.vrr" 2>/dev/null || true
+        [ -f "$config.vrr" ] && mv "$config.vrr" "$config"
+        for status in /sys/class/drm/card*-*/status; do
+            [ "$(cat "$status" 2>/dev/null)" = connected ] || continue
+            connector=$(basename "$(dirname "$status")")
+            printf '\n[[output]]\nname = "%s"\nadaptive-sync = true\n' "${connector#*-}" >>"$config"
+        done
+        export PILA_CHECK_VRR=1
     fi
     cat >>"$config" <<EOF
 
@@ -425,6 +472,27 @@ if ran noctalia; then
     has "$s" "Noctalia's surfaces match the noctalia-* rule" 'layer rules namespace="noctalia-'
     has "$s" "the rule turns Pila's animations off for them" 'off by rule what="layer-in" id="noctalia-'
     lacks "$s" "Pila doesn't animate any of them" 'starts what="layer-[a-z]*" id="noctalia-'
+fi
+
+# Adaptive sync (--vrr; `udev/outputs.rs`, `udev/draw.rs`): on where a monitor
+# can do it, reported to clients, and still on after powering off and on.
+if grep -q 'check: vrr' "$log" && ran vrr; then
+    on=$(grep -o 'adaptive sync set name="[^"]*" on=true' "$log" | cut -d'"' -f2 | sort -u || true)
+    if [ -z "$on" ]; then
+        skip "vrr (no monitor took adaptive sync: none can do it, or it's off in their own menu)"
+    else
+        s=$(section vrr)
+        for name in $on; do
+            has "$(cat "$log")" "$name reports a variable refresh with adaptive sync on" \
+                "refresh reported to clients name=\"$name\" variable=true"
+            has "$s" "$name keeps adaptive sync after powering off and on" \
+                "refresh reported to clients name=\"$name\" variable=true"
+        done
+    fi
+    unable=$(grep -o 'adaptive sync not supported by the monitor name="[^"]*"' "$log" | cut -d'"' -f2 | sort -u || true)
+    for name in $unable; do
+        info "vrr: $name can't do adaptive sync"
+    done
 fi
 
 # Frame statistics, over the whole run (the performance pillar).

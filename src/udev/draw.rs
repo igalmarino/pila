@@ -282,11 +282,21 @@ pub(super) fn frame_finish(
     };
     // With adaptive sync the period varies: clients are given the shortest,
     // the mode's (wp-presentation's "fastest rate").
-    let refresh = if drm_output.with_compositor(|c| c.vrr_enabled()) {
+    let variable = drm_output.with_compositor(|c| c.vrr_enabled());
+    let refresh = if variable {
         Refresh::Variable(frame_duration)
     } else {
         Refresh::fixed(frame_duration)
     };
+    if variable != surface.presented_variable {
+        surface.presented_variable = variable;
+        debug!(
+            target: "pila::frames",
+            name = surface.output.name(),
+            variable,
+            "refresh reported to clients"
+        );
+    }
     match drm_output.frame_submitted() {
         Ok(Some(Some(mut feedback))) => {
             feedback.presented(time, refresh, seq, flags);

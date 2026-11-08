@@ -522,6 +522,7 @@ pub(super) fn connector_connected(
             gamma_in_flight: false,
             recovery: Recovery::default(),
             adaptive_sync: false,
+            presented_variable: false,
         },
     );
     if !enabled {
@@ -614,6 +615,7 @@ pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
     surface.gamma_in_flight = false;
     surface.lock_frame = LockFrame::None;
     surface.last_vblank = None;
+    surface.presented_variable = false;
     let output = surface.output.clone();
     if let Some(global) = surface.global.take() {
         crate::state::retire_global(&state.display_handle, &state.loop_handle, global);

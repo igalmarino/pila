@@ -9,7 +9,11 @@ frame statistics (no missed refresh, CPU per frame on average within 4 ms, for t
 frames and, on average over all of them, the captures'; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
 and exits 1 on a failure; INFO lines report without judging (how long gamma set the blocking
-way took: after a modeset, or a driver without `GAMMA_LUT`).
+way took: after a modeset, or a driver without `GAMMA_LUT`). `--vrr` (bare metal) asks every
+monitor for adaptive sync and checks it comes on where a monitor can do it, that Pila then
+reports a variable refresh (`refresh reported to clients` on `pila::frames`), and that it's
+still on after `wlopm` powers the monitors off and on; whether the monitor's refresh follows
+the content is still for the eyes.
 
 It doesn't test behavior: that's the integration tests' job (`scripts/toplevel-action`,
 `scripts/workspace-action` and `scripts/capture-stream` are its small taskbar, pager and screen
