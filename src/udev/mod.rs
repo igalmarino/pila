@@ -286,7 +286,12 @@ impl UdevData {
         let Some(surface) = self.outputs.get_mut(&crtc) else {
             return false;
         };
-        if surface.gamma_lut.is_some() && surface.drm_output.is_some() && active {
+        if !active || surface.drm_output.is_none() {
+            // On another VT (no DRM master: setting it would fail, and the
+            // client's control with it) or powered off: remembered, and set
+            // when the CRTC is back (`reapply_gamma`).
+            surface.gamma_pending = None;
+        } else if surface.gamma_lut.is_some() {
             // Sent when the CRTC is free, without blocking (`gamma.rs`); a
             // newer change before then replaces it.
             surface.gamma_pending = Some(ramp.to_vec());

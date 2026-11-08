@@ -475,7 +475,9 @@ Key flows and invariants:
   serve with a blocking commit that holds the event loop a whole refresh, is left for
   drivers without `GAMMA_LUT`, a refused commit, and re-applying the ramps remembered in
   `OutputSurface.gamma` after `ActivateSession`, a mode change and a power on (modesets,
-  which block anyway). Each logs its time and way (`pila::frames` "gamma", `how`; once in
+  which block anyway). Ramps set while the session is on another VT or the output is off
+  are only remembered until then: without DRM master the ioctl fails, and so would the
+  client's control (a night light stepping its fade then stops for good). Each logs its time and way (`pila::frames` "gamma", `how`; once in
   the plain log past 4 ms; `scripts/check` judges the commits).
 - **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
   `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on =
