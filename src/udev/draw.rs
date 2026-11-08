@@ -2,6 +2,13 @@
 
 use super::*;
 
+use smithay::{
+    backend::renderer::{element::Id, gles::GlesTarget},
+    utils::{Rectangle, Transform},
+};
+
+use crate::capture::{copy_frame, Source};
+
 /// The idle callback queued by `UdevData::queue_redraw`.
 pub(super) fn render_all(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
@@ -55,7 +62,12 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     let lock_pending = state.lock_pending();
     let scale = crate::scale::output_scale(&output);
 
-    let Pila { backend, blur, .. } = state;
+    let Pila {
+        backend,
+        blur,
+        capture,
+        ..
+    } = state;
     let Some(Backend::Udev(data)) = backend else {
         return;
     };
@@ -93,10 +105,38 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     let cursor_wl_surface = input.cursor_wl_surface();
     // What failed at the DRM level, and how.
     let mut failure: Option<(&str, String)> = None;
+    // Captures filled from this frame, and the time they took.
+    let mut composited = Vec::new();
+    let mut capture_cpu = Duration::ZERO;
     match rendered {
         Ok(result) => {
             frame::update_primary_outputs(scene, cursor_wl_surface, &output, &result.states);
             if !result.is_empty {
+                // Captures of this output take the frame just composited,
+                // blitted, rather than drawing the scene again
+                // (`Captures::take_composited`). All of it: the buffer may
+                // hold anything.
+                let capture_started = std::time::Instant::now();
+                for job in capture.take_composited(&output, &elements, pointer_here) {
+                    let (size, scale) = (job.size, job.scale);
+                    let mut blit = |renderer: &mut GlesRenderer, target: &mut GlesTarget<'_>| {
+                        result
+                            .blit_frame_result(
+                                size,
+                                Transform::Normal,
+                                scale,
+                                renderer,
+                                target,
+                                [Rectangle::from_size(size)],
+                                std::iter::empty::<Id>(),
+                            )
+                            .map_err(|err| format!("{err:?}"))
+                    };
+                    let source = Source::Draw(&mut blit);
+                    let copied = copy_frame(renderer, &job.buffer, capture, size, scale, source);
+                    composited.push((job, copied));
+                }
+                capture_cpu = capture_started.elapsed();
                 let feedback =
                     frame::presentation_feedback(scene, cursor_wl_surface, &output, &result.states);
                 match drm_output.queue_frame(Some(feedback)) {
@@ -151,8 +191,16 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     if lock_pending {
         maybe_confirm_lock(state);
     }
+    let captures = composited.len() as u32;
+    for (job, copied) in composited {
+        state.finish_composited(job, copied, &output);
+    }
+    for _ in 0..captures {
+        state.record_capture(capture_cpu / captures);
+    }
     if queued {
-        let cpu = started.elapsed();
+        // The captures are counted apart (`frame_stats.rs`).
+        let cpu = started.elapsed().saturating_sub(capture_cpu);
         tracing::trace!(
             target: "pila::frames",
             output = output.name(),

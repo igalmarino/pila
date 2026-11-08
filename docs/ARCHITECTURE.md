@@ -420,6 +420,15 @@ Key flows and invariants:
   instead of once a second or never; shown surfaces keep the screen's pace. Cursor sessions are created stopped; `paint_cursors` is honored.
   `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
   (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
+  On bare metal an output's captures are filled from the frame its DRM compositor just
+  composited, blitted (`RenderFrameResult::blit_frame_result`, between `render_frame` and
+  `queue_frame` in `udev/draw.rs`), instead of drawing the scene a second time:
+  `Captures::take_composited` picks those that would get the same picture (output not
+  turned, since the scanout buffer is in the mode's orientation; cursor painted or not on
+  that output; constraints current), with their sessions' damage over the same elements;
+  `Pila::finish_composited` delivers them, and `process_captures` skips the sessions checked
+  so (`Session::composited`). Copies take what to draw as a `capture::Source`: elements, or
+  that blit. Their time counts as captures, not as the output's frame.
   A frame's presentation time (ext's `presentation_time`, screencopy's `ready`) is when its
   content shows (`Pila::presented_at`: `Backend::next_frame_time` of its output, since copies
   follow the frame just queued there; now for a window off every output), which recorders

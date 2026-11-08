@@ -282,18 +282,21 @@ impl Pila {
             }
         }
 
-        let copied =
-            match capture::copy_frame(renderer, &buffer, capture, size, scale, &elements, clear) {
-                Ok(copied) => copied,
-                Err(err) => {
-                    // The tracker saw changes that were never delivered: the
-                    // next frame starts over with a new one, all damaged.
-                    capture.screencopy_trackers.remove(&key);
-                    log_failure(err);
-                    frame.failed();
-                    return true;
-                }
-            };
+        let source = capture::Source::Elements {
+            elements: &elements,
+            clear,
+        };
+        let copied = match capture::copy_frame(renderer, &buffer, capture, size, scale, source) {
+            Ok(copied) => copied,
+            Err(err) => {
+                // The tracker saw changes that were never delivered: the
+                // next frame starts over with a new one, all damaged.
+                capture.screencopy_trackers.remove(&key);
+                log_failure(err);
+                frame.failed();
+                return true;
+            }
+        };
         let shown = self.presented_at(Some(&output));
         let (hi, lo, nanos) = capture::split_timestamp(shown.into());
         let frame = frame.clone();

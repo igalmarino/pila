@@ -46,7 +46,8 @@ use smithay::{
             buffer_type,
             damage::OutputDamageTracker,
             element::AsRenderElements,
-            gles::{GlesMapping, GlesRenderer, GlesTexture},
+            gles::{GlesMapping, GlesRenderer, GlesTarget, GlesTexture},
+            sync::SyncPoint,
             Bind, BufferType, ExportMem, Offscreen, Texture, TextureMapping,
         },
     },
@@ -181,6 +182,18 @@ pub struct Captures {
     shm_textures: Vec<GlesTexture>,
 }
 
+/// A pending output capture to fill from the frame its output just
+/// composited (`Captures::take_composited`), then hand to
+/// `Pila::finish_composited`.
+pub(crate) struct Composited {
+    pub buffer: WlBuffer,
+    pub size: Size<i32, Physical>,
+    pub scale: Scale<f64>,
+    resource: ExtImageCopyCaptureSessionV1,
+    frame: ExtImageCopyCaptureFrameV1,
+    damage: Vec<Rectangle<i32, Physical>>,
+}
+
 /// How many sizes of offscreen textures `Captures` keeps: an output and a
 /// window or two captured at once.
 const MAX_SHM_TEXTURES: usize = 4;
@@ -195,6 +208,84 @@ impl Captures {
         {
             self.shm_textures.clear();
         }
+    }
+
+    /// The pending captures of `output` that the frame just composited for
+    /// it from `elements` can fill, by a blit instead of drawing the scene
+    /// again (`udev/draw.rs`), each with the damage its session's tracker
+    /// sees in `elements`. Only those that would get the same picture: of
+    /// an output that isn't turned (its scanout buffer is upright), with the
+    /// cursor as that frame has it (painted, or not on this output), at the
+    /// size and scale advertised. The rest are left to `process_captures`,
+    /// and so are those without a change, once checked here.
+    pub(crate) fn take_composited(
+        &mut self,
+        output: &Output,
+        elements: &[PilaRenderElement],
+        pointer_here: bool,
+    ) -> Vec<Composited> {
+        if output.current_transform() != Transform::Normal {
+            return Vec::new();
+        }
+        let Some(mode) = output.current_mode() else {
+            return Vec::new();
+        };
+        let geometry = (mode.size, output_scale(output));
+        let mut jobs = Vec::new();
+        for session in &mut self.sessions {
+            let ours = matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output));
+            if !ours
+                || !session.pending
+                || session.stopped
+                || session.geometry != Some(geometry)
+                || (pointer_here && !session.paint_cursors)
+            {
+                continue;
+            }
+            let Some(frame) = session.frame.clone() else {
+                continue;
+            };
+            let buffer = frame
+                .data::<FrameData>()
+                .and_then(|data| data.state.lock().unwrap().buffer.clone());
+            let Some(buffer) = buffer else {
+                continue;
+            };
+            let (size, scale) = geometry;
+            let tracker = session
+                .tracker
+                .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
+            let damage = match tracker.damage_output(1, elements) {
+                Ok((damage, _)) => Some(damage.cloned().unwrap_or_default()),
+                Err(err) => {
+                    warn!(?err, "capture: damage tracking failed");
+                    None
+                }
+            };
+            session.composited = true;
+            let damage = match damage {
+                Some(damage) if session.captured_once => {
+                    if damage.is_empty() {
+                        continue;
+                    }
+                    damage
+                }
+                Some(_) => vec![Rectangle::from_size(size)],
+                None => {
+                    session.tracker = None;
+                    vec![Rectangle::from_size(size)]
+                }
+            };
+            jobs.push(Composited {
+                buffer,
+                size,
+                scale,
+                resource: session.resource.clone(),
+                frame,
+                damage,
+            });
+        }
+        jobs
     }
 
     /// Offscreen textures kept, for tests (`Pila::state_json`).
@@ -218,6 +309,10 @@ pub struct Session {
     pending: bool,
     captured_once: bool,
     stopped: bool,
+    /// The frame its output just composited filled or checked its pending
+    /// frame in this event-loop iteration (`Captures::take_composited`):
+    /// `process_captures` leaves it.
+    composited: bool,
 }
 
 /// A frame's buffer, damage and whether `capture` was sent.
@@ -355,7 +450,10 @@ impl Pila {
             return;
         }
         let mut sessions = std::mem::take(&mut self.capture.sessions);
-        for session in sessions.iter_mut().filter(|s| s.pending) {
+        for session in sessions.iter_mut() {
+            if std::mem::take(&mut session.composited) || !session.pending {
+                continue;
+            }
             self.process_capture(session);
             if let Some(started) = self.capture.building.take() {
                 self.record_capture(started.elapsed());
@@ -493,7 +591,11 @@ impl Pila {
             }
         };
 
-        let copied = match copy_frame(renderer, &buffer, capture, size, scale, &elements, clear) {
+        let source = Source::Elements {
+            elements: &elements,
+            clear,
+        };
+        let copied = match copy_frame(renderer, &buffer, capture, size, scale, source) {
             Ok(copied) => copied,
             Err(err) => {
                 session.start_over();
@@ -503,8 +605,22 @@ impl Pila {
         };
         session.pending = false;
         session.captured_once = true;
-        let (hi, lo, nanos) = split_timestamp(self.presented_at(shown_on.as_ref()).into());
         let resource = session.resource.clone();
+        self.send_copied(resource, frame, damage, copied, shown_on.as_ref());
+    }
+
+    /// Send a copied frame's events once the copy is complete: its damage,
+    /// presentation time and `ready`; or, if the copy failed on the GPU,
+    /// `failed`, starting its session over.
+    fn send_copied(
+        &mut self,
+        resource: ExtImageCopyCaptureSessionV1,
+        frame: ExtImageCopyCaptureFrameV1,
+        damage: Vec<Rectangle<i32, Physical>>,
+        copied: Copied,
+        shown_on: Option<&Output>,
+    ) {
+        let (hi, lo, nanos) = split_timestamp(self.presented_at(shown_on).into());
         let wanted = frame.clone();
         self.when_copied(
             copied,
@@ -526,6 +642,35 @@ impl Pila {
                 frame.ready();
             },
         );
+    }
+
+    /// A capture `take_composited` gave for `output` was copied (or not).
+    pub(crate) fn finish_composited(
+        &mut self,
+        job: Composited,
+        copied: Result<Copied, CopyError>,
+        output: &Output,
+    ) {
+        let Some(session) = self
+            .capture
+            .sessions
+            .iter_mut()
+            .find(|s| s.resource == job.resource)
+        else {
+            return;
+        };
+        session.composited = false;
+        let copied = match copied {
+            Ok(copied) => copied,
+            Err(err) => {
+                session.start_over();
+                session.fail(copy_failure(err));
+                return;
+            }
+        };
+        session.pending = false;
+        session.captured_once = true;
+        self.send_copied(job.resource, job.frame, job.damage, copied, Some(output));
     }
 
     /// When a frame copied now shows on `output`: copies follow the frame
@@ -677,19 +822,51 @@ pub(crate) fn copy_frame(
     capture: &mut Captures,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement],
-    clear: [f32; 4],
+    source: Source<'_>,
 ) -> Result<Copied, CopyError> {
     match buffer_type(buffer) {
         Some(BufferType::Shm) => {
             let textures = &mut capture.shm_textures;
-            copy_to_shm(renderer, textures, buffer, size, scale, elements, clear)
+            copy_to_shm(renderer, textures, buffer, size, scale, source)
         }
         Some(BufferType::Dma) => {
             let dmabuf = capture.dmabuf.as_ref();
-            render_to_dmabuf(renderer, buffer, dmabuf, size, scale, elements, clear)
+            render_to_dmabuf(renderer, buffer, dmabuf, size, scale, source)
         }
         _ => Err(CopyError::Constraints),
+    }
+}
+
+/// How a copy draws its frame into the buffer it fills, all of it, top row
+/// first (`Transform::Normal`).
+pub(crate) enum Source<'a> {
+    /// Render these elements over `clear`, as the backends draw an output.
+    Elements {
+        elements: &'a [PilaRenderElement],
+        clear: [f32; 4],
+    },
+    /// Some other way: the frame a DRM output just composited, blitted
+    /// (`udev/draw.rs`). The error is logged.
+    Draw(&'a mut dyn FnMut(&mut GlesRenderer, &mut GlesTarget<'_>) -> Result<SyncPoint, String>),
+}
+
+/// Draw `source` into `target`, of `size` at `scale`.
+fn draw(
+    renderer: &mut GlesRenderer,
+    target: &mut GlesTarget<'_>,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    source: Source<'_>,
+) -> Result<SyncPoint, CopyError> {
+    match source {
+        Source::Elements { elements, clear } => {
+            let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
+            tracker
+                .render_output(renderer, target, 0, elements, clear)
+                .map(|result| result.sync)
+                .map_err(|e| render_error(&e))
+        }
+        Source::Draw(draw) => draw(renderer, target).map_err(CopyError::Render),
     }
 }
 
@@ -724,15 +901,14 @@ fn render_error(err: &dyn std::fmt::Debug) -> CopyError {
     CopyError::Render(render::error_text(err))
 }
 
-/// Render `elements` into the client's dma-buf: no copy through the CPU.
+/// Draw `source` into the client's dma-buf: no copy through the CPU.
 fn render_to_dmabuf(
     renderer: &mut GlesRenderer,
     buffer: &WlBuffer,
     offered: Option<&DmabufTarget>,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement],
-    clear: [f32; 4],
+    source: Source<'_>,
 ) -> Result<Copied, CopyError> {
     let mut dmabuf = get_dmabuf(buffer)
         .map_err(|_| CopyError::Constraints)?
@@ -746,30 +922,26 @@ fn render_to_dmabuf(
     }
     let mut target = renderer.bind(&mut dmabuf).map_err(|e| render_error(&e))?;
     // Drawn like a DRM output's buffer: top row first, so `Normal`.
-    let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
-    let result = tracker
-        .render_output(renderer, &mut target, 0, elements, clear)
-        .map_err(|e| render_error(&e))?;
+    let sync = draw(renderer, &mut target, size, scale, source)?;
     // The client reads it as soon as it gets `ready`: once the GPU is done.
-    if let Some(fence) = result.sync.export() {
+    if let Some(fence) = sync.export() {
         return Ok(Copied::InFlight {
             fence,
             finish: Box::new(|_| Ok(())),
         });
     }
-    result.sync.wait().map_err(|e| render_error(&e))?;
+    sync.wait().map_err(|e| render_error(&e))?;
     Ok(Copied::Done)
 }
 
-/// Render `elements` offscreen and copy the pixels into the shm `buffer`.
+/// Draw `source` offscreen and copy the pixels into the shm `buffer`.
 fn copy_to_shm(
     renderer: &mut GlesRenderer,
     textures: &mut Vec<GlesTexture>,
     buffer: &WlBuffer,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
-    elements: &[PilaRenderElement],
-    clear: [f32; 4],
+    source: Source<'_>,
 ) -> Result<Copied, CopyError> {
     let (w, h) = (size.w, size.h);
     let format = with_buffer_contents(buffer, |_, _, data| {
@@ -793,11 +965,9 @@ fn copy_to_shm(
             .map_err(|e| render_error(&e))?,
     };
     let mut target = renderer.bind(&mut texture).map_err(|e| render_error(&e))?;
-    let mut tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
-    // The read-back below comes after the drawing in the same context.
-    tracker
-        .render_output(renderer, &mut target, 0, elements, clear)
-        .map_err(|e| render_error(&e))?;
+    // The read-back below comes after the drawing in the same context: no
+    // need to wait for it.
+    let _ = draw(renderer, &mut target, size, scale, source)?;
     let region = Rectangle::from_size((w, h).into());
     let (mapping, swap_rb) = match renderer.copy_framebuffer(&target, region, wanted) {
         Ok(mapping) => (mapping, false),
@@ -1043,6 +1213,7 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     pending: false,
                     captured_once: false,
                     stopped: false,
+                    composited: false,
                 };
                 match state.capture_geometry(&session.target, None) {
                     Some(geometry) => {
@@ -1096,6 +1267,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
                     pending: false,
                     captured_once: false,
                     stopped: false,
+                    composited: false,
                 };
                 session.stop();
                 state.capture.sessions.push(session);
