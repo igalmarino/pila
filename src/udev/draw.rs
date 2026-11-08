@@ -280,9 +280,16 @@ pub(super) fn frame_finish(
     let Some(drm_output) = &mut surface.drm_output else {
         return;
     };
+    // With adaptive sync the period varies: clients are given the shortest,
+    // the mode's (wp-presentation's "fastest rate").
+    let refresh = if drm_output.with_compositor(|c| c.vrr_enabled()) {
+        Refresh::Variable(frame_duration)
+    } else {
+        Refresh::fixed(frame_duration)
+    };
     match drm_output.frame_submitted() {
         Ok(Some(Some(mut feedback))) => {
-            feedback.presented(time, Refresh::fixed(frame_duration), seq, flags);
+            feedback.presented(time, refresh, seq, flags);
         }
         Ok(_) => {}
         Err(err) => warn!(?err, "frame submission failed"),
