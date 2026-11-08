@@ -497,7 +497,10 @@ Key flows and invariants:
   and the client gets `failed`. Disabling a head
   (`disable_output`) clears its CRTC, removes its global and runs `output_removed`; the
   `OutputSurface` stays so the head is still listed; `enable_output` is the reverse (also
-  used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`.
+  used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`, after
+  checking the connector can do it (a CRTC takes it either way); what `[[output]]` asks is kept
+  in `OutputSurface::adaptive_sync` and set again whenever the CRTC is set up again (powered
+  on, enabled: `apply_vrr`), as gamma is.
 - **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
   surface state (`BlurRegion`, committed by Smithay); `Pila::scene` evaluates it per
   layer surface into `SceneLayer::blur` (upper layers only for now) and per window into

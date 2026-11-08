@@ -521,6 +521,7 @@ pub(super) fn connector_connected(
             gamma_pending: None,
             gamma_in_flight: false,
             recovery: Recovery::default(),
+            adaptive_sync: false,
         },
     );
     if !enabled {
@@ -542,7 +543,8 @@ pub(super) fn connector_connected(
         y,
         "output connected"
     );
-    if let (Some(on), Some(Backend::Udev(data))) = (output_config.adaptive_sync, &state.backend) {
+    if let (Some(on), Some(Backend::Udev(data))) = (output_config.adaptive_sync, &mut state.backend)
+    {
         set_vrr(data, crtc, on);
     }
     state.refit_maximized();
@@ -584,6 +586,7 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     surface.frame_pending = false;
     surface.redraw_needed = true;
     surface.recovery = Recovery::default();
+    apply_vrr(surface);
     surface.global = Some(surface.output.create_global::<Pila>(&state.display_handle));
     let output = surface.output.clone();
     let loc = output.current_location();
@@ -610,6 +613,7 @@ pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
     surface.frame_pending = false;
     surface.gamma_in_flight = false;
     surface.lock_frame = LockFrame::None;
+    surface.last_vblank = None;
     let output = surface.output.clone();
     if let Some(global) = surface.global.take() {
         crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
@@ -619,28 +623,44 @@ pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
     state.output_removed(&output);
 }
 
-/// Turn variable refresh rate on or off where the monitor supports it.
-pub(super) fn set_vrr(data: &UdevData, crtc: crtc::Handle, on: bool) {
-    let Some(surface) = data.outputs.get(&crtc) else {
+/// Turn variable refresh rate on or off where the monitor supports it,
+/// now and whenever the CRTC is set up again (powered on, enabled).
+pub(super) fn set_vrr(data: &mut UdevData, crtc: crtc::Handle, on: bool) {
+    let Some(surface) = data.outputs.get_mut(&crtc) else {
         return;
     };
+    surface.adaptive_sync = on;
+    apply_vrr(surface);
+}
+
+/// Bring the CRTC's adaptive sync to what `[[output]]` asks for. A CRTC
+/// may take it while the monitor can't do it (`vrr_capable`, off in a
+/// monitor's own menu too): that's checked first.
+pub(super) fn apply_vrr(surface: &OutputSurface) {
     let Some(drm_output) = &surface.drm_output else {
         return;
     };
+    let on = surface.adaptive_sync;
     let result = drm_output.with_compositor(|c| {
         if c.vrr_enabled() == on {
-            return Ok(());
+            return Ok(false);
         }
-        c.use_vrr(on)
+        if on
+            && matches!(
+                c.vrr_supported(surface.connector),
+                Ok(VrrSupport::NotSupported) | Err(_)
+            )
+        {
+            return Err(None);
+        }
+        c.use_vrr(on).map(|()| true).map_err(Some)
     });
+    let name = surface.output.name();
     match result {
-        Ok(()) => {}
-        Err(err) => debug!(
-            name = surface.output.name(),
-            ?err,
-            on,
-            "couldn't set adaptive sync"
-        ),
+        Ok(true) => info!(name, on, "adaptive sync set"),
+        Ok(false) => {}
+        Err(None) => info!(name, "adaptive sync not supported by the monitor"),
+        Err(Some(err)) => warn!(name, ?err, on, "couldn't set adaptive sync"),
     }
 }
 

@@ -166,6 +166,9 @@ struct OutputSurface {
     /// Frames that failed at the DRM level (`recovery.rs`): drawing waits
     /// for a retry instead of failing again on every event.
     recovery: Recovery,
+    /// Adaptive sync as `[[output]]` asks for it, set again whenever the
+    /// CRTC is set up again (`outputs::apply_vrr`).
+    adaptive_sync: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -345,6 +348,8 @@ impl UdevData {
             surface.frame_pending = false;
             surface.gamma_in_flight = false;
             surface.lock_frame = LockFrame::None;
+            // The vblanks of the dark gap aren't missed refreshes.
+            surface.last_vblank = None;
             if let Err(err) = drm.lock().try_to_restore_modifiers(renderer, &elements) {
                 debug!(?err, "couldn't restore modifiers after powering off");
             }
@@ -362,6 +367,7 @@ impl UdevData {
         surface.redraw_needed = true;
         surface.recovery = Recovery::default();
         info!(name, "output powered on");
+        outputs::apply_vrr(surface);
         self.reapply_gamma(crtc);
         self.queue_redraw();
         true
