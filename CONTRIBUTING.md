@@ -44,8 +44,6 @@ container. (The author's host is Arch, with pila as its only desktop.)
   `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
   against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
 - Claude Code (native install) with auth and history persisted across rebuilds
-- An egress firewall so Claude Code can only reach what `.devcontainer/allowed-domains.txt` lists
-  (crates.io, GitHub, Anthropic, docs.rs, Arch's sites and what the tools need)
 
 The container follows the session it's entered from: entered from a pila session
 (`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME (or any
@@ -111,8 +109,8 @@ scripts/dev claude    # Claude Code inside the container
 scripts/dev cargo build
 ```
 
-The startup log should show `OK: host Wayland socket mounted`, `OK: GPU render node
-available` and `Firewall ready`.
+The startup log should show `OK: host Wayland socket mounted` and `OK: GPU render node
+available`.
 
 ### 3. Smoke test
 
@@ -130,7 +128,7 @@ cargo run                  # nested pila, with a terminal inside
 Run `claude` (or `scripts/dev claude`) and sign in. If the browser login completes but the
 terminal never notices, paste the code shown in the browser at the prompt.
 
-`CLAUDE.md` gives Claude the project context: nested development, no root, firewall, and the
+`CLAUDE.md` gives Claude the project context: nested development, no root, and the
 commands to use. To pre-approve routine commands, create `.claude/settings.json`:
 
 ```json
@@ -150,22 +148,18 @@ commands to use. To pre-approve routine commands, create `.claude/settings.json`
 }
 ```
 
-Because the container is non-root with the firewall on, you can run
-`claude --dangerously-skip-permissions` for unattended work. Claude can still edit anything in
-this folder (it's your real checkout) and reach anything on the allowlist, so only do this with
-code you trust and commit often.
+The container is non-root, but its network access is unrestricted. With
+`claude --dangerously-skip-permissions` Claude can edit anything in this folder (it's your real
+checkout) and reach any host, so only do this with code you trust and commit often.
 
 ### Container configuration
 
 | What | Where |
 | - | - |
 | Add system packages | `pacman` line in `.devcontainer/Dockerfile`, then rebuild |
-| Allow another domain | `.devcontainer/allowed-domains.txt`, then rebuild |
-| Start without the firewall | `export DEVCONTAINER_FIREWALL=0` on the host before starting |
-| Full passwordless sudo | `FULL_SUDO` build arg in `devcontainer.json` (lets anything in the container disable the firewall) |
+| Full passwordless sudo | `FULL_SUDO` build arg in `devcontainer.json` (lets anything in the container act as root) |
 
-The `dev` user can only `sudo` the firewall script, and the allowlist is baked into the image.
-That's deliberate: nothing running inside, Claude included, can widen its own network access.
+The `dev` user has no `sudo` unless `FULL_SUDO` is set.
 
 ### Troubleshooting
 
@@ -185,12 +179,5 @@ That's deliberate: nothing running inside, Claude included, can widen its own ne
   Docker.
 - **`eglinfo` shows llvmpipe.** `/dev/dri` isn't passed through, or (NVIDIA) the container
   toolkit isn't set up.
-- **A site you need is blocked.** Add it to `allowed-domains.txt` and rebuild.
-- **An allowlisted CDN domain (crates.io, docs.rs) fails intermittently.** The firewall allows
-  IPs, and CDNs rotate theirs every ~60s. A background loop adds the current IPs every 30s
-  (log: `/tmp/firewall-refresh.log`), so retrying after half a minute usually works. To force
-  it, run `sudo /usr/local/bin/init-firewall.sh --refresh`, or rerun the script without
-  arguments to rebuild the firewall; both are safe while it's active (a failed rebuild keeps
-  the previous rules).
 - **Super-key shortcuts go to GNOME.** When testing pila nested on GNOME, GNOME grabs Super.
   Nested pila uses Alt as Mod by default for that reason.

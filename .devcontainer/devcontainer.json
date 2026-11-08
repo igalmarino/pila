@@ -14,9 +14,6 @@
   "updateRemoteUserUID": true,
 
   "runArgs": [
-    // Needed by init-firewall.sh (egress allowlist).
-    "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW",
     // GPU for EGL/GLES rendering (Intel/AMD via Mesa).
     "--device=/dev/dri"
   ],
@@ -46,9 +43,7 @@
     "WAYLAND_DISPLAY": "/run/host-wayland/wayland-0",
     // Private runtime dir where your compositor creates its own socket.
     "XDG_RUNTIME_DIR": "/tmp/xdg-runtime",
-    "RUST_BACKTRACE": "1",
-    // Set DEVCONTAINER_FIREWALL=0 on the host to start without the firewall.
-    "ENABLE_FIREWALL": "${localEnv:DEVCONTAINER_FIREWALL:1}"
+    "RUST_BACKTRACE": "1"
   },
 
   // Makes a socket for the current session in the mounted directory

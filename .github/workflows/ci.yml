@@ -56,7 +56,7 @@ jobs:
             scripts/coverage scripts/dev scripts/install scripts/layer-namespaces scripts/link-wayland \
             scripts/report scripts/tty \
             scripts/uninstall resources/session/pila-session \
-            .devcontainer/post-start.sh .devcontainer/init-firewall.sh
+            .devcontainer/post-start.sh
       - name: Python scripts
         run: |
           python3 -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' \

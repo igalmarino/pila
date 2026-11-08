@@ -30,12 +30,6 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 - You can't see the screen. Ask the user to confirm anything visual.
 - No root and no package manager access. If a system library or tool is missing, say
   which Arch package is needed so the user can add it to `.devcontainer/Dockerfile`.
-- Outbound network is allowlisted (crates.io, GitHub, Anthropic, docs.rs, Arch's forum, AUR
-  and wiki). Other hosts fail.
-  New domains go in `.devcontainer/allowed-domains.txt` (user must rebuild the container).
-  The firewall allows IPs; CDN-hosted domains (crates.io, docs.rs) rotate theirs, and a
-  background loop adds new ones every 30s. A `cargo` "could not connect" usually clears after
-  ~30s; if not, ask the user to run `! sudo /usr/local/bin/init-firewall.sh --refresh`.
 
 ## Commands
 
