@@ -323,6 +323,20 @@ own screenshot features.
 file chooser, for instance). Pila installs their configuration for a Pila session. When an app
 asks to share, the pointer becomes a crosshair: click the monitor to share (this uses `slurp`).
 
+**Sharing a single window** needs a menu to pick it from, since `slurp` can only click
+monitors. With `fuzzel` installed (`wofi`, `rofi`, `bemenu` or `wmenu` work too), copy
+`/etc/xdg/xdg-desktop-portal-wlr/pila` to `~/.config/xdg-desktop-portal-wlr/pila` if it isn't
+there yet, change its two `chooser_` lines to:
+
+```ini
+chooser_type=dmenu
+chooser_cmd=fuzzel -d -l 10 -p 'Select a source to share: '
+```
+
+and restart the portal (`systemctl --user restart xdg-desktop-portal-wlr`, or log out and back
+in). The menu then lists monitors and windows. A shared window keeps updating while it's
+covered, minimized or on another workspace.
+
 Screen sharing needs the session's D-Bus bus, which the login screen and `pila-session` set up;
 a nested Pila doesn't have it.
 
