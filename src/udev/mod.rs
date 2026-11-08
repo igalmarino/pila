@@ -64,8 +64,9 @@ mod draw;
 mod gamma;
 mod input;
 mod outputs;
+mod recovery;
 
-use self::{draw::*, gamma::*, input::*, outputs::*};
+use self::{draw::*, gamma::*, input::*, outputs::*, recovery::Recovery};
 pub use outputs::apply_output_config;
 
 use crate::{
@@ -77,9 +78,6 @@ use crate::{
     render::{self, PilaRenderElement},
     Pila,
 };
-
-/// How long to wait before trying to draw again after a DRM-level failure.
-const RECOVERY_DELAY: Duration = Duration::from_millis(100);
 
 /// 8-bit formats only: widely supported, and what clients expect.
 const COLOR_FORMATS: [Fourcc; 4] = [
@@ -118,10 +116,6 @@ pub struct UdevData {
     cursor_theme: CursorTheme,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
-    /// A frame failed at the DRM level (typically: not DRM master yet after
-    /// a VT switch); rendering waits for `recover` instead of retrying on
-    /// every event.
-    recovering: bool,
     loop_handle: LoopHandle<'static, Pila>,
     /// Last: see the struct docs.
     pub session: LibSeatSession,
@@ -158,6 +152,9 @@ struct OutputSurface {
     /// The gamma ramps a client set (`gamma_control.rs`), re-applied
     /// whenever the CRTC is set up again.
     gamma: Option<Vec<u16>>,
+    /// Frames that failed at the DRM level (`recovery.rs`): drawing waits
+    /// for a retry instead of failing again on every event.
+    recovery: Recovery,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -189,25 +186,33 @@ impl UdevData {
         }
     }
 
-    /// A frame failed at the DRM level: try again shortly, once, instead of
-    /// on every client event until it works.
-    fn schedule_recovery(&mut self) {
-        if self.recovering {
-            return;
-        }
-        self.recovering = true;
-        let timer = Timer::from_duration(RECOVERY_DELAY);
-        let _ = self.loop_handle.insert_source(timer, |_, _, state| {
+    /// A frame on `crtc` failed at the DRM level: draw it again after
+    /// `delay` (`Recovery::failed`), taking DRM master first in case that
+    /// was it. The other outputs go on meanwhile.
+    fn schedule_recovery(&mut self, crtc: crtc::Handle, delay: Duration) {
+        let timer = Timer::from_duration(delay);
+        let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
             if let Some(Backend::Udev(data)) = &mut state.backend {
-                data.recovering = false;
                 data.take_master();
-                for surface in data.outputs.values_mut() {
+                if let Some(surface) = data.outputs.get_mut(&crtc) {
+                    surface.recovery.retry();
                     surface.redraw_needed = true;
                 }
+                if !data.redraw_scheduled {
+                    data.redraw_scheduled = true;
+                    data.loop_handle.insert_idle(render_all);
+                }
             }
-            state.queue_redraw();
             TimeoutAction::Drop
         });
+        if let Err(err) = inserted {
+            // Without a timer the output would wait forever: retry on the
+            // next redraw instead.
+            warn!(err = %err.error, "can't schedule a retry for an output");
+            if let Some(surface) = self.outputs.get_mut(&crtc) {
+                surface.recovery.retry();
+            }
+        }
     }
 
     pub fn update_leds(&mut self, leds: LedState) {
@@ -330,6 +335,7 @@ impl UdevData {
                 surface.drm_output = Some(drm_output);
                 surface.frame_pending = false;
                 surface.redraw_needed = true;
+                surface.recovery = Recovery::default();
                 info!(name, "output powered on");
             }
             Err(err) => {
@@ -564,10 +570,12 @@ pub fn init_udev(
                     if let Err(err) = data.drm.lock().activate(true) {
                         error!(?err, "failed to resume the DRM device");
                     }
-                    data.recovering = false;
                     let crtcs: Vec<_> = data.outputs.keys().copied().collect();
                     for crtc in crtcs {
-                        data.outputs.get_mut(&crtc).expect("listed").frame_pending = false;
+                        let surface = data.outputs.get_mut(&crtc).expect("listed");
+                        surface.frame_pending = false;
+                        // Failures while away were for lack of DRM master.
+                        surface.recovery = Recovery::default();
                         // Another VT may have changed the LUTs.
                         data.reapply_gamma(crtc);
                     }
@@ -611,7 +619,6 @@ pub fn init_udev(
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
         redraw_scheduled: false,
-        recovering: false,
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),

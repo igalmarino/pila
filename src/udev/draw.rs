@@ -33,7 +33,7 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         || !surface.redraw_needed
         || surface.drm_output.is_none()
         || !data.session.is_active()
-        || data.recovering
+        || surface.recovery.blocks_render()
     {
         return;
     }
@@ -91,7 +91,8 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         FrameFlags::DEFAULT,
     );
     let cursor_wl_surface = input.cursor_wl_surface();
-    let mut recover = false;
+    // What failed at the DRM level, and how.
+    let mut failure: Option<(&str, String)> = None;
     match rendered {
         Ok(result) => {
             frame::update_primary_outputs(scene, cursor_wl_surface, &output, &result.states);
@@ -106,9 +107,8 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
                         }
                     }
                     Err(err) => {
-                        warn!(?err, "failed to queue frame");
                         surface.redraw_needed = true;
-                        recover = true;
+                        failure = Some(("queue", format!("{err:?}")));
                     }
                 }
             } else if scene.locked {
@@ -117,17 +117,35 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
             }
         }
         Err(err) => {
-            warn!(?err, "failed to render frame");
             surface.redraw_needed = true;
-            recover = true;
+            failure = Some(("render", format!("{err:?}")));
         }
     }
     if !scene.locked {
         surface.lock_frame = LockFrame::None;
     }
     let queued = surface.frame_pending;
-    if recover {
-        data.schedule_recovery();
+    let mut retry = None;
+    if let Some((stage, err)) = failure {
+        retry = surface.recovery.failed();
+        if surface.recovery.should_log() {
+            warn!(
+                output = output.name(),
+                stage,
+                err,
+                failures = surface.recovery.failures(),
+                retry_ms = retry.map(|d| d.as_millis() as u64),
+                "frame failed; trying again later"
+            );
+        }
+    } else if queued {
+        let failures = surface.recovery.succeeded();
+        if failures > 0 {
+            info!(output = output.name(), failures, "output recovered");
+        }
+    }
+    if let Some(delay) = retry {
+        data.schedule_recovery(crtc, delay);
     }
 
     if lock_pending {

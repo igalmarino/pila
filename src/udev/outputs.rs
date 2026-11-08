@@ -312,6 +312,7 @@ pub(super) fn connector_connected(
             lock_frame: LockFrame::None,
             modes,
             gamma: None,
+            recovery: Recovery::default(),
         },
     );
     if !enabled {
@@ -384,6 +385,7 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     surface.enabled = true;
     surface.frame_pending = false;
     surface.redraw_needed = true;
+    surface.recovery = Recovery::default();
     surface.global = Some(surface.output.create_global::<Pila>(&state.display_handle));
     let output = surface.output.clone();
     let loc = output.current_location();

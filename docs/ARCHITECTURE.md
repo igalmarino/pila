@@ -104,7 +104,12 @@ Key flows and invariants:
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
-  which also sends presentation feedback with the kernel's timestamp. The session lock is
+  which also sends presentation feedback with the kernel's timestamp. A frame that fails
+  at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
+  the link's bandwidth) blocks only its own output until a per-output timer retries it
+  (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
+  a queued frame, `ActivateSession` or the output coming on; the retry takes DRM master
+  first), so one broken output never stops the others. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
   releases held keys; `ActivateSession` scans the connectors and re-applies the outputs,
   since a monitor plugged in meanwhile can't come on without DRM master (`enable_output`
