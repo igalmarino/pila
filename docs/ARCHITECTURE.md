@@ -277,6 +277,11 @@ Key flows and invariants:
   that can't take a filter but must be hidden from sandboxed clients is re-created with
   `state::Privileged` as its data (`hide_from_sandboxes`: keyboard-shortcuts-inhibit,
   idle-notify).
+- **Clients** (`state::ClientState`): each keeps its security context (sandboxed or not) and its
+  process id, read from the socket's peer credentials when it connects (`SO_PEERCRED`, no file
+  I/O). A client disconnected for a protocol error is logged as a warning with its pid and the
+  error (`ClientData::disconnected`), often the only trace of why a shell went away; a normal
+  disconnect is a debug line.
 - **Animations** (`animation.rs`, `[animations]` in the config:
   `config::AnimationsConfig`, all on by default, each a duration in ms or `false`, plus
   a global `enabled` and `speed`): short and subtle. So far a window rises and fades in

@@ -30,6 +30,8 @@
   longer inherit another compositor's sockets (`NIRI_SOCKET`, `SWAYSOCK`,
   `HYPRLAND_INSTANCE_SIGNATURE`, …), so Noctalia or Dux Shell in a pila started from niri,
   Sway or Hyprland don't drive that compositor instead.
+- **Why a client went away is in the log:** a program pila disconnects for a protocol error is
+  logged as a warning with its process id and the error.
 - **Dragging shows what you drag:** the icon an app gives a drag (a file, a tab) follows the
   pointer until the drop; pila never drew it before.
 - **Panels hidden and shown again come back:** a layer surface (panel, launcher, dock) hidden

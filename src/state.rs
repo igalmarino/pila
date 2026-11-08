@@ -463,9 +463,10 @@ impl Pila {
         let loop_handle = event_loop.handle();
         loop_handle
             .insert_source(listening_socket, |client_stream, _, state| {
+                let client_state = Arc::new(ClientState::for_stream(&client_stream));
                 if let Err(err) = state
                     .display_handle
-                    .insert_client(client_stream, Arc::new(ClientState::default()))
+                    .insert_client(client_stream, client_state)
                 {
                     warn!(?err, "failed to insert client");
                 }
@@ -1859,6 +1860,39 @@ pub struct ClientState {
     /// Set for a client that connected through a security context
     /// (`handlers/protocols.rs`): a sandboxed app (Flatpak).
     pub security_context: Option<SecurityContext>,
+    /// The client's process (its socket's peer credentials), for the log.
+    pub pid: Option<i32>,
+}
+
+impl ClientState {
+    pub fn for_stream(stream: &std::os::unix::net::UnixStream) -> Self {
+        Self {
+            pid: peer_pid(stream),
+            ..Default::default()
+        }
+    }
+}
+
+/// The process at the other end of a Unix socket (`SO_PEERCRED`).
+fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<i32> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred` and `len` describe a valid ucred buffer for the call.
+    let ret = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &mut len,
+        )
+    };
+    (ret == 0 && cred.pid > 0).then_some(cred.pid)
 }
 
 /// Whether `client` may use the privileged protocols (capturing the
@@ -1944,7 +1978,15 @@ pub fn is_privileged(client: &Client) -> bool {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        let pid = self.pid.unwrap_or(0);
+        match reason {
+            DisconnectReason::ProtocolError(err) => {
+                warn!(pid, %err, "client disconnected by a protocol error");
+            }
+            DisconnectReason::ConnectionClosed => debug!(pid, "client disconnected"),
+        }
+    }
 }
 
 #[cfg(test)]

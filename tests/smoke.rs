@@ -58,3 +58,46 @@ fn quit_binding_exits() {
     pila.combo("Super+Shift+e");
     assert!(pila.wait_exit().success());
 }
+
+/// A client that pila disconnects for a protocol error is named in pila's
+/// log, with its process id: often the only trace of why a shell went away.
+#[test]
+fn a_client_killed_by_a_protocol_error_is_logged() {
+    use std::os::fd::AsFd;
+    use wayland_protocols_wlr::gamma_control::v1::client::zwlr_gamma_control_manager_v1::ZwlrGammaControlManagerV1;
+
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let manager: ZwlrGammaControlManagerV1 = client.bind("zwlr_gamma_control_manager_v1", 1);
+    let control =
+        manager.get_gamma_control(&client.output("HEADLESS-1"), &client.qh, "gamma".into());
+    client.flush();
+    client.wait_logged("gamma", "GammaSize");
+    // A ramp of the wrong size is a protocol error (invalid_gamma).
+    let short = tempfile_with(&[0u8; 10]);
+    client.expect_error();
+    control.set_gamma(short.as_fd());
+    client.flush();
+    client.wait_error();
+    pila.wait_log(&format!(
+        "client disconnected by a protocol error pid={}",
+        std::process::id()
+    ));
+}
+
+/// A file holding `data`, already unlinked.
+fn tempfile_with(data: &[u8]) -> std::fs::File {
+    use std::io::{Seek, Write};
+    let path = std::env::temp_dir().join(format!("pila-ramp-{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    file.write_all(data).unwrap();
+    file.rewind().unwrap();
+    file
+}

@@ -14,7 +14,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 
 | Feature | Tests |
 |---|---|
-| Headless backend, control socket, state dump | `smoke::headless_pila_starts_with_one_output`, `smoke::a_window_maps_focused_and_is_drawn`, `smoke::bindings_run_from_injected_keys`, `smoke::quit_binding_exits`, `src/headless.rs::output_specs_parse` |
+| Headless backend, control socket, state dump; clients disconnected for a protocol error are logged | `smoke::headless_pila_starts_with_one_output`, `smoke::a_window_maps_focused_and_is_drawn`, `smoke::bindings_run_from_injected_keys`, `smoke::quit_binding_exits`, `src/headless.rs::output_specs_parse`, `smoke::a_client_killed_by_a_protocol_error_is_logged` |
 
 ## Command line and configuration
 

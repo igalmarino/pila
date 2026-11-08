@@ -199,7 +199,7 @@ impl SecurityContextHandler for Pila {
             .insert_source(source, move |stream, _, state| {
                 let client_state = ClientState {
                     security_context: Some(context.clone()),
-                    ..Default::default()
+                    ..ClientState::for_stream(&stream)
                 };
                 if let Err(err) = state
                     .display_handle
