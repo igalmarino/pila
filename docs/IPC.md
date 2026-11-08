@@ -1,9 +1,9 @@
 # IPC
 
-`pila msg` asks a running pila about its windows and monitors and runs actions. Other programs
+`pila msg` asks a running Pila about its windows and monitors and runs actions. Other programs
 can talk to the same socket directly.
 
-## pila msg
+## `pila msg`
 
 ```
 pila msg [--json] windows            The windows, on all workspaces
@@ -20,12 +20,12 @@ For example: `pila msg action workspace 2`, `pila msg --json windows | jq`.
 
 Without `--json` the output is for people, and may change. Scripts should use `--json`.
 
-Exit status: 0 on success, 1 if pila refused the request (it says why on stderr), 2 for wrong
-arguments, 3 if it can't talk to pila.
+Exit status: 0 on success, 1 if Pila refused the request (it says why on stderr), 2 for wrong
+arguments, 3 if it can't talk to Pila.
 
 ## The socket
 
-A Unix stream socket, for the same user only (mode 0600). Programs pila starts have its path in
+A Unix stream socket, for the same user only (mode 0600). Programs Pila starts have its path in
 `PILA_SOCKET`; otherwise it's `$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
 
 Each request is one line of JSON and gets one line of JSON back, in order. A connection can be

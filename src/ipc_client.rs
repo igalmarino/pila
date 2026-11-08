@@ -17,13 +17,13 @@ Requests:
   outputs             The monitors
   workspaces          The workspaces
   focused             The focused window
-  version             pila's version
+  version             Pila's version
   action <action>     Run an action, as in [bindings]: action workspace 2
   focus <id>          Focus a window, by its id in `windows`
   close <id>          Ask a window to close
 
 Options:
-  --json              Print pila's answer as it is (docs/IPC.md)";
+  --json              Print Pila's answer as it is (docs/IPC.md)";
 
 /// How long to wait for a pila that doesn't answer.
 const TIMEOUT: Duration = Duration::from_secs(5);

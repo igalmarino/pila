@@ -94,7 +94,7 @@ Options:
                         The headless backend's outputs,
                         NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]] separated by commas
                         (default: HEADLESS-1:1280x800@60)
-  --check-config        Check the config file (as pila would read it, the
+  --check-config        Check the config file (as Pila would read it, the
                         keymap included) and exit: 0 if it's valid, 1 if not
   -V, --version         Show the version
   -h, --help            Show this help
@@ -115,9 +115,9 @@ Environment (overrides the config file):
 
 The config file is reloaded when it changes (all but autostart).
 
-Programs pila starts get XDG_CURRENT_DESKTOP=pila and PILA_SOCKET (pila msg),
+Programs Pila starts get XDG_CURRENT_DESKTOP=pila and PILA_SOCKET (pila msg),
 and commands run by bindings PILA_OUTPUT, the name of the output under the
-pointer. On a TTY, pila
+pointer. On a TTY, Pila
 exports WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and to systemd
 --user when that's the bus), for the screen-sharing portals: run it as a login
 session (scripts/install) or under dbus-run-session (scripts/tty), with

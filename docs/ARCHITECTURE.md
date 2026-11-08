@@ -1,6 +1,6 @@
-# pila's architecture
+# Pila's architecture
 
-How pila is put together: its flows and invariants, a section per subsystem. Policies and
+How Pila is put together: its flows and invariants, a section per subsystem. Policies and
 commands are in [CLAUDE.md](../CLAUDE.md), setup in [CONTRIBUTING.md](../CONTRIBUTING.md).
 A change to a flow or invariant updates its section in the same commit.
 
@@ -8,7 +8,7 @@ Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`
 implements every Smithay handler trait. Its fields are grouped by subsystem where they go together: Smithay's
 protocol states (`Protocols`), Xwayland (`xwayland::XwaylandState`), screen capture
 (`capture::Captures`), outputs beyond the `Space` (`output_management::Outputs`), windows
-off the `Space` and their history (`Windows`), pila's own input state (`InputState`). Unlike smallvil (but like anvil), the calloop event
+off the `Space` and their history (`Windows`), Pila's own input state (`InputState`). Unlike smallvil (but like anvil), the calloop event
 loop's data is `Pila` itself (`EventLoop<'static, Pila>`, `Pila::loop_handle`), which
 Smithay modules that schedule their own timers (e.g. idle-notify) require. Core window
 management lives in `state.rs`; each feature beyond it has its own module (named in the
@@ -82,7 +82,7 @@ Key flows and invariants:
   decorations and rule props; focus, Mod+Tab, layers, outputs, pointer, lock,
   animations). A new feature exposes there what its tests need to check.
 - **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`);
-  client cursor surfaces are drawn by pila (`cursor.rs`). Winit doesn't report the pointer
+  client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer
   leaving the window, so a drawn cursor lingers at the edge. Keys held when the host takes
   focus away (e.g. GNOME's Alt+Tab) never get a release (Smithay's winit backend drops
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
@@ -100,7 +100,7 @@ Key flows and invariants:
   their spec.
 - **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
   connectors and outputs, `draw.rs` frames and vblanks, `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
-  primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. pila draws named cursors from the xcursor
+  primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
@@ -129,12 +129,12 @@ Key flows and invariants:
   direction fixed after a small move, action after a threshold, window switching stepping
   per further stretch and ending on lift), unless locked or shortcuts are inhibited.
   Output transforms (rotation) are the `Output`'s: Smithay rotates the rendered frame and
-  the `Space` swaps a turned output's logical size, so pila only sets it (and sizes output
+  the `Space` swaps a turned output's logical size, so Pila only sets it (and sizes output
   captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
   their title bars) and the cursor *before* borrowing the backend, builds elements with
   `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
-  since pila's custom shaders need `GlesFrame`), and calls the damage tracker's
+  since Pila's custom shaders need `GlesFrame`), and calls the damage tracker's
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't
   interleave title bars with windows. Afterwards `frame.rs` (backend-neutral) records each
   drawn surface's primary output from the render states, sends presentation-time feedback
@@ -166,7 +166,7 @@ Key flows and invariants:
   cursor), and reset it in `PointerGrab::unset`. Client-requested move/resize goes through
   `check_grab` (`handlers/xdg_shell.rs`), which requires a live implicit grab on that
   client's surface. Popup grabs (menus, `XdgShellHandler::grab`) use Smithay's
-  `PopupKeyboardGrab`/`PopupPointerGrab`; they are the only keyboard grabs pila takes.
+  `PopupKeyboardGrab`/`PopupPointerGrab`; they are the only keyboard grabs Pila takes.
   A popup grab ignores focus changes, so `focus_window` dismisses it first
   (`dismiss_popup_grab`), and `focused_window` resolves a focused popup to its window.
 - **Window lifecycle:** `new_toplevel` pushes the window onto `Pila::windows.unmapped` (not the
@@ -187,13 +187,13 @@ Key flows and invariants:
   pre-commit hook on every surface blocks a commit whose new dmabuf the client's GPU is
   still writing (`Dmabuf::generate_blocker`, polling its implicit fence). The commit applies
   when the fence signals (`blocker_cleared`, then `queue_redraw`), so a slow client delays
-  its own frame and never pila's. Commits of one surface still apply in order. With
+  its own frame and never Pila's. Commits of one surface still apply in order. With
   linux-drm-syncobj (explicit sync; offered where the backend has a DRM device whose kernel
   has `syncobj_eventfd`: bare metal and headless with a GPU, not nested) a commit's acquire
   point takes the place of the fence, and Smithay signals the release point when the buffer
-  is dropped. pila keeps no buffer of its own: animation snapshots are textures.
+  is dropped. Pila keeps no buffer of its own: animation snapshots are textures.
 - **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
-  on a barrier; pila signals barriers. A commit that sets one registers its surface
+  on a barrier; Pila signals barriers. A commit that sets one registers its surface
   (`commit_paced`), `post_render` signals those shown on the output just drawn, and
   `after_frames` applies what that unblocked and asks for a redraw. So a client gets at most
   one content update per refresh. A barrier a frame didn't signal in a second is signaled by a
@@ -245,7 +245,7 @@ Key flows and invariants:
   dropped from both (`forget_off_space`); both keep location and workspace in the same
   user-data record (`workspaces::leave_space`/`space_location`). Invariant: a window in the `Space` is on the
   active workspace. `switch_workspace` (refused while locked) ends Mod+Tab and popup grabs,
-  swaps the windows (a window in pila's move/resize grab comes along; other pointer
+  swaps the windows (a window in Pila's move/resize grab comes along; other pointer
   grabs, e.g. a client's DnD, are left alone), focuses the most recent one of its own there
   (`focus_arriving_window`) and refreshes pointer focus. Mod+Tab only lists the active workspace; activating a window elsewhere
   (taskbar, xdg-activation) switches first (`reveal_workspace_of`). ext-workspace
@@ -273,7 +273,7 @@ Key flows and invariants:
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`). Every Smithay protocol dispatches through its
-  user data (`Dispatch2`, one `delegate_dispatch2!(Pila)` in `state.rs`); pila's own
+  user data (`Dispatch2`, one `delegate_dispatch2!(Pila)` in `state.rs`); Pila's own
   protocols implement `Dispatch` on `Pila` with user data of their own. A Smithay global
   that can't take a filter but must be hidden from sandboxed clients is re-created with
   `state::Privileged` as its data (`hide_from_sandboxes`: keyboard-shortcuts-inhibit,
@@ -374,8 +374,8 @@ Key flows and invariants:
   in front of that window and its title bar (`SceneWindow::flash`); a timer redraws when it
   ends. Ignored while locked.
 - **Output scale** (`scale.rs`): per output from `[[output]]` (`Config::output`; nested
-  the output is `winit`, scale only), may be fractional. Every coordinate pila handles is
-  logical; `render.rs` gets the scale per output (`scale::output_scale`). pila's own
+  the output is `winit`, scale only), may be fractional. Every coordinate Pila handles is
+  logical; `render.rs` gets the scale per output (`scale::output_scale`). Pila's own
   textures (title bar buttons and text, xcursor images) are rasterized at the scale rounded
   up (`scale::buffer_scale`) and cached per scale. Clients get fractional-scale and
   `preferred_buffer_scale` (wl_compositor v6) after every frame (`update_surface_scales`
@@ -422,7 +422,7 @@ Key flows and invariants:
   when binding it fails.
 - **Screencopy** (`screencopy.rs`, wlr-screencopy v3, for clients that predate
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
-  output-local); pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
+  output-local); Pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
   after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
@@ -490,21 +490,21 @@ Key flows and invariants:
   an opaque one (`SceneWindow::covers`) isn't prepared, but keeps its entry. Shaders are
   compiled by `render::warm_up`, kept in the EGL context; a failure disables blur.
 - **Session environment** (`Pila::spawn`, `start_session`): children get `WAYLAND_DISPLAY`,
-  pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila`, `XDG_SESSION_TYPE=wayland`
+  Pila's Xwayland `DISPLAY`, `XDG_CURRENT_DESKTOP=pila`, `XDG_SESSION_TYPE=wayland`
   and `PILA_SOCKET` (`ipc.rs`); `spawn` adds `PILA_OUTPUT`, the output under the pointer.
   Other compositors' IPC sockets and markers (`OTHER_COMPOSITORS_ENV`: `NIRI_SOCKET`,
-  `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`, …) are removed, for a pila started from inside
+  `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`, …) are removed, for a Pila started from inside
   another session: shells such as Noctalia and Dux Shell pick their compositor backend by them.
   Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
   which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
   `~/.config/xdg-desktop-portal-wlr/` or `/etc/xdg` (xdpw ignores `XDG_CONFIG_DIRS`;
-  `scripts/install` puts both in `/etc/xdg`). On a TTY, before the startup programs, pila
+  `scripts/install` puts both in `/etc/xdg`). On a TTY, before the startup programs, Pila
   exports that environment to the D-Bus session bus (`export_environment`): on the systemd
   user bus (a login session) also to `systemd --user`, which starts the portals and
   pipewire there (`--systemd`); on a private bus (`scripts/tty`, `dbus-run-session`) the
   bus alone, so a test instance leaves the login session's services alone. The export
-  runs in the background (a stuck bus mustn't freeze pila); the startup programs follow
+  runs in the background (a stuck bus mustn't freeze Pila); the startup programs follow
   when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals. Spawned
   programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`); the
   signal source is created first thing in `main`, before any thread, so no thread can
@@ -526,7 +526,7 @@ Key flows and invariants:
   Until placed, `session_output` is the window's output for its scale and fill size. Saved
   to `$XDG_STATE_HOME/pila/sessions.json` by a thread (a second after a change, and at exit,
   `finish_sessions`), at most `MAX_SESSIONS`, empty ones going first; nested, and in a second
-  pila on the same state (`take_sessions_lock`, a `scripts/tty` next to the login session),
+  Pila on the same state (`take_sessions_lock`, a `scripts/tty` next to the login session),
   only in memory (`load_and_persist`). What a client can leave there is bounded
   (`MAX_TOPLEVELS`, `MAX_NAME_BYTES`, `MAX_CLIENT_SESSIONS`).
   Not `is_privileged`: it only touches the client's own windows. X11 windows and clients
@@ -541,7 +541,7 @@ Key flows and invariants:
   input or focus path must respect `is_locked()`. The lock is confirmed (`confirm_lock`)
   only after a full locked frame is submitted. `unlock` defers to `finish_unlock`, which only
   unlocks once the holder's lock object is gone (Smithay 0.7 called `unlock()` even for a
-  rogue client's `unlock_and_destroy`; its main branch checks the lock, and pila still does). A dead locker leaves the session locked;
+  rogue client's `unlock_and_destroy`; its main branch checks the lock, and Pila still does). A dead locker leaves the session locked;
   a new locker may take over.
 - **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event calls
   `notify_activity`; Smithay runs the notification timers on `loop_handle`. Idle inhibitors
@@ -555,7 +555,7 @@ Key flows and invariants:
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::input.host_pointer`); a DRM backend sends real relative motion through the same
   checks.
-- **X11** (`xwayland.rs`, `focus.rs`): pila starts Xwayland at launch and runs Smithay's
+- **X11** (`xwayland.rs`, `focus.rs`): Pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
   waits for X (`pending_startup`). If it dies (`XwmHandler::disconnected`, `xwayland_gone`) its
   windows go, nothing else gets its `DISPLAY` and it's started again, at most `MAX_RESTARTS`
@@ -564,7 +564,7 @@ Key flows and invariants:
   `wl_surface()`, `fill_state`, `close_window`, `focus_target`, and branch on
   `x11_surface()` where X11 differs. Keyboard focus is `focus::KeyboardFocus` (Wayland
   surface or X11 window, so Smithay sets the X input focus); compare surfaces through
-  `Pila::keyboard_focus()`. Whenever pila moves a managed X11 window it must tell X
+  `Pila::keyboard_focus()`. Whenever Pila moves a managed X11 window it must tell X
   (`x11_window_moved`); focusing raises it in X too. Where X has a window, and the size it
   was configured to, is `X11Surface::last_configure()`; `geometry()` is only its visible
   area within its buffer (minus `_GTK_FRAME_EXTENTS`). A window that maps hidden (Smithay
@@ -584,7 +584,7 @@ Key flows and invariants:
   move/resize/center go through `apply_rect`, which also configures X11 windows.
   `Side` also names the four quarters (`snap-top-left`, ... or a drag near a corner:
   `edge_target`); a quarter is tiled only on the edges it touches.
-- **Window menu** (`window_menu.rs`): opened by a right press on pila's title bar
+- **Window menu** (`window_menu.rs`): opened by a right press on Pila's title bar
   (`on_decoration_press`, at the pointer rounded down, so the pointer is inside it) or by
   `show_window_menu` (checked like a move request, `check_grab`, or with the serial of that
   client's last press within a second, `recent_press`: GTK asks after the release of a quick
@@ -637,7 +637,7 @@ Key flows and invariants:
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit; a window that
   started filled (no saved geometry) is restored to two thirds of its output, centered.
-- **Decorations** (`decoration.rs`): pila prefers server-side and honors client requests
+- **Decorations** (`decoration.rs`): Pila prefers server-side and honors client requests
   (`handlers/xdg_shell.rs`); clients that don't bind xdg-decoration (GTK, weston) draw
   their own. A decorated window's `Space` location is still its geometry origin; the title
   bar (`TITLE_BAR_HEIGHT`) sits above it and an invisible resize border surrounds both.

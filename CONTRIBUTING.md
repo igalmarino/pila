@@ -1,8 +1,8 @@
-# Contributing to pila
+# Contributing to Pila
 
 Bug reports, testing on other hardware and distros, and patches are welcome. For a bug,
-open an issue with the bug report form; it asks for what helps most (pila's version, your
-GPU and distro, how pila was started, and the log).
+open an issue with the bug report form; it asks for what helps most (Pila's version, your
+GPU and distro, how Pila was started, and the log).
 
 ## Conventions
 
@@ -17,10 +17,10 @@ GPU and distro, how pila was started, and the log).
 - Before sending a change: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and
   `cargo test` (CI runs them too, plus `shellcheck` on the scripts; builds on Debian, Ubuntu
   and Fedora run when dependencies or packaging change, and weekly). Every feature gets integration tests (`tests/*.rs`, on a
-  headless pila; a new test goes into `tests/FEATURES.md`), and unit tests cover pure
+  headless Pila; a new test goes into `tests/FEATURES.md`), and unit tests cover pure
   logic. What those can't reach is tried by hand: how things look nested (`cargo run`),
   and the DRM/KMS backend on a TTY (`scripts/tty`). `scripts/check` is a smoke and
-  performance run with real programs, judged from pila's log, frame statistics included:
+  performance run with real programs, judged from Pila's log, frame statistics included:
   `--nested` from the dev container, plain from a TTY. A feature adds a scenario there
   only if it's bare-metal only or puts load on rendering.
 - Small commits, each one building and passing the tests. Keep `config.example.toml`, the
@@ -31,13 +31,13 @@ render loop, and how each protocol and feature is wired.
 
 ## Development environment
 
-pila is developed in a dev container on any Linux host with Docker, from inside pila itself
+Pila is developed in a dev container on any Linux host with Docker, from inside Pila itself
 (or another desktop, kept as a fallback session), with **Claude Code** running inside the
-container. (The author's host is Arch, with pila as its only desktop.)
+container. (The author's host is Arch, with Pila as its only desktop.)
 
 - An Arch Linux image with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and
-  every library pila needs (winit, DRM/KMS, libinput)
-- pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
+  every library Pila needs (winit, DRM/KMS, libinput)
+- Pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
   (`/dev/dri`) are passed into the container, and the login session's log is mounted at
   `/run/host-pila` so Claude can read it
 - Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
@@ -45,8 +45,8 @@ container. (The author's host is Arch, with pila as its only desktop.)
   against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
 - Claude Code (native install) with auth and history persisted across rebuilds
 
-The container follows the session it's entered from: entered from a pila session
-(`scripts/dev` in a terminal there), nested pila opens inside that pila; from GNOME (or any
+The container follows the session it's entered from: entered from a Pila session
+(`scripts/dev` in a terminal there), nested Pila opens inside that Pila; from GNOME (or any
 other desktop), on that desktop.
 Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
 with `scripts/install` and a new login (which ends the container's Claude session too). See
@@ -99,7 +99,7 @@ from the terminal.
 
 ### 2. Start the container
 
-Always launch from inside your desktop session (pila, or any other), so `WAYLAND_DISPLAY` and
+Always launch from inside your desktop session (Pila, or any other), so `WAYLAND_DISPLAY` and
 `XDG_RUNTIME_DIR` are set on the host.
 
 ```bash
@@ -164,20 +164,20 @@ The `dev` user has no `sudo` unless `FULL_SUDO` is set.
 ### Troubleshooting
 
 - **`Cannot connect to Wayland display` / socket missing.** The host compositor restarted
-  (you logged out and back in, or restarted pila), so its socket is new. Run any
+  (you logged out and back in, or restarted Pila), so its socket is new. Run any
   `scripts/dev` command from the session to make it again (`scripts/link-wayland`).
-- **A tool in the container can't find a protocol of the host session.** On pila, the
+- **A tool in the container can't find a protocol of the host session.** On Pila, the
   container's socket is sandboxed through wp-security-context, as a Flatpak's is: no screen
   capture, virtual keyboard, layer shell or the like, so that nothing in the container can
-  read the screen or type into your windows. Nested pila needs none of that, and tools run
+  read the screen or type into your windows. Nested Pila needs none of that, and tools run
   inside it see all of its protocols. `PILA_DEV_PRIVILEGED=1 scripts/link-wayland` shares the
   session's own socket instead, and everything in the container gets those powers.
-- **Nested pila opens on the wrong desktop.** The container uses the session `scripts/dev`
+- **Nested Pila opens on the wrong desktop.** The container uses the session `scripts/dev`
   last ran from. Run `scripts/dev` in a terminal of the session you want.
 - **`Permission denied` on the socket.** Your host UID isn't the one the container user got.
   Check `id -u` on the host and inside; they must match. Make sure you're not using rootless
   Docker.
 - **`eglinfo` shows llvmpipe.** `/dev/dri` isn't passed through, or (NVIDIA) the container
   toolkit isn't set up.
-- **Super-key shortcuts go to GNOME.** When testing pila nested on GNOME, GNOME grabs Super.
-  Nested pila uses Alt as Mod by default for that reason.
+- **Super-key shortcuts go to GNOME.** When testing Pila nested on GNOME, GNOME grabs Super.
+  Nested Pila uses Alt as Mod by default for that reason.

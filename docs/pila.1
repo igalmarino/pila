@@ -1,4 +1,4 @@
-.TH PILA 1 "" "pila" "User Commands"
+.TH PILA 1 "" "Pila" "User Commands"
 .SH NAME
 pila \- a stacking Wayland compositor
 .SH SYNOPSIS
@@ -29,13 +29,13 @@ pila \- a stacking Wayland compositor
 is a stacking Wayland compositor: overlapping windows with title bars, snapping, workspaces
 that span all monitors, animations and per-app rules, configured in one TOML file that applies
 when saved.
-X11 apps run through Xwayland, which pila starts.
+X11 apps run through Xwayland, which Pila starts.
 .PP
-Started from a login screen or a TTY, pila drives the monitors and input devices itself.
+Started from a login screen or a TTY, Pila drives the monitors and input devices itself.
 Started inside another desktop, it opens as a window there (nested), with Alt as its Mod key.
 .PP
 .B pila\-session
-starts pila as a login session: with its log in
+starts Pila as a login session: with its log in
 .IR ~/.local/state/pila/pila.log ,
 and a D-Bus session bus of its own (with dbus-run-session) when the system gives none.
 Login screens run it; from a TTY, run it after logging in.
@@ -51,7 +51,7 @@ It sends nothing anywhere.
 .PP
 The user manual,
 .IR MANUAL.md ,
-describes how to use and set up pila; it's installed with the documentation (usually in
+describes how to use and set up Pila; it's installed with the documentation (usually in
 .IR /usr/share/doc/pila )
 and on https://github.com/igalmarino/pila.
 .SH OPTIONS
@@ -71,7 +71,7 @@ instead of the default (see
 .TP
 .BR \-\-backend " " \fIBACKEND\fR
 .B winit
-opens pila as a window in another Wayland or X11 session;
+opens Pila as a window in another Wayland or X11 session;
 .B udev
 drives the monitors and input devices directly, from a TTY;
 .B headless
@@ -93,7 +93,7 @@ The headless backend's outputs:
 separated by commas (default: HEADLESS\-1:1280x800@60).
 .TP
 .B \-\-check\-config
-Check the configuration file as pila would read it, the keyboard layout included, print what's
+Check the configuration file as Pila would read it, the keyboard layout included, print what's
 wrong, and exit.
 .TP
 .BR \-V ", " \-\-version
@@ -103,7 +103,7 @@ Show the version.
 Show a summary of the options.
 .SH PILA MSG
 .B pila msg
-talks to a running pila:
+talks to a running Pila:
 .TP
 .BR "pila msg " [ \-\-json ] " windows" | outputs | workspaces | focused | version
 List the windows, monitors or workspaces, or show the focused window or the version.
@@ -123,8 +123,8 @@ Scripts should use
 the plain text is for people and may change.
 .B pila msg \-\-help
 has the details.
-Exit status: 0 on success, 1 if pila refused the request, 2 for wrong arguments, 3 if it can't
-reach pila.
+Exit status: 0 on success, 1 if Pila refused the request, 2 for wrong arguments, 3 if it can't
+reach Pila.
 .SH DEFAULT BINDINGS
 Mod is Super from a login screen or a TTY and Alt nested, unless the configuration's
 .B mod
@@ -199,7 +199,7 @@ Screenshot of the monitor under the pointer to
 Close the window.
 .TP
 .B Mod+Shift+E
-Quit pila.
+Quit Pila.
 .TP
 .BR "Mod + left drag" ", " "Mod + right drag"
 Move a window; resize it from the nearest corner.
@@ -258,7 +258,7 @@ leaves it empty.
 .B RUST_LOG
 What the log shows (default: info; debug for details).
 .PP
-Programs pila starts get
+Programs Pila starts get
 .BR XDG_CURRENT_DESKTOP =pila
 and
 .B PILA_SOCKET

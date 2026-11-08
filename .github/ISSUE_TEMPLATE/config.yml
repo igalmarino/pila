@@ -2,4 +2,4 @@ blank_issues_enabled: true
 contact_links:
   - name: Questions, ideas and setups
     url: https://github.com/igalmarino/pila/discussions
-    about: How to configure something, whether a tool works with pila, sharing your setup.
+    about: How to configure something, whether a tool works with Pila, sharing your setup.

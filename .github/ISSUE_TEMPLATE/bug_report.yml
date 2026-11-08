@@ -12,7 +12,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: pila version
+      label: Pila version
       description: The output of `pila --version` (or the commit, for a source build).
       placeholder: pila 0.3.0 (v0.3.0)
     validations:
@@ -20,7 +20,7 @@ body:
   - type: dropdown
     id: started
     attributes:
-      label: How pila was started
+      label: How Pila was started
       options:
         - Login session (display manager)
         - By hand on a TTY (scripts/tty or pila)

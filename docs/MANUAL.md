@@ -1,16 +1,16 @@
-# pila user manual
+# Pila user manual
 
-pila is a stacking Wayland compositor: windows overlap and you move them around, as on most
-desktops. pila draws the windows, their title bars and shadows, and handles the keyboard, mouse,
+Pila is a stacking Wayland compositor: windows overlap and you move them around, as on most
+desktops. Pila draws the windows, their title bars and shadows, and handles the keyboard, mouse,
 touchpad and monitors. The rest of a desktop (a bar, a launcher, notifications, a wallpaper, a
 lock screen) comes from separate programs, or from a shell such as Noctalia that has them all.
 
-This manual says how to use pila and set it up. Every configuration option is described in
-[`config.example.toml`](../config.example.toml) (installed with pila, usually in
-`/usr/share/doc/pila`); `man pila` has the command line. Installing pila is in the
+This manual says how to use Pila and set it up. Every configuration option is described in
+[`config.example.toml`](../config.example.toml) (installed with Pila, usually in
+`/usr/share/doc/pila`); `man pila` has the command line. Installing Pila is in the
 [README](../README.md#running-pila).
 
-- [Starting and leaving pila](#starting-and-leaving-pila)
+- [Starting and leaving Pila](#starting-and-leaving-pila)
 - [The Mod key and the default bindings](#the-mod-key-and-the-default-bindings)
 - [Windows](#windows)
 - [Workspaces](#workspaces)
@@ -22,22 +22,22 @@ This manual says how to use pila and set it up. Every configuration option is de
 - [Locking the screen and idling](#locking-the-screen-and-idling)
 - [Games and X11 apps](#games-and-x11-apps)
 - [Window and layer rules](#window-and-layer-rules)
-- [Scripting with pila msg](#scripting-with-pila-msg)
+- [Scripting with `pila msg`](#scripting-with-pila-msg)
 - [Troubleshooting](#troubleshooting)
 
-## Starting and leaving pila
+## Starting and leaving Pila
 
-- **From the login screen:** pick *pila* in the session menu (on GDM, the gear icon on the
+- **From the login screen:** pick *Pila* in the session menu (on GDM, the gear icon on the
   password screen). This is the usual way.
-- **From a TTY:** log in on a text console and run `pila-session`, which starts pila the way the
+- **From a TTY:** log in on a text console and run `pila-session`, which starts Pila the way the
   login screen does, with its log in `~/.local/state/pila/pila.log`.
 - **Nested:** run `pila` from another desktop and it opens as a window there. Nothing else on
   your system changes, so it's a safe way to try a config. Nested, the Mod key is Alt (the
   desktop around it keeps Super), and the mouse, touchpad and monitors belong to that desktop.
 
-At startup pila runs the programs in `autostart`, or a terminal if there are none.
+At startup Pila runs the programs in `autostart`, or a terminal if there are none.
 
-To leave, press **Mod+Shift+E**: pila quits and you're back at the login screen or the TTY. If the
+To leave, press **Mod+Shift+E**: Pila quits and you're back at the login screen or the TTY. If the
 screen stops responding, **Ctrl+Alt+F1** to **F12** switch to another virtual terminal, where you
 can log in and run `pkill pila`.
 
@@ -73,7 +73,7 @@ Most bindings use the Mod key: **Super** (the Windows key) from the login screen
 | `Mod+Shift+S` | Screenshot of a region you drag, to the clipboard (needs grim, slurp and wl-clipboard) |
 | `Mod+Ctrl+S` | Screenshot of the monitor under the pointer, to `~/Pictures` (needs grim) |
 | `Mod+Shift+Q` | Close the window |
-| `Mod+Shift+E` | Quit pila |
+| `Mod+Shift+E` | Quit Pila |
 | `Mod` + left drag | Move a window from anywhere in it |
 | `Mod` + right drag | Resize a window from its nearest corner |
 | `Ctrl+Alt+F1` to `F12` | Switch to another virtual terminal (not nested) |
@@ -84,11 +84,11 @@ in [Keyboard, mouse and touchpad](#keyboard-mouse-and-touchpad).
 
 ## Windows
 
-**With the mouse.** Windows that let pila decorate them get a title bar with minimize, maximize
+**With the mouse.** Windows that let Pila decorate them get a title bar with minimize, maximize
 and close buttons: drag the bar to move the window, and drag any edge or corner to resize it.
 Apps that draw their own title bar (GTK apps, browsers) work the way they always do. Mod plus
 the left button moves any window from anywhere in it, and Mod plus the right button resizes it.
-Right-clicking a title bar, pila's or an app's own, opens the window menu: minimize, maximize,
+Right-clicking a title bar, Pila's or an app's own, opens the window menu: minimize, maximize,
 always on top, on all workspaces, close. Up, Down and Enter work in it too; Escape or a click
 elsewhere closes it.
 
@@ -146,7 +146,7 @@ A window rule's `open-on-workspace` opens an app's windows on a given workspace.
 
 ## Monitors
 
-pila uses every monitor that's plugged in, and takes monitors plugged in or out while it runs.
+Pila uses every monitor that's plugged in, and takes monitors plugged in or out while it runs.
 Without settings, a monitor uses its preferred mode at scale 1, to the right of the others.
 
 `[[output]]` sections in the configuration set a monitor's mode (resolution and refresh rate),
@@ -154,7 +154,7 @@ scale (fractional scales such as 1.25 work), position, rotation and variable ref
 leave it off. A section names a monitor by its connector (`eDP-1`, `DP-1`, `HDMI-A-1`) or by
 its make and model, optionally with its serial number, so the settings follow the monitor to
 whichever port it's plugged into. `wlr-randr` lists the connected monitors with their names,
-makes and models; pila's log has them too.
+makes and models; Pila's log has them too.
 
 Programs that change monitor settings at runtime (`wlr-randr`, a shell's display settings) work
 too, until the next time you save that monitor's section in the configuration.
@@ -185,7 +185,7 @@ speed and acceleration, tap to click (on by default), disabling the touchpad whi
 a clickpad tells left from right clicks, and middle-click emulation. Settings you leave out
 keep libinput's defaults for the device.
 
-**Touchpad gestures.** pila handles these swipes itself:
+**Touchpad gestures.** Pila handles these swipes itself:
 
 | Swipe | What it does |
 |---|---|
@@ -195,16 +195,16 @@ keep libinput's defaults for the device.
 | `swipe-4-left`, `swipe-4-right` | Next, previous workspace |
 
 `[gestures]` changes them, with any action a key binding can have, for 3, 4 or 5 fingers. Other
-gestures (pinching, finger counts pila doesn't use) reach the apps.
+gestures (pinching, finger counts Pila doesn't use) reach the apps.
 
 The mouse, touchpad and gesture settings apply from the login screen or a TTY; nested, the
-desktop around pila handles those devices. The keyboard settings apply either way.
+desktop around Pila handles those devices. The keyboard settings apply either way.
 
 ## The configuration file
 
-pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`). Without one,
+Pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`). Without one,
 it uses its defaults. To start one, copy the example, which packages install in
-`/usr/share/doc/pila` (it's also in pila's source):
+`/usr/share/doc/pila` (it's also in Pila's source):
 
 ```bash
 mkdir -p ~/.config/pila
@@ -214,12 +214,12 @@ cp /usr/share/doc/pila/config.example.toml ~/.config/pila/config.toml
 Every line in the example is commented out, so the copy changes nothing until you edit it. Each
 value says whether it's the default or an example; take the `#` off a line to use it.
 
-**Changes apply when you save**, all but `autostart`, which only runs when pila starts. If the
-saved file has a mistake, pila keeps the configuration it was running with and shows a
+**Changes apply when you save**, all but `autostart`, which only runs when Pila starts. If the
+saved file has a mistake, Pila keeps the configuration it was running with and shows a
 notification with the line and what's wrong (and writes it to the log). If the file is invalid
-when pila starts, pila starts with the defaults and says why.
+when Pila starts, Pila starts with the defaults and says why.
 
-`pila --check-config` checks the file without starting pila, the keyboard layout included, and
+`pila --check-config` checks the file without starting Pila, the keyboard layout included, and
 prints what's wrong.
 
 **Key bindings** go in `[bindings]`: a key combination, and an action or a command.
@@ -241,8 +241,8 @@ The environment variables `PILA_MOD`, `PILA_TERMINAL` and `PILA_LAUNCHER` overri
 
 ## Building your desktop
 
-pila starts the programs listed in `autostart` once it's ready (X11 support included). Everything
-they open, bars, launchers, notifications and wallpapers, is placed by pila the way those
+Pila starts the programs listed in `autostart` once it's ready (X11 support included). Everything
+they open, bars, launchers, notifications and wallpapers, is placed by Pila the way those
 programs ask.
 
 **With Noctalia**, one program gives you the bar, launcher, notifications, wallpaper and lock
@@ -259,7 +259,7 @@ animations = false
 ```
 
 Noctalia opens its panels on the monitor of the window you're using. Its `dpms-off` and `dpms-on`
-commands don't work on pila (Noctalia 5.4 runs `wlr-randr --off` without naming a monitor); for
+commands don't work on Pila (Noctalia 5.4 runs `wlr-randr --off` without naming a monitor); for
 that, `wlr-randr --output DP-1 --off` works.
 
 **With Dux Shell** (DankMaterialShell):
@@ -279,11 +279,11 @@ app-id = "dev.duxlabs.shell"
 title-bar = false
 ```
 
-Both shells work on pila through standard protocols: bar, workspaces, taskbar and dock, launcher,
+Both shells work on Pila through standard protocols: bar, workspaces, taskbar and dock, launcher,
 notifications, clipboard history, screenshots, night light, display settings and power, idle and
-the lock screen. Neither knows pila by name yet, so the features they build on a compositor's own
+the lock screen. Neither knows Pila by name yet, so the features they build on a compositor's own
 commands are missing: Dux Shell's overview, window rules and keybinding editor, and switching the
-keyboard layout from either shell's bar (pila's keyboard settings and `Mod` bindings still work).
+keyboard layout from either shell's bar (Pila's keyboard settings and `Mod` bindings still work).
 `dms doctor` says "No supported Wayland compositor found"; that line is all it means.
 
 **With separate tools**, for example:
@@ -303,11 +303,11 @@ instance) and switch workspaces. Clipboard managers that use ext-data-control, n
 (`wlsunset`, through gamma control) and screen recorders that use screencopy (`wf-recorder`)
 work too.
 
-**Programs started by pila** get `XDG_CURRENT_DESKTOP=pila` and `PILA_SOCKET`, for `pila msg`.
+**Programs started by Pila** get `XDG_CURRENT_DESKTOP=pila` and `PILA_SOCKET`, for `pila msg`.
 Programs such as kitty open links with `xdg-open`, from the `xdg-utils` package: without it, a
 click on a link does nothing.
 
-**Notifications from pila** (an invalid configuration, for instance) are sent with
+**Notifications from Pila** (an invalid configuration, for instance) are sent with
 `notify-send`, from the `libnotify` package, and shown by your notification daemon (Noctalia,
 mako, ...). Without either, they only reach the log.
 
@@ -320,16 +320,16 @@ own screenshot features.
 
 **Screen sharing** in browsers, OBS and video calls goes through the desktop portal:
 `xdg-desktop-portal-wlr` for the screen, and `xdg-desktop-portal-gtk` for everything else (the
-file chooser, for instance). pila installs their configuration for a pila session. When an app
+file chooser, for instance). Pila installs their configuration for a Pila session. When an app
 asks to share, the pointer becomes a crosshair: click the monitor to share (this uses `slurp`).
 
 Screen sharing needs the session's D-Bus bus, which the login screen and `pila-session` set up;
-a nested pila doesn't have it.
+a nested Pila doesn't have it.
 
 ## Locking the screen and idling
 
 Lock screens that use ext-session-lock work: `swaylock`, or your shell's own (Noctalia has one).
-While the screen is locked, only the lock screen gets the keyboard and the mouse, and pila's
+While the screen is locked, only the lock screen gets the keyboard and the mouse, and Pila's
 bindings don't run.
 
 To lock and turn the screens off after a while without input, use `swayidle` (or your shell's
@@ -345,13 +345,13 @@ A video playing in a visible window keeps the session from idling, if the player
 as most do.
 
 If the lock screen crashes, the session stays locked, for safety. Switch to another virtual
-terminal (`Ctrl+Alt+F2`), log in and start a new lock screen on pila's display, for instance
+terminal (`Ctrl+Alt+F2`), log in and start a new lock screen on Pila's display, for instance
 `WAYLAND_DISPLAY=wayland-1 swaylock` (`ls $XDG_RUNTIME_DIR` shows the name); unlocking it gives
 you the session back.
 
 ## Games and X11 apps
 
-X11 apps (older programs, many games, Steam) run through Xwayland, which pila starts by itself;
+X11 apps (older programs, many games, Steam) run through Xwayland, which Pila starts by itself;
 the clipboard works between X11 and Wayland apps. Games can lock and confine the pointer.
 
 A rule turns off the opening and closing animations for Steam games:
@@ -389,9 +389,9 @@ open-on-workspace = 3
 `pila msg windows` shows each window's app id and title. Every option is in
 `config.example.toml`.
 
-## Scripting with pila msg
+## Scripting with `pila msg`
 
-`pila msg` asks a running pila about its windows, monitors and workspaces, and runs any action a
+`pila msg` asks a running Pila about its windows, monitors and workspaces, and runs any action a
 binding can run:
 
 ```bash
@@ -417,12 +417,12 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 
 | Problem | What to do |
 |---|---|
-| The pila session doesn't start | Pick another session at the login screen and read the log. `pila --check-config` rules out the configuration. |
+| The Pila session doesn't start | Pick another session at the login screen and read the log. `pila --check-config` rules out the configuration. |
 | A notification says the configuration is invalid | It gives the line and the problem; fix it and save. `pila --check-config` checks it again. A key binding must be under `[bindings]`. |
 | `Mod+Shift+S` does nothing | Install `grim`, `slurp` and `wl-clipboard`; `pila-report` says if `wl-copy` is missing. |
 | Clicking a link in the terminal does nothing | Install `xdg-utils`. |
-| No notifications from pila | Install `libnotify` and run a notification daemon (Noctalia, mako). |
-| Screen sharing shows nothing | Install `xdg-desktop-portal-wlr` and `slurp`, and start pila from the login screen or `pila-session`. |
+| No notifications from Pila | Install `libnotify` and run a notification daemon (Noctalia, mako). |
+| Screen sharing shows nothing | Install `xdg-desktop-portal-wlr` and `slurp`, and start Pila from the login screen or `pila-session`. |
 | The shell doesn't turn the screens off | Some shells run `wlr-randr --off` without a monitor name, which fails; use `wlopm --off '*'`. |
 | X11 apps don't start | Install Xwayland; the log says if it couldn't start. |
 | Title bars have no text | Install a font (any TrueType or OpenType font). |

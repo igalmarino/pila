@@ -1,21 +1,21 @@
-# pila configuration. Copy to ~/.config/pila/config.toml (or
+# Pila configuration. Copy to ~/.config/pila/config.toml (or
 # $XDG_CONFIG_HOME/pila/config.toml, or pass --config FILE) and edit.
 # Every setting is optional, and every one here is commented out: as it is,
 # this file gives the same desktop as no file at all. Values marked
-# "(default)" are what pila uses when the setting is unset; the others are
+# "(default)" are what Pila uses when the setting is unset; the others are
 # examples. Take the `#` off a line to use it: table headers ([keyboard],
 # [bindings], ...) are left active so it lands in the right table.
 # PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
-# An invalid file is reported in the log and in a notification, and pila starts
+# An invalid file is reported in the log and in a notification, and Pila starts
 # with the defaults.
 # Saved changes apply right away (except autostart); if the edited file is
-# invalid, pila keeps the running config and says why in a notification.
+# invalid, Pila keeps the running config and says why in a notification.
 # `pila --check-config` checks the file (keymap included) without starting.
 
 # The modifier in "Mod+..." bindings and for Mod+drag (Mod+left drag moves a
 # window, Mod+right drag resizes it from the nearest corner): alt, super or
 # ctrl. Unset, it's super on a TTY and alt nested (a host desktop such as
-# GNOME grabs Super while pila runs inside it).
+# GNOME grabs Super while Pila runs inside it).
 # mod = "super"                  # (default on a TTY; alt nested)
 
 # Mod+Return, and what starts when there's no autostart. Unset, the first
@@ -54,7 +54,7 @@
 # color = "#00000066"              # (default) #rrggbb or #rrggbbaa
 # inactive-color = "#00000033"     # (default) under the other windows
 
-# The colors of what pila draws, as #rrggbb. All of them are the defaults.
+# The colors of what Pila draws, as #rrggbb. All of them are the defaults.
 [colors]
 # bar = "#2f3136"                  # title bar of the focused window
 # bar-inactive = "#26272b"         # title bar of the others
@@ -96,7 +96,7 @@
 
 # Touchpad and mouse (libinput, on a TTY; nested, the host handles input).
 # Unset options keep libinput's defaults for the device, except tap, which
-# pila turns on. Options a device doesn't support are skipped.
+# Pila turns on. Options a device doesn't support are skipped.
 [input.touchpad]
 # tap = true                       # (default) tap to click
 # natural-scroll = true            # e.g.: content follows the fingers
@@ -177,9 +177,9 @@
 # "Mod+J" = "none"
 
 [gestures]
-# Touchpad swipes pila handles itself (on a TTY), as "swipe-<fingers>-<way>"
+# Touchpad swipes Pila handles itself (on a TTY), as "swipe-<fingers>-<way>"
 # with 3 to 5 fingers and left, right, up or down (the way the fingers move).
-# Values are the same actions as [bindings]. pila keeps every swipe with a
+# Values are the same actions as [bindings]. Pila keeps every swipe with a
 # finger count used here from the apps; other gestures (pinch, unused finger
 # counts) reach them. Window switching steps once more for every further
 # stretch of the same swipe and ends when the fingers lift.
@@ -255,7 +255,7 @@
 #
 # [[window-rule]]
 # app-id = "kitty"
-# title-bar = false                # pila draws no title bar (the app neither)
+# title-bar = false                # Pila draws no title bar (the app neither)
 # corner-radius = 12               # instead of the one above
 # opacity = 0.95                   # 0.1 to 1, title bar included
 #                                  # (only lowers what the app draws: a translucent

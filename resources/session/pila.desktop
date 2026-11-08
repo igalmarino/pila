@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=pila
+Name=Pila
 Comment=A stacking Wayland compositor
 Exec=@BINDIR@/pila-session
 Type=Application

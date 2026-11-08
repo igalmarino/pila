@@ -1,4 +1,4 @@
-# pila
+# Pila
 
 [![CI](https://github.com/igalmarino/pila/actions/workflows/ci.yml/badge.svg)](https://github.com/igalmarino/pila/actions/workflows/ci.yml)
 
@@ -7,37 +7,37 @@ Windows float and overlap, with server-side title bars, like a classic desktop; 
 launchers, wallpapers and lock screens come from the usual Wayland tools (waybar, fuzzel,
 swaybg, swaylock, ...).
 
-pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
+Pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
 The wlroots protocols that panels and shells still need and that have no standard
 replacement yet (layer shell, screencopy, foreign toplevel management, gamma control,
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-![pila with a terminal and a Noctalia bar](docs/screenshot.png)
+![Pila with a terminal and a Noctalia bar](docs/screenshot.png)
 
 How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`).
 
 ## Status
 
-pila is **alpha**: usable day to day (its author runs it as their only desktop and
+Pila is **alpha**: usable day to day (its author runs it as their only desktop and
 develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
 with an external monitor, on Arch Linux with GDM. Testers report it working on Intel integrated
 GPUs, on Debian with SDDM and on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
 
-Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs. pila uses only
+Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs. Pila uses only
 the seat's primary GPU, so **monitors wired to another GPU don't work yet**: on many laptops with
 two GPUs (NVIDIA ones especially) the HDMI and DisplayPort outputs are on the dedicated GPU, and
 monitors plugged in there don't show up. `pila-report` marks them.
 
-## Help test pila
+## Help test Pila
 
-The biggest unknown is how pila behaves away from its author's laptop. Most useful right
+The biggest unknown is how Pila behaves away from its author's laptop. Most useful right
 now, in this order:
 
 - **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs. On a laptop with two
-  GPUs, pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
+  GPUs, Pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
 - **no systemd** (Void, Alpine, with elogind or seatd), and other **distros**, such as
   [Ubuntu and Fedora](#debian-ubuntu-and-fedora);
 - **display managers** other than GDM and SDDM (greetd, LightDM);
@@ -92,9 +92,9 @@ A short report helps even if everything works:
 - **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
   action ([docs/IPC.md](docs/IPC.md)).
 
-## Running pila
+## Running Pila
 
-pila runs on a TTY of any Linux machine (DRM/KMS, libinput, and a session from logind,
+Pila runs on a TTY of any Linux machine (DRM/KMS, libinput, and a session from logind,
 elogind or seatd; systemd isn't required), or nested as a window inside another Wayland or
 X11 session.
 
@@ -114,16 +114,16 @@ quits. Closing the window works too.
 
 On a TTY or as a login session, Mod is **Super**:
 
-- **Super+Shift+E** quits pila (back to the login screen or the TTY).
+- **Super+Shift+E** quits Pila (back to the login screen or the TTY).
 - **Ctrl+Alt+F1..F12** switch to another virtual terminal, where you can log in and
   `pkill pila` if the screen stops responding.
-- If the pila session doesn't start, pick your usual session at the login screen and
+- If the Pila session doesn't start, pick your usual session at the login screen and
   look at the log (see [Reporting bugs](#reporting-bugs)); `scripts/uninstall` (or
   removing the package) takes the session entry away.
 
 ### Building
 
-pila needs Rust 1.89 or newer. If your distro's Rust is older, install it with
+Pila needs Rust 1.89 or newer. If your distro's Rust is older, install it with
 [rustup](https://rustup.rs). It also needs `pkg-config` and the development files of
 `libseat`, `libinput`, `libudev`, `gbm` (Mesa) and `xkbcommon`. At runtime it loads EGL
 (Mesa) and starts `Xwayland` for X11 apps. Package names on common distros (they may
@@ -233,13 +233,13 @@ The build uses the host's `cargo`. Without one, it falls back to the dev contain
 (`--container`), whose binary is linked against Arch's libraries and may not run
 elsewhere. `--no-build` installs what's already in `target/release`. Before installing, it
 checks that the binary runs on this system (a container build may need a newer glibc than
-the host's), and warns if another pila session entry (e.g. a distro package's) is installed
+the host's), and warns if another Pila session entry (e.g. a distro package's) is installed
 too. Run it on the host, not inside the dev container.
 
 This is the way to install your working tree while developing. The AUR package builds
 what's on GitHub, so use it for a published version, and don't keep both installed.
 
-Log out, pick *pila* (on GDM, the gear icon on the password screen), log in. The session
+Log out, pick *Pila* (on GDM, the gear icon on the password screen), log in. The session
 uses the user's D-Bus bus (and `systemd --user` where there is one) like any other
 desktop, so portals, PipeWire and the keyring (unlocked by the display manager's PAM setup)
 just work. Without a per-user bus (e.g. elogind or seatd without systemd), the wrapper
@@ -247,7 +247,7 @@ starts one for the session with `dbus-run-session`.
 
 The log goes to `~/.local/state/pila/pila.log` (the previous run's is in `pila.log.old`).
 A copy goes to the journal with systemd (`journalctl -t pila -b`), or otherwise to syslog
-through `logger`. After changing pila, run `scripts/install` again and log out and back
+through `logger`. After changing Pila, run `scripts/install` again and log out and back
 in. `scripts/uninstall`, given the same variables, removes what it installed. Mod+Shift+E
 ends the session (back to the login screen).
 
@@ -260,8 +260,8 @@ scripts/tty                        # the release build with ~/.config/pila/confi
 scripts/tty my-test.toml           # another config; --debug for the debug build
 ```
 
-This lets you try a build or a config while another session (pila or anything else) keeps
-running on another VT. This pila gets a D-Bus bus of its own (`dbus-run-session`), so its
+This lets you try a build or a config while another session (Pila or anything else) keeps
+running on another VT. This Pila gets a D-Bus bus of its own (`dbus-run-session`), so its
 portals don't touch the other session's services. The log (portals included) goes to
 `pila-tty.log`, the previous run's to `pila-tty.log.old`. Ctrl+Alt+F1..F12 switch TTYs;
 Mod+Shift+E quits.
@@ -273,7 +273,7 @@ Host packages for a full session (names are the same on most distros):
 - `xdg-desktop-portal-wlr`, `slurp`: screen sharing (`slurp` picks the screen to share)
 - `grim`, `slurp`: screenshots; Mod+Ctrl+S needs `grim`, Mod+Shift+S both and `wl-clipboard`
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
-- `libnotify` (`libnotify-bin` on Debian, Ubuntu): `notify-send`, which pila uses to tell you
+- `libnotify` (`libnotify-bin` on Debian, Ubuntu): `notify-send`, which Pila uses to tell you
   about an invalid config, for instance; a notification daemon must show them (Noctalia, mako, ...)
 - `xdg-utils`: `xdg-open`, which programs such as kitty use to open links and files; without it
   a click on a link does nothing, and says nothing
@@ -291,29 +291,29 @@ sudo dnf install kitty xdg-desktop-portal-wlr xdg-desktop-portal-gtk grim slurp 
 
 ### Desktop shells and tools
 
-pila draws windows and title bars only; the rest of a desktop comes from the usual Wayland
+Pila draws windows and title bars only; the rest of a desktop comes from the usual Wayland
 tools: a bar (waybar), launcher (fuzzel), notifications (mako), wallpaper (swaybg), lock
 screen and idle (swaylock, swayidle), night light (wlsunset), clipboard (wl-clipboard), all
 started from `autostart`. A full shell such as [Noctalia](https://noctalia.dev) provides all
 of these at once. To turn screens off on idle, use `wlopm` (`wlopm --off '*'`): shells that
-don't recognize pila may run `wlr-randr --off` without naming an output, which fails.
+don't recognize Pila may run `wlr-randr --off` without naming an output, which fails.
 
-## Configuring pila
+## Configuring Pila
 
-pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the file
+Pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the file
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
-pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
+Pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
 each monitor's mode, scale, rotation and position, the number of workspaces, rounded corners,
 shadows (`[shadow]`), colors (`[colors]`), animations (`[animations]`) and per-app rules
 (`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid one is
-reported in the log and in a notification, and pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
+reported in the log and in a notification, and Pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.
 
 Saving the file applies it right away, everything but `autostart`. If the new version is
-invalid, pila keeps running with the previous one and shows the error in a notification
+invalid, Pila keeps running with the previous one and shows the error in a notification
 (with a notification daemon such as mako) and in the log. `pila --check-config` checks
-the file, keyboard layout included, without starting pila: it prints what's wrong and
+the file, keyboard layout included, without starting Pila: it prints what's wrong and
 exits with status 1, or 0 if it's valid.
 
 The default key bindings, and how to set up a desktop, monitors, screen sharing, locking and
@@ -327,7 +327,7 @@ Open an [issue](https://github.com/igalmarino/pila/issues/new/choose). `pila-rep
 your home directory, user name and host name, and sends nothing anywhere. By hand, it's:
 
 - `pila --version`, your distro, GPU and driver (`lspci -k | grep -A3 VGA`);
-- how pila was started: login session, `scripts/tty`, or nested;
+- how Pila was started: login session, `scripts/tty`, or nested;
 - the log: `~/.local/state/pila/pila.log` for a login session (`pila.log.old` is the run
   before; with systemd also `journalctl -t pila -b`), `pila-tty.log` for `scripts/tty`, the
   terminal for nested. `RUST_LOG=debug` makes it detailed; after a crash,
@@ -337,12 +337,12 @@ your home directory, user name and host name, and sends nothing anywhere. By han
 Look through logs and configs before posting them: they can hold window titles, commands,
 file paths and monitor details.
 
-Questions, ideas and "does X work with pila?" go to
+Questions, ideas and "does X work with Pila?" go to
 [Discussions](https://github.com/igalmarino/pila/discussions).
 
 ## Use of AI
 
-pila is developed with AI assistance: [Claude Code](https://claude.com/claude-code) helps
+Pila is developed with AI assistance: [Claude Code](https://claude.com/claude-code) helps
 with programming and testing, and the commits it worked on carry a `Co-Authored-By`
 trailer. The instructions it works under are public, in [CLAUDE.md](CLAUDE.md).
 
@@ -353,10 +353,10 @@ experience. I review the code that goes in and I answer for it.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the development environment (a
-dev container in which pila runs nested on your desktop).
+dev container in which Pila runs nested on your desktop).
 
 ## License
 
-pila is free software: you can redistribute it and/or modify it under the terms of the GNU
+Pila is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License as published by the Free Software Foundation, either version 3 of
 the License, or (at your option) any later version. See [LICENSE](LICENSE).

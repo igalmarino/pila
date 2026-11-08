@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# pila: a stacking Wayland compositor
+# Pila: a stacking Wayland compositor
 
 A daily-driver **stacking** Wayland compositor (crate/binary name `pila`) written in **Rust**
 on **Smithay**'s main branch (a git dependency pinned to a `rev` in `Cargo.toml`, as niri
@@ -11,13 +11,13 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 ## Environment
 
 - You run inside a dev container (Arch Linux base). The host is Arch Linux; the user logs
-  into pila itself through Noctalia's greeter (`scripts/install`), and it's the only desktop
+  into Pila itself through Noctalia's greeter (`scripts/install`), and it's the only desktop
   there: a build that doesn't start leaves no other session to fall back on, so try it with
   `scripts/tty` first.
 - The compositor is developed **nested**: Smithay's winit backend opens it as a window on
   the host desktop. `WAYLAND_DISPLAY` points at the host socket for that purpose
   (`/run/host-wayland/wayland-0`, which `scripts/link-wayland` makes for whichever session
-  the container was entered from: on pila a wp-security-context socket, so privileged
+  the container was entered from: on Pila a wp-security-context socket, so privileged
   protocols are hidden here too; on GNOME a hard link to the session's socket); the compositor
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
@@ -52,7 +52,7 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   running in the foreground; use `timeout 10 cargo run` for smoke tests or ask the user.
   `cargo run -- -c '<cmd>'` runs `<cmd>` at startup instead of the terminal.
 - Config: `config.example.toml` (copy to `~/.config/pila/config.toml`, or `--config`);
-  `pila --check-config [--config FILE]` validates a file as pila reads it, plus the
+  `pila --check-config [--config FILE]` validates a file as Pila reads it, plus the
   keymap (`config::check_keymap`), and exits 0/1 (`main::run_config_check`).
   Env overrides: `USAGE` in `main.rs`. Alt is the default because GNOME grabs Super while
   nested.
@@ -83,19 +83,19 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   Taking a change into the session means logging out and back in, which ends this
   Claude session; the user does it.
 - Arch package: `packaging/aur/pila-git`. Keep `depends` in its `PKGBUILD` in step with the
-  libraries pila links (`readelf -d`) and README's package table. Packaging and releases:
+  libraries Pila links (`readelf -d`) and README's package table. Packaging and releases:
   the `release` skill.
 - Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file added
   to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix job builds it and
-  starts pila from it. `flake.lock` pins nixpkgs; a dependency on a new system library goes in
+  starts Pila from it. `flake.lock` pins nixpkgs; a dependency on a new system library goes in
   `buildInputs` there too.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's
   `pila-tty.log.old` in the repo root afterwards. The user's own config lives outside the
   repo (`~/.config/pila`); keep `config.example.toml` valid (a test parses it).
-- This container is connected to the user's pila session, so `cargo run` opens a nested
-  window inside it. Changes that need a pila restart are tested by the user.
+- This container is connected to the user's Pila session, so `cargo run` opens a nested
+  window inside it. Changes that need a Pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or
   hardware-related; push to GitHub (`origin`, public, GPL-3.0-or-later) only when asked.
 
@@ -105,26 +105,29 @@ Everything in the repository is in English: code, identifiers, comments, docs, l
 messages, test names, config examples and commit messages, even when the conversation
 isn't.
 
+**Naming:** the project is "Pila" in prose. Write `pila` (in code style) for the command,
+crate, packages, paths, environment variables and anything users type.
+
 ## Distro policy
 
-pila must not assume a distro, init system or display manager. This machine is Arch with
+Pila must not assume a distro, init system or display manager. This machine is Arch with
 systemd and Noctalia's greeter, but the code and the host-side scripts (`scripts/`, `resources/session/`)
 must also work elsewhere (Debian, Fedora, Void, Alpine, ...), including without systemd
 (elogind or seatd, no per-user D-Bus bus, no journal): check for optional tools
 (`systemd-cat`, `logger`, `dbus-run-session`) and degrade, use `/usr/bin/env bash`, and keep
 install paths configurable. Name packages generically in messages ("package dbus"), not
 with one distro's package manager. `rust-version` in `Cargo.toml` is the oldest Rust that
-builds pila; raise it when a dependency or the code needs a newer one. The dev container
+builds Pila; raise it when a dependency or the code needs a newer one. The dev container
 itself is Arch, and its packages are named as Arch's.
 
 ## Performance pillar
 
-pila never makes an output miss a refresh while there is something to show (an
+Pila never makes an output miss a refresh while there is something to show (an
 animation, a drag, a client's new frame), at the output's own refresh rate (60, 144 Hz,
 ...); 60 Hz is the floor it must hold everywhere. It renders on demand: smooth doesn't
 mean redrawing when nothing changed. How fast clients draw is up to them.
 
-- **Budget:** the CPU time pila spends on a frame (scene, elements, submitting the
+- **Budget:** the CPU time Pila spends on a frame (scene, elements, submitting the
   render) stays well inside the period. Target: release build on the user's laptop (AMD
   Renoir), typical scenes, **at most 4 ms per output** (a quarter of 60 Hz, still room at
   144 Hz).
@@ -153,11 +156,11 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
 
 ## Protocol policy
 
-pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`
+Pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`
 (stable, staging, and unstable where nothing newer exists). Where both exist, prefer the
 `ext-`/staging protocol over an older unstable or vendor one (e.g. `ext-data-control`, not
 `zwlr_data_control`). A standard protocol that Smithay doesn't implement (e.g.
-`ext-image-copy-capture`) is implemented in pila on the bindings from the
+`ext-image-copy-capture`) is implemented in Pila on the bindings from the
 `wayland-protocols` crate, not swapped for a vendor one. (One temporary exception:
 xdg-session-management's XML is in that crate's release but no module yet, so
 `session_protocol.rs` generates its bindings with `wayland-scanner`; delete it, its
@@ -170,11 +173,11 @@ Noctalia): `wlr-layer-shell`, `wlr-screencopy`, `wlr-foreign-toplevel-management
 `wlr-gamma-control`, `wlr-output-management`, `wlr-output-power-management` and
 `virtual-keyboard-unstable-v1`. Other vendor protocols (KDE, GNOME, Hyprland, …) are not
 added, even if Smithay implements them. Features with no protocol at all go through
-pila's own config/IPC.
+Pila's own config/IPC.
 
 Privileged protocols are hidden from sandboxed apps: a client that connected through
 wp-security-context (Flatpak) fails `state::is_privileged` (`ClientState::security_context`;
-Xwayland counts as privileged). Smithay globals take it as their filter, pila's own as
+Xwayland counts as privileged). Smithay globals take it as their filter, Pila's own as
 `GlobalDispatch::can_view`. It covers layer-shell, session lock, ext-data-control,
 virtual-keyboard, ext-foreign-toplevel-list, screen capture (both protocols), toplevel
 management, gamma, output management and power, ext-workspace, keyboard-shortcuts-inhibit,
