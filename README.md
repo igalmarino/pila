@@ -26,8 +26,10 @@ GPUs, on Debian with SDDM and on NixOS. NVIDIA hasn't been tried. Other GPUs, di
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
 
-Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs (pila uses the
-seat's primary one).
+Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs. pila uses only
+the seat's primary GPU, so **monitors wired to another GPU don't work yet**: on many laptops with
+two GPUs (NVIDIA ones especially) the HDMI and DisplayPort outputs are on the dedicated GPU, and
+monitors plugged in there don't show up. `pila-report` marks them.
 
 ## Help test pila
 

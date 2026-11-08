@@ -109,14 +109,22 @@ section_gpu() {
     gpu_in_use
 }
 
-# With two GPUs (a hybrid laptop), which of them pila draws with. Searched in the
-# whole log: it's logged once, at the start. Only a TTY session logs it.
-gpu_in_use() {
-    local log gpu driver
+# The device pila draws with (/dev/dri/cardN), from its log; nothing if it
+# isn't there. Searched in the whole log: it's logged once, at the start, and
+# only by a session on a TTY.
+gpu_device() {
+    local log gpu
     log="$(find_log)"
     [ -n "$log" ] || return 0
     gpu="$(grep -a 'using GPU' "$log" | tail -n 1 | sed -n 's/.*gpu=\([^[:space:]]*\).*/\1/p')"
-    gpu="${gpu%$'\033'*}"
+    echo "${gpu%$'\033'*}"
+}
+
+# With two GPUs (a hybrid laptop), which of them pila draws with.
+gpu_in_use() {
+    local gpu driver
+    [ -n "$(find_log)" ] || return 0
+    gpu="$(gpu_device)"
     if [ -z "$gpu" ]; then
         echo "In use by pila: not in the log"
         return 0
@@ -126,15 +134,24 @@ gpu_in_use() {
 }
 
 # Only what the kernel lists: no EDID, which has the monitor's serial number.
+# pila uses one GPU: a monitor wired to another (often a hybrid laptop's
+# HDMI or DisplayPort, on the dedicated GPU) doesn't show up, and is marked.
 section_monitors() {
-    local connector name mode
+    local connector name mode card used note
     echo "## Monitors"
-    for connector in /sys/class/drm/card[0-9]-*; do
+    used="$(gpu_device)"
+    used="${used##*/}"
+    for connector in /sys/class/drm/card[0-9]*-*; do
         [ -e "$connector/status" ] || continue
         [ "$(cat "$connector/status")" = connected ] || continue
         name="$(basename "$connector")"
+        card="${name%%-*}"
         mode="$(head -n 1 "$connector/modes" 2>/dev/null)"
-        echo "${name#card[0-9]-}: preferred mode ${mode:-unknown}"
+        note=""
+        if [ -n "$used" ] && [ "$card" != "$used" ]; then
+            note=" (on $card, not the GPU pila uses: not supported yet, so pila doesn't show it)"
+        fi
+        echo "${name#"$card"-}: preferred mode ${mode:-unknown}$note"
     done
 }
 
