@@ -6,7 +6,9 @@
 //! the others, keep it on all workspaces (those two show a mark while on),
 //! close. While it's open a pointer grab (`WindowMenuGrab`) has the pointer:
 //! releasing a button over an item runs it (so press, drag to an item,
-//! release works too), a press outside closes the menu and goes nowhere else.
+//! release works too), a press outside closes the menu and goes nowhere else,
+//! except a right press, which still counts (another title bar's menu, an
+//! app's own).
 //! The keyboard path (`input.rs`) gives it Up, Down, Return and Escape. It
 //! closes with its window (`forget_window`), a lock or a workspace switch.
 //!
@@ -94,6 +96,18 @@ impl Item {
         }
     }
 }
+
+/// The last pointer button press (`InputState::last_press`).
+pub struct LastPress {
+    pub serial: Serial,
+    pub button: u32,
+    pub location: Point<f64, Logical>,
+    pub client: Option<smithay::reexports::wayland_server::backend::ClientId>,
+    pub at: std::time::Instant,
+}
+
+/// How long after its press a client may still ask for the menu with it.
+const PRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// An open window menu.
 pub struct WindowMenu {
@@ -204,9 +218,36 @@ impl Pila {
             hover: None,
             buffers: Default::default(),
         });
-        pointer.set_grab(self, WindowMenuGrab { start_data }, serial, Focus::Clear);
+        let grab = WindowMenuGrab {
+            start_data,
+            opened: std::time::Instant::now(),
+            opening: serial,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
         self.set_cursor(CursorImageStatus::default_named());
         self.queue_redraw();
+    }
+
+    /// The grab start of the last press, if it's `serial`, the client of
+    /// `surface` got it and it's recent: GTK asks for the menu when it
+    /// handles the press, often after the release (a quick click), when the
+    /// press no longer holds a grab.
+    pub fn recent_press(
+        &self,
+        surface: &WlSurface,
+        serial: Serial,
+    ) -> Option<PointerGrabStartData<Pila>> {
+        use smithay::reexports::wayland_server::Resource;
+        let press = self.input.last_press.as_ref()?;
+        let client = self.display_handle.get_client(surface.id()).ok()?.id();
+        (press.serial == serial
+            && press.client.as_ref() == Some(&client)
+            && press.at.elapsed() < PRESS_TIMEOUT)
+            .then(|| PointerGrabStartData {
+                focus: None,
+                button: press.button,
+                location: press.location,
+            })
     }
 
     /// Close the menu, if one is open, without running anything.
@@ -307,7 +348,16 @@ impl Pila {
 /// The pointer while the menu is open: no client sees it.
 pub struct WindowMenuGrab {
     start_data: PointerGrabStartData<Pila>,
+    opened: std::time::Instant,
+    /// The press that opened it, which reaches the grab right after: not a
+    /// click on the menu, nor one outside it.
+    opening: Serial,
 }
+
+/// The release of the click that opened the menu is no choice before this:
+/// the menu opens under the pointer, and a hand moves a few pixels during a
+/// click, onto its first item. Held longer, it's a press, drag, release.
+const OPENING_CLICK: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl PointerGrab<Pila> for WindowMenuGrab {
     fn motion(
@@ -341,6 +391,9 @@ impl PointerGrab<Pila> for WindowMenuGrab {
         handle: &mut PointerInnerHandle<'_, Pila>,
         event: &ButtonEvent,
     ) {
+        if event.serial == self.opening {
+            return;
+        }
         let location = handle.current_location();
         let Some(menu) = data.window_menu.as_ref() else {
             handle.unset_grab(self, data, event.serial, event.time, true);
@@ -351,6 +404,9 @@ impl PointerGrab<Pila> for WindowMenuGrab {
         // Inside a grab the pointer is locked: end it through `handle`
         // (`unset` drops the menu), never `Pila::close_window_menu`.
         match event.state {
+            ButtonState::Released
+                if event.button == self.start_data.button
+                    && self.opened.elapsed() < OPENING_CLICK => {}
             ButtonState::Released => {
                 if let Some((window, item)) = row.and_then(|row| data.menu_row(row)) {
                     handle.unset_grab(self, data, event.serial, event.time, true);
@@ -361,8 +417,19 @@ impl PointerGrab<Pila> for WindowMenuGrab {
                     data.wake.ping();
                 }
             }
+            // Elsewhere: closed. A right press still counts (another title
+            // bar's menu, an app's own): replayed once the grab is gone and
+            // the pointer's focus is what's under it.
             ButtonState::Pressed if !inside => {
                 handle.unset_grab(self, data, event.serial, event.time, true);
+                if event.button == crate::input::BTN_RIGHT {
+                    data.loop_handle.insert_idle(|state| {
+                        state.refresh_pointer_focus();
+                        let time = smithay::backend::input::InputTime::now();
+                        state.pointer_button(crate::input::BTN_RIGHT, ButtonState::Pressed, time);
+                    });
+                    data.wake.ping();
+                }
             }
             ButtonState::Pressed => {}
         }

@@ -28,7 +28,7 @@ use crate::{
 
 // Linux input event codes (linux/input-event-codes.h).
 const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
+pub(crate) const BTN_RIGHT: u32 = 0x111;
 
 impl Pila {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>)
@@ -399,7 +399,8 @@ impl Pila {
     ) {
         // A right click on a title bar opens the window menu where it is.
         if start_data.button == BTN_RIGHT && matches!(decoration, Decoration::TitleBar(_)) {
-            let at = start_data.location.to_i32_round();
+            // Down, so the pointer (between pixels) is inside it.
+            let at = start_data.location.to_i32_floor();
             self.open_window_menu(&window, at, start_data, serial);
             return;
         }
@@ -419,6 +420,18 @@ impl Pila {
     }
 
     fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
+        self.pointer_button(event.button_code(), event.state(), event.time());
+    }
+
+    /// A pointer button pressed or released: focus, pila's decorations and
+    /// bindings, then the client. Also replays the right press that closed
+    /// the window menu (`window_menu.rs`).
+    pub(crate) fn pointer_button(
+        &mut self,
+        button: u32,
+        button_state: ButtonState,
+        time: InputTime,
+    ) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -426,8 +439,22 @@ impl Pila {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let button = event.button_code();
-        let button_state = event.state();
+        if button_state == ButtonState::Pressed {
+            let client = pointer
+                .current_focus()
+                .and_then(|surface| {
+                    use smithay::reexports::wayland_server::Resource;
+                    self.display_handle.get_client(surface.id()).ok()
+                })
+                .map(|client| client.id());
+            self.input.last_press = Some(crate::window_menu::LastPress {
+                serial,
+                button,
+                location: pointer.current_location(),
+                client,
+                at: std::time::Instant::now(),
+            });
+        }
         // A click picks the window itself; a Mod+Tab in progress is over.
         if button_state == ButtonState::Pressed {
             self.end_switch();
@@ -506,7 +533,7 @@ impl Pila {
                 button,
                 state: button_state,
                 serial,
-                time: event.time(),
+                time,
             },
         );
         pointer.frame(self);

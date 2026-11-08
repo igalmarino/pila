@@ -223,6 +223,9 @@ pub struct InputState {
     /// The configured keymap as text, kept while a virtual keyboard's is in
     /// place; reset when the keyboard config is applied.
     pub configured_keymap: Option<smithay::input::keyboard::KeymapFile>,
+    /// The last pointer button press: a client may ask for the window menu
+    /// with its serial after the release (`window_menu::recent_press`).
+    pub last_press: Option<crate::window_menu::LastPress>,
     /// A key pressed while the window menu is open, for it (`window_menu.rs`).
     pub menu_key: Option<smithay::input::keyboard::Keysym>,
 }

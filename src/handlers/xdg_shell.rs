@@ -123,7 +123,10 @@ impl XdgShellHandler for Pila {
         let Some(seat) = Seat::from_resource(&seat) else {
             return;
         };
-        let Some(start_data) = check_grab(&seat, surface.wl_surface(), serial) else {
+        // While the press holds, or just after its release (`recent_press`).
+        let Some(start_data) = check_grab(&seat, surface.wl_surface(), serial)
+            .or_else(|| self.recent_press(surface.wl_surface(), serial))
+        else {
             return;
         };
         let Some(window) = self.window_for_surface(surface.wl_surface()) else {
@@ -132,7 +135,10 @@ impl XdgShellHandler for Pila {
         let Some(origin) = self.space.element_location(&window) else {
             return;
         };
-        self.open_window_menu(&window, origin + location, start_data, serial);
+        // `location` is surface-local: its window geometry may start inside
+        // it (client-side shadows).
+        let at = origin - window.geometry().loc + location;
+        self.open_window_menu(&window, at, start_data, serial);
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {

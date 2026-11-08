@@ -173,3 +173,125 @@ fn a_window_menu_needs_a_real_press() {
         menu(s).is_null()
     });
 }
+
+/// With the menu open, a right click elsewhere is still a right click: on
+/// another title bar it opens that window's menu, in an app it reaches the
+/// app (its own menu, or one it asks pila for).
+#[test]
+fn a_right_click_elsewhere_closes_the_window_menu_and_counts() {
+    let (mut pila, client, _a, (ax, ay, ..)) = one_window();
+    let other = pila.client();
+    other.window("b").size(300, 200).create();
+    let state = pila.wait_focus("b");
+    let (bx, by, ..) = rect(&window_in(&state, "b").unwrap()["geometry"]);
+    pila.move_to(bx as f64 + 10.0, by as f64 - 14.0);
+    pila.click("right");
+    pila.wait("b's menu", |s| menu(s)["window"] == "b");
+    // a's title bar, left of b (cascaded).
+    pila.move_to(ax as f64 + 10.0, ay as f64 - 14.0);
+    pila.click("right");
+    pila.wait("a's menu", |s| menu(s)["window"] == "a");
+    // Inside a, away from the menu: the app gets the press.
+    client.clear_events();
+    pila.move_to(ax as f64 + 350.0, ay as f64 + 250.0);
+    pila.click("right");
+    pila.wait("closed", |s| menu(s).is_null());
+    client.wait("the app's right press", |s| {
+        s.events.iter().any(|e| {
+            matches!(
+                e,
+                Ev::Button {
+                    button: 0x111,
+                    pressed: true,
+                    ..
+                }
+            )
+        })
+    });
+}
+
+/// GTK asks for the menu when it handles the press, often after the release
+/// arrived (a quick click): the serial of that press, from that client,
+/// still opens it. A press of someone else, or an old one, doesn't.
+#[test]
+fn an_app_can_open_its_window_menu_after_a_quick_click() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client
+        .window("a")
+        .size(400, 300)
+        .decorations(common::client::Decorations::Client)
+        .create();
+    let state = pila.wait_focus("a");
+    let (x, y, ..) = rect(&window_in(&state, "a").unwrap()["geometry"]);
+    pila.move_to(x as f64 + 50.0, y as f64 + 10.0);
+    pila.click("right");
+    client.wait("the release", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Button { pressed: false, .. }))
+    });
+    let press = client
+        .events()
+        .iter()
+        .find_map(|e| match e {
+            Ev::Button {
+                pressed: true,
+                serial,
+                ..
+            } => Some(*serial),
+            _ => None,
+        })
+        .expect("the press");
+    let seat = client.seat();
+    client.request(a, |t| t.show_window_menu(&seat, press, 50, 10));
+    let state = pila.wait("the menu", |s| !menu(s).is_null());
+    assert_eq!(rect(&menu(&state)["geometry"]).0, x + 50);
+    pila.key("Escape");
+    pila.wait("closed", |s| menu(s).is_null());
+    // A later click makes that press old.
+    pila.click("left");
+    client.roundtrip();
+    client.request(a, |t| t.show_window_menu(&seat, press, 50, 10));
+    client.roundtrip();
+    pila.stays("no menu", std::time::Duration::from_millis(100), |s| {
+        menu(s).is_null()
+    });
+}
+
+/// The release of the right click that opened the menu, a few pixels away
+/// (a hand on a touchpad), lands on its first item: that's not a choice.
+#[test]
+fn the_release_of_the_opening_click_runs_nothing() {
+    let (mut pila, _client, _a, (x, y, ..)) = one_window();
+    pila.move_to(x as f64 + 60.0, y as f64 - 14.0);
+    pila.press("right");
+    pila.wait("the menu", |s| !menu(s).is_null());
+    pila.move_to(x as f64 + 66.0, y as f64 - 6.0);
+    pila.wait("over its first item", |s| menu(s)["hover"] == 0);
+    pila.release("right");
+    let state = pila.settle();
+    assert!(!menu(&state).is_null(), "the menu closed");
+    assert_eq!(window_in(&state, "a").unwrap()["minimized"], false);
+    // A real click on it still runs it.
+    pila.click("left");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+}
+
+/// A real pointer sits between pixels: the menu opens at its position rounded
+/// to a pixel, and the press that opened it must not count as one outside it
+/// (it reopened the menu in a loop, which never showed).
+#[test]
+fn a_menu_opened_between_pixels_stays_open() {
+    let (mut pila, _client, _a, (x, y, ..)) = one_window();
+    pila.move_to(x as f64 + 60.6, y as f64 - 13.6);
+    pila.click("right");
+    let state = pila.wait("the menu", |s| !menu(s).is_null());
+    let opened = menu(&state)["geometry"].clone();
+    let state = pila.settle();
+    assert_eq!(menu(&state)["geometry"], opened, "the menu was reopened");
+    let (mx, my, ..) = rect(&opened);
+    assert!((mx as f64) <= x as f64 + 60.6 && (my as f64) <= y as f64 - 13.6);
+}
