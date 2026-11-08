@@ -39,6 +39,8 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   --external-sources` on the scripts: run that after editing one. `compat.yml` (`rust-version`,
   Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when dependencies or packaging change, weekly
   and by hand before a release. `packages.yml` builds the `.deb` and `.rpm` of a release.
+  `vkms.yml` (by hand, an experiment) runs the udev backend on the kernel's virtual KMS
+  driver in the runner's VM.
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Every feature gets
   integration tests (`tests/*.rs`; how they work is in `tests/CLAUDE.md`) and a new test
   goes into `tests/FEATURES.md`; only bare-metal paths (`udev/`), real frame times
