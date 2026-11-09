@@ -10,13 +10,15 @@ pila msg [--json] windows            The windows, on all workspaces
 pila msg [--json] outputs            The monitors
 pila msg [--json] workspaces         The workspaces
 pila msg [--json] focused            The focused window
-pila msg [--json] version            pila's version
+pila msg [--json] version            Pila's version
+pila msg [--json] subscribe [EVENTS] Events as they happen, until Pila quits
 pila msg action <action>             Run an action, as in [bindings]
 pila msg focus <id>                  Focus a window, on whichever workspace
 pila msg close <id>                  Ask a window to close
 ```
 
-For example: `pila msg action workspace 2`, `pila msg --json windows | jq`.
+For example: `pila msg action workspace 2`, `pila msg --json windows | jq`,
+`pila msg --json subscribe workspaces`.
 
 Without `--json` the output is for people, and may change. Scripts should use `--json`.
 
@@ -56,6 +58,7 @@ actions are those of `config.example.toml`.
 | `outputs` | | `protocol`, `outputs` |
 | `workspaces` | | `protocol`, `workspaces` |
 | `focused` | | `protocol`, `window`: a window, or null |
+| `subscribe` | `events`: a list of `windows`, `workspaces`, `outputs` (all if left out) | `protocol`; then events (below) |
 | `action` | `action`: as in `[bindings]` | nothing more |
 | `focus` | `id` | nothing more |
 | `close` | `id` | nothing more |
@@ -78,3 +81,21 @@ those turned on.
 
 **A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on
 all workspaces counts for the active one).
+
+## Events
+
+After `subscribe`, the connection gets an event line for each kind asked for, with how things are
+now, and then one whenever that kind changes:
+
+```
+→ {"request": "subscribe", "events": ["workspaces"]}
+← {"ok": true, "protocol": 1}
+← {"event": "workspaces", "workspaces": [{"index": 1, "active": true, "windows": 0}, ...]}
+← {"event": "workspaces", "workspaces": [{"index": 1, "active": false, ...}, {"index": 2, "active": true, ...}, ...]}
+```
+
+Each event is the whole list, as the request of the same name answers it: replace what you had.
+Windows in events leave out `x`, `y`, `width` and `height`, which change in every frame of a move;
+ask `windows` for them. Events come once things settle on screen, as taskbars hear about them. A
+subscribed connection still answers requests (answers have `ok`, events `event`); subscribing
+again replaces the list. A subscriber that leaves more than 1 MiB unread is disconnected.

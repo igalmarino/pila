@@ -427,10 +427,12 @@ pila msg --json outputs | jq     # the monitors, as JSON for scripts
 pila msg action workspace 2      # any action, as in [bindings]
 pila msg focus <id>              # focus a window
 pila msg close <id>              # close a window
+pila msg --json subscribe        # windows, workspaces and monitors as they change
 ```
 
-Scripts should use `--json`: the plain text is for reading and may change. The full
-description, the socket included, is in [IPC.md](IPC.md).
+Scripts should use `--json`: the plain text is for reading and may change. A bar or script that
+follows the windows or workspaces subscribes instead of asking over and over. The full
+description, the socket and the events included, is in [IPC.md](IPC.md).
 
 ## Troubleshooting
 

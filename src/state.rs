@@ -101,6 +101,8 @@ pub struct Pila {
     pub socket_name: OsString,
     /// Where `pila msg` finds this pila (`ipc.rs`).
     pub ipc_socket: Option<std::path::PathBuf>,
+    /// Clients of `pila msg` subscribed to events (`ipc.rs`).
+    pub ipc_events: crate::ipc::Subscribers,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
     pub loop_handle: LoopHandle<'static, Pila>,
@@ -390,6 +392,7 @@ impl Pila {
             clock,
             socket_name,
             ipc_socket: None,
+            ipc_events: Default::default(),
             display_handle: dh,
             loop_signal,
             loop_handle,
@@ -1413,6 +1416,7 @@ impl Pila {
         // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();
         self.refresh_toplevels();
+        self.send_ipc_events();
         self.update_idle_inhibit();
         self.popups.cleanup();
         self.step_animations();

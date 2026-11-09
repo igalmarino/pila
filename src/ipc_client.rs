@@ -18,6 +18,8 @@ Requests:
   workspaces          The workspaces
   focused             The focused window
   version             Pila's version
+  subscribe [EVENTS]  Events as they happen: windows, workspaces, outputs
+                      (all of them unless named), until Pila quits
   action <action>     Run an action, as in [bindings]: action workspace 2
   focus <id>          Focus a window, by its id in `windows`
   close <id>          Ask a window to close
@@ -68,6 +70,8 @@ fn request(args: &[String]) -> Result<Value, String> {
         }
         "action" if rest.is_empty() => Err("action needs an action".to_string()),
         "action" => Ok(json!({ "request": "action", "action": rest.join(" ") })),
+        "subscribe" if rest.is_empty() => Ok(json!({ "request": "subscribe" })),
+        "subscribe" => Ok(json!({ "request": "subscribe", "events": rest })),
         "focus" | "close" => Ok(json!({ "request": name, "id": one_id()? })),
         other => Err(format!("unknown request {other:?}")),
     }
@@ -122,14 +126,18 @@ fn window_line(window: &Value) -> String {
     if !snapped.is_empty() {
         marks.push(&snapped);
     }
+    // Events leave out where windows are.
+    let place = match window["width"].is_null() {
+        true => String::new(),
+        false => format!(
+            "  {}x{}+{}+{}",
+            window["width"], window["height"], window["x"], window["y"]
+        ),
+    };
     format!(
-        "{}  workspace {}  {}x{}+{}+{}  {}: {}{}",
+        "{}  workspace {}{place}  {}: {}{}",
         plain(&window["id"]),
         window["workspace"],
-        window["width"],
-        window["height"],
-        window["x"],
-        window["y"],
         plain(&window["app_id"]),
         plain(&window["title"]),
         if marks.is_empty() {
@@ -210,6 +218,9 @@ pub fn run(args: &[String]) -> i32 {
             return EXIT_USAGE;
         }
     };
+    if request["request"] == "subscribe" {
+        return subscribe(&request, json_output);
+    }
     let line = match socket_path().and_then(|path| ask(&path, &request)) {
         Ok(line) => line,
         Err(err) => {
@@ -242,6 +253,69 @@ pub fn run(args: &[String]) -> i32 {
     0
 }
 
+/// `pila msg subscribe`: each event as it comes, until pila closes the
+/// connection.
+fn subscribe(request: &Value, json_output: bool) -> i32 {
+    let connected = socket_path().and_then(|path| {
+        let shown = path.display().to_string();
+        let fail = |err: std::io::Error| format!("can't talk to pila at {shown}: {err}");
+        let mut stream = UnixStream::connect(&path).map_err(fail)?;
+        stream.set_read_timeout(Some(TIMEOUT)).map_err(fail)?;
+        stream.set_write_timeout(Some(TIMEOUT)).map_err(fail)?;
+        stream
+            .write_all(format!("{request}\n").as_bytes())
+            .map_err(fail)?;
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(fail)?;
+        // Events come when something changes: no timeout from here on.
+        reader.get_ref().set_read_timeout(None).map_err(fail)?;
+        Ok((reader, line))
+    });
+    let (mut reader, line) = match connected {
+        Ok(connected) => connected,
+        Err(err) => {
+            eprintln!("pila msg: {err}");
+            return EXIT_NO_PILA;
+        }
+    };
+    match serde_json::from_str::<Value>(&line) {
+        Ok(answer) if answer["ok"] == true => {}
+        Ok(answer) => {
+            eprintln!("pila msg: {}", plain(&answer["error"]));
+            return EXIT_REFUSED;
+        }
+        Err(_) => {
+            eprintln!("pila msg: a bad answer from pila");
+            return EXIT_NO_PILA;
+        }
+    }
+    let mut out = std::io::stdout().lock();
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return 0,
+            Ok(_) => {}
+        }
+        let written = if json_output {
+            out.write_all(line.as_bytes()).and_then(|()| out.flush())
+        } else {
+            let event: Value = serde_json::from_str(&line).unwrap_or_default();
+            let kind = plain(&event["event"]);
+            let mut text = format!("== {kind}\n");
+            for item in text_of(&kind, &event) {
+                text.push_str(&item);
+                text.push('\n');
+            }
+            out.write_all(text.as_bytes()).and_then(|()| out.flush())
+        };
+        // A closed pipe (`| head`): done.
+        if written.is_err() {
+            return 0;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +323,19 @@ mod tests {
     #[test]
     fn a_title_cant_send_a_terminal_escapes() {
         assert_eq!(plain(&json!("evil\u{1b}[2Jtitle\n")), "evil?[2Jtitle?");
+    }
+
+    #[test]
+    fn subscribe_takes_the_events_named_or_all() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            request(&args(&["subscribe"])).unwrap(),
+            json!({ "request": "subscribe" })
+        );
+        assert_eq!(
+            request(&args(&["subscribe", "windows", "outputs"])).unwrap(),
+            json!({ "request": "subscribe", "events": ["windows", "outputs"] })
+        );
     }
 
     #[test]

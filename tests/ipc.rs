@@ -636,3 +636,184 @@ fn a_title_cant_reach_the_terminal_as_it_is() {
         "evil\u{1b}[2Jtitle"
     );
 }
+
+// --- Events ------------------------------------------------------------------
+
+/// A raw subscription: the answer, then events, one per line.
+struct Subscription {
+    reader: BufReader<UnixStream>,
+}
+
+impl Subscription {
+    fn new(pila: &TestPila, events: Option<&[&str]>) -> (Subscription, Value) {
+        let mut stream = UnixStream::connect(socket(pila)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let request = match events {
+            Some(events) => serde_json::json!({ "request": "subscribe", "events": events }),
+            None => serde_json::json!({ "request": "subscribe" }),
+        };
+        writeln!(stream, "{request}").unwrap();
+        let mut subscription = Subscription {
+            reader: BufReader::new(stream),
+        };
+        let answer = subscription.line().expect("an answer");
+        (subscription, answer)
+    }
+
+    /// The next line, or `None` if none comes within the read timeout.
+    fn line(&mut self) -> Option<Value> {
+        let mut line = String::new();
+        match self.reader.read_line(&mut line) {
+            Ok(n) if n > 0 => Some(serde_json::from_str(&line).unwrap()),
+            _ => None,
+        }
+    }
+
+    /// The next `kind` event for which `f` holds, skipping others.
+    #[track_caller]
+    fn wait(&mut self, kind: &str, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+        loop {
+            let event = self
+                .line()
+                .unwrap_or_else(|| panic!("no {kind} event: {what}"));
+            if event["event"] == kind && f(&event) {
+                return event;
+            }
+        }
+    }
+
+    /// The events that come within `time`.
+    fn during(&mut self, time: Duration) -> Vec<Value> {
+        self.reader.get_ref().set_read_timeout(Some(time)).unwrap();
+        let mut events = Vec::new();
+        while let Some(event) = self.line() {
+            events.push(event);
+        }
+        events
+    }
+}
+
+fn app_ids(event: &Value) -> Vec<String> {
+    event["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["app_id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_subscriber_gets_the_state_then_each_change() {
+    let pila = TestPila::start();
+    let (mut events, answer) = Subscription::new(&pila, None);
+    assert_eq!(answer["ok"], true);
+    assert_eq!(answer["protocol"], 1);
+    // First, each kind as it is.
+    let first: Vec<Value> = (0..3).map(|_| events.line().unwrap()).collect();
+    let kinds: Vec<&str> = first.iter().map(|e| e["event"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["windows", "workspaces", "outputs"]);
+    assert_eq!(first[0]["windows"], serde_json::json!([]));
+    assert_eq!(first[2]["outputs"][0]["name"], "HEADLESS-1");
+
+    let client = pila.client();
+    let a = client.window("a").create();
+    let opened = events.wait("windows", "a opens", |e| app_ids(e) == ["a"]);
+    let window = &opened["windows"][0];
+    assert!(
+        window["x"].is_null() && window["width"].is_null(),
+        "{window}"
+    );
+    assert_eq!(window["workspace"], 1);
+    // Each change comes once, in the same order as the first events.
+    events.wait("workspaces", "a counted", |e| {
+        e["workspaces"][0]["windows"] == 1
+    });
+    client.request(a, |t| t.set_title("renamed".into()));
+    events.wait("windows", "the new title", |e| {
+        e["windows"][0]["title"] == "renamed"
+    });
+    action(&pila, &["workspace", "2"]);
+    events.wait("workspaces", "workspace 2 active", |e| {
+        e["workspaces"][1]["active"] == true
+    });
+    client.destroy(a);
+    events.wait("windows", "a gone", |e| app_ids(e).is_empty());
+}
+
+#[test]
+fn a_subscriber_gets_only_what_it_asked_for_and_no_moves() {
+    let mut pila = TestPila::start();
+    let (mut workspaces, _) = Subscription::new(&pila, Some(&["workspaces"]));
+    assert_eq!(workspaces.line().unwrap()["event"], "workspaces");
+    let client = pila.client();
+    client.window("a").size(300, 200).create();
+    pila.wait_focus("a");
+    workspaces.wait("workspaces", "a counted", |e| {
+        e["workspaces"][0]["windows"] == 1
+    });
+
+    // A move changes where the window is, which events leave out.
+    let (mut windows, _) = Subscription::new(&pila, Some(&["windows"]));
+    assert_eq!(windows.line().unwrap()["event"], "windows");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.move_to((x + 50) as f64, (y + 50) as f64);
+    pila.key_press("Super");
+    pila.press("left");
+    for _ in 0..5 {
+        pila.move_by(20.0, 10.0);
+    }
+    pila.release("left");
+    pila.key_release("Super");
+    pila.wait("moved", |s| {
+        rect(&window_in(s, "a").unwrap()["geometry"]).0 == x + 100
+    });
+    let moved = windows.during(Duration::from_millis(300));
+    assert!(moved.is_empty(), "{moved:?}");
+    let other = workspaces.during(Duration::from_millis(100));
+    assert!(
+        other.iter().all(|e| e["event"] == "workspaces"),
+        "{other:?}"
+    );
+}
+
+#[test]
+fn subscribing_to_something_unknown_says_so() {
+    let pila = TestPila::start();
+    let (_, answer) = Subscription::new(&pila, Some(&["weather"]));
+    assert_eq!(answer["ok"], false);
+    assert!(
+        answer["error"].as_str().unwrap().contains("weather"),
+        "{answer}"
+    );
+}
+
+#[test]
+fn pila_msg_subscribe_prints_events_as_they_come() {
+    let pila = TestPila::start();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pila"))
+        .args(["msg", "subscribe", "workspaces"])
+        .env_remove("PILA_SOCKET")
+        .env("WAYLAND_DISPLAY", &pila.display)
+        .env("XDG_RUNTIME_DIR", &pila.dir)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    out.read_line(&mut line).unwrap();
+    assert_eq!(line, "== workspaces\n");
+    line.clear();
+    out.read_line(&mut line).unwrap();
+    assert!(line.starts_with("1: 0 windows  [active]"), "{line:?}");
+    action(&pila, &["workspace", "2"]);
+    let mut seen = String::new();
+    while !seen.contains("2: 0 windows  [active]") {
+        line.clear();
+        assert!(out.read_line(&mut line).unwrap() > 0, "{seen}");
+        seen.push_str(&line);
+    }
+    child.kill().unwrap();
+    let _ = child.wait();
+}

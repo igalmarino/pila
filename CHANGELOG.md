@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Events from `pila msg`:** `pila msg subscribe` (or a `subscribe` request on the socket) sends
+  the windows, workspaces and monitors when they change, whole lists each time, so a bar or a
+  script follows them without asking over and over (docs/IPC.md).
+
 ## 0.4.1 (2026-11-08)
 
 - **Sharing a single window keeps going when it's hidden:** a shared window that another window

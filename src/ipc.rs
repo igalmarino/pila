@@ -7,6 +7,12 @@
 //! client does: reads and writes don't block, what a client hasn't read waits in
 //! a queue, and a client past a limit is disconnected. Answers are only built
 //! when asked for.
+//!
+//! A client may `subscribe` to events: whole snapshots of the windows,
+//! workspaces or outputs, sent first as they are and then whenever one changes
+//! (`Pila::send_ipc_events`, from `after_frames`, where the taskbars hear about
+//! windows too). Each subscriber keeps the last snapshot it got of each kind;
+//! with none, nothing is built.
 
 use std::{
     cell::{Cell, RefCell},
@@ -18,6 +24,7 @@ use std::{
     },
     path::PathBuf,
     rc::Rc,
+    rc::Weak,
 };
 
 use serde_json::{json, Value};
@@ -57,6 +64,9 @@ struct Client {
     pending: Vec<u8>,
     /// Answered, waiting to be written.
     unread: Vec<u8>,
+    /// Written right after the answer being built: a new subscriber's first
+    /// events.
+    after_answer: Vec<u8>,
     writing: bool,
     clients: Rc<Cell<usize>>,
 }
@@ -156,6 +166,7 @@ fn add_client(state: &mut Pila, stream: UnixStream, clients: &Rc<Cell<usize>>) {
         stream,
         pending: Vec::new(),
         unread: Vec::new(),
+        after_answer: Vec::new(),
         writing: false,
         clients: clients.clone(),
     }));
@@ -198,12 +209,14 @@ fn client_readable(state: &mut Pila, client: &Rc<RefCell<Client>>) -> PostAction
         if line.len() > MAX_REQUEST {
             return disconnect(client);
         }
-        let mut text = respond(state, &line).to_string();
+        let mut text = respond(state, client, &line).to_string();
         text.push('\n');
-        client
-            .borrow_mut()
-            .unread
-            .extend_from_slice(text.as_bytes());
+        {
+            let mut client = client.borrow_mut();
+            client.unread.extend_from_slice(text.as_bytes());
+            let events = std::mem::take(&mut client.after_answer);
+            client.unread.extend_from_slice(&events);
+        }
         if client.borrow().unread.len() > MAX_UNREAD {
             // Written as it goes: only what it really left unread counts.
             let flushed = client.borrow_mut().flush();
@@ -271,10 +284,10 @@ fn write_the_rest(state: &mut Pila, client: &Rc<RefCell<Client>>) {
     }
 }
 
-fn respond(state: &mut Pila, line: &[u8]) -> Value {
+fn respond(state: &mut Pila, client: &Rc<RefCell<Client>>, line: &[u8]) -> Value {
     let answer = serde_json::from_slice::<Value>(line)
         .map_err(|err| format!("bad request: {err}"))
-        .and_then(|request| handle(state, &request));
+        .and_then(|request| handle(state, client, &request));
     match answer {
         Ok(Value::Object(mut map)) => {
             map.insert("ok".into(), true.into());
@@ -285,7 +298,11 @@ fn respond(state: &mut Pila, line: &[u8]) -> Value {
     }
 }
 
-fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
+fn handle(
+    state: &mut Pila,
+    client: &Rc<RefCell<Client>>,
+    request: &Value,
+) -> Result<Value, String> {
     let name = request
         .get("request")
         .and_then(Value::as_str)
@@ -295,6 +312,22 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
         "windows" => Ok(json!({ "protocol": PROTOCOL, "windows": state.ipc_windows() })),
         "outputs" => Ok(json!({ "protocol": PROTOCOL, "outputs": state.ipc_outputs() })),
         "workspaces" => Ok(json!({ "protocol": PROTOCOL, "workspaces": state.ipc_workspaces() })),
+        "subscribe" => {
+            let kinds = match request.get("events") {
+                None => Kind::ALL.to_vec(),
+                Some(Value::Array(names)) if !names.is_empty() => names
+                    .iter()
+                    .map(|name| {
+                        name.as_str()
+                            .and_then(Kind::named)
+                            .ok_or_else(|| format!("no such events {name}"))
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(_) => return Err("\"events\" is a list of event names".to_string()),
+            };
+            state.subscribe(client, kinds);
+            Ok(json!({ "protocol": PROTOCOL }))
+        }
         "focused" => {
             let window = state.focused_window().and_then(|w| state.ipc_window(&w));
             Ok(json!({ "protocol": PROTOCOL, "window": window }))
@@ -337,6 +370,41 @@ fn named_window(state: &Pila, request: &Value) -> Result<Window, String> {
         .ok_or_else(|| format!("no window {id:?}"))
 }
 
+/// What a client can subscribe to: one snapshot each.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Windows,
+    Workspaces,
+    Outputs,
+}
+
+impl Kind {
+    const ALL: [Kind; 3] = [Kind::Windows, Kind::Workspaces, Kind::Outputs];
+
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Windows => "windows",
+            Kind::Workspaces => "workspaces",
+            Kind::Outputs => "outputs",
+        }
+    }
+
+    fn named(name: &str) -> Option<Kind> {
+        Kind::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
+struct Subscriber {
+    client: Weak<RefCell<Client>>,
+    kinds: Vec<Kind>,
+    /// The last event of each kind it was sent, by `Kind::ALL`'s order.
+    last: [Option<String>; Kind::ALL.len()],
+}
+
+/// The clients subscribed to events (`Pila::ipc_events`).
+#[derive(Default)]
+pub struct Subscribers(Vec<Subscriber>);
+
 /// As in the config's `[[output]]`.
 fn transform_name(transform: Transform) -> &'static str {
     match transform {
@@ -352,6 +420,104 @@ fn transform_name(transform: Transform) -> &'static str {
 }
 
 impl Pila {
+    /// Subscribe `client` to `kinds` (again, if it already was: the new list
+    /// replaces the old). Its first events are what's there now.
+    fn subscribe(&mut self, client: &Rc<RefCell<Client>>, kinds: Vec<Kind>) {
+        let weak = Rc::downgrade(client);
+        self.ipc_events.0.retain(|s| !s.client.ptr_eq(&weak));
+        let mut subscriber = Subscriber {
+            client: weak,
+            kinds,
+            last: Default::default(),
+        };
+        let mut first = String::new();
+        for &kind in &subscriber.kinds {
+            let event = self.ipc_event(kind);
+            first.push_str(&event);
+            first.push('\n');
+            subscriber.last[kind as usize] = Some(event);
+        }
+        client
+            .borrow_mut()
+            .after_answer
+            .extend_from_slice(first.as_bytes());
+        self.ipc_events.0.push(subscriber);
+    }
+
+    /// Send each subscriber the snapshots that changed since it got its last
+    /// ones. Called after frames are drawn, as taskbars are updated.
+    pub fn send_ipc_events(&mut self) {
+        self.ipc_events.0.retain(|s| s.client.strong_count() > 0);
+        if self.ipc_events.0.is_empty() {
+            return;
+        }
+        let mut events: [Option<String>; Kind::ALL.len()] = Default::default();
+        for kind in Kind::ALL {
+            if self.ipc_events.0.iter().any(|s| s.kinds.contains(&kind)) {
+                events[kind as usize] = Some(self.ipc_event(kind));
+            }
+        }
+        // A client is subscribed once (`subscribe` replaces its entry).
+        let mut written = Vec::new();
+        for subscriber in &mut self.ipc_events.0 {
+            let Some(client) = subscriber.client.upgrade() else {
+                continue;
+            };
+            let mut out = String::new();
+            for &kind in &subscriber.kinds {
+                let Some(event) = &events[kind as usize] else {
+                    continue;
+                };
+                if subscriber.last[kind as usize].as_ref() != Some(event) {
+                    subscriber.last[kind as usize] = Some(event.clone());
+                    out.push_str(event);
+                    out.push('\n');
+                }
+            }
+            if !out.is_empty() {
+                client.borrow_mut().unread.extend_from_slice(out.as_bytes());
+                written.push(client);
+            }
+        }
+        for client in written {
+            let behind = {
+                let mut c = client.borrow_mut();
+                c.flush().is_err() || c.unread.len() > MAX_UNREAD
+            };
+            if behind {
+                debug!("IPC: a subscriber isn't reading");
+                let _ = client.borrow().stream.shutdown(Shutdown::Both);
+                continue;
+            }
+            write_the_rest(self, &client);
+        }
+    }
+
+    /// An event line: `{"event": kind, kind: [...]}`. Windows leave out where
+    /// they are and their size, which change in every frame of a move.
+    fn ipc_event(&self, kind: Kind) -> String {
+        let list = match kind {
+            Kind::Windows => self
+                .ipc_windows()
+                .into_iter()
+                .map(|mut window| {
+                    if let Value::Object(fields) = &mut window {
+                        for field in ["x", "y", "width", "height"] {
+                            fields.remove(field);
+                        }
+                    }
+                    window
+                })
+                .collect(),
+            Kind::Workspaces => self.ipc_workspaces(),
+            Kind::Outputs => self.ipc_outputs(),
+        };
+        let mut event = serde_json::Map::new();
+        event.insert("event".into(), kind.name().into());
+        event.insert(kind.name().into(), Value::Array(list));
+        Value::Object(event).to_string()
+    }
+
     /// A binding's action, but with no key held: a window switch ends at once,
     /// where one from the keyboard ends as its modifiers are released.
     fn ipc_action(&mut self, action: Action) {

@@ -109,6 +109,10 @@ talks to a running Pila:
 .BR "pila msg " [ \-\-json ] " windows" | outputs | workspaces | focused | version
 List the windows, monitors or workspaces, or show the focused window or the version.
 .TP
+.BR "pila msg " [ \-\-json ] " subscribe " [ windows | workspaces | outputs ...]
+Print events as they happen: the whole list of windows, workspaces or monitors each time it
+changes, until Pila quits.
+.TP
 .BI "pila msg action " action
 Run an action, as in a key binding (for example
 .BR "workspace 2" ).

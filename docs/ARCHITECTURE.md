@@ -699,6 +699,11 @@ Key flows and invariants:
   Answers have their own JSON, not `state_json` (for tests, free to change), and are built only when
   asked. `action`, `focus` and `close` are refused while locked. An action goes through
   `Action::parse` and `run_action`, with a window switch ended at once, as no key is held.
+  `subscribe` adds the client (a `Weak`) to `Pila::ipc_events` with the kinds it wants and the
+  last event of each it got; its first events go right after the answer (`Client::after_answer`).
+  `Pila::send_ipc_events`, in `after_frames` right after the taskbars' `refresh_toplevels`, builds
+  each kind someone wants (only then), and sends it to those whose last differs: whole lists,
+  windows without their geometry so that moves send nothing.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit; a window that
