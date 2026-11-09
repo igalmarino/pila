@@ -20,7 +20,10 @@ use wayland_protocols::ext::{
         ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
     },
     image_copy_capture::v1::client::{
-        ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1,
+        ext_image_copy_capture_cursor_session_v1::{
+            Error as CursorSessionError, ExtImageCopyCaptureCursorSessionV1,
+        },
+        ext_image_copy_capture_frame_v1::{Error as FrameError, ExtImageCopyCaptureFrameV1},
         ext_image_copy_capture_manager_v1::{
             ExtImageCopyCaptureManagerV1, Options as CaptureOptions,
         },
@@ -30,7 +33,10 @@ use wayland_protocols::ext::{
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::Layer, zwlr_layer_surface_v1::Anchor,
 };
-use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
+use wayland_protocols_wlr::screencopy::v1::client::{
+    zwlr_screencopy_frame_v1::Error as ScreencopyError,
+    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
+};
 
 const RED: [u8; 4] = [255, 255, 0, 0];
 const BACKGROUND: [u8; 3] = [31, 33, 38];
@@ -384,6 +390,109 @@ fn a_buffer_of_the_wrong_size_fails() {
     let _ = pila;
 }
 
+/// A frame is used once: what comes after `capture`, or a `capture` with
+/// no buffer, is a protocol error (each on a client of its own, since the
+/// error ends its connection).
+#[test]
+fn a_frame_misused_is_a_protocol_error() {
+    let pila = TestPila::start();
+    type Misuse = fn(&Client, &ExtImageCopyCaptureFrameV1, (i32, i32));
+    let cases: [(&str, FrameError, Misuse); 4] = [
+        (
+            "attach after capture",
+            FrameError::AlreadyCaptured,
+            |client, frame, size| {
+                frame.capture();
+                frame.attach_buffer(&client.capture_buffer(size, Format::Xrgb8888).0);
+            },
+        ),
+        (
+            "damage after capture",
+            FrameError::AlreadyCaptured,
+            |_, frame, size| {
+                frame.capture();
+                frame.damage_buffer(0, 0, size.0, size.1);
+            },
+        ),
+        (
+            "capture sent twice",
+            FrameError::AlreadyCaptured,
+            |_, frame, _| {
+                frame.capture();
+                frame.capture();
+            },
+        ),
+        (
+            "capture without a buffer",
+            FrameError::NoBuffer,
+            |_, _, _| {},
+        ),
+    ];
+    for (what, code, misuse) in cases {
+        let client = pila.client();
+        let source = output_source(&client, "HEADLESS-1");
+        let (session, size) = session(&client, &source, "session");
+        let frame = session.create_frame(&client.qh, "frame".into());
+        // A buffer for all but the last case, which captures without one.
+        let buffer = (what != "capture without a buffer")
+            .then(|| client.capture_buffer(size, Format::Xrgb8888));
+        if let Some((buffer, _)) = &buffer {
+            frame.attach_buffer(buffer);
+        } else {
+            client.expect_error();
+            frame.capture();
+        }
+        if buffer.is_some() {
+            client.expect_error();
+            misuse(&client, &frame, size);
+        }
+        client.flush();
+        let error = client.wait_error();
+        let expected = format!(
+            "Protocol error {} on object ext_image_copy_capture_frame_v1",
+            code as u32
+        );
+        assert!(error.contains(&expected), "{what}: {error}");
+    }
+}
+
+/// Pila doesn't capture the pointer apart (clients ask for it painted
+/// in): a cursor session's capture session is stopped from the start, and
+/// its frames fail. Asking for that session twice is a protocol error.
+#[test]
+fn a_cursor_session_is_stopped_from_the_start() {
+    let pila = TestPila::start();
+    let client = pila.client();
+    let source = output_source(&client, "HEADLESS-1");
+    let manager: ExtImageCopyCaptureManagerV1 = client.bind("ext_image_copy_capture_manager_v1", 1);
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    let cursor: ExtImageCopyCaptureCursorSessionV1 =
+        manager.create_pointer_cursor_session(&source, &pointer, &client.qh, "cursor".into());
+    let session = cursor.get_capture_session(&client.qh, "session".into());
+    client.flush();
+    client.wait_logged("session", "Stopped");
+    let frame = session.create_frame(&client.qh, "frame".into());
+    let (buffer, _file) = client.capture_buffer((64, 64), Format::Xrgb8888);
+    frame.attach_buffer(&buffer);
+    frame.capture();
+    client.flush();
+    client.wait_logged("frame", "Failed");
+    assert!(
+        client.has_logged("frame", "Stopped"),
+        "{:?}",
+        client.logged("frame")
+    );
+    client.expect_error();
+    let _again = cursor.get_capture_session(&client.qh, "again".into());
+    client.flush();
+    let error = client.wait_error();
+    let expected = format!(
+        "Protocol error {} on object ext_image_copy_capture_cursor_session_v1",
+        CursorSessionError::DuplicateSession as u32
+    );
+    assert!(error.contains(&expected), "{error}");
+}
+
 #[test]
 fn closing_the_window_stops_its_session() {
     let mut pila = TestPila::start();
@@ -535,6 +644,42 @@ fn screencopy_copies_an_output() {
         [255, 0, 0]
     );
     assert_eq!(read_pixel(&file, 1280, 5, 5), BACKGROUND);
+}
+
+/// A screencopy frame is copied once, into a buffer of the size and
+/// format it announced: anything else is a protocol error (each on a
+/// client of its own, since the error ends its connection).
+#[test]
+fn a_screencopy_frame_copied_twice_or_into_a_wrong_buffer_is_a_protocol_error() {
+    let pila = TestPila::start();
+    for (what, code) in [
+        ("copied twice", ScreencopyError::AlreadyUsed),
+        ("a wrong buffer", ScreencopyError::InvalidBuffer),
+    ] {
+        let client = pila.client();
+        let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+        let frame =
+            manager.capture_output(0, &client.output("HEADLESS-1"), &client.qh, "copy".into());
+        client.flush();
+        client.wait_logged("copy", "BufferDone");
+        if code == ScreencopyError::AlreadyUsed {
+            let (buffer, _file) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+            frame.copy(&buffer);
+            client.expect_error();
+            frame.copy(&buffer);
+        } else {
+            let (buffer, _file) = client.capture_buffer((100, 100), Format::Xrgb8888);
+            client.expect_error();
+            frame.copy(&buffer);
+        }
+        client.flush();
+        let error = client.wait_error();
+        let expected = format!(
+            "Protocol error {} on object zwlr_screencopy_frame_v1",
+            code as u32
+        );
+        assert!(error.contains(&expected), "{what}: {error}");
+    }
 }
 
 #[test]

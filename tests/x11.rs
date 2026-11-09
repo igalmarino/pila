@@ -925,3 +925,28 @@ fn the_session_starts_when_xwayland_dies_at_startup() {
     pila.wait_log("Xwayland failed to start");
     let _ = std::fs::remove_dir_all(&bin);
 }
+
+/// Mod+right drag resizes an X11 window too: from the top-left quarter its
+/// top-left corner follows the pointer and the bottom-right one stays.
+#[test]
+fn mod_right_drag_resizes_an_x11_window_from_its_corner() {
+    let mut pila = TestPila::start();
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    x.window("XApp", (300, 200), 0xff0000);
+    pila.wait_focus("XApp");
+    let (gx, gy, gw, gh) = rect(&pila.window("XApp")["geometry"]);
+    pila.move_to((gx + 30) as f64, (gy + 30) as f64);
+    pila.key_press("Super");
+    pila.press("right");
+    pila.wait("a resize grab", |s| s["pointer"]["grab"] == "resize");
+    pila.move_by(-40.0, -30.0);
+    pila.wait("resized up and left", |s| {
+        x11_window(s, "XApp")
+            .is_some_and(|w| rect(&w["geometry"]) == (gx - 40, gy - 30, gw + 40, gh + 30))
+    });
+    pila.release("right");
+    pila.key_release("Super");
+    pila.wait("the grab ends", |s| s["pointer"]["grabbed"] == false);
+}

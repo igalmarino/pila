@@ -72,7 +72,8 @@ Key flows and invariants:
   also offers 1024x768 and 1920x1080) rendered into offscreen textures on a render node
   or Mesa's software device, paced by a timer at their refresh rate while a redraw is
   queued; `[[output]]` applies in full (`headless::apply_output_config`, with
-  wlr-output-management's overrides), gamma and power are kept in memory. Mod defaults
+  wlr-output-management's overrides), gamma, power and adaptive sync (every virtual output
+  can do it, reported back on its head as udev does) are kept in memory. Mod defaults
   to Super and nothing starts without `-c`/autostart. The control socket
   (`test_control.rs`, `$XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.control`, JSON lines; its
   commands are in the module doc) injects `TestInput` events through

@@ -152,6 +152,9 @@ pub struct HeadlessOutput {
     pub power: bool,
     /// The gamma ramps set (red, green, blue concatenated); `None` linear.
     pub gamma: Option<Vec<u16>>,
+    /// Adaptive sync as `[[output]]` or a display tool asked: a virtual
+    /// output can always do it, and reports it back as udev does.
+    pub adaptive_sync: bool,
 }
 
 pub struct HeadlessData {
@@ -226,7 +229,7 @@ impl HeadlessData {
                     position: (loc.x, loc.y),
                     transform: o.output.current_transform(),
                     scale: o.output.current_scale().fractional_scale(),
-                    adaptive_sync: Some(false),
+                    adaptive_sync: Some(o.adaptive_sync),
                 }
             })
             .collect()
@@ -495,6 +498,7 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
         frames: 0,
         power: true,
         gamma: None,
+        adaptive_sync: false,
     });
     info!(name = spec.name, size = ?spec.size, refresh_mhz = spec.refresh_mhz, "output connected");
     apply_output_config(state);
@@ -598,6 +602,9 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
         let transform = config.transform.unwrap_or(Transform::Normal);
         let loc: Point<i32, smithay::utils::Logical> =
             config.position.unwrap_or((right_edge, 0)).into();
+        if let Some(on) = config.adaptive_sync {
+            o.adaptive_sync = on;
+        }
         if o.output.current_mode() != Some(mode) {
             info!(name = o.output.name(), mode = ?mode.size, refresh_mhz = mode.refresh, "output mode changed");
             o.texture = None;

@@ -96,6 +96,94 @@ fn resizing_from_the_top_left_moves_the_window_once_it_commits() {
     });
     pila.release("right");
     pila.key_release("Super");
+    // The client's last commit, after the resize is over, still keeps the
+    // corner where it was.
+    client.wait_configure(window, "resize over", |c| !c.has(states::RESIZING));
+    client.roundtrip();
+    let state = pila.settle();
+    assert_eq!(
+        rect(&window_in(&state, "a").unwrap()["geometry"]),
+        (x - 40, y - 30, w + 40, h + 30)
+    );
+}
+
+#[test]
+fn a_resize_respects_the_maximum_size() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client
+        .window("a")
+        .size(400, 300)
+        .max_size(450, 320)
+        .create();
+    pila.wait_focus("a");
+    let (x, y, w, h) = geometry(&mut pila);
+    pila.move_to((x + w - 10) as f64, (y + h - 10) as f64);
+    pila.key_press("Super");
+    pila.press("right");
+    pila.wait("a move or resize grab", |s| {
+        matches!(s["pointer"]["grab"].as_str(), Some("move" | "resize"))
+    });
+    pila.move_by(200.0, 200.0);
+    client.wait_configure(window, "the maximum", |c| c.size == (450, 320));
+    pila.release("right");
+    pila.key_release("Super");
+}
+
+#[test]
+fn each_edge_resizes_with_its_own_cursor() {
+    let (mut pila, _client, _, (x, y, w, h)) = one_window(Decorations::Server);
+    let top = y - BAR - 3;
+    for (at, cursor) in [
+        ((x + w / 2, y + h + 3), "s-resize"),
+        ((x + w + 3, y + h / 2), "e-resize"),
+        ((x - 3, y + h / 2), "w-resize"),
+        ((x + w / 2, top), "n-resize"),
+        ((x + 10, top), "nw-resize"),
+        ((x + w - 10, top), "ne-resize"),
+        ((x - 3, y + h + 3), "sw-resize"),
+        ((x + w + 3, y + h + 3), "se-resize"),
+    ] {
+        pila.move_to(at.0 as f64, at.1 as f64);
+        pila.press("left");
+        let state = pila.wait("a resize grab", |s| s["pointer"]["grab"] == "resize");
+        assert_eq!(state["pointer"]["cursor"], cursor, "at {at:?}");
+        pila.release("left");
+        pila.wait("the grab ends", |s| s["pointer"]["grabbed"] == false);
+    }
+}
+
+#[test]
+fn a_window_minimized_while_moved_ends_the_move_and_stays_minimized() {
+    let (mut pila, client, window, (x, y, _, _)) = one_window(Decorations::Server);
+    pila.move_to((x + 100) as f64, (y + 100) as f64);
+    pila.key_press("Super");
+    pila.press("left");
+    pila.wait("a move grab", |s| s["pointer"]["grab"] == "move");
+    client.request(window, |t| t.set_minimized());
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    pila.move_by(30.0, 20.0);
+    let state = pila.wait("the grab ends", |s| s["pointer"]["grabbed"] == false);
+    assert_eq!(window_in(&state, "a").unwrap()["minimized"], true);
+    pila.release("left");
+    pila.key_release("Super");
+}
+
+#[test]
+fn a_window_closed_while_resized_ends_the_resize() {
+    let (mut pila, client, window, (x, y, w, h)) = one_window(Decorations::Server);
+    pila.move_to((x + w - 50) as f64, (y + h - 50) as f64);
+    pila.key_press("Super");
+    pila.press("right");
+    pila.wait("a resize grab", |s| s["pointer"]["grab"] == "resize");
+    client.destroy(window);
+    pila.wait("gone", |s| window_in(s, "a").is_none());
+    pila.move_by(30.0, 20.0);
+    pila.wait("the grab ends", |s| s["pointer"]["grabbed"] == false);
+    pila.release("right");
+    pila.key_release("Super");
 }
 
 #[test]

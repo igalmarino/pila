@@ -19,6 +19,21 @@ fn a_new_binding_works_after_a_reload() {
     client.wait("close request", |s| s.windows[a.0].close_requested);
 }
 
+/// A symlinked config (dotfiles managers keep the file elsewhere) is
+/// reloaded when the file it points to is edited.
+#[test]
+fn a_symlinked_config_reloads_when_its_file_changes() {
+    let mut pila = TestPila::start_with(Options {
+        config_symlink: true,
+        ..Options::default()
+    });
+    pila.wait_log("watching the config for changes");
+    pila.write_config("[bindings]\n\"Mod+n\" = \"spawn echo ran > $XDG_RUNTIME_DIR/ran\"\n");
+    pila.wait_log("config reloaded");
+    pila.combo("Super+n");
+    pila.wait_file("ran");
+}
+
 #[test]
 fn an_invalid_file_keeps_the_running_config() {
     let mut pila = TestPila::with_config("[bindings]\n\"Mod+x\" = \"close\"\n");

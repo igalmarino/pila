@@ -86,6 +86,23 @@ fn the_window_menu_runs_from_the_keyboard() {
     });
 }
 
+/// Up with nothing picked goes to the last item and wraps backwards;
+/// "On all workspaces" puts the window on every workspace.
+#[test]
+fn up_starts_from_the_bottom_and_all_workspaces_runs() {
+    let (mut pila, _client, _a, geometry) = one_window();
+    open_from_title_bar(&mut pila, geometry);
+    pila.key("Up");
+    pila.wait("Close picked", |s| menu(s)["hover"] == 4);
+    pila.key("Up");
+    pila.wait("On all workspaces picked", |s| menu(s)["hover"] == 3);
+    pila.key("Return");
+    let state = pila.wait("on all workspaces", |s| {
+        window_in(s, "a").unwrap()["all_workspaces"] == true
+    });
+    assert!(menu(&state).is_null());
+}
+
 #[test]
 fn a_click_outside_the_window_menu_closes_it_and_reaches_nothing() {
     let (mut pila, _client, _a, geometry) = one_window();

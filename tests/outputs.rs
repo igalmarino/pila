@@ -5,12 +5,14 @@
 mod common;
 
 use common::*;
-use wayland_client::Proxy;
+use wayland_client::{protocol::wl_output::Transform, Proxy};
 use wayland_protocols_wlr::{
     gamma_control::v1::client::zwlr_gamma_control_manager_v1::ZwlrGammaControlManagerV1,
     output_management::v1::client::{
-        zwlr_output_configuration_v1::ZwlrOutputConfigurationV1,
-        zwlr_output_head_v1::ZwlrOutputHeadV1, zwlr_output_manager_v1::ZwlrOutputManagerV1,
+        zwlr_output_configuration_head_v1::Error as ConfigHeadError,
+        zwlr_output_configuration_v1::{Error as ConfigurationError, ZwlrOutputConfigurationV1},
+        zwlr_output_head_v1::{AdaptiveSyncState, ZwlrOutputHeadV1},
+        zwlr_output_manager_v1::ZwlrOutputManagerV1,
         zwlr_output_mode_v1::ZwlrOutputModeV1,
     },
     output_power_management::v1::client::{
@@ -334,6 +336,125 @@ fn bad_configurations_fail() {
     config.apply();
     client.flush();
     client.wait_logged("config3", "Failed");
+}
+
+#[test]
+fn unplugging_an_output_finishes_its_head() {
+    let mut pila = two_outputs();
+    let (client, _manager) = manager(&pila);
+    let b = head(&client, "B");
+    pila.request(json!({ "cmd": "output_remove", "name": "B" }));
+    client.wait("B's head finished", |s| {
+        s.logged("head").iter().any(|e| e == "Finished")
+    });
+    assert!(client.events_of(&b).iter().any(|e| e == "Finished"));
+}
+
+#[test]
+fn stopping_the_manager_finishes_it() {
+    let pila = two_outputs();
+    let (client, manager) = manager(&pila);
+    manager.stop();
+    client.flush();
+    client.wait_logged("zwlr_output_manager_v1", "Finished");
+}
+
+#[test]
+fn a_configuration_turns_an_output_and_sets_a_custom_mode_it_has() {
+    let mut pila = two_outputs();
+    let (client, manager) = manager(&pila);
+    let config = configuration(&client, &manager);
+    let a = config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    a.set_transform(Transform::_90);
+    let b = config.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+    b.set_custom_mode(1920, 1080, 0);
+    config.apply();
+    client.flush();
+    client.wait_logged("config", "Succeeded");
+    let state = pila.wait("turned and resized", |s| {
+        s["outputs"][0]["transform"] == "_90" && s["outputs"][1]["mode"]["w"] == 1920
+    });
+    // Turned a quarter, A is as tall as it was wide.
+    let (_, _, w, h) = rect(&state["outputs"][0]["geometry"]);
+    assert_eq!((w, h), (800, 1280));
+}
+
+/// A client turning adaptive sync on hears it back from the head, as with
+/// `wlr-randr --adaptive-sync enabled`; so does one reading a config that
+/// turns it on.
+#[test]
+fn adaptive_sync_set_by_a_client_or_the_config_shows_on_the_head() {
+    let pila = two_outputs();
+    let (client, om) = manager(&pila);
+    let a = head(&client, "A");
+    assert!(
+        client
+            .events_of(&a)
+            .iter()
+            .any(|e| e == "AdaptiveSync { state: Value(Disabled) }"),
+        "{:?}",
+        client.events_of(&a)
+    );
+    let config = configuration(&client, &om);
+    let a_config = config.enable_head(&a, &client.qh, "config_head".into());
+    a_config.set_adaptive_sync(AdaptiveSyncState::Enabled);
+    config.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+    config.apply();
+    client.flush();
+    client.wait_logged("config", "Succeeded");
+    client.wait("A's adaptive sync on", |s| {
+        s.logged("head")
+            .iter()
+            .any(|e| e == "AdaptiveSync { state: Value(Enabled) }")
+    });
+
+    let pila = TestPila::start_with(Options {
+        config: "[[output]]\nname = \"HEADLESS-1\"\nadaptive-sync = true\n".into(),
+        ..Options::default()
+    });
+    let (client, _manager) = manager(&pila);
+    let events = client.events_of(&head(&client, "HEADLESS-1"));
+    assert!(
+        events
+            .iter()
+            .any(|e| e == "AdaptiveSync { state: Value(Enabled) }"),
+        "{events:?}"
+    );
+}
+
+/// Configuring a head twice, or a scale that isn't positive, is a protocol
+/// error (each on a client of its own: it ends the connection).
+#[test]
+fn a_head_configured_twice_or_a_bad_scale_is_a_protocol_error() {
+    let pila = two_outputs();
+    let (client, om) = manager(&pila);
+    let config = configuration(&client, &om);
+    config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    client.expect_error();
+    config.disable_head(&head(&client, "A"));
+    client.flush();
+    let error = client.wait_error();
+    assert!(
+        error.contains(&format!(
+            "Protocol error {} on object zwlr_output_configuration_v1",
+            ConfigurationError::AlreadyConfiguredHead as u32
+        )),
+        "{error}"
+    );
+    let (client, om) = manager(&pila);
+    let config = configuration(&client, &om);
+    let a = config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    client.expect_error();
+    a.set_scale(0.0);
+    client.flush();
+    let error = client.wait_error();
+    assert!(
+        error.contains(&format!(
+            "Protocol error {} on object zwlr_output_configuration_head_v1",
+            ConfigHeadError::InvalidScale as u32
+        )),
+        "{error}"
+    );
 }
 
 #[test]

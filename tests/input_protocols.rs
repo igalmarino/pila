@@ -222,6 +222,44 @@ fn a_confined_pointer_stays_inside_the_surface() {
     );
 }
 
+/// A locked client draws its own cursor and may say where it is
+/// (`set_cursor_position_hint`, applied on commit): Pila's pointer goes
+/// there, so unlocking doesn't jump, but never outside the window.
+#[test]
+fn a_locked_pointer_follows_the_clients_hint_within_its_window() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("game").size(400, 300).create();
+    pila.wait_focus("game");
+    let (x, y, _, h) = rect(&pila.window("game")["geometry"]);
+    pila.move_to((x + 100) as f64, (y + 100) as f64);
+    let constraints: ZwpPointerConstraintsV1 = client.bind("zwp_pointer_constraints_v1", 1);
+    let locked = constraints.lock_pointer(
+        &client.surface(window),
+        &pointer(&client),
+        None,
+        Lifetime::Persistent,
+        &client.qh,
+        "locked".into(),
+    );
+    client.flush();
+    client.wait_logged("locked", "Locked");
+    let at = |s: &Value| (s["pointer"]["x"].as_f64(), s["pointer"]["y"].as_f64());
+    locked.set_cursor_position_hint(50.0, 60.0);
+    client.surface(window).commit();
+    client.flush();
+    pila.wait("the pointer at the hint", |s| {
+        at(s) == (Some((x + 50) as f64), Some((y + 60) as f64))
+    });
+    // Past the window's edges: its last pixels.
+    locked.set_cursor_position_hint(-20.0, 5000.0);
+    client.surface(window).commit();
+    client.flush();
+    pila.wait("the pointer clamped to the window", |s| {
+        at(s) == (Some(x as f64), Some((y + h - 1) as f64))
+    });
+}
+
 #[test]
 fn switching_to_an_empty_workspace_releases_a_locked_pointer() {
     let mut pila = TestPila::start();

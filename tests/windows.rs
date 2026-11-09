@@ -1,4 +1,5 @@
-//! Window lifecycle, placement, focus and stacking, title bar buttons.
+//! Window lifecycle, placement, focus and stacking, title bar buttons,
+//! scrolling.
 
 mod common;
 
@@ -673,4 +674,46 @@ fn a_modal_dialog_minimized_alone_doesnt_take_the_parents_focus() {
     client.roundtrip();
     pila.combo("Super+n");
     pila.wait_focus("parent");
+}
+
+/// The wheel and the touchpad scroll the window under the pointer: a wheel
+/// notch is 15 px with a `value120` of 120, a touchpad gives pixels only.
+#[test]
+fn scrolling_reaches_the_window_under_the_pointer() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.move_to((x + 100) as f64, (y + 100) as f64);
+    client.wait("pointer enter", |s| s.pointer_name.as_deref() == Some("a"));
+    pila.scroll("wheel", 0.0, 1.0);
+    client.wait("a wheel notch", |s| {
+        s.events.iter().any(|e| {
+            matches!(
+                e,
+                Ev::AxisV120 {
+                    horizontal: false,
+                    value: 120
+                }
+            )
+        })
+    });
+    assert!(client
+        .events()
+        .iter()
+        .any(|e| matches!(e, Ev::Axis { horizontal: false, value } if *value == 15.0)));
+    pila.scroll("finger", -7.5, 0.0);
+    client.wait("a touchpad scroll", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Axis { horizontal: true, value } if *value == -7.5))
+    });
+    assert!(!client.events().iter().any(|e| matches!(
+        e,
+        Ev::AxisV120 {
+            horizontal: true,
+            ..
+        }
+    )));
 }

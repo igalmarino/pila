@@ -41,6 +41,10 @@ pub struct Options {
     pub command: Option<String>,
     /// Extra environment.
     pub env: Vec<(String, String)>,
+    /// The config path pila gets is a symlink to the file, kept elsewhere
+    /// (`dotfiles/`), as dotfiles managers set it up; `config_path` and
+    /// `write_config` are the file itself.
+    pub config_symlink: bool,
 }
 
 pub struct TestPila {
@@ -95,7 +99,17 @@ impl TestPila {
         let config_dir = dir.join("config");
         std::fs::create_dir_all(&config_dir).unwrap();
         let config_path = config_dir.join("config.toml");
-        std::fs::write(&config_path, full_config(&options.config)).unwrap();
+        let config_file = if options.config_symlink {
+            let dotfiles = dir.join("dotfiles");
+            std::fs::create_dir_all(&dotfiles).unwrap();
+            dotfiles.join("pila.toml")
+        } else {
+            config_path.clone()
+        };
+        std::fs::write(&config_file, full_config(&options.config)).unwrap();
+        if options.config_symlink {
+            std::os::unix::fs::symlink(&config_file, &config_path).unwrap();
+        }
         let log_path = dir.join("pila.log");
         let log = std::fs::File::create(&log_path).unwrap();
 
@@ -168,7 +182,7 @@ impl TestPila {
         TestPila {
             child,
             dir,
-            config_path,
+            config_path: config_file,
             log_path,
             display,
             control: BufReader::new(control),
