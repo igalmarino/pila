@@ -121,6 +121,8 @@ pub struct Outputs {
     pub gamma: crate::gamma_control::GammaControls,
     /// Clients watching or setting outputs' power (`output_power.rs`).
     pub power: crate::output_power::OutputPowers,
+    /// Outputs `power-off-monitors` turned off, back on with any input.
+    pub off_until_input: Vec<smithay::output::Output>,
 }
 
 /// Create the global. Called once from `Pila::new`.

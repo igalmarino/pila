@@ -66,7 +66,8 @@ actions are those of `config.example.toml`.
 | `close` | `id` | nothing more |
 
 While the session is locked, `action`, `focus` and `close` are refused, `quit` included, and
-queries still answer. An action with `spawn` runs a command as your user; any program of yours can
+queries still answer. Only the actions `power-off-monitors` and `power-on-monitors` still run,
+as idling locks first and then turns the monitors off. An action with `spawn` runs a command as your user; any program of yours can
 do that anyway.
 
 **A window:** `id` (string, for as long as the window lives; the same identifier as
@@ -78,7 +79,8 @@ screen; the title bar isn't included), `minimized`, `maximized`, `fullscreen`, `
 terminal escapes included. Text from `pila msg` without `--json` has control characters replaced.
 
 **An output:** `name`, `make`, `model`, `x`, `y`, `width`, `height` (logical pixels), `refresh`
-(mHz, or null), `scale`, `transform` (as in `[[output]]`), `focused` (the pointer is on it). Only
+(mHz, or null), `scale`, `transform` (as in `[[output]]`), `focused` (the pointer is on it), `power` (its display is on: off
+after `power-off-monitors` or a tool such as `wlopm`). Only
 those turned on.
 
 **A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on

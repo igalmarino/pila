@@ -43,6 +43,80 @@ fn mode(on: bool) -> Mode {
 }
 
 impl Pila {
+    /// Turn an output's display off or back on, as a client asked or an
+    /// action (`power-off-monitors`); the power objects of that output hear
+    /// its new mode. `false` if the backend couldn't.
+    pub fn set_output_power(&mut self, output: &Output, on: bool) -> bool {
+        let mode_before = output.current_mode();
+        let done = self
+            .backend
+            .as_mut()
+            .is_some_and(|b| b.set_output_power(output, on));
+        if !done {
+            warn!(
+                output = output.name(),
+                on, "couldn't set the output's power"
+            );
+            return false;
+        }
+        if output.current_mode() != mode_before {
+            // Back on with a lighter mode: the one it had didn't fit.
+            self.fit_to_outputs();
+        }
+        if !on {
+            // Nothing draws there until it's back; what's kept for it is big.
+            self.blur.forget_output(&output.name());
+        }
+        for (r, o) in &self.outputs.power {
+            if o == output {
+                r.mode(mode(on));
+            }
+        }
+        true
+    }
+
+    /// `power-off-monitors`: every display that's on goes off, until any
+    /// input (`wake_monitors`) or `power-on-monitors`.
+    pub fn power_off_monitors(&mut self) {
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        for output in outputs {
+            let on = self.backend.as_ref().and_then(|b| b.output_power(&output));
+            if on == Some(true) && self.set_output_power(&output, false) {
+                self.outputs.off_until_input.push(output);
+            }
+        }
+    }
+
+    /// `power-on-monitors`: every display that's off comes back.
+    pub fn power_on_monitors(&mut self) {
+        self.outputs.off_until_input.clear();
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        for output in outputs {
+            let on = self.backend.as_ref().and_then(|b| b.output_power(&output));
+            if on == Some(false) {
+                self.set_output_power(&output, true);
+            }
+        }
+    }
+
+    /// Input after `power-off-monitors`: the displays it turned off come
+    /// back (not those a client turned off: that client says when). `true`
+    /// if this input did it, so a key or click can be kept from apps.
+    pub fn wake_monitors(&mut self) -> bool {
+        let outputs = std::mem::take(&mut self.outputs.off_until_input);
+        if outputs.is_empty() {
+            return false;
+        }
+        for output in outputs {
+            let on = self.backend.as_ref().and_then(|b| b.output_power(&output));
+            if on == Some(false) {
+                self.set_output_power(&output, true);
+            }
+        }
+        self.queue_redraw();
+        true
+    }
+
     /// An output went away: its power objects are over.
     pub fn output_power_removed(&mut self, output: &Output) {
         self.outputs.power.retain(|(resource, o)| {
@@ -51,6 +125,7 @@ impl Pila {
             }
             o != output
         });
+        self.outputs.off_until_input.retain(|o| o != output);
     }
 }
 
@@ -126,32 +201,11 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Pila {
             return;
         }
         debug!(output = output.name(), on, "output power request");
-        let mode_before = output.current_mode();
-        let done = state
-            .backend
-            .as_mut()
-            .is_some_and(|b| b.set_output_power(output, on));
-        if !done {
-            warn!(
-                output = output.name(),
-                on, "couldn't set the output's power"
-            );
+        // A client's choice now: input doesn't turn it back on.
+        state.outputs.off_until_input.retain(|o| o != output);
+        if !state.set_output_power(output, on) {
             resource.failed();
             state.outputs.power.retain(|(r, _)| r != resource);
-            return;
-        }
-        if output.current_mode() != mode_before {
-            // Back on with a lighter mode: the one it had didn't fit.
-            state.fit_to_outputs();
-        }
-        if !on {
-            // Nothing draws there until it's back; what's kept for it is big.
-            state.blur.forget_output(&output.name());
-        }
-        for (r, o) in &state.outputs.power {
-            if o == output {
-                r.mode(mode(on));
-            }
         }
     }
 

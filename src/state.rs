@@ -230,6 +230,9 @@ pub struct InputState {
     /// The physical keyboard's layout names as last read, told while a
     /// virtual keyboard's keymap is in place (`keyboard_layout.rs`).
     pub layout_names: Vec<String>,
+    /// Pointer buttons whose press only woke the monitors: their release
+    /// isn't forwarded either.
+    pub suppressed_buttons: HashSet<u32>,
     /// The last pointer button press: a client may ask for the window menu
     /// with its serial after the release (`window_menu::recent_press`).
     pub last_press: Option<crate::window_menu::LastPress>,
@@ -1500,6 +1503,8 @@ impl Pila {
             Action::FocusOutput(target) => self.focus_output(target),
             Action::MoveToOutput(target) => self.move_focused_to_output(target),
             Action::SwitchLayout(target) => self.switch_layout(target),
+            Action::PowerOffMonitors => self.power_off_monitors(),
+            Action::PowerOnMonitors => self.power_on_monitors(),
             Action::Restore => {
                 if let Some(window) = self.focused_window() {
                     self.restore_window_size(&window);

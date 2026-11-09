@@ -307,6 +307,10 @@ pub enum Action {
     MoveToOutput(OutputTarget),
     /// Switch the keyboard layout (`keyboard_layout.rs`).
     SwitchLayout(LayoutTarget),
+    /// Turn every monitor's display off until any input, or back on
+    /// (`output_power.rs`).
+    PowerOffMonitors,
+    PowerOnMonitors,
     /// Switch to virtual terminal N (Ctrl+Alt+F<N> on a TTY; not configurable).
     ChangeVt(i32),
 }
@@ -432,6 +436,8 @@ impl Action {
             "maximize" => Action::ToggleMaximize,
             "fullscreen" => Action::ToggleFullscreen,
             "quit" => Action::Quit,
+            "power-off-monitors" => Action::PowerOffMonitors,
+            "power-on-monitors" => Action::PowerOnMonitors,
             other => {
                 return Err(format!(
                     "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
@@ -441,8 +447,8 @@ impl Action {
                      shrink-width, grow-height, shrink-height, center, toggle-always-on-top, \
                      toggle-all-workspaces, show-desktop, focus-output <next|prev>, \
                      move-to-output <next|prev>, workspace <n|next|prev>, \
-                     move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, quit or \
-                     none)"
+                     move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, \
+                     power-off-monitors, power-on-monitors, quit or none)"
                 ))
             }
         }))
@@ -1978,6 +1984,18 @@ mod tests {
         );
         assert!(Action::parse("switch-layout 0").is_err());
         assert!(Action::parse("switch-layout up").is_err());
+    }
+
+    #[test]
+    fn the_monitors_power_actions_parse() {
+        assert_eq!(
+            Action::parse("power-off-monitors").unwrap(),
+            Some(Action::PowerOffMonitors)
+        );
+        assert_eq!(
+            Action::parse("power-on-monitors").unwrap(),
+            Some(Action::PowerOnMonitors)
+        );
     }
 
     #[test]

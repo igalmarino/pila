@@ -325,6 +325,14 @@ fn a_locked_session_refuses_actions_and_still_answers_questions() {
     assert!(!apps.with_window(a, |w| w.close_requested));
     assert_eq!(pila.state()["workspace"], 1);
     assert!(msg(&pila, &["outputs"]).status.success());
+    // Turning the monitors off and on gets past nothing: idling locks, then
+    // turns them off.
+    action(&pila, &["power-off-monitors"]);
+    pila.wait("off", |s| s["outputs"][0]["power"] == false);
+    assert_eq!(query(&pila, &["outputs"])["outputs"][0]["power"], false);
+    action(&pila, &["power-on-monitors"]);
+    pila.wait("on", |s| s["outputs"][0]["power"] == true);
+    assert_eq!(query(&pila, &["outputs"])["outputs"][0]["power"], true);
 }
 
 #[test]

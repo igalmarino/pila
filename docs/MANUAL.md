@@ -171,8 +171,12 @@ too, until the next time you save that monitor's section in the configuration.
 `Mod+O` moves the pointer and the focus to the next monitor, and `Mod+Shift+O` sends the focused
 window there, keeping its place, or still filling the monitor or the same half.
 
-To turn monitors off without unplugging them, for instance when idle, use `wlopm`:
-`wlopm --off '*'` and `wlopm --on '*'`.
+To turn the monitors off without unplugging them, for instance when idle, run
+`pila msg action power-off-monitors` (or bind the action to a key): any key, click or move of the
+pointer turns them back on, and that first key or click does nothing else. It works with the
+screen locked too, as idling usually locks first. `pila msg action power-on-monitors` turns them
+on from a script. `wlopm --off '*'` and `wlopm --on '*'` work as well; monitors a tool turned off
+stay off until that tool turns them on.
 
 ## Keyboard, mouse and touchpad
 
@@ -365,7 +369,7 @@ idle settings):
 
 ```toml
 autostart = [
-    "swayidle -w timeout 300 'swaylock -f' timeout 600 'wlopm --off \"*\"' resume 'wlopm --on \"*\"' before-sleep 'swaylock -f'",
+    "swayidle -w timeout 300 'swaylock -f' timeout 600 'pila msg action power-off-monitors' before-sleep 'swaylock -f'",
 ]
 ```
 
@@ -457,7 +461,7 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 | Clicking a link in the terminal does nothing | Install `xdg-utils`. |
 | No notifications from Pila | Install `libnotify` and run a notification daemon (Noctalia, mako). |
 | Screen sharing shows nothing | Install `xdg-desktop-portal-wlr` and `slurp`, and start Pila from the login screen or `pila-session`. |
-| The shell doesn't turn the screens off | Some shells run `wlr-randr --off` without a monitor name, which fails; use `wlopm --off '*'`. |
+| The shell doesn't turn the screens off | Some shells run `wlr-randr --off` without a monitor name, which fails; use `pila msg action power-off-monitors` (any input turns them back on). |
 | X11 apps don't start | Install Xwayland; the log says if it couldn't start. |
 | Title bars have no text | Install a font (any TrueType or OpenType font). |
 | Stuck on a locked screen after the locker crashed | See [Locking the screen and idling](#locking-the-screen-and-idling). |

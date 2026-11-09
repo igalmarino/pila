@@ -36,6 +36,19 @@ impl Pila {
         I::Device: 'static,
     {
         self.notify_activity();
+        // After `power-off-monitors` any input brings them back; a key or a
+        // click that does is kept from apps (`on_keyboard`, `pointer_button`).
+        if matches!(
+            event,
+            InputEvent::PointerMotion { .. }
+                | InputEvent::PointerMotionAbsolute { .. }
+                | InputEvent::PointerAxis { .. }
+                | InputEvent::GestureSwipeBegin { .. }
+                | InputEvent::GesturePinchBegin { .. }
+                | InputEvent::GestureHoldBegin { .. }
+        ) {
+            self.wake_monitors();
+        }
         match event {
             InputEvent::Keyboard { event, .. } => self.on_keyboard::<I>(event),
             InputEvent::PointerMotion { event, .. } => self.on_pointer_motion::<I>(event),
@@ -93,6 +106,11 @@ impl Pila {
             serial,
             time,
             |state, mods, handle| {
+                // A key that wakes the monitors does only that.
+                if key_state == KeyState::Pressed && state.wake_monitors() {
+                    state.input.suppressed_keys.insert(keycode);
+                    return FilterResult::Intercept(None);
+                }
                 // Ctrl+Alt+F<N>: the keymap turns it into XF86_Switch_VT_<N>.
                 if key_state == KeyState::Pressed {
                     let raw = handle.modified_sym().raw();
@@ -438,6 +456,15 @@ impl Pila {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        // A click that wakes the monitors does only that, release included.
+        match button_state {
+            ButtonState::Pressed if self.wake_monitors() => {
+                self.input.suppressed_buttons.insert(button);
+                return;
+            }
+            ButtonState::Released if self.input.suppressed_buttons.remove(&button) => return,
+            _ => {}
+        }
         let serial = SERIAL_COUNTER.next_serial();
         if button_state == ButtonState::Pressed {
             let client = pointer

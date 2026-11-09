@@ -131,7 +131,9 @@
 # workspace <n|next|prev> (go to a workspace; next/prev don't wrap around),
 # move-to-workspace <n|next|prev> (move the window there; "workspace-next" and
 # "move-to-workspace-prev" work too), switch-layout <n|next|prev> (the keyboard
-# layout, among [keyboard]'s; next/prev wrap around), quit, none.
+# layout, among [keyboard]'s; next/prev wrap around), power-off-monitors
+# (every display off until any input; the key or click that wakes them does
+# nothing else), power-on-monitors, quit, none.
 # Dragging a window to the left/right edge of a screen snaps it to that half,
 # near a corner to that quarter; the top edge maximizes it.
 #

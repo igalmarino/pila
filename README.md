@@ -306,8 +306,9 @@ Pila draws windows and title bars only; the rest of a desktop comes from the usu
 tools: a bar (waybar), launcher (fuzzel), notifications (mako), wallpaper (swaybg), lock
 screen and idle (swaylock, swayidle), night light (wlsunset), clipboard (wl-clipboard), all
 started from `autostart`. A full shell such as [Noctalia](https://noctalia.dev) provides all
-of these at once. To turn screens off on idle, use `wlopm` (`wlopm --off '*'`): shells that
-don't recognize Pila may run `wlr-randr --off` without naming an output, which fails.
+of these at once. To turn screens off on idle, use `pila msg action power-off-monitors` (any input
+turns them back on): shells that don't recognize Pila may run `wlr-randr --off` without naming an
+output, which fails.
 
 ## Configuring Pila
 

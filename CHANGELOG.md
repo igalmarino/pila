@@ -8,6 +8,10 @@
 - **Keyboard layouts from a bar or a binding:** `pila msg keyboard` lists the layouts of
   `[keyboard]` and says which is in use, `pila msg subscribe keyboard` follows it, and the action
   `switch-layout <n|next|prev>` changes it, from a key binding or `pila msg action`.
+- **Turning the monitors off:** the actions `power-off-monitors` (until any input; the key or
+  click that wakes them does nothing else) and `power-on-monitors`, for a binding or a shell's idle
+  settings through `pila msg action`, which allows them with the screen locked. `pila msg outputs`
+  tells each monitor's `power`.
 
 ## 0.4.1 (2026-11-08)
 

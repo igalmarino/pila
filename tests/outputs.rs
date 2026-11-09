@@ -4,6 +4,7 @@
 
 mod common;
 
+use common::client::Ev;
 use common::*;
 use wayland_client::{protocol::wl_output::Transform, Proxy};
 use wayland_protocols_wlr::{
@@ -785,4 +786,91 @@ fn memfd(data: &[u8]) -> std::os::fd::OwnedFd {
     file.write_all(data).unwrap();
     file.rewind().unwrap();
     file.into()
+}
+
+// --- power-off-monitors ------------------------------------------------------
+
+fn powered(state: &Value) -> Vec<bool> {
+    state["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["power"] == true)
+        .collect()
+}
+
+/// Two outputs and a focused app, with `power-off-monitors` on Mod+X.
+fn ready_to_power_off() -> (TestPila, Client) {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        config: "[bindings]\n\"Mod+x\" = \"power-off-monitors\"\n".into(),
+        ..Options::default()
+    });
+    let app = pila.client();
+    app.window("app").create();
+    pila.wait_focus("app");
+    pila.combo("Super+x");
+    pila.wait("every monitor off", |s| powered(s) == [false, false]);
+    (pila, app)
+}
+
+#[test]
+fn power_off_monitors_lasts_until_a_key_which_the_app_doesnt_get() {
+    let (mut pila, app) = ready_to_power_off();
+    app.roundtrip();
+    app.clear_events();
+    pila.key("a");
+    pila.wait("every monitor on", |s| powered(s) == [true, true]);
+    app.roundtrip();
+    assert!(
+        !app.events().iter().any(|e| matches!(e, Ev::Key { .. })),
+        "{:?}",
+        app.events()
+    );
+    // The next key is the app's again.
+    pila.key("a");
+    app.wait("a key", |s| {
+        s.events.iter().any(|e| matches!(e, Ev::Key { .. }))
+    });
+}
+
+#[test]
+fn a_click_wakes_the_monitors_and_does_nothing_else() {
+    let (mut pila, app) = ready_to_power_off();
+    app.roundtrip();
+    let buttons = app.buttons().len();
+    pila.click("left");
+    pila.wait("every monitor on", |s| powered(s) == [true, true]);
+    app.roundtrip();
+    assert_eq!(app.buttons().len(), buttons, "{:?}", app.buttons());
+}
+
+#[test]
+fn moving_the_pointer_wakes_the_monitors() {
+    let (mut pila, _app) = ready_to_power_off();
+    pila.move_by(5.0, 0.0);
+    pila.wait("every monitor on", |s| powered(s) == [true, true]);
+}
+
+/// A monitor a client turned off (wlopm, a shell's idle handling) stays off
+/// on input: that client turns it back on.
+#[test]
+fn input_doesnt_wake_a_monitor_a_client_turned_off() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        config: "[bindings]\n\"Mod+x\" = \"power-off-monitors\"\n".into(),
+        ..Options::default()
+    });
+    let client = pila.client();
+    let manager: ZwlrOutputPowerManagerV1 = client.bind("zwlr_output_power_manager_v1", 1);
+    let power = manager.get_output_power(&client.output("A"), &client.qh, "power".into());
+    client.flush();
+    client.wait_logged("power", "Mode { mode: Value(On) }");
+    power.set_mode(Mode::Off);
+    client.flush();
+    pila.wait("A off", |s| powered(s) == [false, true]);
+    pila.combo("Super+x");
+    pila.wait("both off", |s| powered(s) == [false, false]);
+    pila.key("a");
+    pila.wait("B back, A still off", |s| powered(s) == [false, true]);
 }

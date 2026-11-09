@@ -334,6 +334,21 @@ fn handle(
             let window = state.focused_window().and_then(|w| state.ipc_window(&w));
             Ok(json!({ "protocol": PROTOCOL, "window": window }))
         }
+        // Turning the monitors off or on doesn't get past the lock screen, and
+        // idling locks first, then turns them off.
+        "action"
+            if state.is_locked()
+                && matches!(
+                    request.get("action").and_then(Value::as_str).map(str::trim),
+                    Some("power-off-monitors" | "power-on-monitors")
+                ) =>
+        {
+            let text = string_field(request, "action")?;
+            if let Some(action) = Action::parse(text)? {
+                state.ipc_action(action);
+            }
+            Ok(json!({}))
+        }
         "action" | "focus" | "close" if state.is_locked() => {
             // Not even `quit`: a program mustn't get past the lock screen this way.
             Err("the session is locked".to_string())
@@ -616,6 +631,11 @@ impl Pila {
                     "scale": output.current_scale().fractional_scale(),
                     "transform": transform_name(output.current_transform()),
                     "focused": geo.to_f64().contains(pointer),
+                    "power": self
+                        .backend
+                        .as_ref()
+                        .and_then(|b| b.output_power(output))
+                        .unwrap_or(true),
                 }))
             })
             .collect()

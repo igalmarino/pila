@@ -503,7 +503,12 @@ Key flows and invariants:
   `Pila::fit_to_outputs`), with gamma and adaptive sync set again and its recovery and first
   frame reset.
   Code using `drm_output` must handle `None`; a powered-off output stays mapped and counts
-  as showing the lock screen. Nested: fails.
+  as showing the lock screen. Nested: fails. Clients and the actions go through
+  `Pila::set_output_power` (the backend, a lighter mode's refit, power objects told).
+  `power-off-monitors` remembers what it turned off (`Outputs::off_until_input`); any input then
+  turns those back on (`wake_monitors`, from `process_input_event`), and a key or click that does
+  is kept from apps (`suppressed_keys`, `InputState::suppressed_buttons`). Outputs a client turned
+  off aren't woken: that client says when.
 - **Output management** (`output_management.rs`, wlr-output-management v4): heads are
   `HeadInfo` snapshots (`Backend::output_heads`; nested: the window, transform `Normal`,
   only its scale may change). `refresh_output_heads` diffs against the last snapshot,
@@ -697,7 +702,8 @@ Key flows and invariants:
   it hasn't read waits in `Client::unread` with a write source of its own, and past `MAX_UNREAD` or
   `MAX_REQUEST` it's disconnected. A client's place (`MAX_CLIENTS`) frees when its last source goes.
   Answers have their own JSON, not `state_json` (for tests, free to change), and are built only when
-  asked. `action`, `focus` and `close` are refused while locked. An action goes through
+  asked. `action`, `focus` and `close` are refused while locked, but for `power-off-monitors` and
+  `power-on-monitors` (idling locks, then turns monitors off). An action goes through
   `Action::parse` and `run_action`, with a window switch ended at once, as no key is held.
   `subscribe` adds the client (a `Weak`) to `Pila::ipc_events` with the kinds it wants and the
   last event of each it got; its first events go right after the answer (`Client::after_answer`).
