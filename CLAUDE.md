@@ -137,7 +137,8 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   animation runs: exact on bare metal (the DRM sequence of the vblanks that showed
   frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
   show); `pila::frames=trace` logs every frame. Screen captures, which build frames of their
-  own after the outputs', are logged apart (`captures`; `scripts/check` reports them). Any change that touches rendering, input
+  own after the outputs', are logged apart (`captures`), held to the same budget (`scripts/check`
+  streams one, as a screen share does: `scripts/capture-stream`). Any change that touches rendering, input
   or the event loop is checked with it (release build) before it's committed; bare-metal
   numbers come from the user with `scripts/check` (see Commands).
 - **Rules:** nothing blocking on the event loop (I/O, D-Bus, font loading go to threads

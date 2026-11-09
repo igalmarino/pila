@@ -2,17 +2,18 @@
 
 `scripts/check` drives a real Pila with real programs (a terminal, xterm, fuzzel, grim,
 Noctalia if installed: windows opening and closing, minimize, maximize, workspace switches, a
-launcher, a capture, a blurred window) and judges the log: the scenarios finished without a panic, animations
+launcher, a capture, a capture stream, a blurred window) and judges the log: the scenarios finished without a panic, animations
 ran (`starts` on `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a
-picture, monitors were identified from their EDID (bare metal), and the frame statistics (no
-missed refresh, CPU per frame on average within 4 ms; bare metal, if a night light set gamma,
+picture, the stream got frames, monitors were identified from their EDID (bare metal), and the
+frame statistics (no missed refresh, CPU per frame on average within 4 ms, for the outputs'
+frames and, on average over all of them, the captures'; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
-and exits 1 on a failure; INFO lines report without judging (the captures' CPU time, which has
-no budget yet, and how long gamma set the blocking way took: after a modeset, or a driver
-without `GAMMA_LUT`).
+and exits 1 on a failure; INFO lines report without judging (how long gamma set the blocking
+way took: after a modeset, or a driver without `GAMMA_LUT`).
 
-It doesn't test behavior: that's the integration tests' job (`scripts/toplevel-action` and
-`scripts/workspace-action` are its small taskbar and pager clients, standard-library Python).
+It doesn't test behavior: that's the integration tests' job (`scripts/toplevel-action`,
+`scripts/workspace-action` and `scripts/capture-stream` are its small taskbar, pager and screen
+share clients, standard-library Python).
 
 A feature adds a scenario there (a `mark "name begin/end"` section in the workload, checks
 with `section`, `has`, `lacks` on a debug log target) only if it's bare-metal only or puts load

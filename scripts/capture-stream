@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Capture the first output for a while, frame after frame, as a screen share
+does: a minimal ext-image-copy-capture client (standard library only, shm
+buffers, the pointer painted in), for scripted tests such as scripts/check.
+Frames come as the screen changes, so something on it should. It prints how
+many frames were ready and exits 1 if none was. Run it inside Pila (it uses
+WAYLAND_DISPLAY).
+
+    scripts/capture-stream <seconds>
+"""
+import os
+import socket
+import struct
+import sys
+import time
+
+if len(sys.argv) != 2:
+    sys.exit(__doc__)
+try:
+    seconds = float(sys.argv[1])
+except ValueError:
+    sys.exit(__doc__)
+path = os.path.join(os.environ["XDG_RUNTIME_DIR"], os.environ["WAYLAND_DISPLAY"])
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(path)
+next_id = 2
+
+
+def new_id():
+    global next_id
+    next_id += 1
+    return next_id
+
+
+def send(obj, opcode, payload=b"", fds=()):
+    message = struct.pack("<II", obj, ((8 + len(payload)) << 16) | opcode) + payload
+    if fds:
+        socket.send_fds(sock, [message], list(fds))
+    else:
+        sock.sendall(message)
+
+
+def string(s):
+    data = s.encode() + b"\0"
+    pad = (4 - len(data) % 4) % 4
+    return struct.pack("<I", len(data)) + data + b"\0" * pad
+
+
+buf = b""
+
+
+def events(deadline=None):
+    """The events the compositor sends, as (object, opcode, body), until
+    `deadline` (a time.monotonic() value) if one is given."""
+    global buf
+    while True:
+        while len(buf) >= 8:
+            obj, word = struct.unpack("<II", buf[:8])
+            size, opcode = word >> 16, word & 0xFFFF
+            if len(buf) < size:
+                break
+            body, buf = buf[8:size], buf[size:]
+            yield obj, opcode, body
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            sock.settimeout(left)
+        try:
+            data = sock.recv(65536)
+        except socket.timeout:
+            return
+        if not data:
+            sys.exit("the compositor closed the connection")
+        buf += data
+
+
+def roundtrip():
+    callback = new_id()
+    send(DISPLAY, 0, struct.pack("<I", callback))  # sync
+    for obj, _, _ in events():
+        if obj == callback:
+            return
+
+
+DISPLAY, REGISTRY = 1, 2
+send(DISPLAY, 1, struct.pack("<I", REGISTRY))  # get_registry
+wanted = {
+    "wl_shm": 1,
+    "wl_output": 1,
+    "ext_output_image_capture_source_manager_v1": 1,
+    "ext_image_copy_capture_manager_v1": 1,
+}
+globals_found = {}
+callback = new_id()
+send(DISPLAY, 0, struct.pack("<I", callback))
+for obj, op, body in events():
+    if obj == REGISTRY and op == 0:  # global
+        name, length = struct.unpack("<II", body[:8])
+        iface = body[8:8 + length - 1].decode()
+        if iface in wanted and iface not in globals_found:
+            globals_found[iface] = name
+    if obj == callback:
+        break
+missing = [iface for iface in wanted if iface not in globals_found]
+if missing:
+    sys.exit("missing: " + ", ".join(missing))
+bound = {}
+for iface, version in wanted.items():
+    bound[iface] = new_id()
+    send(REGISTRY, 0, struct.pack("<I", globals_found[iface]) + string(iface)
+         + struct.pack("<II", version, bound[iface]))  # bind
+
+SOURCE, SESSION = new_id(), new_id()
+send(bound["ext_output_image_capture_source_manager_v1"], 0,
+     struct.pack("<II", SOURCE, bound["wl_output"]))  # create_source
+PAINT_CURSORS = 1
+send(bound["ext_image_copy_capture_manager_v1"], 0,
+     struct.pack("<III", SESSION, SOURCE, PAINT_CURSORS))  # create_session
+width = height = shm_format = None
+for obj, op, body in events(time.monotonic() + 5):
+    if obj == SESSION and op == 0:  # buffer_size
+        width, height = struct.unpack("<II", body[:8])
+    elif obj == SESSION and op == 1 and shm_format is None:  # shm_format
+        shm_format, = struct.unpack("<I", body[:4])
+    elif obj == SESSION and op == 4:  # done
+        break
+    elif obj == SESSION and op == 5:  # stopped
+        sys.exit("the capture session stopped")
+if None in (width, height, shm_format):
+    sys.exit("no buffer constraints")
+
+stride = width * 4
+size = stride * height
+fd = os.memfd_create("pila-capture-stream")
+os.ftruncate(fd, size)
+POOL, BUFFER = new_id(), new_id()
+send(bound["wl_shm"], 0, struct.pack("<Ii", POOL, size), fds=[fd])  # create_pool
+send(POOL, 0, struct.pack("<IiiiiI", BUFFER, 0, width, height, stride, shm_format))
+os.close(fd)
+
+ready = failed = 0
+deadline = time.monotonic() + seconds
+while time.monotonic() < deadline:
+    frame = new_id()
+    send(SESSION, 0, struct.pack("<I", frame))  # create_frame
+    send(frame, 1, struct.pack("<I", BUFFER))  # attach_buffer
+    send(frame, 2, struct.pack("<iiii", 0, 0, width, height))  # damage_buffer
+    send(frame, 3)  # capture
+    done = False
+    for obj, op, body in events(deadline):
+        if obj == frame and op == 3:  # ready
+            ready += 1
+            done = True
+            break
+        if obj == frame and op == 4:  # failed
+            failed += 1
+            done = True
+            break
+        if obj == SESSION and op == 5:
+            sys.exit("the capture session stopped")
+    send(frame, 0)  # destroy
+    if not done:
+        break
+roundtrip()
+print(f"frames {ready} failed {failed} size {width}x{height}")
+sys.exit(0 if ready else 1)

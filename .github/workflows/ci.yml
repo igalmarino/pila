@@ -60,4 +60,5 @@ jobs:
       - name: Python scripts
         run: |
           python3 -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' \
-            scripts/sandbox-socket scripts/toplevel-action scripts/workspace-action
+            scripts/sandbox-socket scripts/toplevel-action scripts/workspace-action \
+            scripts/capture-stream
