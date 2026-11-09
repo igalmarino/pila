@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The focus goes back to the window you were using:** closing a window, a launcher going away
+  or unlocking the screen gave the keyboard to the topmost window, which with a window kept on
+  top (`toggle-always-on-top`) was always that one. It now goes to the window used most recently.
+
 ## 0.4.2 (2026-11-09)
 
 - **Apps can no longer crash Pila with absurd sizes:** a window made wider than any screen (a

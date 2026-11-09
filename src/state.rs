@@ -1131,17 +1131,6 @@ impl Pila {
         keyboard.unset_grab(self);
     }
 
-    /// Focus the topmost window, e.g. after the focused surface went away.
-    pub fn focus_top_window(&mut self, serial: Serial) {
-        let top = self
-            .space
-            .elements()
-            .rev()
-            .find(|w| !crate::workspaces::is_override_redirect(w))
-            .cloned();
-        self.focus_window(top, serial);
-    }
-
     /// Fit maximized windows to the usable area again after it changed (a
     /// panel appeared, resized or went away, or the output was resized).
     pub fn refit_maximized(&mut self) {

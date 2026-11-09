@@ -200,7 +200,7 @@ impl Pila {
             }
             // The focused layer surface was hidden (committed without a buffer).
             None if !has_buffer(surface) && self.has_keyboard_focus(surface) => {
-                self.focus_top_window(serial);
+                self.focus_recent_window();
             }
             // A launcher or dialog above the windows that takes the keyboard
             // on demand gets it when it shows up (as on niri and COSMIC).
@@ -212,7 +212,7 @@ impl Pila {
     }
 
     /// Unmap a destroyed layer surface; hand its keyboard focus back to the
-    /// top window.
+    /// window used most recently.
     pub fn remove_layer(&mut self, surface: &WlSurface) {
         let was_focused = self.has_keyboard_focus(surface);
         let mut zone_changed = false;
@@ -233,7 +233,7 @@ impl Pila {
             self.refit_maximized();
         }
         if was_focused {
-            self.focus_top_window(SERIAL_COUNTER.next_serial());
+            self.focus_recent_window();
         }
     }
 }

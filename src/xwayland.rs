@@ -428,7 +428,7 @@ impl XwmHandler for Pila {
             let _ = surface.set_mapped(false);
         }
         if was_focused {
-            self.focus_top_window(SERIAL_COUNTER.next_serial());
+            self.focus_recent_window();
         }
         self.queue_redraw();
     }

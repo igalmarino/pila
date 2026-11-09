@@ -47,6 +47,65 @@ fn a_window_on_top_stays_above_one_that_opens_and_takes_the_focus() {
 }
 
 #[test]
+fn closing_a_window_focuses_the_one_used_before_not_the_one_on_top() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pinned_and_other(&mut pila, &client);
+    let b = client.window("b").size(500, 300).create();
+    pila.wait_focus("b");
+    client.destroy(b);
+    pila.wait("b gone", |s| window_in(s, "b").is_none());
+    pila.wait_focus("other");
+    assert_eq!(top(&pila.state()), "pin");
+}
+
+#[test]
+fn a_launcher_going_away_gives_the_keyboard_back_to_the_window_used_before() {
+    use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::KeyboardInteractivity;
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pinned_and_other(&mut pila, &client);
+    let (launcher, layer) = client.layer_surface(
+        "launcher",
+        &LayerSpec {
+            layer: Layer::Overlay,
+            keyboard: KeyboardInteractivity::Exclusive,
+            ..LayerSpec::default()
+        },
+        [255, 0, 0, 255],
+    );
+    client.wait_surface_configured(launcher);
+    pila.wait("the launcher has the keyboard", |s| {
+        s["keyboard_focus"] == "layer:launcher"
+    });
+    layer.destroy();
+    client.wl_surface_of(launcher).destroy();
+    client.flush();
+    pila.wait("a window has the keyboard", |s| s["focused"].is_string());
+    assert_eq!(pila.state()["focused"], "other");
+}
+
+#[test]
+fn unlocking_gives_the_keyboard_back_to_the_window_used_before() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pinned_and_other(&mut pila, &client);
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    let surf = locker.lock_surface(&lock, "HEADLESS-1", [255, 10, 20, 30]);
+    locker.wait_surface_configured(surf);
+    locker.wait_logged("lock", "Locked");
+    pila.wait("locked", |s| {
+        s["locked"] == true && s["lock_pending"] == false
+    });
+    lock.unlock_and_destroy();
+    locker.flush();
+    pila.wait("unlocked", |s| s["locked"] == false);
+    pila.wait("a window has the keyboard", |s| s["focused"].is_string());
+    assert_eq!(pila.state()["focused"], "other");
+}
+
+#[test]
 fn a_window_on_top_stays_above_whatever_moves_the_others() {
     let mut pila = TestPila::start();
     let client = pila.client();

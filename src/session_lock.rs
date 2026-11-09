@@ -205,7 +205,7 @@ impl Pila {
         self.session_lock = SessionLock::default();
         // Runs outside client dispatch, which would otherwise queue it.
         self.queue_redraw();
-        self.focus_top_window(SERIAL_COUNTER.next_serial());
+        self.focus_recent_window();
         self.refresh_pointer_focus();
     }
 }

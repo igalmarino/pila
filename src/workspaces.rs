@@ -286,7 +286,9 @@ impl Pila {
     }
 
     /// Focus the most recently used window on screen (or the top one, or
-    /// none), e.g. after the focused one was minimized or left the workspace.
+    /// none), e.g. after the focused one was minimized, closed or left the
+    /// workspace, a launcher went away or the session was unlocked. Not the
+    /// top one first: an always-on-top window is always that.
     pub(crate) fn focus_recent_window(&mut self) {
         let next = self
             .windows

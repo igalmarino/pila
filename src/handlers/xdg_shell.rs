@@ -17,7 +17,7 @@ use smithay::{
             Resource,
         },
     },
-    utils::{Logical, Point, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Serial},
     wayland::shell::xdg::{
         decoration::XdgDecorationHandler, PopupSurface, PositionerState, ToplevelSurface,
         XdgShellHandler, XdgShellState,
@@ -67,7 +67,7 @@ impl XdgShellHandler for Pila {
             self.space.unmap_elem(&window);
         }
         if was_focused {
-            self.focus_top_window(SERIAL_COUNTER.next_serial());
+            self.focus_recent_window();
         }
     }
 

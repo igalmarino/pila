@@ -275,7 +275,11 @@ Key flows and invariants:
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;
   the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
   released (checked after every key in `on_keyboard`), on a click, and in
-  `release_all_keys`. Unmapped windows are dropped with `forget_window`.
+  `release_all_keys`. Unmapped windows are dropped with `forget_window`. Whenever the focus has
+  to go somewhere else (the focused window closed, unmapped, minimized or left the workspace, a
+  launcher that held the keyboard went away, the session unlocked) it goes through
+  `focus_recent_window`: the most recent window on screen in that history, the top one only if
+  none is. Never the top one first: an always-on-top window always is.
 - **Minimize** (`minimize.rs`): a minimized window is unmapped from the `Space` and kept
   in `Pila::windows.minimized` with its location (X11 ones get `_NET_WM_STATE_HIDDEN`).
   `window_for_surface`/`window_for_x11` search it too, and destroyed windows are removed
