@@ -242,7 +242,10 @@ Key flows and invariants:
   "everything"). Smithay builds a layer surface's `Size` from the u32 it gets, and past
   `i32::MAX` its debug assertion panics before Pila sees it (debug builds only; release
   builds reach the check). A new request carrying a client's size or position gets a check
-  here.
+  here. Outside surfaces: a screencopy region past the limit fails its frame (`position_ok`,
+  `size_ok`); points that only get added to others (a cursor's hotspot, where an app asks for
+  its window menu, a drag icon's accumulated offset) go through Smithay's `Point` arithmetic,
+  which saturates, and are tested far off (`tests/surface_limits.rs`).
 - **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
   on a barrier; Pila signals barriers. A commit that sets one registers its surface
   (`commit_paced`), `post_render` signals those shown on the output just drawn, and

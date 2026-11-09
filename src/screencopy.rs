@@ -387,6 +387,15 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for Pila {
                 width,
                 height,
             } => {
+                // A client's rectangle: a negative size or a place past the
+                // limit fails the frame (the protocol has no error for it).
+                let within = crate::surface_limits::position_ok(x.into(), y.into())
+                    && crate::surface_limits::size_ok(width, height);
+                if !within {
+                    debug!(x, y, width, height, "screencopy: a region past the limit");
+                    data_init.init(frame, Mutex::new(None)).failed();
+                    return;
+                }
                 let region = Rectangle::new((x, y).into(), (width, height).into());
                 (frame, overlay_cursor, output, Some(region))
             }

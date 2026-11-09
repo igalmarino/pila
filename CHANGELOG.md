@@ -8,6 +8,9 @@
 - **Room for busy sessions:** Pila raises its limit of open files (usually 1024) to the most the
   system allows, since it holds some for every app, buffer and frame in flight; a session with
   many windows could run out and drop apps. Programs it starts still get the usual limit.
+- **Screenshots of a region past the limits fail instead of crashing:** a `wlr-screencopy` region
+  with a negative size or a place past 32768 px could crash a debug build of Pila; the frame now
+  fails, as other numbers from apps past the limits do since 0.4.2.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it.

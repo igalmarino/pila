@@ -174,3 +174,142 @@ fn an_input_region_past_the_limit_is_fine() {
     pila.settle();
     assert!(pila.alive());
 }
+
+// --- Other requests carrying a client's numbers -------------------------------
+
+/// The region of a screencopy is a client's rectangle: a negative size or a
+/// place past the limit fails the frame (wlr-screencopy has no error for it).
+#[test]
+fn a_screencopy_region_past_the_limit_fails_the_frame() {
+    use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let output = client.output("HEADLESS-1");
+    for (i, (x, y, w, h)) in [
+        (10, 10, -5, 100),
+        (i32::MAX, 0, 100, 100),
+        (0, 0, i32::MAX, i32::MAX),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let tag = format!("copy{i}");
+        manager.capture_output_region(0, &output, x, y, w, h, &client.qh, tag.clone());
+        client.flush();
+        client.wait_logged(&tag, "Failed");
+    }
+    pila.settle();
+    assert!(pila.alive());
+}
+
+/// A cursor's hotspot, set with the cursor or moved by its buffer's
+/// offsets (which add up over commits), is a client's point: far off, Pila
+/// goes on drawing (Smithay's point arithmetic saturates).
+#[test]
+fn a_cursor_hotspot_far_off_is_drawn_without_overflow() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.move_to((x + 50) as f64, (y + 50) as f64);
+    client.wait("pointer enter", |s| s.pointer_name.as_deref() == Some("a"));
+    let serial = client.lock().pointer_enter_serial;
+    let cursor = client.painted_surface([255, 255, 255, 255], (16, 16));
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, Some(&cursor), i32::MAX, i32::MIN);
+    client.flush();
+    pila.wait("a surface cursor", |s| s["pointer"]["cursor"] == "surface");
+    pila.move_by(5.0, 5.0);
+    pila.settle();
+    // Offsets add up over commits.
+    pointer.set_cursor(serial, Some(&cursor), 0, 0);
+    for i in 0..70_000 {
+        cursor.offset(-32768, 32768);
+        cursor.commit();
+        if i % 1000 == 0 {
+            client.roundtrip();
+        }
+    }
+    client.roundtrip();
+    pila.move_by(5.0, 5.0);
+    pila.settle();
+    assert!(pila.alive());
+}
+
+/// Where an app asks for its window menu is its point: far off, the menu
+/// stays on the output.
+#[test]
+fn a_window_menu_asked_for_far_off_stays_on_the_output() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client
+        .window("a")
+        .size(400, 300)
+        .decorations(common::client::Decorations::Client)
+        .create();
+    let state = pila.wait_focus("a");
+    let (x, y, ..) = rect(&window_in(&state, "a").unwrap()["geometry"]);
+    pila.move_to(x as f64 + 50.0, y as f64 + 10.0);
+    pila.press("right");
+    client.wait("the press", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, common::client::Ev::Button { pressed: true, .. }))
+    });
+    let serial = client.last_serial();
+    let seat = client.seat();
+    client.request(a, |t| t.show_window_menu(&seat, serial, i32::MAX, i32::MAX));
+    let state = pila.wait("the menu", |s| !s["window_menu"].is_null());
+    let (mx, my, mw, mh) = rect(&state["window_menu"]["geometry"]);
+    assert!(
+        mx >= 0 && my >= 0 && mx + mw <= 1280 && my + mh <= 800,
+        "{state}"
+    );
+    pila.release("right");
+    assert!(pila.alive());
+}
+
+/// A drag icon moves by its buffer's offsets, which add up over commits:
+/// far off, Pila goes on drawing (Smithay's point arithmetic saturates).
+#[test]
+fn a_drag_icon_offset_adding_up_far_off_is_drawn_without_overflow() {
+    use wayland_client::protocol::wl_data_device_manager::{DndAction, WlDataDeviceManager};
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("source").size(400, 300).create();
+    let state = pila.wait_focus("source");
+    let (x, y, ..) = rect(&window_in(&state, "source").unwrap()["geometry"]);
+    pila.move_to(x as f64 + 50.0, y as f64 + 50.0);
+    pila.press("left");
+    client.wait("the press", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, common::client::Ev::Button { pressed: true, .. }))
+    });
+    let source = client.data_source("drag", "dragged text");
+    source.set_actions(DndAction::Copy);
+    let manager: WlDataDeviceManager = client.bind("wl_data_device_manager", 3);
+    let device = manager.get_data_device(&client.seat(), &client.qh, "src".into());
+    let icon = client.painted_surface(RED, (20, 20));
+    device.start_drag(
+        Some(&source),
+        &client.surface(window),
+        Some(&icon),
+        client.last_serial(),
+    );
+    client.flush();
+    for i in 0..70_000 {
+        icon.offset(32768, -32768);
+        icon.commit();
+        if i % 1000 == 0 {
+            client.roundtrip();
+        }
+    }
+    client.roundtrip();
+    pila.move_by(10.0, 10.0);
+    pila.settle();
+    pila.release("left");
+    assert!(pila.alive());
+}

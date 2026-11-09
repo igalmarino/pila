@@ -31,12 +31,12 @@ use tracing::warn;
 /// tree, a client may give a surface, in logical px (buffers: in pixels).
 pub const MAX_EXTENT: i32 = 32768;
 
-fn position_ok(x: i64, y: i64) -> bool {
+pub fn position_ok(x: i64, y: i64) -> bool {
     let range = -(MAX_EXTENT as i64)..=MAX_EXTENT as i64;
     range.contains(&x) && range.contains(&y)
 }
 
-fn size_ok(w: i32, h: i32) -> bool {
+pub fn size_ok(w: i32, h: i32) -> bool {
     (0..=MAX_EXTENT).contains(&w) && (0..=MAX_EXTENT).contains(&h)
 }
 
