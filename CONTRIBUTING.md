@@ -2,7 +2,8 @@
 
 Bug reports, testing on other hardware and distros, and patches are welcome. For a bug,
 open an issue with the bug report form; it asks for what helps most (Pila's version, your
-GPU and distro, how Pila was started, and the log).
+GPU and distro, how Pila was started, and the log). Changes made with AI help are welcome
+too; see [Use of AI](README.md#use-of-ai) for the terms.
 
 ## Conventions
 
