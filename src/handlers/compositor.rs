@@ -45,6 +45,7 @@ impl CompositorHandler for Pila {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, _, surface| {
+            crate::surface_limits::check_commit(surface);
             state.wait_for_client_rendering(surface);
             state.hold_commit_until_timestamp(surface);
         });

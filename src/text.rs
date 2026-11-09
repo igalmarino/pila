@@ -97,8 +97,12 @@ fn render_with(
     height: i32,
     scale: i32,
 ) -> Option<(Vec<u8>, i32)> {
-    let width = max_width * scale;
-    let height = height * scale;
+    // Sizes from a client's window: nothing to draw rather than an overflow.
+    let width = max_width.checked_mul(scale).filter(|w| *w > 0)?;
+    let height = height.checked_mul(scale).filter(|h| *h > 0)?;
+    let bytes = (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)?;
     let Fonts { system, cache } = fonts;
 
     // A line as tall as the bar: cosmic-text centers the glyphs within it.
@@ -124,7 +128,7 @@ fn render_with(
 
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let text_color = Color::rgb(byte(color[0]), byte(color[1]), byte(color[2]));
-    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    let mut pixels = vec![0u8; bytes];
     buffer.draw(cache, text_color, |x, y, w, h, color| {
         let (r, g, b, a) = color.as_rgba_tuple();
         if a == 0 {
@@ -173,5 +177,22 @@ mod tests {
             cosmic_text::fontdb::Database::new(),
         );
         assert!(prepare(empty).is_none());
+    }
+
+    /// A title as wide as `i32::MAX` px (scaled, it overflows) or with no
+    /// room: nothing to draw, not a panic.
+    #[test]
+    fn a_title_too_wide_to_draw_is_nothing() {
+        let system = FontSystem::new_with_locale_and_db(
+            "en-US".into(),
+            cosmic_text::fontdb::Database::new(),
+        );
+        let mut fonts = Fonts {
+            system,
+            cache: SwashCache::new(),
+        };
+        let white = [1.0; 3];
+        assert!(render_with(&mut fonts, "a", white, i32::MAX, 30, 2).is_none());
+        assert!(render_with(&mut fonts, "a", white, 0, 30, 1).is_none());
     }
 }

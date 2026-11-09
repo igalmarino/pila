@@ -224,6 +224,22 @@ Key flows and invariants:
   has `syncobj_eventfd`: bare metal and headless with a GPU, not nested) a commit's acquire
   point takes the place of the fence, and Smithay signals the release point when the buffer
   is dropped. Pila keeps no buffer of its own: animation snapshots are textures.
+- **Surface limits** (`surface_limits.rs`): no size or place a client gives a surface goes past
+  `MAX_EXTENT` (32768 logical px; buffers in pixels), so no sum of a position and a size
+  overflows, in Pila's layout and drawing or in Smithay's (bounding boxes, popup placement).
+  The first pre-commit hook on every surface (`check_commit`) walks its whole tree from the
+  root, since a parent's commit applies its synchronized subsurfaces' positions: each
+  subsurface's place relative to the root, buffer sizes and offsets, viewport destinations,
+  xdg window geometry, layer-shell sizes, margins and exclusive zones. What's past the limit
+  is a `wl_surface` protocol error (`invalid_size`, logged), and is cleared or reset in the
+  pending state, so the commit that still applies before the client is gone is within it;
+  xdg min/max sizes are clamped silently (a large maximum can mean "none"). Popup
+  positioners apply at `new_popup`/`reposition_request`, not at a commit, and are checked
+  there (`check_positioner`). Input and opaque regions aren't errors (`INT32_MAX` is a common
+  "everything"). Smithay builds a layer surface's `Size` from the u32 it gets, and past
+  `i32::MAX` its debug assertion panics before Pila sees it (debug builds only; release
+  builds reach the check). A new request carrying a client's size or position gets a check
+  here.
 - **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
   on a barrier; Pila signals barriers. A commit that sets one registers its surface
   (`commit_paced`), `post_render` signals those shown on the output just drawn, and
@@ -736,7 +752,8 @@ Key flows and invariants:
   re-rendered only when it changes; they can't be shared between windows (element ids must
   be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw
-  without text.
+  without text. The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide
+  the window, and `render_with` returns `None` on sizes that overflow.
 - **Rounded corners** (`rounded.rs`, `corner-radius`, default 0): `Pila::scene` gives each
   window a `Rounding` (geometry plus title bar; none when maximized or fullscreen; radius
   at most half the shorter side and, with a bar, its height). `render::window_elements`

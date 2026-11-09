@@ -90,7 +90,11 @@ impl XdgShellHandler for Pila {
         }
     }
 
-    fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        if let Err(err) = crate::surface_limits::check_positioner(&positioner) {
+            crate::surface_limits::refuse(surface.wl_surface(), err);
+            return;
+        }
         self.unconstrain_popup(&surface);
         if let Err(err) = self.popups.track_popup(PopupKind::Xdg(surface)) {
             warn!(?err, "failed to track popup");
@@ -103,6 +107,10 @@ impl XdgShellHandler for Pila {
         positioner: PositionerState,
         token: u32,
     ) {
+        if let Err(err) = crate::surface_limits::check_positioner(&positioner) {
+            crate::surface_limits::refuse(surface.wl_surface(), err);
+            return;
+        }
         surface.with_pending_state(|state| {
             state.geometry = positioner.get_geometry();
             state.positioner = positioner;

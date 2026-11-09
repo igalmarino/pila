@@ -471,3 +471,29 @@ fn a_reload_recolors_whats_already_drawn() {
     assert!(near(px, [192, 192, 0, 255], 40), "the button: {px:?}");
     assert_eq!(pila.pixel(5.0, 795.0), [128, 64, 32, 255]);
 }
+
+/// A window as wide as clients may make one (`surface_limits`'s 32768 px, past
+/// any screen): a subsurface at the far end stretches the bounding box
+/// Smithay clamps the geometry to. Its title bar is drawn no wider than any
+/// screen, not as a texture as wide as the window.
+#[test]
+fn a_window_as_wide_as_the_limit_is_drawn() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").color(RED).create();
+    pila.wait_focus("a");
+    let wide = 32768;
+    client.subsurface(&client.surface(window), "sub", (wide - 1, 10), (1, 1), RED);
+    client.with_window(window, |w| {
+        w.xdg_surface.set_window_geometry(0, 0, wide, 100);
+    });
+    client.draw(window, None);
+    pila.wait("the wide geometry", |s| {
+        window_in(s, "a").unwrap()["geometry"]["w"] == wide
+    });
+    // Frames go on being drawn, the title bar's among them.
+    pila.settle();
+    let _ = pila.pixel(10.0, 10.0);
+    assert!(pila.alive());
+    assert_eq!(pila.window("a")["title_bar"], true);
+}

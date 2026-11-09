@@ -52,6 +52,10 @@ const BUTTONS: i32 = 3;
 const TITLE_PADDING: i32 = 10;
 /// Narrower than this, the title isn't drawn at all.
 const MIN_TITLE_WIDTH: i32 = 24;
+/// The widest title texture: more than any screen shows. A client can make
+/// its window far wider (a subsurface stretches the geometry's bounds), and
+/// the texture is width x height x 4 bytes.
+const MAX_TITLE_WIDTH: i32 = 8192;
 /// Width of the invisible resize border outside the window and title bar.
 const BORDER: i32 = 6;
 /// Distance from a corner, along each edge, that resizes diagonally.
@@ -363,7 +367,8 @@ pub fn title_bar_elements(
 
     // The title: at most the space between the left padding and the buttons,
     // centered on the bar where it fits (see `title_x`).
-    let title_width = rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING;
+    let title_width =
+        (rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING).min(MAX_TITLE_WIDTH);
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
             let key = (text, title_width, icon_color, buffer_scale);

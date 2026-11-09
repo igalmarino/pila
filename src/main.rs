@@ -54,6 +54,7 @@ mod session_protocol;
 mod snap;
 mod stacking;
 mod state;
+mod surface_limits;
 mod switcher;
 mod test_control;
 mod text;
