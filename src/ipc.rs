@@ -12,8 +12,9 @@
 //! workspaces, outputs or keyboard layouts, sent first as they are and then
 //! whenever one changes (`Pila::send_ipc_events`, from `after_frames`, where
 //! the taskbars hear about windows too; the layouts every loop iteration,
-//! `send_keyboard_events`). Each subscriber keeps the last snapshot it got of
-//! each kind; with none, nothing is built.
+//! `send_keyboard_events`). A change that may come with no frame at all (the
+//! monitors turned off) sends them anyway (`ipc_events_due`). Each subscriber
+//! keeps the last snapshot it got of each kind; with none, nothing is built.
 
 use std::{
     cell::{Cell, RefCell},
@@ -426,7 +427,12 @@ struct Subscriber {
 
 /// The clients subscribed to events (`Pila::ipc_events`).
 #[derive(Default)]
-pub struct Subscribers(Vec<Subscriber>);
+pub struct Subscribers {
+    list: Vec<Subscriber>,
+    /// Something changed that no frame may follow (the monitors went off):
+    /// `after_frames` sends the events anyway (`send_ipc_events_due`).
+    due: bool,
+}
 
 /// As in the config's `[[output]]`.
 fn transform_name(transform: Transform) -> &'static str {
@@ -447,7 +453,7 @@ impl Pila {
     /// replaces the old). Its first events are what's there now.
     fn subscribe(&mut self, client: &Rc<RefCell<Client>>, kinds: Vec<Kind>) {
         let weak = Rc::downgrade(client);
-        self.ipc_events.0.retain(|s| !s.client.ptr_eq(&weak));
+        self.ipc_events.list.retain(|s| !s.client.ptr_eq(&weak));
         let mut subscriber = Subscriber {
             client: weak,
             kinds,
@@ -464,14 +470,29 @@ impl Pila {
             .borrow_mut()
             .after_answer
             .extend_from_slice(first.as_bytes());
-        self.ipc_events.0.push(subscriber);
+        self.ipc_events.list.push(subscriber);
     }
 
     /// Send each subscriber the windows, workspaces and outputs that changed
     /// since it got its last ones. Called after frames are drawn, as taskbars
     /// are updated.
     pub fn send_ipc_events(&mut self) {
+        self.ipc_events.due = false;
         self.send_events_of(&Kind::AFTER_FRAMES);
+    }
+
+    /// Send the events after a change no frame may follow (`ipc_events_due`),
+    /// from `after_frames` when nothing was drawn.
+    pub fn send_ipc_events_due(&mut self) {
+        if std::mem::take(&mut self.ipc_events.due) {
+            self.send_ipc_events();
+        }
+    }
+
+    /// Something changed that may come with no frame (every monitor turned
+    /// off draws nothing): send the events at the end of this iteration.
+    pub fn ipc_events_due(&mut self) {
+        self.ipc_events.due = true;
     }
 
     /// The same for the keyboard layouts, every loop iteration.
@@ -480,19 +501,19 @@ impl Pila {
     }
 
     fn send_events_of(&mut self, kinds: &[Kind]) {
-        self.ipc_events.0.retain(|s| s.client.strong_count() > 0);
-        if self.ipc_events.0.is_empty() {
+        self.ipc_events.list.retain(|s| s.client.strong_count() > 0);
+        if self.ipc_events.list.is_empty() {
             return;
         }
         let mut events: [Option<String>; Kind::ALL.len()] = Default::default();
         for &kind in kinds {
-            if self.ipc_events.0.iter().any(|s| s.kinds.contains(&kind)) {
+            if self.ipc_events.list.iter().any(|s| s.kinds.contains(&kind)) {
                 events[kind as usize] = Some(self.ipc_event(kind));
             }
         }
         // A client is subscribed once (`subscribe` replaces its entry).
         let mut written = Vec::new();
-        for subscriber in &mut self.ipc_events.0 {
+        for subscriber in &mut self.ipc_events.list {
             let Some(client) = subscriber.client.upgrade() else {
                 continue;
             };

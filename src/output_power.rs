@@ -72,6 +72,9 @@ impl Pila {
                 r.mode(mode(on));
             }
         }
+        // With every monitor off nothing is drawn, and IPC events wait for
+        // frames: subscribers hear of it anyway.
+        self.ipc_events_due();
         true
     }
 

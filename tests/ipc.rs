@@ -902,3 +902,16 @@ fn the_layout_can_be_switched_while_locked() {
     action(&pila, &["switch-layout", "next"]);
     assert_eq!(query(&pila, &["keyboard"])["layouts"][1]["active"], true);
 }
+
+/// With every monitor off nothing is drawn, and events go out after frames:
+/// a shell must still hear that they went off, and back on.
+#[test]
+fn a_subscriber_hears_the_monitors_go_off_and_on() {
+    let mut pila = TestPila::start();
+    let (mut outputs, _) = Subscription::new(&pila, Some(&["outputs"]));
+    assert_eq!(outputs.line().unwrap()["outputs"][0]["power"], true);
+    action(&pila, &["power-off-monitors"]);
+    outputs.wait("outputs", "off", |e| e["outputs"][0]["power"] == false);
+    pila.key("a");
+    outputs.wait("outputs", "on again", |e| e["outputs"][0]["power"] == true);
+}

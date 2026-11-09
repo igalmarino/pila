@@ -14,6 +14,8 @@
 - **Nothing comes back behind the lock screen:** an app holding an activation token from before
   the screen locked could bring a minimized window back while it was locked (out of sight; the
   keyboard stayed with the lock screen). It's now ignored until unlocked.
+- **`pila msg subscribe` hears the monitors go off:** with every monitor off nothing is drawn,
+  and the `outputs` events waited for a frame, so a subscriber never saw `power: false`.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it.

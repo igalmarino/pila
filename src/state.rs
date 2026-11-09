@@ -1443,6 +1443,8 @@ impl Pila {
         // A layout can change with no frame to draw (an xkb option's keys).
         self.send_keyboard_events();
         if !std::mem::take(&mut self.frame_drawn) {
+            // A change no frame follows (every monitor turned off).
+            self.send_ipc_events_due();
             return;
         }
         self.apply_unblocked_commits();
