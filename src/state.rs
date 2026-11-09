@@ -1899,11 +1899,6 @@ fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<i32> {
     (ret == 0 && cred.pid > 0).then_some(cred.pid)
 }
 
-/// Whether `client` may use the privileged protocols (capturing the
-/// screen, reading the clipboard, typing for others, locking, panels and
-/// the like): any client but a sandboxed one, i.e. one that connected
-/// through a security context. Xwayland is trusted (X11 has no such
-/// boundary anyway).
 /// Take a global away without killing the client binding it right then, before
 /// it heard: clients are told now, and it's removed some time later.
 pub fn retire_global(
@@ -1971,6 +1966,11 @@ pub fn hide_from_sandboxes<I: Resource + 'static>(
     dh.create_global::<Pila, I, _>(version, Privileged);
 }
 
+/// Whether `client` may use the privileged protocols (capturing the
+/// screen, reading the clipboard, typing for others, locking, panels and
+/// the like): any client but a sandboxed one, i.e. one that connected
+/// through a security context. Xwayland is trusted (X11 has no such
+/// boundary anyway).
 pub fn is_privileged(client: &Client) -> bool {
     if client.get_data::<XWaylandClientData>().is_some() {
         return true;

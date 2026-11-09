@@ -53,8 +53,8 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --severity=warning --external-sources \
-            scripts/coverage scripts/dev scripts/install scripts/layer-namespaces scripts/link-wayland \
-            scripts/report scripts/tty \
+            scripts/check scripts/coverage scripts/dev scripts/install scripts/layer-namespaces \
+            scripts/link-wayland scripts/report scripts/shells scripts/tty \
             scripts/uninstall resources/session/pila-session \
             .devcontainer/post-start.sh
       - name: Python scripts

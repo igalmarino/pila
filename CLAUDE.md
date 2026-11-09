@@ -180,7 +180,9 @@ Pila's own config/IPC.
 
 Privileged protocols are hidden from sandboxed apps: a client that connected through
 wp-security-context (Flatpak) fails `state::is_privileged` (`ClientState::security_context`;
-Xwayland counts as privileged). Smithay globals take it as their filter, Pila's own as
+Xwayland counts as privileged). Smithay globals take it as their filter (those Smithay gives none,
+keyboard-shortcuts-inhibit and ext-idle-notify, are made again hidden with
+`state::hide_from_sandboxes`), Pila's own as
 `GlobalDispatch::can_view`. It covers layer-shell, session lock, ext-data-control,
 virtual-keyboard, ext-foreign-toplevel-list, screen capture (both protocols), toplevel
 management, gamma, output management and power, ext-workspace, keyboard-shortcuts-inhibit,

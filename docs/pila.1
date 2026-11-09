@@ -51,9 +51,10 @@ It sends nothing anywhere.
 .PP
 The user manual,
 .IR MANUAL.md ,
-describes how to use and set up Pila; it's installed with the documentation (usually in
-.IR /usr/share/doc/pila )
-and on https://github.com/igalmarino/pila.
+describes how to use and set up Pila; Pila's packages install it with the documentation
+(usually in
+.IR /usr/share/doc/pila ),
+and it's on https://github.com/igalmarino/pila.
 .SH OPTIONS
 .TP
 .BR \-c ", " \-\-command " " \fICMD\fR
@@ -225,7 +226,9 @@ The configuration's
 .B [bindings]
 and
 .B [gestures]
-change any of them.
+change any of them but the mouse drags (which follow
+.BR mod )
+and the virtual terminal switch.
 .SH ENVIRONMENT
 .TP
 .B PILA_MOD
@@ -272,7 +275,7 @@ the name of the monitor under the pointer.
 .IR ~/.config/pila/config.toml " (or " $XDG_CONFIG_HOME/pila/config.toml )
 The configuration. Every option is described in
 .IR config.example.toml ,
-installed with the documentation.
+installed with the documentation by Pila's packages.
 .TP
 .I ~/.local/state/pila/pila.log
 The log of a session started by
@@ -281,6 +284,10 @@ The log of a session started by
 is the run before.
 With systemd, also
 .BR "journalctl \-t pila \-b" .
+.TP
+.IR ~/.local/state/pila/sessions.json " (or " $XDG_STATE_HOME/pila/sessions.json )
+Where windows were, for apps that ask to get them back (xdg\-session\-management).
+A nested Pila keeps that in memory only.
 .SH EXIT STATUS
 .B pila \-\-check\-config
 exits with 0 if the configuration is valid and 1 if not.

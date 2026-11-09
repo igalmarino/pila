@@ -24,7 +24,7 @@ Key flows and invariants:
   (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
   `Config::read`; an invalid file keeps the running config and notifies). `apply_config`
   re-applies what changed: keyboard (`set_xkb_config`), rules (`refresh_rule_props`),
-  `[input]` on connected devices
+  the workspace count (`apply_workspace_count`), `[input]` on connected devices
   (`UdevData::apply_input_config`), `[[output]]` (`Pila::apply_outputs` →
   `udev::apply_output_config`: enabled, mode via `use_mode`, scale, transform, position,
   adaptive sync; nested only scale) with wlr-output-management's runtime overrides on
@@ -32,12 +32,15 @@ Key flows and invariants:
   `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
   re-run. A new setting must either be read when used or be re-applied there. Keep in
   sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc
-  and the defaults listed in `config.example.toml`; and the `USAGE` string in `main.rs`
-  with the CLI flags and env vars.
+  and the defaults listed in `config.example.toml`; the `USAGE` string in `main.rs` with the
+  CLI flags and env vars; and the user docs, `docs/MANUAL.md` and the man page `docs/pila.1`
+  (tests check both against the default bindings and the man page against `USAGE`).
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
   up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
   ignored; keys without Mod, e.g. media keys, can be bound); intercepted keycodes go in
-  `suppressed_keys` so their release isn't forwarded to the client either.
+  `suppressed_keys` so their release isn't forwarded to the client either. Scrolling
+  (`on_pointer_axis`) goes to the surface under the pointer: a wheel step as `value120` 120
+  plus 15 px, a touchpad's pixels, with a stop when the fingers lift.
   Bindings don't run while the focused surface (or its menu's window) holds an active
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted, and sandboxed apps can't make any), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
@@ -100,7 +103,8 @@ Key flows and invariants:
   are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
   their spec.
 - **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
-  connectors and outputs, `draw.rs` frames and vblanks, `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
+  connectors and outputs, `draw.rs` frames and vblanks, `recovery.rs` DRM failures,
+  `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
   primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
@@ -178,7 +182,17 @@ Key flows and invariants:
   outside an event source (e.g. from `after_frames`, the `event_loop.run` callback) must
   ping it too. A redraw requested from `after_frames` goes through `insert_idle` plus
   the ping: nested, the winit source has already checked for redraw requests by then.
-- **Pointer grabs:** Mod+drag installs the move/resize grab *before* the press is
+- **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
+  `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average
+  and worst, missed refreshes; each frame over half the period on its own); winit and udev
+  also call `record_missed` with the refreshes missed. Bare metal counts them from the DRM sequence of
+  the vblanks that showed frames while an animation runs (`missed_refreshes`); nested
+  estimates them from gaps over 1.5 periods. Screen captures are recorded apart
+  (`record_capture`, a `captures` line), the blit into them subtracted from the output's
+  frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
+  and modeset) is logged on its own and not counted. `scripts/check` judges these lines.
+- **Pointer grabs** (`grabs/move_grab.rs`, `grabs/resize_grab.rs`): Mod+drag installs the
+  move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
   via `Pila::set_cursor`, which must be called *after* `set_grab` (`Focus::Clear` resets the
   cursor), and reset it in `PointerGrab::unset`. Client-requested move/resize goes through
@@ -286,7 +300,8 @@ Key flows and invariants:
   (`takes_keyboard_on_map`, `MapChange::Mapped`), as on niri and COSMIC; else on a click. Popups may
   have a layer-surface root (`unconstrain_popup`, popup `grab`). Smithay resets a layer
   surface's or popup's role in the commit that unmaps it (null buffer); that commit is never
-  answered as an initial commit (`state::unmapped_by_commit`): a layer surface's next commit
+  answered as an initial commit (`state::commit_map_change` says `MapChange::Unmapped`): a
+  layer surface's next commit
   is its new initial one, and a popup can't map again (its parent is gone).
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
@@ -427,6 +442,10 @@ Key flows and invariants:
   instead of once a second or never; shown surfaces keep the screen's pace. Cursor sessions are created stopped; `paint_cursors` is honored.
   `copy_frame` doesn't wait for the GPU on the event loop: with a native fence to export
   (bare metal, nested; not the headless backend) it returns `Copied::InFlight`, and
+  `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
+  calloop source on the fence fd, unless the client destroyed the frame meanwhile: then
+  nothing is written into its buffer, which it may be using again. Without one it waits,
+  as before.
   On bare metal an output's captures are filled from the frame its DRM compositor just
   composited, blitted (`RenderFrameResult::blit_frame_result`, between `render_frame` and
   `queue_frame` in `udev/draw.rs`), instead of drawing the scene a second time:
@@ -440,10 +459,7 @@ Key flows and invariants:
   content shows (`Pila::presented_at`: `Backend::next_frame_time` of its output, since copies
   follow the frame just queued there; now for a window off every output), which recorders
   use to keep sound and picture in step.
-  `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
-  calloop source on the fence fd, unless the client destroyed the frame meanwhile: then
-  nothing is written into its buffer, which it may be using again. Without one it waits,
-  as before. A dma-buf must have a format and modifier the session offered
+  A dma-buf must have a format and modifier the session offered
   (`dmabuf_offered`: renderable, a subset of what linux-dmabuf imports), else the frame
   fails with `buffer_constraints`, so the client allocates another, rather than `unknown`
   when binding it fails.
@@ -481,8 +497,11 @@ Key flows and invariants:
   client's control (a night light stepping its fade then stops for good). Each logs its time and way (`pila::frames` "gamma", `how`; once in
   the plain log past 4 ms; `scripts/check` judges the commits).
 - **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
-  `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on =
-  `initialize_output` again with the stored connector and mode (`UdevData::set_output_power`).
+  `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on = the CRTC set up
+  again with the stored connector and mode through `initialize_with_fallback`
+  (`UdevData::set_output_power`; a lighter mode if that one no longer fits, followed by
+  `Pila::fit_to_outputs`), with gamma and adaptive sync set again and its recovery and first
+  frame reset.
   Code using `drm_output` must handle `None`; a powered-off output stays mapped and counts
   as showing the lock screen. Nested: fails.
 - **Output management** (`output_management.rs`, wlr-output-management v4): heads are
@@ -502,14 +521,15 @@ Key flows and invariants:
   used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`, after
   checking the connector can do it (a CRTC takes it either way); what `[[output]]` asks is kept
   in `OutputSurface::adaptive_sync` and set again whenever the CRTC is set up again (powered
-  on, enabled: `apply_vrr`), as gamma is.
+  on, enabled: `apply_vrr`), as gamma is. While it's on, `frame_finish` reports a variable
+  refresh (`Refresh::Variable`) in presentation feedback.
 - **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
   surface state (`BlurRegion`, committed by Smithay); `Pila::scene` evaluates it per
   layer surface into `SceneLayer::blur` (upper layers only for now) and per window into
   `SceneWindow::blur` (`blur = true` in a rule covers the geometry and title bar, not a
   client's shadow; a window opaque over its geometry and at full opacity gets none,
-  `blur::is_opaque`). Before an output's elements are built, the backends (and captures)
-  call `BlurCache::prepare`: back to front, windows and then upper layers, so that each
+  `blur::is_opaque`). Before an output's elements are built, `render::output_elements` (which
+  the backends and captures use) calls `BlurCache::prepare`: back to front, windows and then upper layers, so that each
   backdrop has those behind it, it renders what's behind the region (`render::elements_behind`)
   into an offscreen texture through a per-region damage tracker, and only when that
   changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
@@ -597,7 +617,8 @@ Key flows and invariants:
   Mod+Tab / clicking elsewhere / locking the escape. The motion path checks the active
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::input.host_pointer`); a DRM backend sends real relative motion through the same
-  checks.
+  checks. A locked client's cursor position hint (`cursor_position_hint`) moves Pila's pointer
+  there, kept within its window, so unlocking doesn't jump.
 - **X11** (`xwayland.rs`, `focus.rs`): Pila starts Xwayland at launch and runs Smithay's
   `X11Wm`; spawned clients get its `DISPLAY` (never the host's) and the startup command
   waits for X (`pending_startup`), or for it to fail: dying before it's ready, which Smithay's

@@ -6,8 +6,8 @@ touchpad and monitors. The rest of a desktop (a bar, a launcher, notifications, 
 lock screen) comes from separate programs, or from a shell such as Noctalia that has them all.
 
 This manual says how to use Pila and set it up. Every configuration option is described in
-[`config.example.toml`](../config.example.toml) (installed with Pila, usually in
-`/usr/share/doc/pila`); `man pila` has the command line. Installing Pila is in the
+[`config.example.toml`](../config.example.toml) (installed by Pila's packages, usually in
+`/usr/share/doc/pila`, and in its source); `man pila` has the command line. Installing Pila is in the
 [README](../README.md#running-pila).
 
 - [Starting and leaving Pila](#starting-and-leaving-pila)
@@ -78,8 +78,9 @@ Most bindings use the Mod key: **Super** (the Windows key) from the login screen
 | `Mod` + right drag | Resize a window from its nearest corner |
 | `Ctrl+Alt+F1` to `F12` | Switch to another virtual terminal (not nested) |
 
-Any of these can be changed or removed, and any key bound to an action or a command, in
-`[bindings]`: see [The configuration file](#the-configuration-file). The touchpad gestures are
+Any of these but the two drags and the VT switch can be changed or removed (the drags follow
+the `mod` setting), and any key bound to an action or a command, in `[bindings]`: see
+[The configuration file](#the-configuration-file). The touchpad gestures are
 in [Keyboard, mouse and touchpad](#keyboard-mouse-and-touchpad).
 
 ## Windows
@@ -125,6 +126,11 @@ window rules can set them when a window opens.
 
 **Closing.** `Mod+Shift+Q` or the close button asks the window to close; the app may ask you
 first, as it would for unsaved work.
+
+**Windows coming back where they were.** Apps that ask for it (xdg-session-management) get
+their windows' place, size and maximized or fullscreen state back when they open them again,
+even after Pila restarts. Pila keeps that in `~/.local/state/pila/sessions.json`; a nested Pila,
+or a second one started next to your session, keeps it in memory only.
 
 ## Workspaces
 
@@ -370,6 +376,10 @@ you the session back.
 
 X11 apps (older programs, many games, Steam) run through Xwayland, which Pila starts by itself;
 the clipboard works between X11 and Wayland apps. Games can lock and confine the pointer.
+
+Apps that ask for every key while they have the focus (virtual machines, remote desktops:
+keyboard-shortcuts-inhibit) get Pila's bindings and touchpad gestures too, all but the one that
+quits Pila.
 
 A rule turns off the opening and closing animations for Steam games:
 

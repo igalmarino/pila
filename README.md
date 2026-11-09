@@ -27,7 +27,8 @@ How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`
 Pila is **alpha**: usable day to day (its author runs it as their only desktop and
 develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
 with an external monitor, on Arch Linux with Noctalia's greeter. Testers report it working on Intel integrated
-GPUs, on Debian with SDDM and on NixOS. NVIDIA hasn't been tried. Other GPUs, distros and setups
+GPUs, on Debian with SDDM, on NixOS and from LightDM in an Arch virtual machine. NVIDIA hasn't
+been tried. Other GPUs, distros and setups
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
 
@@ -45,7 +46,7 @@ now, in this order:
   GPUs, Pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
 - **no systemd** (Void, Alpine, with elogind or seatd), and other **distros**, such as
   [Ubuntu and Fedora](#debian-ubuntu-and-fedora);
-- **display managers** other than GDM, SDDM and greetd (LightDM, for instance);
+- **display managers** other than GDM, SDDM, greetd and LightDM;
 - **monitors:** high refresh rates, 4K, mixed scales, several at once;
 - **other shells and apps:** bars, launchers, games, Steam, Electron.
 
@@ -69,15 +70,18 @@ A short report helps even if everything works:
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
   between monitors; switching by recent use (Mod+Tab); workspaces spanning all monitors (Mod+1..N,
-  four-finger swipes); a shadow under each window (`[shadow]`); optional rounded corners
-  (`corner-radius`); your own colors (`[colors]`).
+  four-finger swipes); a window menu on the title bar (right click); windows asking for
+  attention marked with an amber title bar; a shadow under each window (`[shadow]`); optional
+  rounded corners (`corner-radius`); your own colors (`[colors]`).
 - **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
   snapping; launchers and notifications; workspaces sliding. Configurable, or off.
 - **Window and layer rules** by app id, title or namespace: animations, workspace, size,
   position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius,
   opacity, blur and shadow per app; blur and animations per panel or launcher.
-- **Monitors:** several at once, hotplugged, each with its own mode, position, rotation
-  and (fractional) scale.
+- **Monitors:** several at once, hotplugged, each with its own mode, position, rotation,
+  (fractional) scale and adaptive sync.
+- **Apps get their windows back:** place, size, maximized or fullscreen, for apps that ask
+  (xdg-session-management), even after Pila restarts.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
@@ -88,7 +92,9 @@ A short report helps even if everything works:
   workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay
   above their window and modal ones that keep the focus (xdg-dialog), window rules by tag
   (xdg-toplevel-tag), Vulkan's FIFO presentation (wp-fifo, wp-commit-timing), explicit sync
-  (linux-drm-syncobj). Enough for a full shell such as Noctalia.
+  (linux-drm-syncobj), virtual keyboards (`wtype`, on-screen keyboards). Enough for a full shell
+  such as Noctalia or Dux Shell. Sandboxed apps (Flatpak) don't see the protocols that read the
+  screen or act on other windows and input (wp-security-context).
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
@@ -202,8 +208,8 @@ please [report](#help-test-pila) how it goes.
 ### Arch Linux (AUR)
 
 [`pila-git`](https://aur.archlinux.org/packages/pila-git) builds the latest `main` from
-GitHub and installs the same files as `scripts/install` with `PREFIX=/usr` (plus the README
-and `config.example.toml` in `/usr/share/doc/pila`):
+GitHub and installs the same files as `scripts/install` with `PREFIX=/usr` (plus the README,
+`config.example.toml`, the user manual and `docs/IPC.md` in `/usr/share/doc/pila`):
 
 ```bash
 git clone https://aur.archlinux.org/pila-git.git
@@ -228,9 +234,9 @@ scripts/install                # builds the release binary and installs it
 PREFIX=/usr scripts/install    # for display managers that only read /usr/share
 ```
 
-This installs the binary and a session wrapper in `$PREFIX/bin`, a `pila` entry in
-`$PREFIX/share/wayland-sessions` for the display manager, and the portal configs for
-screen sharing in `$SYSCONFDIR/xdg`. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
+This installs the binary, a session wrapper and `pila-report` in `$PREFIX/bin`, the man page,
+a `pila` entry in `$PREFIX/share/wayland-sessions` for the display manager, and the portal
+configs for screen sharing in `$SYSCONFDIR/xdg`. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
 to `/etc`; `DESTDIR` stages the files for a distro package (see `scripts/install-paths`).
 GDM reads `/usr/local`; LightDM and some SDDM setups need `PREFIX=/usr`.
 
@@ -309,9 +315,9 @@ Pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`,
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
 Pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
-each monitor's mode, scale, rotation and position, the number of workspaces, rounded corners,
-shadows (`[shadow]`), colors (`[colors]`), animations (`[animations]`) and per-app rules
-(`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid one is
+each monitor's mode, scale, rotation, position and adaptive sync, the number of workspaces,
+rounded corners, shadows (`[shadow]`), colors (`[colors]`), animations (`[animations]`) and
+per-app rules (`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid one is
 reported in the log and in a notification, and Pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.
 

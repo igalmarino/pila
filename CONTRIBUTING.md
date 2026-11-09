@@ -24,7 +24,9 @@ GPU and distro, how Pila was started, and the log).
   `--nested` from the dev container, plain from a TTY. A feature adds a scenario there
   only if it's bare-metal only or puts load on rendering.
 - Small commits, each one building and passing the tests. Keep `config.example.toml`, the
-  `USAGE` text in `src/main.rs` and the README in step with new settings and flags.
+  user manual (`docs/MANUAL.md`), the man page (`docs/pila.1`) and the `USAGE` text in
+  `src/main.rs` in step with new settings, bindings and flags (tests check the bindings and
+  flags).
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the architecture: the state struct, the backends, the
 render loop, and how each protocol and feature is wired.

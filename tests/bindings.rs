@@ -469,3 +469,82 @@ fn bindings_ignore_unfocused_state_without_a_window() {
     pila.settle();
     assert!(pila.alive());
 }
+
+/// The two screenshot bindings run grim (with slurp and wl-copy for a
+/// region): Mod+Ctrl+S saves the output under the pointer to ~/Pictures,
+/// Mod+Shift+S copies a region picked with slurp. Stand-ins on the `PATH`
+/// log how they're called.
+#[test]
+fn the_screenshot_bindings_run_grim() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("pila-shots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bin = dir.join("bin");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    for (name, script) in [
+        (
+            "slurp",
+            "echo slurp >> \"$XDG_RUNTIME_DIR/shots\"\necho '10,20 30x40'\n",
+        ),
+        (
+            "grim",
+            "echo \"grim $*\" >> \"$XDG_RUNTIME_DIR/shots\"\n\
+             for last; do :; done\n\
+             if [ \"$last\" = - ]; then echo PNG; else echo PNG > \"$last\"; fi\n",
+        ),
+        (
+            "wl-copy",
+            "echo \"wl-copy $(cat)\" >> \"$XDG_RUNTIME_DIR/shots\"\n",
+        ),
+    ] {
+        let path = bin.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{script}")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut pila = TestPila::start_with(Options {
+        env: vec![
+            ("PATH".into(), path),
+            ("HOME".into(), home.display().to_string()),
+        ],
+        ..Options::default()
+    });
+    let shots = pila.dir.join("shots");
+    let logged = |wanted: &str| {
+        let started = std::time::Instant::now();
+        loop {
+            let log = std::fs::read_to_string(&shots).unwrap_or_default();
+            if log.contains(wanted) {
+                return log;
+            }
+            assert!(started.elapsed().as_secs() < 10, "no {wanted:?} in {log:?}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+
+    pila.combo("Super+Ctrl+s");
+    let log = logged("grim -o HEADLESS-1 ");
+    let saved = log
+        .lines()
+        .find_map(|l| l.strip_prefix("grim -o HEADLESS-1 "))
+        .unwrap()
+        .to_string();
+    let pictures = home.join("Pictures").display().to_string();
+    assert!(
+        saved.starts_with(&format!("{pictures}/screenshot-")) && saved.ends_with(".png"),
+        "{saved}"
+    );
+    assert_eq!(std::fs::read_to_string(&saved).unwrap(), "PNG\n");
+
+    pila.combo("Super+Shift+s");
+    let log = logged("wl-copy PNG");
+    assert!(log.contains("slurp\n"), "{log}");
+    assert!(log.contains("grim -g 10,20 30x40 -\n"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
