@@ -273,6 +273,12 @@ if [ "${1:-}" = "--nested" ]; then
 fi
 if ! $judge_only; then
     base_config=${1:-}
+    case "$base_config" in
+        -*)
+            echo "scripts/check: no option $base_config; usage: scripts/check [--nested] [<config.toml>], scripts/check --judge <log>" >&2
+            exit 2
+            ;;
+    esac
 
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT

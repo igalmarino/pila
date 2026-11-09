@@ -402,6 +402,20 @@ fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
 }
 
 #[test]
+fn scripts_check_refuses_an_option_it_doesnt_know() {
+    let dir = scripts_copy("option");
+    let out = copied_script(&dir, "check")
+        .args(["--nested", "--no-such-option"])
+        .env("XDG_CONFIG_HOME", &dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("--no-such-option"), "{stderr}");
+    assert!(stderr.contains("usage"), "{stderr}");
+}
+
+#[test]
 fn scripts_check_refuses_a_build_older_than_the_sources() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scripts_copy("stale");
