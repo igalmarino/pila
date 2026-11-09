@@ -296,6 +296,24 @@ fn applying_a_configuration_changes_the_outputs() {
         .any(|e| e == "Scale { scale: 2.0 }"));
 }
 
+/// A position far past any desk is refused, not added up until it
+/// overflows: the configuration fails and nothing changes.
+#[test]
+fn a_position_out_of_range_fails_and_changes_nothing() {
+    let mut pila = two_outputs();
+    let (client, manager) = manager(&pila);
+    let config = configuration(&client, &manager);
+    config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    let b = config.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+    b.set_position(i32::MAX - 10, i32::MAX - 10);
+    config.apply();
+    client.flush();
+    client.wait_logged("config", "Failed");
+    assert!(pila.alive());
+    let state = pila.settle();
+    assert_eq!(rect(&state["outputs"][1]["geometry"]), (1280, 0, 1024, 768));
+}
+
 #[test]
 fn testing_a_configuration_changes_nothing() {
     let mut pila = two_outputs();

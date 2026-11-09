@@ -220,7 +220,8 @@
 # [[output]]
 # name = "DP-1"
 # mode = "2560x1440@143.9"  # WIDTHxHEIGHT[@HZ]; the closest refresh is used
-# position = [1536, 0]      # top-left in logical pixels (size / scale)
+# position = [1536, 0]      # top-left in logical pixels (size / scale), each
+#                           # within -1000000..1000000
 # transform = "90"          # rotated a quarter turn counter-clockwise (a monitor
 #                           # standing on its side): normal, 90, 180, 270, or
 #                           # flipped, flipped-90, flipped-180, flipped-270

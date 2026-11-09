@@ -421,6 +421,15 @@ impl Pila {
             if config.adaptive_sync.is_some() && info.adaptive_sync.is_none() {
                 return Err(format!("head {}: no adaptive sync", info.name));
             }
+            if let Some((x, y)) = config.position {
+                if !crate::config::output_position_in_range((x, y)) {
+                    return Err(format!(
+                        "head {}: position {x},{y} is outside -{max}..{max}",
+                        info.name,
+                        max = crate::config::MAX_OUTPUT_POSITION
+                    ));
+                }
+            }
         }
         if !om
             .heads

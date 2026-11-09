@@ -914,6 +914,18 @@ impl ModeSpec {
     }
 }
 
+/// The farthest an output may be placed from the origin, on each axis, in
+/// logical pixels: far past any desk, and far from where adding an output's
+/// size to its position overflows. `[[output]]` and display tools are held
+/// to it.
+pub const MAX_OUTPUT_POSITION: i32 = 1_000_000;
+
+/// Whether an output position is within `MAX_OUTPUT_POSITION`.
+pub fn output_position_in_range((x, y): (i32, i32)) -> bool {
+    let range = -MAX_OUTPUT_POSITION..=MAX_OUTPUT_POSITION;
+    range.contains(&x) && range.contains(&y)
+}
+
 /// `[[output]]` as written in the file.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -944,6 +956,14 @@ impl OutputFile {
             Some(scale) => Some((scale * 120.0).round() / 120.0),
             None => None,
         };
+        if let Some([x, y]) = self.position {
+            if !output_position_in_range((x, y)) {
+                return Err(format!(
+                    "output {:?}: position [{x}, {y}] is outside -{MAX_OUTPUT_POSITION}..{MAX_OUTPUT_POSITION}",
+                    self.name
+                ));
+            }
+        }
         let mode = match &self.mode {
             Some(mode) => Some(
                 ModeSpec::parse(mode).map_err(|err| format!("output {:?}: {err}", self.name))?,
@@ -1685,6 +1705,21 @@ mod tests {
         assert_eq!(dp.transform, None);
         assert_eq!(dp.enabled, None);
         assert_eq!(dp.adaptive_sync, None);
+    }
+
+    #[test]
+    fn an_output_placed_out_of_range_is_an_error() {
+        let config = |position: &str| {
+            Config::from_toml(
+                &format!("[[output]]\nname = \"DP-1\"\nposition = {position}\n"),
+                &no_env,
+            )
+        };
+        let edge = format!("[{MAX_OUTPUT_POSITION}, -{MAX_OUTPUT_POSITION}]");
+        assert!(config(&edge).is_ok());
+        let err = config(&format!("[{}, 0]", i32::MAX - 10)).unwrap_err();
+        assert!(err.contains("DP-1") && err.contains("position"), "{err}");
+        assert!(config(&format!("[0, -{}]", MAX_OUTPUT_POSITION + 1)).is_err());
     }
 
     #[test]
