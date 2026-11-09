@@ -312,6 +312,44 @@ fn is_user_bus(bus: &str, runtime: &str) -> bool {
     !runtime.is_empty() && path == format!("{runtime}/bus")
 }
 
+/// The limit of open files Pila was started with, which the programs it starts
+/// get back (`session_env`, `raise_file_limit`).
+static STARTING_FILE_LIMIT: std::sync::OnceLock<libc::rlimit> = std::sync::OnceLock::new();
+
+/// Raise the soft limit of open files to the hard one: Pila holds a descriptor
+/// or more per client, shm pool, dma-buf and fence, and a busy session goes past
+/// the usual 1024. What it starts gets the old limit back (`session_env`), since
+/// programs using `select()` break past 1024. Call once at startup.
+pub fn raise_file_limit() {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit` is a valid rlimit for the call to fill.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        warn!(err = %std::io::Error::last_os_error(), "can't read the open files limit");
+        return;
+    }
+    let _ = STARTING_FILE_LIMIT.set(limit);
+    if limit.rlim_cur >= limit.rlim_max {
+        return;
+    }
+    let raised = libc::rlimit {
+        rlim_cur: limit.rlim_max,
+        rlim_max: limit.rlim_max,
+    };
+    // SAFETY: `raised` is a valid rlimit.
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } != 0 {
+        warn!(err = %std::io::Error::last_os_error(), "can't raise the open files limit");
+        return;
+    }
+    info!(
+        from = limit.rlim_cur,
+        to = raised.rlim_cur,
+        "raised the open files limit"
+    );
+}
+
 /// xkbcommon's settings for `[keyboard]` (empty strings: its defaults).
 pub fn xkb_config(kb: &crate::config::KeyboardConfig) -> XkbConfig<'_> {
     XkbConfig {
@@ -1641,16 +1679,23 @@ impl Pila {
     /// signals blocked: pila blocks SIGINT, SIGTERM and SIGCHLD for its
     /// signal source (`main.rs`), and a blocked mask survives exec, so
     /// programs would otherwise ignore `kill` and Ctrl+C, and so would
-    /// everything they start.
+    /// everything they start. It gets the limit of open files Pila was
+    /// started with (`raise_file_limit`).
     pub(crate) fn session_env(&self, cmd: &mut Command) {
+        let file_limit = STARTING_FILE_LIMIT.get().copied();
         // SAFETY: between fork and exec only async-signal-safe calls are
-        // allowed; sigemptyset and sigprocmask are.
+        // allowed; sigemptyset, sigprocmask and setrlimit are.
         unsafe {
-            cmd.pre_exec(|| {
+            cmd.pre_exec(move || {
                 let mut none = std::mem::zeroed::<libc::sigset_t>();
                 libc::sigemptyset(&mut none);
                 if libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut()) != 0 {
                     return Err(std::io::Error::last_os_error());
+                }
+                // Lowering a soft limit can't fail; if it did, the program
+                // would still run.
+                if let Some(limit) = &file_limit {
+                    libc::setrlimit(libc::RLIMIT_NOFILE, limit);
                 }
                 Ok(())
             });

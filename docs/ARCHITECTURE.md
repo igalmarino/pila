@@ -597,7 +597,11 @@ Key flows and invariants:
   bus alone, so a test instance leaves the login session's services alone. The export
   runs in the background (a stuck bus mustn't freeze Pila); the startup programs follow
   when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals. Spawned
-  programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`); the
+  programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`). Pila raises
+  its soft limit of open files to the hard one at startup (`state::raise_file_limit`: a
+  descriptor or more per client, shm pool, dma-buf and fence), and `session_env`'s `pre_exec`
+  gives what it starts the limit it was started with, since programs using `select()` break
+  past 1024 (Xwayland, started by Smithay, keeps the raised one). The
   signal source is created first thing in `main`, before any thread, so no thread can
   take the signal instead.
 - **Activation** (`handlers/xdg_activation.rs`, xdg-activation): a token is issued only

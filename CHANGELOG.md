@@ -5,6 +5,9 @@
 - **The focus goes back to the window you were using:** closing a window, a launcher going away
   or unlocking the screen gave the keyboard to the topmost window, which with a window kept on
   top (`toggle-always-on-top`) was always that one. It now goes to the window used most recently.
+- **Room for busy sessions:** Pila raises its limit of open files (usually 1024) to the most the
+  system allows, since it holds some for every app, buffer and frame in flight; a session with
+  many windows could run out and drop apps. Programs it starts still get the usual limit.
 
 ## 0.4.2 (2026-11-09)
 

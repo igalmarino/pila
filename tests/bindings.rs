@@ -396,6 +396,29 @@ fn spawned_commands_get_the_session_environment() {
     }
 }
 
+/// Pila holds a descriptor or more per client, buffer and fence: it raises
+/// its own limit of open files to the hard one, and what it starts gets the
+/// limit Pila was started with (programs using `select()` break past 1024).
+#[test]
+fn pila_raises_its_open_files_limit_and_spawned_commands_get_the_old_one() {
+    let pila = TestPila::start_with(Options {
+        command: Some("ulimit -Sn > \"$XDG_RUNTIME_DIR/nofile\"".into()),
+        soft_file_limit: Some(256),
+        ..Options::default()
+    });
+    let limits = std::fs::read_to_string(format!("/proc/{}/limits", pila.pid())).unwrap();
+    let open_files: Vec<&str> = limits
+        .lines()
+        .find(|l| l.starts_with("Max open files"))
+        .unwrap()
+        .split_whitespace()
+        .collect();
+    // "Max open files <soft> <hard> files"
+    assert_eq!(open_files[3], open_files[4], "{limits}");
+    assert_ne!(open_files[3], "256", "{limits}");
+    assert_eq!(pila.wait_file("nofile").trim(), "256");
+}
+
 /// A pila started from inside another compositor's session (nested, or a
 /// TTY run from a terminal there) doesn't pass on that compositor's IPC
 /// sockets: shells such as Noctalia and Dux Shell pick their backend by

@@ -45,6 +45,8 @@ pub struct Options {
     /// (`dotfiles/`), as dotfiles managers set it up; `config_path` and
     /// `write_config` are the file itself.
     pub config_symlink: bool,
+    /// The soft limit of open files pila starts with (its hard one stays).
+    pub soft_file_limit: Option<u64>,
 }
 
 pub struct TestPila {
@@ -152,6 +154,26 @@ impl TestPila {
             .stderr(log);
         for (k, v) in &options.env {
             cmd.env(k, v);
+        }
+        if let Some(soft) = options.soft_file_limit {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: getrlimit and setrlimit are async-signal-safe.
+            unsafe {
+                cmd.pre_exec(move || {
+                    let mut limit = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    limit.rlim_cur = soft.min(limit.rlim_max);
+                    if libc::setrlimit(libc::RLIMIT_NOFILE, &limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
         }
         let child = cmd.spawn().expect("start pila");
 

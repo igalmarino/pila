@@ -302,6 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if check_config {
         std::process::exit(run_config_check(config_path.as_deref()));
     }
+    state::raise_file_limit();
 
     // Ctrl+C or `kill` quit like Mod+Shift+E, so the cleanup below runs;
     // SIGCHLD reaps the programs pila started. Set up before any thread
