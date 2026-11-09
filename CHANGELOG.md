@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (2026-11-08)
 
 - **Sharing a single window keeps going when it's hidden:** a shared window that another window
   covered dropped to one frame a second, and one minimized or on another workspace froze, as
