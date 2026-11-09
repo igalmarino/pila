@@ -8,6 +8,9 @@
 - **Room for busy sessions:** Pila raises its limit of open files (usually 1024) to the most the
   system allows, since it holds some for every app, buffer and frame in flight; a session with
   many windows could run out and drop apps. Programs it starts still get the usual limit.
+- **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
+  setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
+  reproducing it.
 
 ## 0.4.2 (2026-11-09)
 

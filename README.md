@@ -354,8 +354,8 @@ your home directory, user name and host name, and sends nothing anywhere. By han
 - how Pila was started: login session, `scripts/tty`, or nested;
 - the log: `~/.local/state/pila/pila.log` for a login session (`pila.log.old` is the run
   before; with systemd also `journalctl -t pila -b`), `pila-tty.log` for `scripts/tty`, the
-  terminal for nested. `RUST_LOG=debug` makes it detailed; after a crash,
-  `RUST_BACKTRACE=1` adds where it happened;
+  terminal for nested. `RUST_LOG=debug` makes it detailed; a crash is logged with where
+  it happened ("pila crashed" and a backtrace);
 - your config file, if you have one, and the steps to reproduce.
 
 Look through logs and configs before posting them: they can hold window titles, commands,

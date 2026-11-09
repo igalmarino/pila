@@ -51,6 +51,8 @@ pub struct Options {
 
 pub struct TestPila {
     child: Child,
+    /// The test makes it crash on purpose (`expect_crash`).
+    crash_expected: bool,
     pub dir: PathBuf,
     pub config_path: PathBuf,
     pub log_path: PathBuf,
@@ -139,6 +141,9 @@ impl TestPila {
             "PILA_TERMINAL",
             "PILA_LAUNCHER",
             "DBUS_SESSION_BUS_ADDRESS",
+            // Crashes are logged with their backtrace without it.
+            "RUST_BACKTRACE",
+            "RUST_LIB_BACKTRACE",
         ] {
             cmd.env_remove(var);
         }
@@ -203,6 +208,7 @@ impl TestPila {
             .unwrap();
         TestPila {
             child,
+            crash_expected: false,
             dir,
             config_path: config_file,
             log_path,
@@ -464,6 +470,11 @@ impl TestPila {
         }
     }
 
+    /// This Pila is made to crash: its panic doesn't fail the test.
+    pub fn expect_crash(&mut self) {
+        self.crash_expected = true;
+    }
+
     /// Whether pila is still running.
     pub fn alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
@@ -507,7 +518,7 @@ impl Drop for TestPila {
             );
         }
         // A crash fails the test even if its checks passed.
-        let panicked = log.contains("panicked");
+        let panicked = log.contains("panicked") && !self.crash_expected;
         if !std::thread::panicking() || std::env::var_os("PILA_TEST_KEEP").is_none() {
             let _ = std::fs::remove_dir_all(&self.dir);
         }

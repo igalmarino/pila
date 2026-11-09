@@ -171,10 +171,11 @@ fn version() -> String {
     }
 }
 
-/// Send panics to the log too: in a login session stderr is the log file or
-/// the journal, but the default message is unstructured and has no
-/// timestamp. The default hook still runs (it prints the backtrace when
-/// RUST_BACKTRACE is set).
+/// Send panics to the log too, with their backtrace: in a login session
+/// stderr is the log file or the journal, but the default message is
+/// unstructured, has no timestamp and no backtrace without RUST_BACKTRACE,
+/// which a session doesn't set (a tester's first report should say where it
+/// happened). The default hook still runs.
 fn log_panics() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -188,7 +189,8 @@ fn log_panics() {
             .copied()
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
             .unwrap_or("(no message)");
-        tracing::error!(%location, version = version(), "pila crashed: {message}");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(%location, version = version(), "pila crashed: {message}\n{backtrace}");
         default_hook(info);
     }));
 }

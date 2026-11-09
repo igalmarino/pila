@@ -42,7 +42,7 @@ body:
         `pila-report` (`scripts/report` in a checkout) gathers it, with your system details, into a file to attach.
         Login session: `~/.local/state/pila/pila.log` (`pila.log.old` is the previous run; with systemd also `journalctl -t pila -b`).
         scripts/tty: `pila-tty.log`. Nested: the terminal output.
-        `RUST_LOG=debug` gives more detail, `RUST_BACKTRACE=1` a backtrace after a crash.
+        `RUST_LOG=debug` gives more detail. After a crash, the log has "pila crashed" and a backtrace: include them.
         Look through it first: logs can hold window titles, commands and file paths.
       render: text
   - type: textarea

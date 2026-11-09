@@ -26,6 +26,7 @@
 //! - `output_fail_next`: the next time outputs are applied, the backend fails.
 //! - `spawn` `command`: run a command as a binding would.
 //! - `quit`.
+//! - `panic`: crash right after answering (the crash report in the log).
 
 use std::{
     io::{Read, Write},
@@ -294,6 +295,14 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
         }
         "quit" => {
             state.loop_signal.stop();
+            json!({})
+        }
+        // After the answer, so the test reads it before Pila is gone.
+        "panic" => {
+            state
+                .loop_handle
+                .insert_idle(|_| panic!("a test asked for it"));
+            state.wake.ping();
             json!({})
         }
         other => return Err(format!("unknown command {other:?}")),

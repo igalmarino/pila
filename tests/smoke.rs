@@ -59,6 +59,27 @@ fn quit_binding_exits() {
     assert!(pila.wait_exit().success());
 }
 
+/// A crash leaves where it happened in the log, without `RUST_BACKTRACE`
+/// (a login session doesn't set it): a tester's first report has it.
+#[test]
+fn a_crash_is_logged_with_its_backtrace() {
+    let mut pila = TestPila::start();
+    pila.expect_crash();
+    pila.request(json!({"cmd": "panic"}));
+    assert!(!pila.wait_exit().success());
+    let log = pila.log();
+    // Pila's own line, up to its fields: the default hook's report follows
+    // it, with a backtrace only if `RUST_BACKTRACE` is set (the harness
+    // unsets it).
+    let crash = log
+        .split_once("pila crashed: a test asked for it")
+        .and_then(|(_, rest)| rest.split_once(" location="))
+        .map(|(message, _)| message)
+        .unwrap_or_else(|| panic!("no crash in the log:\n{log}"));
+    // The frames, with the function that panicked among them.
+    assert!(crash.contains("pila::test_control"), "{log}");
+}
+
 /// A client that pila disconnects for a protocol error is named in pila's
 /// log, with its process id: often the only trace of why a shell went away.
 #[test]

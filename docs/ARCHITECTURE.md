@@ -70,7 +70,10 @@ Key flows and invariants:
   Smithay panics if it can't. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
   imports, `queue_redraw`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
-  hard-codes a keyboard and pointer for all.
+  hard-codes a keyboard and pointer for all. A panic, on any backend, is logged as "pila
+  crashed" with its location, the version and a backtrace, captured whatever `RUST_BACKTRACE`
+  says (`main::log_panics`): a login session doesn't set it, and a tester's first report should
+  say where it happened.
 - **Headless (tests):** virtual outputs (`--headless-outputs NAME:WxH[@HZ],...`; each
   also offers 1024x768 and 1920x1080) rendered into offscreen textures on a render node
   or Mesa's software device, paced by a timer at their refresh rate while a redraw is
