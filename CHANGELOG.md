@@ -11,6 +11,9 @@
 - **Screenshots of a region past the limits fail instead of crashing:** a `wlr-screencopy` region
   with a negative size or a place past 32768 px could crash a debug build of Pila; the frame now
   fails, as other numbers from apps past the limits do since 0.4.2.
+- **Nothing comes back behind the lock screen:** an app holding an activation token from before
+  the screen locked could bring a minimized window back while it was locked (out of sight; the
+  keyboard stayed with the lock screen). It's now ignored until unlocked.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it.

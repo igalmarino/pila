@@ -70,6 +70,11 @@ impl XdgActivationHandler for Pila {
             self.set_urgent(&window, true);
             return;
         }
+        // A token from before the screen locked brings nothing back.
+        if self.is_locked() {
+            debug!("ignoring an activation while locked");
+            return;
+        }
         // On another workspace: go there; minimized: bring it back (as a
         // taskbar's activate does).
         self.reveal_workspace_of(&window);

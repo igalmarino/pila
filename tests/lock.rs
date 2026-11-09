@@ -225,3 +225,47 @@ fn a_surface_committed_after_its_lock_surface_is_destroyed_keeps_the_client() {
     pila.wait("unlocked", |s| s["locked"] == false);
     assert_eq!(locker.error(), None);
 }
+
+/// A token an app got before the screen locked doesn't bring a window back
+/// while it's locked.
+#[test]
+fn activation_does_nothing_while_locked() {
+    use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
+    let mut pila = TestPila::start();
+    let apps = pila.client();
+    let hidden = apps.window("hidden").create();
+    pila.wait_focus("hidden");
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "hidden").unwrap()["minimized"] == true
+    });
+    apps.window("a").create();
+    pila.wait_focus("a");
+    pila.key("a");
+    apps.wait("the key", |s| {
+        s.events.iter().any(|e| {
+            *e == common::client::Ev::Key {
+                key: 30,
+                pressed: false,
+            }
+        })
+    });
+    let activation: XdgActivationV1 = apps.bind("xdg_activation_v1", 1);
+    let token = activation.get_activation_token(&apps.qh, "token".into());
+    token.set_serial(apps.last_serial(), &apps.seat());
+    token.commit();
+    apps.flush();
+    apps.wait_logged("token", "Done");
+    let text = apps.logged("token")[0].clone();
+    let token_string = text.split('"').nth(1).unwrap().to_string();
+
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    let surf = locker.lock_surface(&lock, "HEADLESS-1", LOCK_COLOR);
+    locker.wait_surface_configured(surf);
+    pila.wait("locked", |s| s["locked"] == true);
+    activation.activate(token_string, &apps.surface(hidden));
+    apps.roundtrip();
+    let state = pila.settle();
+    assert_eq!(window_in(&state, "hidden").unwrap()["minimized"], true);
+}

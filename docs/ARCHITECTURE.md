@@ -615,7 +615,8 @@ Key flows and invariants:
   than the pointer focus's enter to the client under the pointer (a clicked notification or
   panel, which take no keyboard; niri accepts either serial from any client). Tokens
   are single-use and expire after `TOKEN_TIMEOUT`. A request switches to the window's
-  workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped.
+  workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped;
+  while locked it does nothing (a token from before the lock), but an urgency token still marks.
 - **Session management** (`session_management.rs`, xdg-session-management-v1, on bindings
   in `session_protocol.rs` until a wayland-protocols release has them): a client keeps its
   toplevels in a session (a random id it stores) and asks to restore them. For windows in
