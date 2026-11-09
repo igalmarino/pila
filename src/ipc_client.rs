@@ -16,10 +16,11 @@ Requests:
   windows             The windows, on all workspaces
   outputs             The monitors
   workspaces          The workspaces
+  keyboard            The keyboard layouts, and which is in use
   focused             The focused window
   version             Pila's version
-  subscribe [EVENTS]  Events as they happen: windows, workspaces, outputs
-                      (all of them unless named), until Pila quits
+  subscribe [EVENTS]  Events as they happen: windows, workspaces, outputs,
+                      keyboard (all of them unless named), until Pila quits
   action <action>     Run an action, as in [bindings]: action workspace 2
   focus <id>          Focus a window, by its id in `windows`
   close <id>          Ask a window to close
@@ -62,10 +63,12 @@ fn request(args: &[String]) -> Result<Value, String> {
         _ => Err(format!("{name} takes one window id")),
     };
     match name.as_str() {
-        "windows" | "outputs" | "workspaces" | "focused" | "version" if rest.is_empty() => {
+        "windows" | "outputs" | "workspaces" | "keyboard" | "focused" | "version"
+            if rest.is_empty() =>
+        {
             Ok(json!({ "request": name }))
         }
-        "windows" | "outputs" | "workspaces" | "focused" | "version" => {
+        "windows" | "outputs" | "workspaces" | "keyboard" | "focused" | "version" => {
             Err(format!("{name} takes no arguments"))
         }
         "action" if rest.is_empty() => Err("action needs an action".to_string()),
@@ -189,6 +192,21 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
                         "windows"
                     },
                     if w["active"] == true {
+                        "  [active]"
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .collect(),
+        "keyboard" => list("layouts")
+            .iter()
+            .map(|l| {
+                format!(
+                    "{}: {}{}",
+                    l["index"],
+                    plain(&l["name"]),
+                    if l["active"] == true {
                         "  [active]"
                     } else {
                         ""

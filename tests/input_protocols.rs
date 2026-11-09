@@ -707,6 +707,59 @@ fn a_virtual_keyboard_keeps_the_layout_and_locks() {
     });
 }
 
+/// While a virtual keyboard's keymap is in place, `pila msg keyboard` still
+/// tells the physical keyboard's layouts, and a switch changes the one it
+/// comes back to.
+#[test]
+fn a_virtual_keyboard_doesnt_change_the_layouts_told() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[keyboard]\nlayout = \"us,de\"\n".into(),
+        ..Options::default()
+    });
+    let app = pila.client();
+    app.window("editor").create();
+    pila.wait_focus("editor");
+    let keymap = keymap_of(&app);
+    let typist = pila.client();
+    let keyboard = virtual_keyboard(&typist, &marked(&keymap));
+    keyboard.key(1, 16, 1);
+    keyboard.key(2, 16, 0);
+    typist.flush();
+    app.wait("the virtual keyboard's keymap", has_marked_keymap);
+    let msg = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+            .arg("msg")
+            .args(args)
+            .env_remove("PILA_SOCKET")
+            .env("WAYLAND_DISPLAY", &pila.display)
+            .env("XDG_RUNTIME_DIR", &pila.dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice::<Value>(&out.stdout).unwrap_or(Value::Null)
+    };
+    let layouts = msg(&["--json", "keyboard"])["layouts"].clone();
+    assert_eq!(layouts[0]["name"], "English (US)", "{layouts}");
+    assert_eq!(layouts[1]["name"], "German", "{layouts}");
+    assert_eq!(layouts[0]["active"], true, "{layouts}");
+    msg(&["action", "switch-layout", "next"]);
+    assert_eq!(msg(&["--json", "keyboard"])["layouts"][1]["active"], true);
+    app.clear_events();
+    pila.key("a");
+    app.wait("the configured keymap back, in German", |s| {
+        s.keymap.is_some()
+            && !has_marked_keymap(s)
+            && s.events
+                .iter()
+                .rfind(|e| matches!(e, Ev::Modifiers { .. }))
+                .is_some_and(|e| matches!(e, Ev::Modifiers { group: 1, .. }))
+    });
+}
+
 /// Keys from a virtual keyboard are read with its own keymap, which the
 /// focused client gets while it types; the next physical key brings the
 /// configured keymap back.

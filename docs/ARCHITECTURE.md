@@ -703,7 +703,13 @@ Key flows and invariants:
   last event of each it got; its first events go right after the answer (`Client::after_answer`).
   `Pila::send_ipc_events`, in `after_frames` right after the taskbars' `refresh_toplevels`, builds
   each kind someone wants (only then), and sends it to those whose last differs: whole lists,
-  windows without their geometry so that moves send nothing.
+  windows without their geometry so that moves send nothing. The keyboard layouts are checked
+  every loop iteration instead (`send_keyboard_events`, before `after_frames` returns early): an
+  xkb option can switch them with nothing to draw. `keyboard_layout.rs` reads them from the
+  seat's xkb state and `switch-layout` sets them; while a virtual keyboard's keymap is in place
+  it's the physical keyboard's that count, the names cached when that keymap swapped in
+  (`InputState::layout_names`) and the layout it comes back to (`saved_layout`), which a switch
+  changes instead.
 - **Maximize/fullscreen** state lives in the toplevel's *pending* xdg state (`fill_state`
   reads it). `set_fill_state` is the single entry point; it stores the pre-fill geometry in
   the window's user data (`RestoreGeometry`) and restores it on exit; a window that

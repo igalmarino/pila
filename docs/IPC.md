@@ -9,6 +9,7 @@ can talk to the same socket directly.
 pila msg [--json] windows            The windows, on all workspaces
 pila msg [--json] outputs            The monitors
 pila msg [--json] workspaces         The workspaces
+pila msg [--json] keyboard           The keyboard layouts, and which is in use
 pila msg [--json] focused            The focused window
 pila msg [--json] version            Pila's version
 pila msg [--json] subscribe [EVENTS] Events as they happen, until Pila quits
@@ -57,8 +58,9 @@ actions are those of `config.example.toml`.
 | `windows` | | `protocol`, `windows`: mapped windows back to front, then those minimized or on other workspaces |
 | `outputs` | | `protocol`, `outputs` |
 | `workspaces` | | `protocol`, `workspaces` |
+| `keyboard` | | `protocol`, `layouts` |
 | `focused` | | `protocol`, `window`: a window, or null |
-| `subscribe` | `events`: a list of `windows`, `workspaces`, `outputs` (all if left out) | `protocol`; then events (below) |
+| `subscribe` | `events`: a list of `windows`, `workspaces`, `outputs`, `keyboard` (all if left out) | `protocol`; then events (below) |
 | `action` | `action`: as in `[bindings]` | nothing more |
 | `focus` | `id` | nothing more |
 | `close` | `id` | nothing more |
@@ -82,6 +84,11 @@ those turned on.
 **A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on
 all workspaces counts for the active one).
 
+**A keyboard layout:** `index` (from 1, in the order of `[keyboard]`'s `layout`), `name` (xkb's,
+such as `English (US)`), `active` (in use). While a virtual keyboard (`wtype`, an on-screen
+keyboard) types with a keymap of its own, these are still the physical keyboard's. The action
+`switch-layout <n|next|prev>` changes the layout.
+
 ## Events
 
 After `subscribe`, the connection gets an event line for each kind asked for, with how things are
@@ -94,8 +101,10 @@ now, and then one whenever that kind changes:
 ← {"event": "workspaces", "workspaces": [{"index": 1, "active": false, ...}, {"index": 2, "active": true, ...}, ...]}
 ```
 
-Each event is the whole list, as the request of the same name answers it: replace what you had.
+Each event is the whole list, as the request of the same name answers it (`keyboard` events carry
+`layouts`): replace what you had.
 Windows in events leave out `x`, `y`, `width` and `height`, which change in every frame of a move;
-ask `windows` for them. Events come once things settle on screen, as taskbars hear about them. A
+ask `windows` for them. Events come once things settle on screen, as taskbars hear about them
+(the keyboard's right away). A
 subscribed connection still answers requests (answers have `ok`, events `event`); subscribing
 again replaces the list. A subscriber that leaves more than 1 MiB unread is disconnected.

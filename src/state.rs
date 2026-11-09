@@ -227,6 +227,9 @@ pub struct InputState {
     /// The configured keymap as text, kept while a virtual keyboard's is in
     /// place; reset when the keyboard config is applied.
     pub configured_keymap: Option<smithay::input::keyboard::KeymapFile>,
+    /// The physical keyboard's layout names as last read, told while a
+    /// virtual keyboard's keymap is in place (`keyboard_layout.rs`).
+    pub layout_names: Vec<String>,
     /// The last pointer button press: a client may ask for the window menu
     /// with its serial after the release (`window_menu::recent_press`).
     pub last_press: Option<crate::window_menu::LastPress>,
@@ -1405,6 +1408,8 @@ impl Pila {
     pub fn after_frames(&mut self) {
         // Every iteration: a window can close before its last move is drawn.
         self.refresh_sessions();
+        // A layout can change with no frame to draw (an xkb option's keys).
+        self.send_keyboard_events();
         if !std::mem::take(&mut self.frame_drawn) {
             return;
         }
@@ -1494,6 +1499,7 @@ impl Pila {
             Action::ShowDesktop => self.show_desktop(),
             Action::FocusOutput(target) => self.focus_output(target),
             Action::MoveToOutput(target) => self.move_focused_to_output(target),
+            Action::SwitchLayout(target) => self.switch_layout(target),
             Action::Restore => {
                 if let Some(window) = self.focused_window() {
                     self.restore_window_size(&window);

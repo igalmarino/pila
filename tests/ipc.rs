@@ -3,6 +3,7 @@
 
 mod common;
 
+use common::client::Ev;
 use common::*;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -816,4 +817,63 @@ fn pila_msg_subscribe_prints_events_as_they_come() {
     }
     child.kill().unwrap();
     let _ = child.wait();
+}
+
+fn layout_names(layouts: &Value) -> Vec<String> {
+    layouts
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// `keyboard` lists the layouts; `switch-layout` changes the one in use
+/// (next and prev wrap around), the focused app gets it, and subscribers
+/// hear about it, also when an xkb option switches it.
+#[test]
+fn keyboard_layouts_are_listed_switched_and_followed() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[keyboard]\nlayout = \"us,de\"\noptions = \"grp:caps_toggle\"\n".into(),
+        ..Options::default()
+    });
+    let app = pila.client();
+    app.window("editor").create();
+    pila.wait_focus("editor");
+    let (mut events, _) = Subscription::new(&pila, Some(&["keyboard"]));
+    let first = events.line().unwrap();
+    assert_eq!(first["event"], "keyboard");
+    assert_eq!(layout_names(&first["layouts"]), ["English (US)", "German"]);
+    assert_eq!(first["layouts"][0]["active"], true);
+
+    action(&pila, &["switch-layout", "next"]);
+    events.wait("keyboard", "German", |e| e["layouts"][1]["active"] == true);
+    app.wait("the app types in German", |s| {
+        s.events
+            .iter()
+            .rfind(|e| matches!(e, Ev::Modifiers { .. }))
+            .is_some_and(|e| matches!(e, Ev::Modifiers { group: 1, .. }))
+    });
+    action(&pila, &["switch-layout", "1"]);
+    events.wait("keyboard", "English again", |e| {
+        e["layouts"][0]["active"] == true
+    });
+    action(&pila, &["switch-layout", "prev"]);
+    events.wait("keyboard", "around to German", |e| {
+        e["layouts"][1]["active"] == true
+    });
+    pila.key("code:66"); // Caps Lock switches layouts with this option
+    events.wait("keyboard", "back to English", |e| {
+        e["layouts"][0]["active"] == true
+    });
+
+    let answer = query(&pila, &["keyboard"]);
+    assert_eq!(layout_names(&answer["layouts"]), ["English (US)", "German"]);
+    assert!(
+        text(&msg(&pila, &["keyboard"])).contains("1: English (US)  [active]"),
+        "{}",
+        text(&msg(&pila, &["keyboard"]))
+    );
+    let out = msg(&pila, &["action", "switch-layout", "0"]);
+    assert_eq!(out.status.code(), Some(1), "{}", error(&out));
 }

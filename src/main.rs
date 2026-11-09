@@ -37,6 +37,7 @@ mod input;
 mod introspect;
 mod ipc;
 mod ipc_client;
+mod keyboard_layout;
 mod layers;
 mod minimize;
 mod output_management;

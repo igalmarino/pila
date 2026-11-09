@@ -305,6 +305,8 @@ pub enum Action {
     /// Go to another output, or send the focused window there (`stacking.rs`).
     FocusOutput(OutputTarget),
     MoveToOutput(OutputTarget),
+    /// Switch the keyboard layout (`keyboard_layout.rs`).
+    SwitchLayout(LayoutTarget),
     /// Switch to virtual terminal N (Ctrl+Alt+F<N> on a TTY; not configurable).
     ChangeVt(i32),
 }
@@ -312,6 +314,16 @@ pub enum Action {
 /// Which output an output action goes to: by position, around the end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputTarget {
+    Next,
+    Prev,
+}
+
+/// Which keyboard layout `switch-layout` goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutTarget {
+    /// Counted from 0 (the config counts from 1).
+    Index(usize),
+    /// The next / previous one, wrapping around.
     Next,
     Prev,
 }
@@ -360,6 +372,19 @@ impl Action {
             {
                 return WorkspaceTarget::parse(target).map(|t| Some(make(t)));
             }
+        }
+        // "switch-layout next", "switch-layout 2".
+        if let Some(target) = text.strip_prefix("switch-layout ") {
+            return match target.trim() {
+                "next" => Ok(Some(Action::SwitchLayout(LayoutTarget::Next))),
+                "prev" => Ok(Some(Action::SwitchLayout(LayoutTarget::Prev))),
+                n => match n.parse::<usize>() {
+                    Ok(n) if n >= 1 => Ok(Some(Action::SwitchLayout(LayoutTarget::Index(n - 1)))),
+                    _ => Err(format!(
+                        "switch-layout {n:?}: must be next, prev or a number from 1"
+                    )),
+                },
+            };
         }
         // "focus-output next", "move-to-output-prev".
         for (prefix, make) in [
@@ -416,7 +441,8 @@ impl Action {
                      shrink-width, grow-height, shrink-height, center, toggle-always-on-top, \
                      toggle-all-workspaces, show-desktop, focus-output <next|prev>, \
                      move-to-output <next|prev>, workspace <n|next|prev>, \
-                     move-to-workspace <n|next|prev>, quit or none)"
+                     move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, quit or \
+                     none)"
                 ))
             }
         }))
@@ -1932,6 +1958,26 @@ mod tests {
         assert!(bad("workspace"));
         assert!(bad("workspaces 2"));
         assert!(bad("move-to-workspace-up"));
+    }
+
+    #[test]
+    fn switch_layout_takes_next_prev_or_a_number_from_1() {
+        use LayoutTarget::{Index, Next, Prev};
+        let parse = |text| Action::parse(text).unwrap();
+        assert_eq!(
+            parse("switch-layout next"),
+            Some(Action::SwitchLayout(Next))
+        );
+        assert_eq!(
+            parse("switch-layout prev"),
+            Some(Action::SwitchLayout(Prev))
+        );
+        assert_eq!(
+            parse("switch-layout 2"),
+            Some(Action::SwitchLayout(Index(1)))
+        );
+        assert!(Action::parse("switch-layout 0").is_err());
+        assert!(Action::parse("switch-layout up").is_err());
     }
 
     #[test]

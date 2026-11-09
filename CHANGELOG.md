@@ -5,6 +5,9 @@
 - **Events from `pila msg`:** `pila msg subscribe` (or a `subscribe` request on the socket) sends
   the windows, workspaces and monitors when they change, whole lists each time, so a bar or a
   script follows them without asking over and over (docs/IPC.md).
+- **Keyboard layouts from a bar or a binding:** `pila msg keyboard` lists the layouts of
+  `[keyboard]` and says which is in use, `pila msg subscribe keyboard` follows it, and the action
+  `switch-layout <n|next|prev>` changes it, from a key binding or `pila msg action`.
 
 ## 0.4.1 (2026-11-08)
 

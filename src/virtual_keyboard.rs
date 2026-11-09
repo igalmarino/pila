@@ -163,9 +163,16 @@ impl Pila {
     fn keyboard_state(&mut self) -> SavedKeyboardState {
         let keyboard = self.seat.get_keyboard().expect("a keyboard");
         let mods = keyboard.modifier_state();
-        let layout = keyboard.with_xkb_state(self, |context| {
-            context.xkb().lock().unwrap().active_layout()
+        let (layout, names) = keyboard.with_xkb_state(self, |context| {
+            let xkb = context.xkb().lock().unwrap();
+            let names: Vec<String> = xkb
+                .layouts()
+                .map(|layout| xkb.layout_name(layout).to_string())
+                .collect();
+            (xkb.active_layout(), names)
         });
+        // Told while the virtual keymap is in place (`keyboard_layout.rs`).
+        self.input.layout_names = names;
         SavedKeyboardState {
             layout,
             caps_lock: mods.caps_lock,
@@ -201,5 +208,25 @@ impl Pila {
                 context.set_layout(saved.layout);
             }
         });
+    }
+}
+
+impl Pila {
+    /// The physical keyboard's layout while a virtual keyboard's keymap is in
+    /// place: the one it comes back to.
+    pub fn saved_layout(&self) -> Option<Layout> {
+        self.input.virtual_keymap.as_ref().map(|a| a.saved.layout)
+    }
+
+    /// Change the layout the physical keyboard comes back to; `false` when no
+    /// virtual keymap is in place (the seat's layout is the physical one).
+    pub fn set_saved_layout(&mut self, layout: Layout) -> bool {
+        match &mut self.input.virtual_keymap {
+            Some(active) => {
+                active.saved.layout = layout;
+                true
+            }
+            None => false,
+        }
     }
 }

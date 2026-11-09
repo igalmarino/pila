@@ -9,10 +9,11 @@
 //! when asked for.
 //!
 //! A client may `subscribe` to events: whole snapshots of the windows,
-//! workspaces or outputs, sent first as they are and then whenever one changes
-//! (`Pila::send_ipc_events`, from `after_frames`, where the taskbars hear about
-//! windows too). Each subscriber keeps the last snapshot it got of each kind;
-//! with none, nothing is built.
+//! workspaces, outputs or keyboard layouts, sent first as they are and then
+//! whenever one changes (`Pila::send_ipc_events`, from `after_frames`, where
+//! the taskbars hear about windows too; the layouts every loop iteration,
+//! `send_keyboard_events`). Each subscriber keeps the last snapshot it got of
+//! each kind; with none, nothing is built.
 
 use std::{
     cell::{Cell, RefCell},
@@ -312,6 +313,7 @@ fn handle(
         "windows" => Ok(json!({ "protocol": PROTOCOL, "windows": state.ipc_windows() })),
         "outputs" => Ok(json!({ "protocol": PROTOCOL, "outputs": state.ipc_outputs() })),
         "workspaces" => Ok(json!({ "protocol": PROTOCOL, "workspaces": state.ipc_workspaces() })),
+        "keyboard" => Ok(json!({ "protocol": PROTOCOL, "layouts": state.ipc_layouts() })),
         "subscribe" => {
             let kinds = match request.get("events") {
                 None => Kind::ALL.to_vec(),
@@ -376,16 +378,34 @@ enum Kind {
     Windows,
     Workspaces,
     Outputs,
+    Keyboard,
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Windows, Kind::Workspaces, Kind::Outputs];
+    const ALL: [Kind; 4] = [
+        Kind::Windows,
+        Kind::Workspaces,
+        Kind::Outputs,
+        Kind::Keyboard,
+    ];
+    /// Built after frames are drawn; the rest every loop iteration.
+    const AFTER_FRAMES: [Kind; 3] = [Kind::Windows, Kind::Workspaces, Kind::Outputs];
 
     fn name(self) -> &'static str {
         match self {
             Kind::Windows => "windows",
             Kind::Workspaces => "workspaces",
             Kind::Outputs => "outputs",
+            Kind::Keyboard => "keyboard",
+        }
+    }
+
+    /// The event's list: named as the answer to the request of the same
+    /// name has it.
+    fn field(self) -> &'static str {
+        match self {
+            Kind::Keyboard => "layouts",
+            other => other.name(),
         }
     }
 
@@ -444,15 +464,25 @@ impl Pila {
         self.ipc_events.0.push(subscriber);
     }
 
-    /// Send each subscriber the snapshots that changed since it got its last
-    /// ones. Called after frames are drawn, as taskbars are updated.
+    /// Send each subscriber the windows, workspaces and outputs that changed
+    /// since it got its last ones. Called after frames are drawn, as taskbars
+    /// are updated.
     pub fn send_ipc_events(&mut self) {
+        self.send_events_of(&Kind::AFTER_FRAMES);
+    }
+
+    /// The same for the keyboard layouts, every loop iteration.
+    pub fn send_keyboard_events(&mut self) {
+        self.send_events_of(&[Kind::Keyboard]);
+    }
+
+    fn send_events_of(&mut self, kinds: &[Kind]) {
         self.ipc_events.0.retain(|s| s.client.strong_count() > 0);
         if self.ipc_events.0.is_empty() {
             return;
         }
         let mut events: [Option<String>; Kind::ALL.len()] = Default::default();
-        for kind in Kind::ALL {
+        for &kind in kinds {
             if self.ipc_events.0.iter().any(|s| s.kinds.contains(&kind)) {
                 events[kind as usize] = Some(self.ipc_event(kind));
             }
@@ -493,9 +523,9 @@ impl Pila {
         }
     }
 
-    /// An event line: `{"event": kind, kind: [...]}`. Windows leave out where
+    /// An event line: `{"event": kind, field: [...]}`. Windows leave out where
     /// they are and their size, which change in every frame of a move.
-    fn ipc_event(&self, kind: Kind) -> String {
+    fn ipc_event(&mut self, kind: Kind) -> String {
         let list = match kind {
             Kind::Windows => self
                 .ipc_windows()
@@ -511,10 +541,11 @@ impl Pila {
                 .collect(),
             Kind::Workspaces => self.ipc_workspaces(),
             Kind::Outputs => self.ipc_outputs(),
+            Kind::Keyboard => self.ipc_layouts(),
         };
         let mut event = serde_json::Map::new();
         event.insert("event".into(), kind.name().into());
-        event.insert(kind.name().into(), Value::Array(list));
+        event.insert(kind.field().into(), Value::Array(list));
         Value::Object(event).to_string()
     }
 
@@ -586,6 +617,18 @@ impl Pila {
                     "transform": transform_name(output.current_transform()),
                     "focused": geo.to_f64().contains(pointer),
                 }))
+            })
+            .collect()
+    }
+
+    /// The physical keyboard's layouts, in order.
+    fn ipc_layouts(&mut self) -> Vec<Value> {
+        let (names, active) = self.keyboard_layouts();
+        names
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                json!({ "index": index + 1, "name": name, "active": index == active })
             })
             .collect()
     }
