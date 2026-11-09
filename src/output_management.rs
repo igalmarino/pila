@@ -749,6 +749,27 @@ impl Dispatch<ZwlrOutputConfigurationHeadV1, ConfigHeadData> for Pila {
         else {
             return;
         };
+        // Each property is set once (a mode or a custom mode: one of them).
+        let set_before = match &request {
+            config_head::Request::SetMode { .. } | config_head::Request::SetCustomMode { .. } => {
+                config.mode.is_some().then_some("mode")
+            }
+            config_head::Request::SetPosition { .. } => {
+                config.position.is_some().then_some("position")
+            }
+            config_head::Request::SetTransform { .. } => {
+                config.transform.is_some().then_some("transform")
+            }
+            config_head::Request::SetScale { .. } => config.scale.is_some().then_some("scale"),
+            config_head::Request::SetAdaptiveSync { .. } => {
+                config.adaptive_sync.is_some().then_some("adaptive sync")
+            }
+            _ => None,
+        };
+        if let Some(what) = set_before {
+            resource.post_error(config_head::Error::AlreadySet, format!("{what} set twice"));
+            return;
+        }
         match request {
             config_head::Request::SetMode { mode } => {
                 let index = mode.data::<(String, usize)>();

@@ -9,7 +9,9 @@ use wayland_client::{protocol::wl_output::Transform, Proxy};
 use wayland_protocols_wlr::{
     gamma_control::v1::client::zwlr_gamma_control_manager_v1::ZwlrGammaControlManagerV1,
     output_management::v1::client::{
-        zwlr_output_configuration_head_v1::Error as ConfigHeadError,
+        zwlr_output_configuration_head_v1::{
+            Error as ConfigHeadError, ZwlrOutputConfigurationHeadV1,
+        },
         zwlr_output_configuration_v1::{Error as ConfigurationError, ZwlrOutputConfigurationV1},
         zwlr_output_head_v1::{AdaptiveSyncState, ZwlrOutputHeadV1},
         zwlr_output_manager_v1::ZwlrOutputManagerV1,
@@ -455,6 +457,53 @@ fn a_head_configured_twice_or_a_bad_scale_is_a_protocol_error() {
         )),
         "{error}"
     );
+}
+
+/// Each property of a head is set once: a second scale, position,
+/// transform, adaptive sync or mode (a custom one included) is a protocol
+/// error, `already_set` (each on a client of its own: it ends the
+/// connection).
+#[test]
+fn setting_a_head_property_twice_is_a_protocol_error() {
+    type Twice = fn(&Client, &ZwlrOutputHeadV1, &ZwlrOutputConfigurationHeadV1);
+    let cases: [(&str, Twice); 5] = [
+        ("scale", |_, _, h| {
+            h.set_scale(1.0);
+            h.set_scale(2.0);
+        }),
+        ("position", |_, _, h| {
+            h.set_position(0, 0);
+            h.set_position(10, 0);
+        }),
+        ("transform", |_, _, h| {
+            h.set_transform(Transform::Normal);
+            h.set_transform(Transform::_90);
+        }),
+        ("adaptive sync", |_, _, h| {
+            h.set_adaptive_sync(AdaptiveSyncState::Enabled);
+            h.set_adaptive_sync(AdaptiveSyncState::Disabled);
+        }),
+        ("a mode and a custom mode", |client, head, h| {
+            h.set_mode(&mode(client, head, (1280, 800)));
+            h.set_custom_mode(1920, 1080, 0);
+        }),
+    ];
+    let pila = two_outputs();
+    for (what, twice) in cases {
+        let (client, om) = manager(&pila);
+        let a = head(&client, "A");
+        let config = configuration(&client, &om);
+        let a_config = config.enable_head(&a, &client.qh, "config_head".into());
+        client.expect_error();
+        twice(&client, &a, &a_config);
+        client.flush();
+        let error = client.wait_error();
+        let expected = format!(
+            "Protocol error {} on object zwlr_output_configuration_head_v1",
+            ConfigHeadError::AlreadySet as u32
+        );
+        assert!(error.contains(&expected), "{what}: {error}");
+    }
 }
 
 #[test]

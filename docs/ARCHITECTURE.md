@@ -495,7 +495,8 @@ Key flows and invariants:
   in `Pila::outputs.overrides`, which `udev::effective_output_config` layers over the file
   for `connector_connected` and `apply_output_config`. If the backend can't do it
   (`apply_outputs` returns false: a failed modeset) the overrides go back to what they were
-  and the client gets `failed`. Disabling a head
+  and the client gets `failed`. A head's property set twice (a mode and a custom mode
+  count as one) is the protocol error `already_set`, as the protocol says. Disabling a head
   (`disable_output`) clears its CRTC, removes its global and runs `output_removed`; the
   `OutputSurface` stays so the head is still listed; `enable_output` is the reverse (also
   used by `connector_connected`). Adaptive sync goes through `DrmCompositor::use_vrr`, after
