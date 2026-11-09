@@ -240,6 +240,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
                             .output
                             .change_current_state(Some(wl_mode), None, None, None);
                         info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
+                        surface.first_frame = true;
                         remodeled.push(crtc);
                     }
                     Err(err) => {
@@ -523,6 +524,7 @@ pub(super) fn connector_connected(
             recovery: Recovery::default(),
             adaptive_sync: false,
             presented_variable: false,
+            first_frame: true,
         },
     );
     if !enabled {
@@ -587,6 +589,7 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     surface.frame_pending = false;
     surface.redraw_needed = true;
     surface.recovery = Recovery::default();
+    surface.first_frame = true;
     apply_vrr(surface);
     surface.global = Some(surface.output.create_global::<Pila>(&state.display_handle));
     let output = surface.output.clone();

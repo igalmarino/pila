@@ -215,7 +215,23 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
             animating = state.animating(),
             "queued"
         );
-        state.record_frame(&output, cpu);
+        let first = match &mut state.backend {
+            Some(Backend::Udev(data)) => data
+                .outputs
+                .get_mut(&crtc)
+                .is_some_and(|s| std::mem::take(&mut s.first_frame)),
+            _ => false,
+        };
+        if first {
+            tracing::debug!(
+                target: "pila::frames",
+                output = output.name(),
+                cpu_ms = cpu.as_secs_f64() * 1000.0,
+                "first frame after setting the output up"
+            );
+        } else {
+            state.record_frame(&output, cpu);
+        }
     }
     frame::send_frames(scene, cursor_wl_surface, &output, state.clock.now().into());
     state.post_render(&output);

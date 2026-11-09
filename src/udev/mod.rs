@@ -173,6 +173,11 @@ struct OutputSurface {
     /// refresh, logged when it changes (`scripts/check --vrr` reads it);
     /// forgotten while the CRTC is off.
     presented_variable: bool,
+    /// The next frame is the first since the CRTC was set up (connected,
+    /// enabled, powered on, a new mode, the session back): it allocates the
+    /// swapchain and commits the modeset, a cost of setting the output up
+    /// that's logged on its own, not counted in the frame budget.
+    first_frame: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -371,6 +376,7 @@ impl UdevData {
         surface.frame_pending = false;
         surface.redraw_needed = true;
         surface.recovery = Recovery::default();
+        surface.first_frame = true;
         info!(name, "output powered on");
         outputs::apply_vrr(surface);
         self.reapply_gamma(crtc);
@@ -610,6 +616,7 @@ pub fn init_udev(
                         surface.gamma_in_flight = false;
                         // Failures while away were for lack of DRM master.
                         surface.recovery = Recovery::default();
+                        surface.first_frame = true;
                         // Another VT may have changed the LUTs.
                         data.reapply_gamma(crtc);
                     }

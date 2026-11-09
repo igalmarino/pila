@@ -514,6 +514,14 @@ else
     fi
 fi
 
+# The first frame after an output is set up (swapchain, modeset) is a cost of
+# setting it up, logged apart from the budget (`udev/draw.rs`).
+setups=$(grep -o 'first frame after setting the output up output="[^"]*" cpu_ms=[0-9.]*' "$log" |
+    sed 's/.*cpu_ms=//' || true)
+if [ -n "$setups" ]; then
+    info "outputs set up: $(wc -l <<<"$setups") first frames, worst $(sort -g <<<"$setups" | tail -1) ms (not in the frame budget)"
+fi
+
 # Screen captures build their frames on top of the outputs' (`frame_stats.rs`),
 # held to the same budget, on average over all of them: a lone first frame
 # (grim's, a texture to allocate) doesn't stand for a share.

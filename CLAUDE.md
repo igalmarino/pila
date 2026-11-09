@@ -136,7 +136,9 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   over half the period. Missed refreshes are vblanks with no new frame while an
   animation runs: exact on bare metal (the DRM sequence of the vblanks that showed
   frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
-  show); `pila::frames=trace` logs every frame. Screen captures, which build frames of their
+  show); `pila::frames=trace` logs every frame. The first frame after an output is set up
+  (connected, powered on, a new mode, back from another VT: swapchain and modeset) is a cost of
+  setting it up, logged on its own and not counted. Screen captures, which build frames of their
   own after the outputs', are logged apart (`captures`), held to the same budget (`scripts/check`
   streams one, as a screen share does: `scripts/capture-stream`). Any change that touches rendering, input
   or the event loop is checked with it (release build) before it's committed; bare-metal
