@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+- **Sharing a single window keeps going when it's hidden:** a shared window that another window
+  covered dropped to one frame a second, and one minimized or on another workspace froze, as
+  browsers and video players stop drawing when nothing asks for a frame. It now draws at the
+  share's pace. The manual says how to share single windows ("Screenshots and screen sharing").
+- **Night light without stutter:** each change of a night light (every step of its fade) held
+  Pila for a whole refresh, 16.7 ms at 60 Hz, while input, apps and every monitor waited. Changes
+  now go out without waiting (about 2 ms on an AMD laptop); drivers without `GAMMA_LUT` keep the
+  old way.
+- **Night light keeps working after a VT switch:** a change made while another VT was in front
+  failed, and Noctalia's night light stopped until it was restarted. Changes made meanwhile now
+  apply when you come back.
+- **The session starts even when Xwayland can't:** Xwayland dying at startup (a crash, a broken
+  install) left Pila waiting for it forever, busy, without starting your shell or terminal. Now
+  only X11 apps are missing.
+- **A failing monitor no longer freezes the others:** when one monitor's frames fail (not enough
+  bandwidth, a dock dropping out), it retries on its own, waiting longer each time and logging
+  ever more rarely, while the others go on drawing.
+- **A monitor whose mode doesn't fit comes on in a lighter one:** a lower refresh rate, then
+  smaller sizes (two 4K monitors on one dock, say), instead of staying off; the log says which.
+- **Monitors whose DisplayPort link fails are set up again:** after a resume or through a dock,
+  a monitor the kernel marks as having a bad link (a black screen) gets its mode set again.
+- **Screen capture fixes:** a capture whose copy failed waited forever on a still screen; a
+  shared window changed resolution when it left the screen; a dma-buf the GPU can't draw into
+  failed with an unknown error instead of asking for another buffer; a copy still on the GPU
+  wrote into a buffer its client had already taken back. Captured frames now carry the time
+  their content shows on screen, which OBS uses to keep sound and picture together.
+- **Screen sharing costs less:** sharing a monitor reuses the frame just drawn for it instead of
+  drawing everything again (on a TTY, unrotated monitors), and screenshots and shares reuse their
+  textures. Captures are held to the same frame budget as the monitors.
+- **Adaptive sync:** apps are told the refresh is variable when it is (video players and games
+  pace their frames by it), and adaptive sync stays on when a monitor wakes from blanking
+  (`wlopm`, idle): it used to stay off until the next config reload.
+- **Monitors on a second GPU** don't work yet, and now the README says so: on many laptops with
+  two GPUs, NVIDIA ones especially, the HDMI and DisplayPort outputs are on the dedicated one.
+  `pila-report` marks those monitors.
+- **`pila-report` for a user named like a system directory:** for a user called `dev`, paths
+  such as `/dev/dri/card1` were hidden as if they held the user name.
+- **Pila is written "Pila"** in the docs, the man page and the login screen's session menu; the
+  command, packages and paths stay `pila`.
+- **For testers:** `scripts/check` also streams a screen capture, checks adaptive sync with
+  `--vrr`, holds gamma changes and captures to the frame budget, and says so when given an
+  option it doesn't know. Pila's display code also runs on GitHub on the kernel's virtual
+  display driver (`vkms.yml`), with a monitor plugged in and out.
+
 ## 0.4.0 (2026-11-08)
 
 - **Smithay's main branch:** pila now builds against Smithay's development branch (a git
