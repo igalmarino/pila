@@ -37,6 +37,18 @@ the seat's primary GPU, so **monitors wired to another GPU don't work yet**: on 
 two GPUs (NVIDIA ones especially) the HDMI and DisplayPort outputs are on the dedicated GPU, and
 monitors plugged in there don't show up. `pila-report` marks them.
 
+**Toward beta.** Pila becomes beta once:
+
+- testers report it on at least four machines besides its author's, NVIDIA among them (or
+  NVIDIA is documented as unsupported);
+- the configuration file and `pila msg` have gone four weeks without a change that breaks them,
+  and stay compatible from then on: a change that breaks them is rare, and the changelog says
+  how to update;
+- no crash or freeze is open in the issues;
+- monitors on a second GPU work, or are accepted as a known limitation of beta.
+
+Reports are what moves this along: see below.
+
 ## Help test Pila
 
 The biggest unknown is how Pila behaves away from its author's laptop. Most useful right
