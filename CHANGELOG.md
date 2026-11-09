@@ -1,7 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-11-09)
 
+- **Apps can no longer crash Pila with absurd sizes:** a window made wider than any screen (a
+  subsurface far out stretches it) crashed Pila drawing its title bar, and other sizes and
+  positions near the limits of a 32-bit number overflowed in layout and drawing. Sizes and places
+  a client gives its surfaces (buffers, viewports, subsurfaces, window geometry, layer surfaces,
+  popups) past 32768 px are now a protocol error that ends that client, and the log says which.
+- **Monitor positions within ±1000000:** a display tool (`wlr-randr`, kanshi) placing a monitor
+  near the limits of a 32-bit number could crash Pila; now the change fails and nothing moves.
+  `[[output]]` positions past it are a config error naming the monitor.
+- **Output configuration follows the protocol more closely:** setting a monitor's property twice
+  in one change is the protocol error wlroots gives (`already_set`), instead of the second value
+  winning.
 - **Events from `pila msg`:** `pila msg subscribe` (or a `subscribe` request on the socket) sends
   the windows, workspaces and monitors when they change, whole lists each time, so a bar or a
   script follows them without asking over and over (docs/IPC.md).
