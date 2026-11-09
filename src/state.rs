@@ -266,11 +266,13 @@ pub struct Protocols {
 /// picks its backends from `pila-portals.conf` by it.
 const DESKTOP_NAME: &str = "pila";
 /// What `export_environment` hands the session bus.
-const SESSION_ENV: [&str; 4] = [
+const SESSION_ENV: [&str; 5] = [
     "WAYLAND_DISPLAY",
     "DISPLAY",
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_TYPE",
+    // For a shell started by systemd or D-Bus to find `pila msg`'s socket.
+    "PILA_SOCKET",
 ];
 
 /// Other compositors' IPC sockets and markers, which pila's children don't

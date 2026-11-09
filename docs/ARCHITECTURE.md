@@ -568,7 +568,8 @@ Key flows and invariants:
   (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
   `~/.config/xdg-desktop-portal-wlr/` or `/etc/xdg` (xdpw ignores `XDG_CONFIG_DIRS`;
   `scripts/install` puts both in `/etc/xdg`). On a TTY, before the startup programs, Pila
-  exports that environment to the D-Bus session bus (`export_environment`): on the systemd
+  exports that environment to the D-Bus session bus (`export_environment`, `SESSION_ENV`, with
+  `PILA_SOCKET` for shells started as services): on the systemd
   user bus (a login session) also to `systemd --user`, which starts the portals and
   pipewire there (`--systemd`); on a private bus (`scripts/tty`, `dbus-run-session`) the
   bus alone, so a test instance leaves the login session's services alone. The export
@@ -702,8 +703,9 @@ Key flows and invariants:
   it hasn't read waits in `Client::unread` with a write source of its own, and past `MAX_UNREAD` or
   `MAX_REQUEST` it's disconnected. A client's place (`MAX_CLIENTS`) frees when its last source goes.
   Answers have their own JSON, not `state_json` (for tests, free to change), and are built only when
-  asked. `action`, `focus` and `close` are refused while locked, but for `power-off-monitors` and
-  `power-on-monitors` (idling locks, then turns monitors off). An action goes through
+  asked. `action`, `focus` and `close` are refused while locked, but for the actions that get
+  past nothing (`Action::runs_while_locked`: the monitors' power, as idling locks and then turns
+  them off, and `switch-layout`, for a lock screen's password). An action goes through
   `Action::parse` and `run_action`, with a window switch ended at once, as no key is held.
   `subscribe` adds the client (a `Weak`) to `Pila::ipc_events` with the kinds it wants and the
   last event of each it got; its first events go right after the answer (`Client::after_answer`).

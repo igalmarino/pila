@@ -885,3 +885,20 @@ fn keyboard_layouts_are_listed_switched_and_followed() {
     let out = msg(&pila, &["action", "switch-layout", "0"]);
     assert_eq!(out.status.code(), Some(1), "{}", error(&out));
 }
+
+/// A lock screen may offer to switch the keyboard layout (to type the
+/// password in another): `switch-layout` runs while locked, as the
+/// monitors' power actions do; that gets past nothing.
+#[test]
+fn the_layout_can_be_switched_while_locked() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[keyboard]\nlayout = \"us,de\"\n".into(),
+        ..Options::default()
+    });
+    let locker = pila.client();
+    let _lock = locker.lock_session();
+    locker.wait_logged("lock", "Locked");
+    pila.wait("locked", |s| s["locked"] == true);
+    action(&pila, &["switch-layout", "next"]);
+    assert_eq!(query(&pila, &["keyboard"])["layouts"][1]["active"], true);
+}

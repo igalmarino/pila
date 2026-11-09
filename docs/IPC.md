@@ -29,7 +29,9 @@ arguments, 3 if it can't talk to Pila.
 ## The socket
 
 A Unix stream socket, for the same user only (mode 0600). Programs Pila starts have its path in
-`PILA_SOCKET`; otherwise it's `$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
+`PILA_SOCKET`, and a login session exports it to the D-Bus session bus and systemd's user manager
+too, for programs started as services; otherwise it's
+`$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
 
 Each request is one line of JSON and gets one line of JSON back, in order. A connection can be
 kept open for more than one.
@@ -66,8 +68,9 @@ actions are those of `config.example.toml`.
 | `close` | `id` | nothing more |
 
 While the session is locked, `action`, `focus` and `close` are refused, `quit` included, and
-queries still answer. Only the actions `power-off-monitors` and `power-on-monitors` still run,
-as idling locks first and then turns the monitors off. An action with `spawn` runs a command as your user; any program of yours can
+queries still answer. Only the actions `power-off-monitors`, `power-on-monitors` and
+`switch-layout` still run: idling locks first and then turns the monitors off, and a lock screen
+may switch the keyboard layout to type the password. An action with `spawn` runs a command as your user; any program of yours can
 do that anyway.
 
 **A window:** `id` (string, for as long as the window lives; the same identifier as

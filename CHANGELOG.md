@@ -8,9 +8,13 @@
 - **Keyboard layouts from a bar or a binding:** `pila msg keyboard` lists the layouts of
   `[keyboard]` and says which is in use, `pila msg subscribe keyboard` follows it, and the action
   `switch-layout <n|next|prev>` changes it, from a key binding or `pila msg action`.
+- **`PILA_SOCKET` for shells started as services:** a login session exports it to the D-Bus
+  session bus and systemd's user manager with `WAYLAND_DISPLAY`, so a shell started by systemd
+  finds `pila msg`'s socket.
 - **Turning the monitors off:** the actions `power-off-monitors` (until any input; the key or
   click that wakes them does nothing else) and `power-on-monitors`, for a binding or a shell's idle
-  settings through `pila msg action`, which allows them with the screen locked. `pila msg outputs`
+  settings through `pila msg action`, which allows them with the screen locked (as it does
+  `switch-layout`, for a lock screen's password). `pila msg outputs`
   tells each monitor's `power`.
 - **Manual: Noctalia and Dux Shell on Pila's terms:** their idle monitor off and Log out through
   `pila msg`, and a waybar module that follows the keyboard layout.

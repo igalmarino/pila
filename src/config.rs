@@ -359,6 +359,16 @@ impl WorkspaceTarget {
 }
 
 impl Action {
+    /// Whether `pila msg action` may run it with the session locked: what
+    /// gets past nothing. Idling locks and then turns the monitors off, and
+    /// a lock screen may switch the keyboard layout to type a password.
+    pub(crate) fn runs_while_locked(&self) -> bool {
+        matches!(
+            self,
+            Action::PowerOffMonitors | Action::PowerOnMonitors | Action::SwitchLayout(_)
+        )
+    }
+
     /// `None` for `"none"`, which removes a binding.
     pub(crate) fn parse(text: &str) -> Result<Option<Self>, String> {
         let text = text.trim();

@@ -334,32 +334,20 @@ fn handle(
             let window = state.focused_window().and_then(|w| state.ipc_window(&w));
             Ok(json!({ "protocol": PROTOCOL, "window": window }))
         }
-        // Turning the monitors off or on doesn't get past the lock screen, and
-        // idling locks first, then turns them off.
-        "action"
-            if state.is_locked()
-                && matches!(
-                    request.get("action").and_then(Value::as_str).map(str::trim),
-                    Some("power-off-monitors" | "power-on-monitors")
-                ) =>
-        {
-            let text = string_field(request, "action")?;
-            if let Some(action) = Action::parse(text)? {
-                state.ipc_action(action);
-            }
-            Ok(json!({}))
-        }
-        "action" | "focus" | "close" if state.is_locked() => {
-            // Not even `quit`: a program mustn't get past the lock screen this way.
-            Err("the session is locked".to_string())
-        }
         "action" => {
             let text = string_field(request, "action")?;
-            if let Some(action) = Action::parse(text)? {
+            let action = Action::parse(text)?;
+            // Not even `quit`: a program mustn't get past the lock screen this
+            // way. A few actions get past nothing (`runs_while_locked`).
+            if state.is_locked() && !action.as_ref().is_some_and(Action::runs_while_locked) {
+                return Err("the session is locked".to_string());
+            }
+            if let Some(action) = action {
                 state.ipc_action(action);
             }
             Ok(json!({}))
         }
+        "focus" | "close" if state.is_locked() => Err("the session is locked".to_string()),
         "focus" => {
             let window = named_window(state, request)?;
             state.activate_toplevel(&window);
