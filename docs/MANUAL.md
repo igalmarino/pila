@@ -276,9 +276,21 @@ namespace = "noctalia-*"
 animations = false
 ```
 
-Noctalia opens its panels on the monitor of the window you're using. Its `dpms-off` and `dpms-on`
-commands don't work on Pila (Noctalia 5.4 runs `wlr-randr --off` without naming a monitor); for
-that, `wlr-randr --output DP-1 --off` works.
+Noctalia opens its panels on the monitor of the window you're using. Its own monitor off
+(`screen_off`, `dpms-off`) doesn't work on Pila: Noctalia 5.4 runs `wlr-randr --off` without
+naming a monitor. Give its idle behavior Pila's action instead (Settings → Idle, or its
+`[idle.behavior.screen-off]`), with no resume command: any input turns the monitors back on.
+
+```toml
+[idle.behavior.screen-off]
+timeout = 660
+action = "command"
+command = "pila msg action power-off-monitors"
+```
+
+Its Log out ends the session through logind (`loginctl terminate-session`), which works where
+systemd or elogind runs it. Elsewhere, or to quit Pila directly, set that button's command to
+`pila msg action quit` (Settings → Power → Session panel).
 
 **With Dux Shell** (DankMaterialShell):
 
@@ -297,11 +309,16 @@ app-id = "dev.duxlabs.shell"
 title-bar = false
 ```
 
+Dux Shell turns monitors off on idle through the standard protocol, which works as it is. For
+Log out, give its power settings a custom command (`customPowerActionLogout`):
+`pila msg action quit`.
+
 Both shells work on Pila through standard protocols: bar, workspaces, taskbar and dock, launcher,
 notifications, clipboard history, screenshots, night light, display settings and power, idle and
 the lock screen. Neither knows Pila by name yet, so the features they build on a compositor's own
 commands are missing: Dux Shell's overview, window rules and keybinding editor, and switching the
-keyboard layout from either shell's bar (Pila's keyboard settings and `Mod` bindings still work).
+keyboard layout from either shell's bar (Pila's keyboard settings and `Mod` bindings still work;
+a binding to `switch-layout next` switches layouts).
 `dms doctor` says "No supported Wayland compositor found"; that line is all it means.
 
 **With separate tools**, for example:
@@ -317,7 +334,16 @@ autostart = [
 ```
 
 Bars and taskbars can list, focus, minimize and close windows (waybar's taskbar module, for
-instance) and switch workspaces. Clipboard managers that use ext-data-control, night light
+instance) and switch workspaces. What no protocol tells, a bar gets from `pila msg`; a waybar
+module that shows the keyboard layout as it changes and switches it on a click:
+
+```json
+"custom/layout": {
+    "exec": "pila msg --json subscribe keyboard | jq --unbuffered -r '.layouts[]? | select(.active) | .name'",
+    "on-click": "pila msg action switch-layout next"
+}
+```
+ Clipboard managers that use ext-data-control, night light
 (`wlsunset`, through gamma control) and screen recorders that use screencopy (`wf-recorder`)
 work too.
 

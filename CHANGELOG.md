@@ -12,6 +12,8 @@
   click that wakes them does nothing else) and `power-on-monitors`, for a binding or a shell's idle
   settings through `pila msg action`, which allows them with the screen locked. `pila msg outputs`
   tells each monitor's `power`.
+- **Manual: Noctalia and Dux Shell on Pila's terms:** their idle monitor off and Log out through
+  `pila msg`, and a waybar module that follows the keyboard layout.
 
 ## 0.4.1 (2026-11-08)
 
