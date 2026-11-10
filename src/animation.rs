@@ -792,8 +792,8 @@ impl Pila {
             // (nothing animates there, or an animation is waiting for its
             // client) waits for it, where asking for it as a change would
             // redraw it as fast as this runs, every redraw calling this
-            // again. An animation's first frame is asked as a change, where
-            // it starts.
+            // again. An animation's first frame is asked as a change when
+            // it starts (`queue_redraw`, every output).
             self.loop_handle.insert_idle(move |state| {
                 let outputs = outputs.unwrap_or_else(|| state.space.outputs().cloned().collect());
                 for output in outputs {

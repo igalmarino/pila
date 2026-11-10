@@ -514,11 +514,11 @@ fn idle_wait(
     lock_pending: bool,
 ) -> Option<Duration> {
     let until = idle_until.filter(|until| now < *until)?;
-    // Something said new doesn't wait, once: a second redraw in a row that
-    // finds nothing means it wasn't, whatever the next says.
     use crate::redraw::Content;
-    // Pila's own change shows; a client's picture, once (it may show
-    // nowhere); what may bring nothing waits.
+    // What's said to be new doesn't wait, as long as it turns out new: a
+    // client's picture once (it may show nowhere: a second redraw in a row
+    // that finds nothing means it wasn't), Pila's own change up to
+    // `SURE_STREAK` times; what may bring nothing waits.
     let surely_new = match content {
         Content::Sure => idle_streak < SURE_STREAK,
         Content::Client => idle_streak <= 1,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Line coverage of the test suite (unit and integration tests, the headless
 # pilas they start included), per source file: a guide to what the tests
-# miss, next to tests/FEATURES.md. Bare-metal code (udev.rs) and the nested
+# miss, next to tests/FEATURES.md. Bare-metal code (udev/) and the nested
 # backend (winit.rs) stay low by nature; scripts/check covers them.
 #
 #   scripts/coverage            report in the terminal

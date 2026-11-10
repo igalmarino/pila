@@ -190,11 +190,12 @@ struct OutputSurface {
     /// That timer is set.
     idle_timer: bool,
     /// Redraws in a row that found nothing new, since the last frame queued:
-    /// past one, even a redraw said to bring something new waits
-    /// (`draw::idle_wait`).
+    /// past one a client's new picture waits too, past `SURE_STREAK` even a
+    /// change of Pila's own (`draw::idle_wait`).
     idle_streak: u32,
     /// The most the redraws asked for since the last one bring
-    /// (`redraw::Content`): a change of Pila's own never waits, a client's
+    /// (`redraw::Content`): a change of Pila's own waits only past
+    /// `SURE_STREAK` redraws in a row that found nothing new, a client's
     /// new picture doesn't unless the last two redraws found nothing new
     /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
     redraw_content: crate::redraw::Content,
