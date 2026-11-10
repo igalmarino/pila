@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **X11 windows show up at once:** an X11 window could open blank (and the window focused
+  before kept its focused title bar) until something else redrew the screen, when Xwayland
+  told Pila which surface was the window's after drawing it.
+
 ## 0.5.0 (2026-11-10)
 
 - **Tap Mod to open the launcher:** pressing and releasing Mod alone (Super, by default on a TTY)

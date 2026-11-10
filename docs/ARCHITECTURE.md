@@ -784,7 +784,9 @@ Key flows and invariants:
   times in `RESTART_WINDOW`. X11 windows are `Window::new_x11_window` in the same
   `Space`, so code that handles windows must not assume `window.toplevel()` is `Some`: use
   `wl_surface()`, `fill_state`, `close_window`, `focus_target`, and branch on
-  `x11_surface()` where X11 differs. Keyboard focus is `focus::KeyboardFocus` (Wayland
+  `x11_surface()` where X11 differs. A window may get its `wl_surface` after it's mapped,
+  even after that surface's commit (X names it last): `surface_associated` redraws everything
+  then, as what it shows appears, and the focus shown moves to it. Keyboard focus is `focus::KeyboardFocus` (Wayland
   surface or X11 window, so Smithay sets the X input focus); compare surfaces through
   `Pila::keyboard_focus()`. Whenever Pila moves a managed X11 window it must tell X
   (`x11_window_moved`); focusing raises it in X too. Where X has a window, and the size it

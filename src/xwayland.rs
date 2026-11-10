@@ -22,6 +22,7 @@ use smithay::{
     reexports::calloop::{
         EventSource, Poll, PostAction, Readiness, RegistrationToken, Token, TokenFactory,
     },
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::CompositorHandler,
@@ -357,6 +358,14 @@ impl Pila {
 impl XWaylandShellHandler for Pila {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
         &mut self.xwayland.shell_state
+    }
+
+    /// An X11 window got its surface. When X names it after the surface's
+    /// commit, what it shows appears now, with no commit to redraw it; and
+    /// with a surface it counts as focused, so the window that had the
+    /// focus before draws its title bar unfocused. Once per X11 window.
+    fn surface_associated(&mut self, _xwm: XwmId, _wl_surface: WlSurface, _surface: X11Surface) {
+        self.queue_redraw();
     }
 }
 
