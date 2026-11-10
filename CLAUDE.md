@@ -221,7 +221,9 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   surface while locked, and `Pila::under` hits nothing else; a new path that tries panics in
   debug builds ("refused while locked"). A new path still refuses what it shouldn't do while
   locked (`is_locked()`) on its own; a new kind of action goes into `Action::examples`
-  (`config.rs`), which the lock test runs.
+  (`config.rs`), which the lock test runs, and its name into `NAMED_ACTIONS` (or
+  `ACTIONS_WITH_ARGUMENT`), which parsing and its error message read and a test checks
+  `config.example.toml` lists.
 - **Input:** a new input path goes through `process_input_event` (or calls
   `notify_activity`) to count as activity, and hit testing through `Pila::under`, which
   must agree with the order `Pila::scene` renders.

@@ -416,53 +416,73 @@ impl Action {
                 };
             }
         }
-        Ok(Some(match text {
-            "none" => return Ok(None),
-            "terminal" => Action::Terminal,
-            "launcher" => Action::Launcher,
-            "close" => Action::CloseFocused,
-            "cycle-focus" => Action::CycleFocus,
-            "cycle-focus-back" => Action::CycleFocusBack,
-            "minimize" => Action::Minimize,
-            "snap-left" => Action::SnapLeft,
-            "snap-right" => Action::SnapRight,
-            "snap-top-left" => Action::SnapTopLeft,
-            "snap-top-right" => Action::SnapTopRight,
-            "snap-bottom-left" => Action::SnapBottomLeft,
-            "snap-bottom-right" => Action::SnapBottomRight,
-            "toggle-always-on-top" => Action::ToggleAlwaysOnTop,
-            "toggle-all-workspaces" => Action::ToggleAllWorkspaces,
-            "show-desktop" => Action::ShowDesktop,
-            "restore" => Action::Restore,
-            "move-left" => Action::MoveWindow(-KEYBOARD_STEP, 0),
-            "move-right" => Action::MoveWindow(KEYBOARD_STEP, 0),
-            "move-up" => Action::MoveWindow(0, -KEYBOARD_STEP),
-            "move-down" => Action::MoveWindow(0, KEYBOARD_STEP),
-            "grow-width" => Action::ResizeWindow(KEYBOARD_STEP, 0),
-            "shrink-width" => Action::ResizeWindow(-KEYBOARD_STEP, 0),
-            "grow-height" => Action::ResizeWindow(0, KEYBOARD_STEP),
-            "shrink-height" => Action::ResizeWindow(0, -KEYBOARD_STEP),
-            "center" => Action::Center,
-            "maximize" => Action::ToggleMaximize,
-            "fullscreen" => Action::ToggleFullscreen,
-            "quit" => Action::Quit,
-            "power-off-monitors" => Action::PowerOffMonitors,
-            "power-on-monitors" => Action::PowerOnMonitors,
-            other => {
-                return Err(format!(
-                    "unknown action {other:?} (spawn <command>, terminal, launcher, close, \
-                     cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, snap-left, \
-                     snap-right, snap-top-left, snap-top-right, snap-bottom-left, \
-                     snap-bottom-right, restore, move-left/right/up/down, grow-width, \
-                     shrink-width, grow-height, shrink-height, center, toggle-always-on-top, \
-                     toggle-all-workspaces, show-desktop, focus-output <next|prev>, \
-                     move-to-output <next|prev>, workspace <n|next|prev>, \
-                     move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, \
-                     power-off-monitors, power-on-monitors, quit or none)"
-                ))
-            }
-        }))
+        if text == "none" {
+            return Ok(None);
+        }
+        if let Some((_, action)) = NAMED_ACTIONS.iter().find(|(name, _)| *name == text) {
+            return Ok(Some(action.clone()));
+        }
+        Err(format!("unknown action {text:?} ({})", action_list()))
     }
+}
+
+/// The actions a word alone names (`Action::parse`), in the order
+/// `action_list` gives them. Adding one here is all parsing needs;
+/// `every_action_is_in_the_example_config` makes sure `config.example.toml`
+/// lists it too.
+const NAMED_ACTIONS: &[(&str, Action)] = &[
+    ("terminal", Action::Terminal),
+    ("launcher", Action::Launcher),
+    ("close", Action::CloseFocused),
+    ("cycle-focus", Action::CycleFocus),
+    ("cycle-focus-back", Action::CycleFocusBack),
+    ("minimize", Action::Minimize),
+    ("maximize", Action::ToggleMaximize),
+    ("fullscreen", Action::ToggleFullscreen),
+    ("snap-left", Action::SnapLeft),
+    ("snap-right", Action::SnapRight),
+    ("snap-top-left", Action::SnapTopLeft),
+    ("snap-top-right", Action::SnapTopRight),
+    ("snap-bottom-left", Action::SnapBottomLeft),
+    ("snap-bottom-right", Action::SnapBottomRight),
+    ("restore", Action::Restore),
+    ("move-left", Action::MoveWindow(-KEYBOARD_STEP, 0)),
+    ("move-right", Action::MoveWindow(KEYBOARD_STEP, 0)),
+    ("move-up", Action::MoveWindow(0, -KEYBOARD_STEP)),
+    ("move-down", Action::MoveWindow(0, KEYBOARD_STEP)),
+    ("grow-width", Action::ResizeWindow(KEYBOARD_STEP, 0)),
+    ("shrink-width", Action::ResizeWindow(-KEYBOARD_STEP, 0)),
+    ("grow-height", Action::ResizeWindow(0, KEYBOARD_STEP)),
+    ("shrink-height", Action::ResizeWindow(0, -KEYBOARD_STEP)),
+    ("center", Action::Center),
+    ("toggle-always-on-top", Action::ToggleAlwaysOnTop),
+    ("toggle-all-workspaces", Action::ToggleAllWorkspaces),
+    ("show-desktop", Action::ShowDesktop),
+    ("power-off-monitors", Action::PowerOffMonitors),
+    ("power-on-monitors", Action::PowerOnMonitors),
+    ("quit", Action::Quit),
+];
+
+/// The actions that take an argument, as written (`Action::parse` reads
+/// them by their prefix).
+const ACTIONS_WITH_ARGUMENT: &[&str] = &[
+    "spawn <command>",
+    "focus-output <next|prev>",
+    "move-to-output <next|prev>",
+    "workspace <n|next|prev>",
+    "move-to-workspace <n|next|prev>",
+    "switch-layout <n|next|prev>",
+];
+
+/// Every action as a config may write it, for messages.
+fn action_list() -> String {
+    let names: Vec<&str> = ACTIONS_WITH_ARGUMENT[..1]
+        .iter()
+        .copied()
+        .chain(NAMED_ACTIONS.iter().map(|(name, _)| *name))
+        .chain(ACTIONS_WITH_ARGUMENT[1..].iter().copied())
+        .collect();
+    format!("{} or none", names.join(", "))
 }
 
 /// One example of each kind of action (`Action::examples`, for a test that
@@ -1589,6 +1609,33 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `config.example.toml` lists every action (its comment above
+    /// `[bindings]`), so a new one can't be left out of it.
+    #[test]
+    fn every_action_is_in_the_example_config() {
+        let example = include_str!("../config.example.toml");
+        let names = NAMED_ACTIONS
+            .iter()
+            .map(|(name, _)| *name)
+            .chain(ACTIONS_WITH_ARGUMENT.iter().copied());
+        for name in names {
+            assert!(
+                example.contains(name),
+                "config.example.toml doesn't list {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_named_action_parses_to_itself() {
+        for (name, action) in NAMED_ACTIONS {
+            assert_eq!(Action::parse(name), Ok(Some(action.clone())), "{name}");
+        }
+        assert_eq!(Action::parse("none"), Ok(None));
+        let err = Action::parse("explode").unwrap_err();
+        assert!(err.contains("spawn <command>, terminal,") && err.ends_with("quit, focus-output <next|prev>, move-to-output <next|prev>, workspace <n|next|prev>, move-to-workspace <n|next|prev>, switch-layout <n|next|prev> or none)"), "{err}");
+    }
 
     #[test]
     fn the_examples_are_one_of_each_kind_of_action() {
