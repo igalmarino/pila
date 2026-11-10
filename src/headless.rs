@@ -150,7 +150,7 @@ pub struct HeadlessOutput {
     /// What the output shows: the last frame drawn.
     texture: Option<GlesTexture>,
     damage_tracker: OutputDamageTracker,
-    /// Something may have changed since the last frame.
+    /// A redraw was asked for it since its last one (`queue_redraw_output`).
     redraw_needed: bool,
     /// The texture holds a frame (else the next one is drawn whole).
     drawn: bool,

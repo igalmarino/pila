@@ -316,7 +316,7 @@ pub struct Session {
     composited: bool,
 }
 
-/// A frame's buffer, damage and whether `capture` was sent.
+/// A frame's buffer and whether `capture` was sent.
 #[derive(Default)]
 pub struct FrameState {
     buffer: Option<WlBuffer>,

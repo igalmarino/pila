@@ -143,7 +143,8 @@ pub struct Pila {
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
-    /// Surfaces with fifo barriers to signal (`commit_pacing.rs`).
+    /// Commits held back for a refresh (wp-fifo barriers) or a timestamp
+    /// (wp-commit-timing) (`commit_pacing.rs`).
     pub commit_pacing: crate::commit_pacing::CommitPacing,
     /// Screen capture: ext-image-copy-capture and wlr-screencopy.
     pub capture: crate::capture::Captures,
@@ -155,7 +156,7 @@ pub struct Pila {
     pub ext_workspaces: crate::ext_workspace::ExtWorkspaces,
     /// Saved window states of clients' sessions (`session_management.rs`).
     pub session_management: crate::session_management::SessionManagement,
-    /// Blurred backdrops of layer surfaces (`blur.rs`).
+    /// Blurred backdrops of layer surfaces and windows (`blur.rs`).
     pub blur: crate::blur::BlurCache,
     /// What's known and set about outputs beyond the `Space`: monitors,
     /// display tools' settings, gamma and power.
@@ -169,7 +170,9 @@ pub struct Pila {
     /// The screen captures' frames (`frame_stats.rs`, `Pila::record_capture`).
     pub capture_stats: crate::frame_stats::FrameStats,
 
-    /// Mapped windows, in stacking order (back to front).
+    /// The mapped windows of the active workspace and those on every
+    /// workspace, in stacking order (back to front); the others are
+    /// `off_space_windows()` (`workspaces.rs`, `minimize.rs`).
     pub space: Space<Window>,
     /// Windows off the `Space`, and the order they were used in.
     pub windows: Windows,
@@ -186,7 +189,8 @@ pub struct Pila {
     pub idle_inhibitors: IdleInhibitors,
 
     pub seat: Seat<Self>,
-    /// Cursor most recently requested by the client under the pointer.
+    /// The cursor shown: the last the client under the pointer asked for, or
+    /// Pila's own (a grab's, over a resize border; `set_cursor`).
     pub cursor_status: CursorImageStatus,
     /// The icon of the drag in progress (`handlers/mod.rs`), drawn at the
     /// pointer plus its offset.
@@ -194,9 +198,11 @@ pub struct Pila {
     /// The window menu, while open (`window_menu.rs`).
     pub window_menu: Option<crate::window_menu::WindowMenu>,
 
-    /// Nested-only: set by `init_winit`. It lives here (not in the redraw closure) so
-    /// `DmabufHandler` can test-import client buffers into the renderer. A DRM backend
-    /// needs its own renderer handle here instead.
+    /// What Pila runs on (`backend.rs`): nested, bare metal or headless, set by
+    /// `init_winit`, `init_udev` or `init_headless`; `None` only before. Here,
+    /// not in a backend's own loop, so everything else reaches it through its
+    /// methods (the renderer for imports and captures, redraws, cursors, gamma,
+    /// power).
     pub backend: Option<Backend>,
 }
 
@@ -1439,9 +1445,12 @@ impl Pila {
     }
 
     /// Called after every event-loop iteration (`main.rs`), once all the
-    /// outputs due were drawn: captures and screencopies, dead windows and
-    /// popups, taskbar listeners and idle inhibitors. Nothing if no output
-    /// was drawn.
+    /// outputs due were drawn: dead windows and popups, taskbar listeners,
+    /// IPC events, idle inhibitors and animations, if an output was drawn or
+    /// clients or input were handled (`housekeeping`); captures and
+    /// screencopies if an output was drawn or one may have something new
+    /// without (`capture_due`). Session saves and keyboard layout events every
+    /// iteration.
     pub fn after_frames(&mut self) {
         // Every iteration: a window can close before its last move is drawn.
         self.refresh_sessions();
@@ -1788,7 +1797,8 @@ impl Pila {
 }
 
 /// What's under a point: a layer surface (with the surface hit and its origin
-/// in global coordinates), or a window and the part of it that was hit.
+/// in global coordinates), or a window and the part of it that was hit; while
+/// locked, only a lock surface.
 pub enum Under {
     Layer(LayerSurface, WlSurface, Point<f64, Logical>),
     Window(Window, Hit),

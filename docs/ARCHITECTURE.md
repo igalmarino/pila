@@ -194,8 +194,10 @@ Key flows and invariants:
   else may redraw; a captured window's hidden surfaces, off-space ones included, get theirs
   from its capture instead: see "Screen capture"); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
-  iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs captures,
-  screencopies, `space.refresh()`, taskbar updates and `popups.cleanup()`, then a flush. Buffer age (for partial repaints) needs the window's EGL
+  iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs
+  `space.refresh()`, taskbar updates, IPC events and `popups.cleanup()` (when an output was
+  drawn or clients or input were handled), captures and screencopies (when an output was drawn
+  or `capture_due`; see "Redraws are on demand, per output"), then a flush. Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
@@ -506,7 +508,8 @@ Key flows and invariants:
   offscreen textures are kept by size (up to 4) for the next copies, and dropped from
   `after_frames` once no session, waiting screencopy or screencopy damage tracker is left
   (`Captures::trim_textures`). A
-  session's first frame is copied at once (idle), later ones in `after_frames` only when
+  session's first frame is copied at once (idle), later ones in `after_frames` (after a
+  frame drawn, or `capture_due`: a commit shown on no output, a capture request) only when
   the session's own damage tracker sees a change. A copy that fails (at once or on the GPU)
   starts the session over (`Session::start_over`: new tracker, next frame copied at once and
   whole), since its tracker already counted the changes as seen and a still source would
@@ -713,7 +716,8 @@ Key flows and invariants:
 - **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event calls
   `notify_activity`; Smithay runs the notification timers on `loop_handle`. Idle inhibitors
   only count while their surface is part of a mapped window or layer surface and the
-  session isn't locked; `update_idle_inhibit` re-checks after every frame. A new input path
+  session isn't locked; `update_idle_inhibit` re-checks in `after_frames` (after a frame,
+  a client dispatch or input). A new input path
   must go through `process_input_event` (or call `notify_activity`) to count as activity.
 - **Pointer constraints** (`pointer_constraints.rs`): a lock/confine activates only while
   the pointer is over its surface (inside its region) and that window has keyboard focus;

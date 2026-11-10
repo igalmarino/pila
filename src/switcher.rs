@@ -16,7 +16,7 @@ use smithay::{
 
 use crate::Pila;
 
-/// An Mod+Tab in progress.
+/// A Mod+Tab in progress.
 pub struct Switch {
     /// Snapshot of the candidates, most recent first.
     order: Vec<Window>,
