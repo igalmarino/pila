@@ -16,8 +16,19 @@ pub(super) fn render_all(state: &mut Pila) {
     };
     data.redraw_scheduled = false;
     let crtcs: Vec<_> = data.outputs.keys().copied().collect();
-    for crtc in crtcs {
-        render_output(state, crtc, false);
+    // One scene for every output drawn in this pass, built once each one's
+    // commit timers have applied; its cost counts in the first one's frame.
+    let ready: Vec<_> = crtcs
+        .into_iter()
+        .filter_map(|crtc| prepare(state, crtc))
+        .collect();
+    if !ready.is_empty() {
+        let started = std::time::Instant::now();
+        let input = state.frame_input();
+        let mut scene_cpu = started.elapsed();
+        for ready in ready {
+            draw(state, ready, false, &input, std::mem::take(&mut scene_cpu));
+        }
     }
     // With every output powered off nothing is drawn, so nothing above
     // checks the lock: a locker (swaylock -f waits for it) would wait forever.
@@ -30,10 +41,35 @@ pub(super) fn render_all(state: &mut Pila) {
 /// next vblank) or nothing changed. `at_vblank`: called right after one, so
 /// the frame is due at the next (`frame_stats.rs`).
 pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: bool) {
+    let Some(ready) = prepare(state, crtc) else {
+        return;
+    };
+    let started = std::time::Instant::now();
+    let input = state.frame_input();
+    let scene_cpu = started.elapsed();
+    draw(state, ready, at_vblank, &input, scene_cpu);
+}
+
+/// An output about to be drawn (`prepare`).
+pub(super) struct Ready {
+    crtc: crtc::Handle,
+    output: Output,
+    output_geo: Rectangle<i32, smithay::utils::Logical>,
+    /// When `prepare` decided to draw it (for `idle_until`).
+    now: Duration,
+    lock_pending: bool,
+    /// The CPU time `prepare` took (its commit timers), counted in its frame.
+    cpu: Duration,
+}
+
+/// Whether `crtc` is to be drawn now (nothing in flight, something asked for,
+/// not held back: see `render_output`); if so, its commit timers applied, so
+/// the scene built next has what they unblocked.
+fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
     // A gamma change takes the CRTC first; drawing goes on at its vblank.
     if let Some(Backend::Udev(data)) = &mut state.backend {
         if commit_pending_gamma(data, crtc) {
-            return;
+            return None;
         }
     }
     // An output that had nothing new to show just now waits its turn
@@ -53,27 +89,23 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         });
         if let Some(delay) = wait {
             data.schedule_idle_redraw(crtc, delay);
-            return;
+            return None;
         }
     }
     let Some(Backend::Udev(data)) = &state.backend else {
-        return;
+        return None;
     };
-    let Some(surface) = data.outputs.get(&crtc) else {
-        return;
-    };
+    let surface = data.outputs.get(&crtc)?;
     if surface.frame_pending
         || !surface.redraw_needed
         || surface.drm_output.is_none()
         || !data.session.is_active()
         || surface.recovery.blocks_render()
     {
-        return;
+        return None;
     }
     let output = surface.output.clone();
-    let Some(output_geo) = state.space.output_geometry(&output) else {
-        return;
-    };
+    let output_geo = state.space.output_geometry(&output)?;
 
     let started = std::time::Instant::now();
     // A destroyed cursor surface falls back to the default arrow.
@@ -81,8 +113,39 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         state.cursor_status = CursorImageStatus::default_named();
     }
     state.signal_commit_timers(&output);
-    // Everything taken from `state` is collected before borrowing the backend.
-    let input = state.frame_input();
+    Some(Ready {
+        crtc,
+        output,
+        output_geo,
+        now,
+        lock_pending,
+        cpu: started.elapsed(),
+    })
+}
+
+/// Draw `ready` from `input` (`Pila::frame_input`, shared by the outputs of a
+/// pass), whose building took `scene_cpu` (counted in this frame).
+fn draw(
+    state: &mut Pila,
+    ready: Ready,
+    at_vblank: bool,
+    input: &crate::render::FrameInput,
+    scene_cpu: Duration,
+) {
+    let Ready {
+        crtc,
+        output,
+        output_geo,
+        now,
+        lock_pending,
+        cpu: prepare_cpu,
+    } = ready;
+    // This frame's CPU time: its own drawing, `prepare`'s and the scene's
+    // share (`frame_stats.rs`).
+    let now_instant = std::time::Instant::now();
+    let started = now_instant
+        .checked_sub(prepare_cpu + scene_cpu)
+        .unwrap_or(now_instant);
     let scene = &input.scene;
     let pointer_here = output_geo.to_f64().contains(input.pointer);
     let scale = crate::scale::output_scale(&output);
@@ -117,7 +180,7 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     let mut elements = Vec::new();
     if pointer_here {
         elements =
-            render::pointer_elements(renderer, &input, Some(cursor_theme), output_geo.loc, scale);
+            render::pointer_elements(renderer, input, Some(cursor_theme), output_geo.loc, scale);
     }
     elements.extend(render::output_elements(
         renderer,

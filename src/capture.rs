@@ -447,6 +447,13 @@ impl Pila {
     /// session's first). Called after each rendered frame and when a first
     /// capture is requested.
     pub fn process_captures(&mut self) {
+        self.process_captures_with(&mut None);
+    }
+
+    /// `process_captures`, with `input` the scene of this pass, built by the
+    /// first capture that needs it (`after_frames` shares it with the
+    /// screencopies).
+    pub fn process_captures_with(&mut self, input: &mut Option<crate::render::FrameInput>) {
         if !self.capture.sessions.iter().any(|s| s.pending) {
             return;
         }
@@ -455,7 +462,7 @@ impl Pila {
             if std::mem::take(&mut session.composited) || !session.pending {
                 continue;
             }
-            self.process_capture(session);
+            self.process_capture(session, input);
             if let Some(started) = self.capture.building.take() {
                 self.record_capture(started.elapsed());
             }
@@ -465,7 +472,11 @@ impl Pila {
         self.capture.sessions = sessions;
     }
 
-    fn process_capture(&mut self, session: &mut Session) {
+    fn process_capture(
+        &mut self,
+        session: &mut Session,
+        input: &mut Option<crate::render::FrameInput>,
+    ) {
         let Some(geometry) = self.capture_geometry(&session.target, session.geometry) else {
             session.stop();
             return;
@@ -497,7 +508,7 @@ impl Pila {
 
         // Everything taken from `self` before borrowing the renderer.
         self.capture.building = Some(Instant::now());
-        let input = self.frame_input();
+        let input = &*input.get_or_insert_with(|| self.frame_input());
         let scene = &input.scene;
         let (origin, window) = match &session.target {
             Target::Output(output) => {
@@ -544,7 +555,7 @@ impl Pila {
 
         let mut elements: Vec<PilaRenderElement> = Vec::new();
         if session.paint_cursors {
-            elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
+            elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);
         }
         match (&window, &output_for_blur) {
             (Some(window), _) => {

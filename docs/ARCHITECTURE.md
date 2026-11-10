@@ -181,7 +181,10 @@ Key flows and invariants:
   the `Space` swaps a turned output's logical size, so Pila only sets it (and sizes output
   captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.
 - **Render loop** (`winit::redraw`): collects `Pila::scene()` (windows front to back with
-  their title bars) and the cursor *before* borrowing the backend, builds elements with
+  their title bars) and the cursor *before* borrowing the backend (`Pila::frame_input`; built
+  once per pass and shared by the outputs drawn in it, `udev/draw.rs::render_all` and
+  `headless.rs`'s, after each one's commit timers applied, its cost counted in the first
+  output's frame; and once for the captures and screencopies of an `after_frames`), builds elements with
   `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
   since Pila's custom shaders need `GlesFrame`), and calls the damage tracker's
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't

@@ -749,12 +749,27 @@ fn render_all(state: &mut Pila) {
     let due: Vec<bool> = data.outputs.iter().map(|o| o.due(now)).collect();
     let lock_pending = state.lock_pending();
     let mut locked_everywhere = true;
+    // One scene for every output drawn in this pass, built once each one's
+    // commit timers have applied; its cost counts in the first one's frame.
+    let mut ready = Vec::new();
     for (index, due) in due.into_iter().enumerate() {
         if !due && !lock_pending {
             continue;
         }
-        if !render_output(state, index, lock_pending) {
-            locked_everywhere = false;
+        match prepare(state, index, lock_pending) {
+            Ok(output) => ready.push((index, output)),
+            Err(shown) => locked_everywhere &= shown,
+        }
+    }
+    if !ready.is_empty() {
+        let started = Instant::now();
+        let input = state.frame_input();
+        let mut scene_cpu = started.elapsed();
+        for (index, (output, output_geo, prepare_cpu)) in ready {
+            let cpu = prepare_cpu + std::mem::take(&mut scene_cpu);
+            if !render_output(state, index, lock_pending, &input, output, output_geo, cpu) {
+                locked_everywhere = false;
+            }
         }
     }
     if lock_pending {
@@ -856,34 +871,54 @@ fn state_output_geometry(output: &Output) -> Option<Rectangle<i32, smithay::util
     Some(Rectangle::new(output.current_location(), size))
 }
 
-/// Draw one output if something changed. Returns whether the output now
-/// shows the scene (for a pending lock: a locked frame, or nothing to show).
-fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
+/// An output to draw (its place, and the CPU time `prepare` took), or why
+/// not: whether it shows the scene anyway (`render_output`'s answer).
+type Prepared = Result<(Output, Rectangle<i32, smithay::utils::Logical>, Duration), bool>;
+
+/// Whether output `index` is to be drawn (something changed, or a lock
+/// waits); if so, its commit timers applied, so the scene built next has what
+/// they unblocked.
+fn prepare(state: &mut Pila, index: usize, lock_pending: bool) -> Prepared {
     let Some(Backend::Headless(data)) = &state.backend else {
-        return false;
+        return Err(false);
     };
     let Some(o) = data.outputs.get(index) else {
-        return false;
+        return Err(false);
     };
     // An output that is off or asleep shows nothing, locked or not.
     if !o.enabled || !o.power {
-        return true;
+        return Err(true);
     }
     if !o.redraw_needed && !lock_pending {
-        return true;
+        return Err(true);
     }
     let output = o.output.clone();
     let Some(output_geo) = state.space.output_geometry(&output) else {
-        return true;
+        return Err(true);
     };
-
     let started = Instant::now();
     // A destroyed cursor surface falls back to the default arrow.
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
         state.cursor_status = CursorImageStatus::default_named();
     }
     state.signal_commit_timers(&output);
-    let input = state.frame_input();
+    Ok((output, output_geo, started.elapsed()))
+}
+
+/// Draw output `index` from `input` (shared by the outputs of a pass), with
+/// `cpu` already spent on it (`prepare`, the scene's share). Returns whether
+/// the output now shows the scene (for a pending lock: a locked frame).
+fn render_output(
+    state: &mut Pila,
+    index: usize,
+    lock_pending: bool,
+    input: &crate::render::FrameInput,
+    output: Output,
+    output_geo: Rectangle<i32, smithay::utils::Logical>,
+    cpu: Duration,
+) -> bool {
+    let now_instant = Instant::now();
+    let started = now_instant.checked_sub(cpu).unwrap_or(now_instant);
     let scene = &input.scene;
     let scale = crate::scale::output_scale(&output);
     let pointer_here = output_geo.to_f64().contains(input.pointer);
@@ -923,7 +958,7 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
     // Named cursors are left out, as nested (the host would draw them).
     let mut elements = Vec::new();
     if pointer_here {
-        elements = render::pointer_elements(renderer, &input, None, output_geo.loc, scale);
+        elements = render::pointer_elements(renderer, input, None, output_geo.loc, scale);
     }
     elements.extend(render::output_elements(
         renderer,

@@ -175,13 +175,15 @@ impl Pila {
     /// Copy every frame whose client asked for it: all of them, or (with
     /// damage) the ones whose region changed since that client's last copy.
     /// Called after each rendered frame and when a plain copy is requested.
-    pub fn process_screencopies(&mut self) {
+    /// `input`: the scene of this pass, built by the first copy that needs it
+    /// (shared with the captures, `after_frames`).
+    pub fn process_screencopies(&mut self, input: &mut Option<crate::render::FrameInput>) {
         if self.capture.screencopies.is_empty() {
             return;
         }
         let frames = std::mem::take(&mut self.capture.screencopies);
         for frame in frames {
-            let done = self.process_screencopy(&frame);
+            let done = self.process_screencopy(&frame, input);
             if let Some(started) = self.capture.building.take() {
                 self.record_capture(started.elapsed());
             }
@@ -192,7 +194,11 @@ impl Pila {
     }
 
     /// Copy one frame; `false` if it's still waiting for a change.
-    fn process_screencopy(&mut self, frame: &ZwlrScreencopyFrameV1) -> bool {
+    fn process_screencopy(
+        &mut self,
+        frame: &ZwlrScreencopyFrameV1,
+        input: &mut Option<crate::render::FrameInput>,
+    ) -> bool {
         let Some(data) = frame.data::<FrameData>() else {
             return true;
         };
@@ -229,7 +235,7 @@ impl Pila {
 
         // Everything taken from `self` before borrowing the renderer.
         self.capture.building = Some(Instant::now());
-        let input = self.frame_input();
+        let input = &*input.get_or_insert_with(|| self.frame_input());
         let origin = geo.loc + region.loc;
         let scale = output_scale(&output);
         let clear = render::clear_color(&input.scene);
@@ -247,7 +253,7 @@ impl Pila {
         let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
         let mut elements: Vec<PilaRenderElement> = Vec::new();
         if overlay_cursor {
-            elements = render::pointer_elements(renderer, &input, cursor_theme, origin, scale);
+            elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);
         }
         elements.extend(render::output_elements(
             renderer,

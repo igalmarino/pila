@@ -1468,8 +1468,10 @@ impl Pila {
         // shows on no output (a hidden window's), and a capture client may
         // ask for a frame: not with every client dispatch.
         if drawn || capture_due {
-            self.process_captures();
-            self.process_screencopies();
+            // One scene for every capture of this pass, built at the first.
+            let mut input = None;
+            self.process_captures_with(&mut input);
+            self.process_screencopies(&mut input);
             self.capture.trim_textures();
         }
         // The space knows which outputs each window is on only after its
