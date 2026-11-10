@@ -287,9 +287,7 @@ fn write_the_rest(state: &mut Pila, client: &Rc<RefCell<Client>>) {
 }
 
 fn respond(state: &mut Pila, client: &Rc<RefCell<Client>>, line: &[u8]) -> Value {
-    let answer = serde_json::from_slice::<Value>(line)
-        .map_err(|err| format!("bad request: {err}"))
-        .and_then(|request| handle(state, client, &request));
+    let answer = parse_request(line).and_then(|request| handle(state, client, request));
     match answer {
         Ok(Value::Object(mut map)) => {
             map.insert("ok".into(), true.into());
@@ -300,44 +298,83 @@ fn respond(state: &mut Pila, client: &Rc<RefCell<Client>>, line: &[u8]) -> Value
     }
 }
 
-fn handle(
-    state: &mut Pila,
-    client: &Rc<RefCell<Client>>,
-    request: &Value,
-) -> Result<Value, String> {
+/// A request of `pila msg`'s protocol (`docs/IPC.md`), as `parse_request`
+/// reads it.
+#[derive(Debug, PartialEq)]
+pub enum Request {
+    Version,
+    Windows,
+    Outputs,
+    Workspaces,
+    Keyboard,
+    /// Events of these kinds, from now on.
+    Subscribe(Vec<Kind>),
+    Focused,
+    /// `None` for `"none"`.
+    Action(Option<Action>),
+    /// By the window's id.
+    Focus(String),
+    Close(String),
+}
+
+/// A line of the protocol as a request, or why it isn't one. Reads it and
+/// nothing else, so it can be fuzzed (`fuzz/`): what a request does, and
+/// whether it may while locked, is `handle`'s.
+pub fn parse_request(line: &[u8]) -> Result<Request, String> {
+    let request =
+        serde_json::from_slice::<Value>(line).map_err(|err| format!("bad request: {err}"))?;
     let name = request
         .get("request")
         .and_then(Value::as_str)
         .ok_or("a request needs a \"request\" string")?;
-    match name {
-        "version" => Ok(json!({ "protocol": PROTOCOL, "version": crate::version() })),
-        "windows" => Ok(json!({ "protocol": PROTOCOL, "windows": state.ipc_windows() })),
-        "outputs" => Ok(json!({ "protocol": PROTOCOL, "outputs": state.ipc_outputs() })),
-        "workspaces" => Ok(json!({ "protocol": PROTOCOL, "workspaces": state.ipc_workspaces() })),
-        "keyboard" => Ok(json!({ "protocol": PROTOCOL, "layouts": state.ipc_layouts() })),
-        "subscribe" => {
-            let kinds = match request.get("events") {
-                None => Kind::ALL.to_vec(),
-                Some(Value::Array(names)) if !names.is_empty() => names
-                    .iter()
-                    .map(|name| {
-                        name.as_str()
-                            .and_then(Kind::named)
-                            .ok_or_else(|| format!("no such events {name}"))
-                    })
-                    .collect::<Result<_, _>>()?,
-                Some(_) => return Err("\"events\" is a list of event names".to_string()),
-            };
+    Ok(match name {
+        "version" => Request::Version,
+        "windows" => Request::Windows,
+        "outputs" => Request::Outputs,
+        "workspaces" => Request::Workspaces,
+        "keyboard" => Request::Keyboard,
+        "subscribe" => Request::Subscribe(match request.get("events") {
+            None => Kind::ALL.to_vec(),
+            Some(Value::Array(names)) if !names.is_empty() => names
+                .iter()
+                .map(|name| {
+                    name.as_str()
+                        .and_then(Kind::named)
+                        .ok_or_else(|| format!("no such events {name}"))
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err("\"events\" is a list of event names".to_string()),
+        }),
+        "focused" => Request::Focused,
+        "action" => Request::Action(Action::parse(string_field(&request, "action")?)?),
+        "focus" => Request::Focus(string_field(&request, "id")?.to_string()),
+        "close" => Request::Close(string_field(&request, "id")?.to_string()),
+        other => return Err(format!("unknown request {other:?}")),
+    })
+}
+
+fn handle(
+    state: &mut Pila,
+    client: &Rc<RefCell<Client>>,
+    request: Request,
+) -> Result<Value, String> {
+    match request {
+        Request::Version => Ok(json!({ "protocol": PROTOCOL, "version": crate::version() })),
+        Request::Windows => Ok(json!({ "protocol": PROTOCOL, "windows": state.ipc_windows() })),
+        Request::Outputs => Ok(json!({ "protocol": PROTOCOL, "outputs": state.ipc_outputs() })),
+        Request::Workspaces => {
+            Ok(json!({ "protocol": PROTOCOL, "workspaces": state.ipc_workspaces() }))
+        }
+        Request::Keyboard => Ok(json!({ "protocol": PROTOCOL, "layouts": state.ipc_layouts() })),
+        Request::Subscribe(kinds) => {
             state.subscribe(client, kinds);
             Ok(json!({ "protocol": PROTOCOL }))
         }
-        "focused" => {
+        Request::Focused => {
             let window = state.focused_window().and_then(|w| state.ipc_window(&w));
             Ok(json!({ "protocol": PROTOCOL, "window": window }))
         }
-        "action" => {
-            let text = string_field(request, "action")?;
-            let action = Action::parse(text)?;
+        Request::Action(action) => {
             // Not even `quit`: a program mustn't get past the lock screen this
             // way. A few actions get past nothing (`runs_while_locked`).
             if state.is_locked() && !action.as_ref().is_some_and(Action::runs_while_locked) {
@@ -348,17 +385,17 @@ fn handle(
             }
             Ok(json!({}))
         }
-        "focus" | "close" if state.is_locked() => Err("the session is locked".to_string()),
-        "focus" => {
-            let window = named_window(state, request)?;
-            state.activate_toplevel(&window);
+        Request::Focus(_) | Request::Close(_) if state.is_locked() => {
+            Err("the session is locked".to_string())
+        }
+        Request::Focus(id) => {
+            state.activate_toplevel(&named_window(state, &id)?);
             Ok(json!({}))
         }
-        "close" => {
-            close_window(&named_window(state, request)?);
+        Request::Close(id) => {
+            close_window(&named_window(state, &id)?);
             Ok(json!({}))
         }
-        other => Err(format!("unknown request {other:?}")),
     }
 }
 
@@ -369,8 +406,7 @@ fn string_field<'a>(request: &'a Value, name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("a request needs a {name:?} string"))
 }
 
-fn named_window(state: &Pila, request: &Value) -> Result<Window, String> {
-    let id = string_field(request, "id")?;
+fn named_window(state: &Pila, id: &str) -> Result<Window, String> {
     state
         .window_for_identifier(id)
         .ok_or_else(|| format!("no window {id:?}"))
@@ -378,7 +414,7 @@ fn named_window(state: &Pila, request: &Value) -> Result<Window, String> {
 
 /// What a client can subscribe to: one snapshot each.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
+pub enum Kind {
     Windows,
     Workspaces,
     Outputs,

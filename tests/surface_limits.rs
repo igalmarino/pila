@@ -313,3 +313,22 @@ fn a_drag_icon_offset_adding_up_far_off_is_drawn_without_overflow() {
     pila.release("left");
     assert!(pila.alive());
 }
+
+/// Damage with a negative width or height (found by `fuzz/`'s protocol
+/// target): Smithay's wl_surface handler makes a `Size` of it, whose
+/// `debug_assert` crashes a debug build of Pila (release builds go on), before
+/// Pila sees the request. A fix is Smithay's.
+#[test]
+#[ignore = "bug: Smithay's wl_surface.damage debug-asserts a negative size"]
+fn damage_of_a_negative_size_harms_nothing() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").color(RED).create();
+    pila.wait_focus("a");
+    let surface = client.surface(window);
+    surface.damage(0, 0, 10, -10);
+    surface.damage_buffer(0, 0, -10, 10);
+    surface.commit();
+    client.roundtrip();
+    assert!(pila.alive());
+}

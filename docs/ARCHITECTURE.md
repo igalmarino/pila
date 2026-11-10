@@ -4,6 +4,12 @@ How Pila is put together: its flows and invariants, a section per subsystem. Pol
 commands are in [CLAUDE.md](../CLAUDE.md), setup in [CONTRIBUTING.md](../CONTRIBUTING.md).
 A change to a flow or invariant updates its section in the same commit.
 
+The crate is a library (`src/lib.rs`: every module, `Pila`, `version()`) and the `pila`
+command (`src/main.rs`: arguments, `USAGE`, `--check-config`, the panic hook, `main`); the
+library is what the fuzz targets (`fuzz/`, cargo-fuzz, a workspace of its own on nightly; see
+CONTRIBUTING.md) call: `ipc::parse_request`, `Config::from_toml`, `edid::parse`,
+`gamma_control::read_ramp`, and a headless Pila for the protocol target.
+
 Structure follows Smithay's `smallvil`. One state struct, `Pila` (`src/state.rs`),
 implements every Smithay handler trait. Its fields are grouped by subsystem where they go together: Smithay's
 protocol states (`Protocols`), Xwayland (`xwayland::XwaylandState`), screen capture

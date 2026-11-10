@@ -34,7 +34,7 @@ const VERSION: u32 = 1;
 /// thread. Data that isn't there yet means a short ramp; more than `bytes`
 /// holds is a malformed one. A pipe still open for writing after the ramp
 /// is fine.
-fn read_ramp(mut file: File, bytes: &mut [u8]) -> std::io::Result<()> {
+pub fn read_ramp(mut file: File, bytes: &mut [u8]) -> std::io::Result<()> {
     use smithay::reexports::rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     let flags = fcntl_getfl(&file)?;
     fcntl_setfl(&file, flags | OFlags::NONBLOCK)?;

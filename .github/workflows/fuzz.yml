@@ -1,0 +1,62 @@
+# By hand: run each fuzz target (`fuzz/`, cargo-fuzz) for a few minutes, and
+# keep what crashed. Not on every push: it takes nightly Rust and its time.
+# How to run one locally, and what each covers: CONTRIBUTING.md.
+name: Fuzz
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes per target"
+        default: "5"
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ipc_request, config, edid, gamma_ramp, protocol]
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed git rustup gcc clang pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: |
+            . -> target
+            fuzz -> target
+      - run: cargo install cargo-fuzz --locked
+      # The protocol target runs a headless Pila (a debug build: debug
+      # assertions catch more), rendering on llvmpipe.
+      - if: matrix.target == 'protocol'
+        run: cargo build --locked
+      - name: Fuzz
+        env:
+          PILA_HEADLESS_DEVICE: software
+          MINUTES: ${{ inputs.minutes }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          case "$MINUTES" in
+            '' | *[!0-9]*) echo "minutes must be a number" >&2; exit 2 ;;
+          esac
+          cd fuzz
+          cargo fuzz run -O "$TARGET" -- \
+            -max_total_time="$((MINUTES * 60))" -rss_limit_mb=4096
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/

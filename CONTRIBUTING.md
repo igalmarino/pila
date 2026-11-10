@@ -32,6 +32,37 @@ too; see [Use of AI](README.md#use-of-ai) for the terms.
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the architecture: the state struct, the backends, the
 render loop, and how each protocol and feature is wired.
 
+## Fuzzing
+
+`fuzz/` has [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets for what Pila reads
+from outside. It's a workspace of its own, built with nightly Rust; Pila's own builds never see
+it. Pila is a library (`src/lib.rs`) plus the `pila` command (`src/main.rs`), so the targets call
+its functions directly.
+
+| Target | What it feeds |
+|---|---|
+| `ipc_request` | a line of `pila msg`'s protocol (`ipc::parse_request`) |
+| `config` | a config file and the `PILA_*` overrides (`Config::from_toml`, rules included) |
+| `edid` | a monitor's EDID (`edid::parse`) |
+| `gamma_ramp` | a client's gamma ramp, from a file or a pipe it may keep open (`gamma_control::read_ramp`) |
+| `protocol` | sequences of requests (surfaces, buffers, scales, offsets, subsurfaces, viewports, windows, popups) to a headless Pila it starts once |
+
+```sh
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz
+cargo +nightly fuzz list
+cargo +nightly fuzz run -O config -- -max_total_time=300
+# protocol runs target/debug/pila (or $PILA_BIN): build it first
+cargo build && cargo +nightly fuzz run -O protocol -- -max_total_time=300
+```
+
+What crashes goes to `fuzz/artifacts/<target>/`; `cargo +nightly fuzz run -O <target>
+<artifact>` replays it and `cargo +nightly fuzz tmin` shrinks it. A crash becomes a test that
+reproduces it (or a `#[ignore = "bug: ..."]` one, if the fix isn't Pila's), then the fix. The
+`protocol` target's coverage is its own, not Pila's (a process of its own), so it explores less
+cleverly than the others: give it time. The `Fuzz` workflow (`.github/workflows/fuzz.yml`, run
+by hand) runs every target for a few minutes and keeps what crashed.
+
 ## Development environment
 
 Pila is developed in a dev container on any Linux host with Docker, from inside Pila itself

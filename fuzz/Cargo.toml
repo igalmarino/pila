@@ -1,0 +1,58 @@
+# Fuzz targets for cargo-fuzz (`cargo +nightly fuzz run <target>`; see
+# CONTRIBUTING.md). A workspace of its own: Pila's builds (`cargo build
+# --locked`, `rust-version`) never see it, and it needs nightly.
+[package]
+name = "pila-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+libc = "0.2"
+pila = { path = ".." }
+# The protocol target's client, as the integration tests' (`tests/common/`).
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ipc_request"
+path = "fuzz_targets/ipc_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "edid"
+path = "fuzz_targets/edid.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gamma_ramp"
+path = "fuzz_targets/gamma_ramp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol"
+path = "fuzz_targets/protocol.rs"
+test = false
+doc = false
+bench = false

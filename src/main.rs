@@ -1,82 +1,12 @@
-//! pila: a stacking Wayland compositor built on Smithay.
-//!
-//! Structure is based on Smithay's `smallvil` example (MIT licensed,
-//! https://github.com/Smithay/smithay), extended with window placement,
-//! focus management, keybindings, modifier-drag move/resize, and
-//! maximize/fullscreen.
-//!
-//! Runs on a TTY (DRM/KMS + libinput, `udev/`), as a login session or by
-//! hand, or nested as a window inside another Wayland or X11 session
-//! (`winit.rs`).
-
-#![allow(irrefutable_let_patterns)]
-
-mod animation;
-mod backend;
-mod bell;
-mod blur;
-mod capture;
-mod commit_pacing;
-mod config;
-mod config_reload;
-mod cursor;
-mod decoration;
-mod edid;
-mod ext_workspace;
-mod focus;
-mod foreign_toplevel;
-mod frame;
-mod frame_stats;
-mod gamma_control;
-mod gestures;
-mod grabs;
-mod handlers;
-mod headless;
-mod idle;
-mod input;
-mod introspect;
-mod ipc;
-mod ipc_client;
-mod keyboard_layout;
-mod layers;
-mod minimize;
-mod output_management;
-mod output_power;
-mod pointer_constraints;
-mod redraw;
-mod render;
-mod rounded;
-mod rules;
-mod scale;
-mod screencopy;
-mod session_lock;
-mod session_management;
-mod session_protocol;
-mod snap;
-mod stacking;
-mod state;
-mod surface_limits;
-mod switcher;
-mod sync;
-mod test_control;
-mod text;
-mod toplevel_management;
-mod transients;
-mod udev;
-mod urgency;
-mod virtual_keyboard;
-mod window_menu;
-mod winit;
-mod workspace_slide;
-mod workspaces;
-mod xwayland;
+//! The `pila` command: the compositor (the library, `lib.rs`), `pila msg`
+//! (`ipc_client.rs`) and `pila --check-config`.
 
 use std::io::IsTerminal;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
-use crate::config::{Config, ModKey};
-pub use crate::state::Pila;
+use pila::config::{self, Config, ModKey};
+use pila::{headless, ipc, ipc_client, state, test_control, text, udev, version, winit, Pila};
 
 const USAGE: &str = "\
 Usage: pila [-c|--command <CMD>] [--config <FILE>] [--backend winit|udev|headless]
@@ -162,15 +92,6 @@ fn run_config_check(path: Option<&std::path::Path>) -> i32 {
         println!("{shown}: no such file; pila uses the defaults");
     }
     0
-}
-
-/// The crate version, plus `git describe` when built from a checkout.
-fn version() -> String {
-    let version = env!("CARGO_PKG_VERSION");
-    match env!("PILA_GIT_VERSION") {
-        "" => version.to_string(),
-        git => format!("{version} ({git})"),
-    }
 }
 
 /// Send panics to the log too, with their backtrace: in a login session

@@ -152,4 +152,6 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 
 ## Known bugs (ignored tests)
 
-None at the moment.
+| Bug | Test |
+|---|---|
+| Damage with a negative width or height crashes a debug build (a `debug_assert` in Smithay's `wl_surface` handler, before Pila sees the request; release builds go on). Found by `fuzz/`'s protocol target, which leaves such damage out until Smithay fixes it | `surface_limits::damage_of_a_negative_size_harms_nothing` |
