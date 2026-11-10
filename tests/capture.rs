@@ -939,6 +939,9 @@ fn screencopy_of_an_unplugged_output_fails() {
     client.wait_logged("copy", "BufferDone");
     let (buffer, _) = client.capture_buffer((1024, 768), Format::Xrgb8888);
     pila.request(json!({ "cmd": "output_remove", "name": "B" }));
+    // Nothing left to draw: no frame of another output comes to fail the copy
+    // by chance (under load, in CI, none did and it was never answered).
+    pila.settle();
     frame.copy_with_damage(&buffer);
     client.flush();
     client.wait_logged("copy", "Failed");

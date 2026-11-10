@@ -571,7 +571,9 @@ Key flows and invariants:
   after the next frame (it asks for its output's, as one that may bring nothing), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
   checked from `after_frames`; a copy that fails drops that tracker, for the same reason as
-  `Session::start_over`. A mode/scale change or a removed output fails the frame.
+  `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy
+  already waiting when its output goes (`fail_screencopies_of`), or one asked afterwards, at
+  once (its output has no frame of its own to come, and no other output's is asked).
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

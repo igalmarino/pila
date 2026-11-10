@@ -49,6 +49,9 @@
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it. The AUR package is no longer stripped, so the backtrace has the names of the
   functions (about 9 MB more).
+- **A screenshot of a monitor just unplugged fails instead of waiting:** a `wlr-screencopy` copy
+  asked after its monitor went away was never answered, so the tool taking it hung (since
+  each monitor is redrawn on its own, in this release).
 
 ## 0.4.2 (2026-11-09)
 

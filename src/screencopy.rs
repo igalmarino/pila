@@ -457,16 +457,24 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
             return;
         }
         frame_state.copied = true;
+        // An output unplugged since the frame was set up has no frame of its
+        // own to come: fail now (`fail_screencopies_of` only fails the copies
+        // already waiting when it goes).
+        let output = frame_state
+            .output
+            .upgrade()
+            .filter(|output| state.space.output_geometry(output).is_some());
+        let Some(output) = output else {
+            resource.failed();
+            return;
+        };
         frame_state.buffer = Some(buffer);
         frame_state.with_damage = with_damage;
         state.capture.screencopies.push(resource.clone());
         // Copied after the next frame (`after_frames`): at most once per
         // refresh however fast a client asks, as with damage. Its output's
         // frame, which may well have nothing new (`redraw::Content::Maybe`).
-        match frame_state.output.upgrade() {
-            Some(output) => state.request_redraw(&output, false),
-            None => state.queue_redraw(),
-        }
+        state.request_redraw(&output, false);
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyFrameV1, _: &FrameData) {
