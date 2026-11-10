@@ -182,7 +182,8 @@ struct OutputSurface {
     first_frame: bool,
     /// After a redraw that had nothing new to show, the next that may bring
     /// nothing either waits until then (`draw::idle_until`, `draw::idle_wait`):
-    /// a client committing no buffer in a loop of frame callbacks, or the
+    /// a client committing no new picture (no buffer, or one without damage)
+    /// in a loop of frame callbacks or fifo barriers, or the
     /// pointer moving with no cursor drawn, redraw at most once per refresh.
     /// A timer then draws what's due.
     idle_until: Option<Duration>,

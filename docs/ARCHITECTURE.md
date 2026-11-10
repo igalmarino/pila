@@ -128,7 +128,8 @@ Key flows and invariants:
   a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle
   `render_all`, which renders those; an output with a frame in flight renders at its vblank
   (`frame_finish`), which also sends presentation feedback with the kernel's timestamp. A
-  redraw that may bring nothing new (`content` false: a commit with no buffer, the pointer
+  redraw that may bring nothing new (`content` false: a commit with no new picture, no buffer or one without damage
+  (`redraw::brings_content`), the pointer
   moving with the cursor hidden) and finds nothing queues no frame, so nothing would pace the
   next: a client committing nothing in a loop of frame callbacks would make Pila redraw as
   fast as it loops. After such a redraw the output waits until half a period before its next
@@ -244,7 +245,7 @@ Key flows and invariants:
   (`record_capture`, a `captures` line), the blit into them subtracted from the output's
   frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
-  (no frame queued: a commit with no buffer, the pointer moving with no cursor drawn) is counted
+  (no frame queued: a commit with no new picture, the pointer moving with no cursor drawn) is counted
   apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless); an
   output with only those still reports. On bare metal a frame with something new asked for in
   time for a vblank (`frame_stats::IN_TIME`, 4 ms or half a period, before it; with a frame in

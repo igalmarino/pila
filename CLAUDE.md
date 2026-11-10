@@ -154,7 +154,8 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   hidden window gets at its capture client's rate and, on bare metal, the wait of an output
   that just redrew with nothing new until half a period before its next vblank, for the next
   redraw that may bring nothing either (`udev/draw.rs::idle_wait`: a client committing no
-  buffer in a loop of frame callbacks would make it redraw as fast as it loops; a redraw
+  new picture (no buffer, or one without damage) in a loop of frame callbacks or fifo
+  barriers would make it redraw as fast as it loops; a redraw
   with something new never waits) aren't pacing); redraws per output: a change redraws
   only the outputs it shows on (`redraw.rs`); idle callbacks
   inserted outside an event source come with a `Pila::wake` ping (see "Architecture");

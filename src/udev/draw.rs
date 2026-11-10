@@ -570,7 +570,7 @@ mod tests {
         let until = Some(idle_until(Some(ms(100)), ms(110), period));
         // A client's new frame at 111 is drawn at once, in time for 116.
         assert_eq!(idle_wait(until, ms(111), true, false, false), None);
-        // A redraw that may bring nothing (a commit with no buffer) waits.
+        // A redraw that may bring nothing (a commit with no new picture) waits.
         assert_eq!(idle_wait(until, ms(111), false, false, false), Some(ms(13)));
         // Nor does anything wait with a frame in flight (its vblank draws
         // it) or a lock waiting for its frame.

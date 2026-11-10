@@ -19,7 +19,7 @@
 //!
 //! A redraw that found nothing to show on an output (it built the scene and
 //! its elements, and the damage tracker found nothing new: a commit with no
-//! buffer, the pointer moving with no cursor drawn) queues no frame. Those
+//! new picture, the pointer moving with no cursor drawn) queues no frame. Those
 //! are counted apart, `idle` with their CPU time summed, `idle_cpu_ms`. Only
 //! the outputs a change shows on are redrawn (`redraw.rs`); on bare metal one
 //! that just had nothing new waits before the next redraw that may bring

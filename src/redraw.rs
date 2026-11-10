@@ -8,8 +8,9 @@
 //! window's state from a binding). Each request also says whether it surely
 //! brings something new to show (`content`): on bare metal a redraw that may
 //! bring nothing waits after one that found nothing new (`udev/draw.rs`,
-//! `idle_wait`), so that a client committing nothing in a loop of frame
-//! callbacks can't make Pila redraw as fast as it loops; one with content
+//! `idle_wait`), so that a client committing nothing new (no buffer, or one
+//! without damage: `brings_content`) in a loop of frame callbacks or fifo
+//! barriers can't make Pila redraw as fast as it loops; one with content
 //! never waits.
 
 use smithay::{
@@ -20,7 +21,7 @@ use smithay::{
     wayland::compositor::{get_parent, with_states, with_surface_tree_downward, TraversalAction},
 };
 
-use crate::Pila;
+use crate::{sync::Locked, Pila};
 
 /// A redraw held back by `Pila::defer_redraws`.
 #[derive(Clone)]
@@ -34,25 +35,56 @@ pub enum Deferred {
 #[derive(Default)]
 struct BringsContent(std::cell::Cell<bool>);
 
-/// Called before a commit applies: whether it attaches (or removes) a buffer.
-/// A commit with none may still move or resize something (a subsurface, the
+/// Called before a commit applies: whether it brings something new to show
+/// (`brings_content`: a buffer with damage, a first one, or none any more).
+/// A commit without may still move or resize something (a subsurface, the
 /// window geometry), but most often it only asks for a frame callback.
 pub fn note_pending_content(surface: &WlSurface) {
-    use smithay::wayland::compositor::SurfaceAttributes;
+    use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
+    use smithay::wayland::compositor::{BufferAssignment, SurfaceAttributes};
     with_states(surface, |states| {
-        let buffer = states
-            .cached_state
-            .get::<SurfaceAttributes>()
-            .pending()
-            .buffer
-            .is_some();
-        if buffer {
+        let (attached, damaged) = {
+            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+            let pending = attributes.pending();
+            let attached = match &pending.buffer {
+                Some(BufferAssignment::NewBuffer(_)) => Some(Attached::New),
+                Some(BufferAssignment::Removed) => Some(Attached::Removed),
+                None => None,
+            };
+            (attached, !pending.damage.is_empty())
+        };
+        let had_buffer = states
+            .data_map
+            .get::<RendererSurfaceStateUserData>()
+            .is_some_and(|state| state.locked().buffer().is_some());
+        if brings_content(attached, damaged, had_buffer) {
             states.data_map.insert_if_missing(BringsContent::default);
             if let Some(mark) = states.data_map.get::<BringsContent>() {
                 mark.0.set(true);
             }
         }
     });
+}
+
+/// What a commit's buffer brings to show (`note_pending_content`): `Some`
+/// whether a buffer was attached or removed, `damaged` whether it came with
+/// damage, `had_buffer` whether the surface showed one before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Attached {
+    New,
+    Removed,
+}
+
+/// A new buffer without damage is the same picture again (Wayland: only
+/// damage says what changed), unless it's the surface's first; a client
+/// pacing itself by frame callbacks or fifo barriers may send one each time
+/// it's let, and with it counted new would redraw as fast as it loops.
+fn brings_content(attached: Option<Attached>, damaged: bool, had_buffer: bool) -> bool {
+    match attached {
+        Some(Attached::New) => damaged || !had_buffer,
+        Some(Attached::Removed) => true,
+        None => false,
+    }
 }
 
 /// Every output of the `Space`, collected (to ask while borrowing `state`).
@@ -299,5 +331,26 @@ impl Pila {
         for output in outputs {
             self.request_redraw(&output, content);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_buffer_brings_something_new_only_with_damage_or_as_the_first() {
+        use Attached::*;
+        // A new buffer with damage, a surface's first, or none any more.
+        assert!(brings_content(Some(New), true, true));
+        assert!(brings_content(Some(New), false, false));
+        assert!(brings_content(Some(Removed), false, true));
+        // The same picture again (a new buffer, no damage: nothing changed),
+        // as a client pacing itself by frame callbacks or fifo barriers
+        // does: it may bring nothing, so it doesn't skip the wait after a
+        // redraw with nothing new (`udev/draw.rs::idle_wait`).
+        assert!(!brings_content(Some(New), false, true));
+        // No buffer at all.
+        assert!(!brings_content(None, true, true));
     }
 }
