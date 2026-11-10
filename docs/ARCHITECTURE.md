@@ -122,7 +122,7 @@ Key flows and invariants:
 - **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
   connectors and outputs, `draw.rs` frames and vblanks, `recovery.rs` DRM failures,
   `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
-  primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
+  primary; more than one is a plan, `docs/MULTI_GPU.md`), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output (see "Redraws are on demand"):
   a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle
