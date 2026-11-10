@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-10)
 
+- **Tap Mod to open the launcher:** pressing and releasing Mod alone (Super, by default on a TTY)
+  opens the launcher, as Mod+D does, the way other desktops open their menu. It runs only if no
+  other key, click, scroll or gesture came in between, so every shortcut with Mod stays as it
+  was. `"Mod" = "none"` in `[bindings]` turns it off, and `"Mod"`, `"Super"`, `"Alt"` or `"Ctrl"`
+  alone can be bound to any action.
 - **Alt+Tab switches windows:** as on other desktops, `Alt+Tab` and `Alt+Shift+Tab` now do what
   `Mod+Tab` and `Mod+Shift+Tab` do, whatever the Mod key is (Super, by default on a TTY). Apps no
   longer get Alt+Tab; `"Alt+Tab" = "none"` in `[bindings]` gives it back to them.
