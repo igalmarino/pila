@@ -193,7 +193,10 @@ Key flows and invariants:
   estimates them from gaps over 1.5 periods. Screen captures are recorded apart
   (`record_capture`, a `captures` line), the blit into them subtracted from the output's
   frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
-  and modeset) is logged on its own and not counted. `scripts/check` judges these lines.
+  and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
+  (no frame queued: the pointer moved on another one) is counted apart, `idle` and its summed CPU
+  `idle_cpu_ms` (`record_idle_frame`, udev and headless); an output with only those still
+  reports. `scripts/check` judges these lines and reports the idle redraws per output.
 - **Pointer grabs** (`grabs/move_grab.rs`, `grabs/resize_grab.rs`): Mod+drag installs the
   move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor

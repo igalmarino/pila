@@ -14,6 +14,12 @@
 //! every frame is logged: when it was queued (at a vblank or not) and the
 //! vblank that showed it.
 //!
+//! A redraw that found nothing to show on an output (it built the scene and
+//! its elements, and the damage tracker found nothing new: the pointer moved
+//! on another output) queues no frame. Those are counted apart, `idle` with
+//! their CPU time summed, `idle_cpu_ms`: on bare metal nothing paces them, so
+//! each input event can cost one per output that has nothing new.
+//!
 //! Screen captures (`capture.rs`, `screencopy.rs`) build their frames on
 //! the event loop too, after the outputs' (`Pila::after_frames`): a frame's
 //! scene, elements and damage while one is waiting, and its copy when the
@@ -39,6 +45,8 @@ pub struct FrameStats {
     cpu_total: Duration,
     cpu_max: Duration,
     missed: u32,
+    idle: u32,
+    idle_cpu: Duration,
 }
 
 /// What `FrameStats` logs.
@@ -50,35 +58,52 @@ pub struct Report {
     pub cpu_avg: Duration,
     pub cpu_max: Duration,
     pub missed: u32,
+    /// Redraws that had nothing to show, and their CPU time.
+    pub idle: u32,
+    pub idle_cpu: Duration,
 }
 
 impl FrameStats {
     /// A frame was drawn at `now`, taking `cpu`. Returns a report when one
     /// is due, and starts over.
     pub fn record(&mut self, now: Duration, cpu: Duration) -> Option<Report> {
-        let start = *self.start.get_or_insert(now);
         self.frames += 1;
         self.cpu_total += cpu;
         self.cpu_max = self.cpu_max.max(cpu);
+        self.report_if_due(now)
+    }
+
+    /// A redraw at `now` took `cpu` and had nothing to show (no frame
+    /// queued). Returns a report when one is due, as `record`.
+    pub fn record_idle(&mut self, now: Duration, cpu: Duration) -> Option<Report> {
+        self.idle += 1;
+        self.idle_cpu += cpu;
+        self.report_if_due(now)
+    }
+
+    fn report_if_due(&mut self, now: Duration) -> Option<Report> {
+        let start = *self.start.get_or_insert(now);
         if now.saturating_sub(start) < REPORT_EVERY {
             return None;
         }
         self.take(now)
     }
 
-    /// What was recorded since the last report, if any frame was drawn,
-    /// starting over at `now` (also for the last report, on exit).
+    /// What was recorded since the last report, if any frame was drawn or
+    /// redraw done, starting over at `now` (also for the last report, on exit).
     pub fn take(&mut self, now: Duration) -> Option<Report> {
         let start = self.start?;
-        if self.frames == 0 {
+        if self.frames == 0 && self.idle == 0 {
             return None;
         }
         let report = Report {
             secs: now.saturating_sub(start).as_secs_f64(),
             frames: self.frames,
-            cpu_avg: self.cpu_total / self.frames,
+            cpu_avg: self.cpu_total.checked_div(self.frames).unwrap_or_default(),
             cpu_max: self.cpu_max,
             missed: self.missed,
+            idle: self.idle,
+            idle_cpu: self.idle_cpu,
         };
         *self = Self {
             start: Some(now),
@@ -120,6 +145,8 @@ fn log_report(output: &str, report: &Report) {
         cpu_avg_ms = ms(report.cpu_avg),
         cpu_max_ms = ms(report.cpu_max),
         missed = report.missed,
+        idle = report.idle,
+        idle_cpu_ms = ms(report.idle_cpu),
         "frames"
     );
 }
@@ -159,6 +186,21 @@ impl Pila {
             .entry(name.clone())
             .or_default()
             .record(now, cpu);
+        if let Some(report) = report {
+            log_report(&name, &report);
+        }
+    }
+
+    /// A redraw of `output` took `cpu` and had nothing to show (see the
+    /// module docs).
+    pub fn record_idle_frame(&mut self, output: &Output, cpu: Duration) {
+        let name = output.name();
+        let now = self.animation_time();
+        let report = self
+            .frame_stats
+            .entry(name.clone())
+            .or_default()
+            .record_idle(now, cpu);
         if let Some(report) = report {
             log_report(&name, &report);
         }
@@ -228,6 +270,22 @@ mod tests {
         stats.record(11_000 * MS, 2 * MS);
         let report = stats.take(12_000 * MS).expect("one frame left");
         assert_eq!((report.frames, report.secs), (1, 2.0));
+    }
+
+    #[test]
+    fn redraws_with_nothing_to_show_are_counted_apart_and_reported_alone() {
+        let mut stats = FrameStats::default();
+        stats.record(Duration::ZERO, 2 * MS);
+        stats.record_idle(1000 * MS, MS / 2);
+        stats.record_idle(2000 * MS, MS / 2);
+        let report = stats.record_idle(5000 * MS, MS).expect("due after 5 s");
+        assert_eq!((report.frames, report.cpu_avg), (1, 2 * MS));
+        assert_eq!((report.idle, report.idle_cpu), (3, 2 * MS));
+        // An output with nothing new at all still reports what it spent.
+        stats.record_idle(6000 * MS, MS);
+        let report = stats.take(7000 * MS).expect("an idle redraw");
+        assert_eq!((report.frames, report.idle), (0, 1));
+        assert_eq!(report.cpu_avg, Duration::ZERO);
     }
 
     #[test]

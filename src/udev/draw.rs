@@ -114,6 +114,8 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     // Captures filled from this frame, and the time they took.
     let mut composited = Vec::new();
     let mut capture_cpu = Duration::ZERO;
+    // Rendered, with nothing new to show: no frame (`frame_stats.rs`, idle).
+    let mut nothing_new = false;
     match rendered {
         Ok(result) => {
             frame::update_primary_outputs(scene, cursor_wl_surface, &output, &result.states);
@@ -157,9 +159,12 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
                         failure = Some(("queue", format!("{err:?}")));
                     }
                 }
-            } else if scene.locked {
-                // Nothing changed: the screen already shows the locked scene.
-                surface.lock_frame = LockFrame::Shown;
+            } else {
+                nothing_new = true;
+                if scene.locked {
+                    // Nothing changed: the screen already shows the locked scene.
+                    surface.lock_frame = LockFrame::Shown;
+                }
             }
         }
         Err(err) => {
@@ -232,6 +237,8 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         } else {
             state.record_frame(&output, cpu);
         }
+    } else if nothing_new {
+        state.record_idle_frame(&output, started.elapsed());
     }
     frame::send_frames(scene, cursor_wl_surface, &output, state.clock.now().into());
     state.post_render(&output);

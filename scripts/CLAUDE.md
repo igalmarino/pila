@@ -10,7 +10,8 @@ frames and, on average over all of them, the captures'; bare metal, if a night l
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
 and exits 1 on a failure; INFO lines report without judging (how long gamma set the blocking
 way took: after a modeset, or a driver without `GAMMA_LUT`; the first frames after outputs were
-set up, which the budget leaves out). `--vrr` (bare metal) asks every
+set up, which the budget leaves out; the redraws per output that found nothing new, `idle` in
+the frame statistics, which nothing paces on bare metal). `--vrr` (bare metal) asks every
 monitor for adaptive sync and checks it comes on where a monitor can do it, that Pila then
 reports a variable refresh (`refresh reported to clients` on `pila::frames`), and that it's
 still on after `wlopm` powers the monitors off and on; whether the monitor's refresh follows

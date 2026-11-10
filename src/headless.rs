@@ -806,6 +806,8 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
             wp_presentation_feedback::Kind::Vsync,
         );
         state.record_frame(&output, started.elapsed());
+    } else {
+        state.record_idle_frame(&output, started.elapsed());
     }
     frame::send_frames(scene, cursor_surface, &output, state.clock.now().into());
     state.post_render(&output);
