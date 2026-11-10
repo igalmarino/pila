@@ -63,6 +63,54 @@ fn alt_tab_switches_windows_too_whatever_the_mod_key() {
 }
 
 #[test]
+fn alt_tab_switches_with_mod_set_to_alt() {
+    // Mod+Tab and Alt+Tab are then the same combo, bound twice.
+    let mut pila = TestPila::with_config("mod = \"alt\"\n");
+    let client = pila.client();
+    for name in ["a", "b"] {
+        client.window(name).create();
+        pila.wait_focus(name);
+    }
+    pila.combo("Alt+Tab");
+    pila.wait_focus("a");
+    pila.wait("the switch to end", |s| s["switch"].is_null());
+    pila.combo("Alt+Shift+Tab");
+    pila.wait_focus("b");
+}
+
+#[test]
+fn alt_tab_set_to_none_goes_to_the_app() {
+    const KEY_TAB: u32 = 15;
+    let mut pila =
+        TestPila::with_config("[bindings]\n\"Alt+Tab\" = \"none\"\n\"Alt+Shift+Tab\" = \"none\"\n");
+    let client = pila.client();
+    for name in ["a", "b"] {
+        client.window(name).create();
+        pila.wait_focus(name);
+    }
+    pila.combo("Alt+Tab");
+    pila.combo("Alt+Shift+Tab");
+    client.wait("both Tabs to reach the app", |s| {
+        s.events
+            .iter()
+            .filter(|e| {
+                **e == common::client::Ev::Key {
+                    key: KEY_TAB,
+                    pressed: false,
+                }
+            })
+            .count()
+            == 2
+    });
+    let state = pila.settle();
+    assert_eq!(state["focused"], "b");
+    assert!(state["switch"].is_null());
+    // Mod+Tab still switches.
+    pila.combo("Super+Tab");
+    pila.wait_focus("a");
+}
+
+#[test]
 fn a_window_closing_during_mod_tab_doesnt_upset_the_order() {
     let (mut pila, client, handles) = windows(&["a", "b", "c", "d"]);
     pila.key_press("Super");

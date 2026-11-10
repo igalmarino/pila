@@ -444,6 +444,18 @@ fn a_click_or_scroll_while_mod_is_held_isnt_a_tap() {
 }
 
 #[test]
+fn a_touchpad_gesture_while_mod_is_held_isnt_a_tap() {
+    let mut pila = TestPila::with_config(STAYING_LAUNCHER);
+    for kind in ["hold", "pinch", "swipe"] {
+        pila.key_press("Super");
+        pila.gesture(json!({ "kind": kind, "phase": "begin", "fingers": 2 }));
+        pila.gesture(json!({ "kind": kind, "phase": "end" }));
+        pila.key_release("Super");
+    }
+    assert_eq!(runs(&mut pila), 0);
+}
+
+#[test]
 fn the_tap_follows_mod_and_can_be_rebound_or_removed() {
     let mut pila = TestPila::with_config(&format!("mod = \"alt\"\n{STAYING_LAUNCHER}"));
     pila.key("Super");
