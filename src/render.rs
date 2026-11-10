@@ -212,6 +212,9 @@ pub struct SceneWindow {
     /// While a workspace slide draws it into an output's texture, the
     /// output it's on (`workspace_slide.rs`).
     pub slid: Option<Option<Output>>,
+    /// Everything of it that may be drawn, global (`Pila::window_visual_rect`):
+    /// an output it doesn't touch leaves it out (`window_elements`).
+    pub bounds: Rectangle<i32, Logical>,
 }
 
 impl SceneWindow {
@@ -276,6 +279,7 @@ pub fn scene_elements(
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
+    visible: Option<Rectangle<i32, Logical>>,
 ) -> Vec<PilaRenderElement> {
     scene_elements_from(
         renderer,
@@ -284,6 +288,7 @@ pub fn scene_elements(
         scale,
         backdrop,
         Start::Upper(0),
+        visible,
     )
 }
 
@@ -302,10 +307,11 @@ pub fn elements_behind(
         Behind::Layer(index) => Start::Upper(index + 1),
         Behind::Window(index) => Start::Window(index + 1),
     };
-    scene_elements_from(renderer, scene, origin, scale, backdrop, start)
+    scene_elements_from(renderer, scene, origin, scale, backdrop, start, None)
 }
 
-/// `scene_elements` from `start`.
+/// `scene_elements` from `start`. `visible`: the global area drawn (an
+/// output's), outside which windows are left out (`window_elements`).
 fn scene_elements_from(
     renderer: &mut GlesRenderer,
     scene: &Scene,
@@ -313,6 +319,7 @@ fn scene_elements_from(
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
     start: Start,
+    visible: Option<Rectangle<i32, Logical>>,
 ) -> Vec<PilaRenderElement> {
     if scene.locked {
         return scene
@@ -391,6 +398,7 @@ fn scene_elements_from(
                     output_location,
                     scale,
                     backdrop,
+                    visible,
                 )),
             }
         }
@@ -412,6 +420,7 @@ fn scene_elements_from(
                 output_location,
                 scale,
                 backdrop,
+                visible,
             ));
         }
     }
@@ -494,6 +503,9 @@ fn layer_content_rect(
     rect
 }
 
+/// `visible`: the global area drawn; a window wholly outside it (its
+/// `bounds`) is left out, unless it's drawn somewhere else than where it is
+/// (animating, sliding).
 fn window_elements(
     renderer: &mut GlesRenderer,
     windows: &[SceneWindow],
@@ -501,6 +513,7 @@ fn window_elements(
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
+    visible: Option<Rectangle<i32, Logical>>,
 ) -> Vec<PilaRenderElement> {
     let shaders = windows
         .iter()
@@ -516,6 +529,10 @@ fn window_elements(
     let mut elements = Vec::new();
     for (i, entry) in windows.iter().enumerate() {
         elements.extend(ghosts_before(i));
+        let elsewhere = entry.effect.is_some() || entry.slid.is_some();
+        if !elsewhere && visible.is_some_and(|area| !entry.bounds.overlaps(area)) {
+            continue;
+        }
         match &entry.effect {
             Some(effect) => elements.extend(animated_window_element(
                 renderer,
@@ -916,7 +933,15 @@ fn slide_elements(
             ..ghost.clone()
         })
         .collect();
-    let mut elements = window_elements(renderer, &carried, &[], rect.loc, scale, &mut *backdrop);
+    let mut elements = window_elements(
+        renderer,
+        &carried,
+        &[],
+        rect.loc,
+        scale,
+        &mut *backdrop,
+        None,
+    );
 
     let new = {
         let mut textures = slide.textures.borrow_mut();
@@ -931,8 +956,15 @@ fn slide_elements(
         };
         index.and_then(|index| {
             let target = &mut textures[index].1;
-            let windows =
-                window_elements(renderer, &moving, &ghosts, rect.loc, scale, &mut *backdrop);
+            let windows = window_elements(
+                renderer,
+                &moving,
+                &ghosts,
+                rect.loc,
+                scale,
+                &mut *backdrop,
+                None,
+            );
             // An empty workspace draws nothing: the texture is just cleared.
             target
                 .draw(renderer, &windows)
@@ -946,7 +978,7 @@ fn slide_elements(
         Some(buffer) => elements.extend(slid_texture(&buffer, rect, new_offset, scale)),
         // No texture: the new windows as usual, unmoved.
         None => elements.extend(window_elements(
-            renderer, &moving, &ghosts, rect.loc, scale, backdrop,
+            renderer, &moving, &ghosts, rect.loc, scale, backdrop, None,
         )),
     }
     if let Some(old) = slide.old_buffer(rect) {
@@ -1009,7 +1041,7 @@ pub fn snapshot_windows(
 ) -> Option<TextureRenderBuffer<GlesTexture>> {
     let elements = match slide.filter(|slide| slide.output_rect(rect.loc).is_some()) {
         Some(slide) => slide_elements(renderer, windows, ghosts, slide, rect, scale, backdrop),
-        None => window_elements(renderer, windows, ghosts, rect.loc, scale, backdrop),
+        None => window_elements(renderer, windows, ghosts, rect.loc, scale, backdrop, None),
     };
     let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
     target.draw(renderer, &elements).then_some(target.buffer)
@@ -1304,6 +1336,7 @@ pub fn output_elements(
         &mut |surface, origin, scale, alpha| {
             blur.element(surface, output_name, origin, scale, alpha)
         },
+        Some(output_geo),
     ));
     elements
 }

@@ -184,7 +184,9 @@ Key flows and invariants:
   their title bars) and the cursor *before* borrowing the backend (`Pila::frame_input`; built
   once per pass and shared by the outputs drawn in it, `udev/draw.rs::render_all` and
   `headless.rs`'s, after each one's commit timers applied, its cost counted in the first
-  output's frame; and once for the captures and screencopies of an `after_frames`), builds elements with
+  output's frame; and once for the captures and screencopies of an `after_frames`). An
+  output's elements leave out the windows that don't touch it (`SceneWindow::bounds`, from
+  `window_visual_rect`; not while one animates or slides, drawn elsewhere than it is), builds elements with
   `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
   since Pila's custom shaders need `GlesFrame`), and calls the damage tracker's
   `render_output` directly. Smithay's `space::render_output` isn't used because it can't

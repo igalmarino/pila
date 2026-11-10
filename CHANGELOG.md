@@ -37,7 +37,9 @@
   count a frame shown a refresh later than it could have been as missed (`late`).
 - **Less CPU with monitors of different scales:** drawing one monitor re-rasterized the title
   bars of the windows on another monitor of another scale (the title text and the buttons), and
-  the next time that one was drawn, again. Each scale now keeps its own.
+  the next time that one was drawn, again. Each scale now keeps its own. And a monitor no longer
+  builds what it would draw of the windows on the others (measured, six windows on one monitor:
+  a redraw of the other a third cheaper).
 - **Window titles appear as soon as the fonts load:** a window that opened before then showed
   its title only at the next redraw of its monitor.
 - **No gamma warning at every login:** the log warned that setting gamma held Pila past a
