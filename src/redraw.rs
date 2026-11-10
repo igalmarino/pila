@@ -11,7 +11,8 @@
 //! `idle_wait`), so that a client committing nothing new (no buffer, or one
 //! without damage: `brings_content`) in a loop of frame callbacks or fifo
 //! barriers can't make Pila redraw as fast as it loops; one with content
-//! never waits.
+//! doesn't wait, once per wait: a second redraw in a row that finds nothing
+//! means it wasn't new (a covered surface's, say), and the next waits too.
 
 use smithay::{
     desktop::Window,

@@ -82,6 +82,7 @@ fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
                 surface.idle_until,
                 now,
                 surface.redraw_content,
+                surface.idle_streak,
                 surface.frame_pending,
                 lock_pending,
             );
@@ -269,6 +270,8 @@ fn draw(
         surface.lock_frame = LockFrame::None;
     }
     let queued = surface.frame_pending;
+    let wait_over = surface.idle_until.is_none_or(|until| now >= until);
+    surface.idle_streak = idle_streak(surface.idle_streak, nothing_new, queued, wait_over);
     surface.idle_until = nothing_new.then(|| {
         let period = crate::frame_stats::refresh_period(&output);
         idle_until(surface.last_vblank_time, now, period)
@@ -472,17 +475,35 @@ pub(super) fn idle_until(last: Option<Duration>, now: Duration, period: Duration
 }
 
 /// How long a redraw of an output waits, given when its wait after a redraw
-/// with nothing new ends (`idle_until`) and whether what was asked brings
-/// something new to show (`content`). `None`: draw now.
+/// with nothing new ends (`idle_until`), whether what was asked brings
+/// something new to show (`content`) and how many redraws in a row found
+/// nothing new (`idle_streak`). `None`: draw now.
 fn idle_wait(
     idle_until: Option<Duration>,
     now: Duration,
     content: bool,
+    idle_streak: u32,
     frame_pending: bool,
     lock_pending: bool,
 ) -> Option<Duration> {
     let until = idle_until.filter(|until| now < *until)?;
-    (!content && !frame_pending && !lock_pending).then(|| until - now)
+    // Something said new doesn't wait, once: a second redraw in a row that
+    // finds nothing means it wasn't, whatever the next says.
+    let surely_new = content && idle_streak <= 1;
+    (!surely_new && !frame_pending && !lock_pending).then(|| until - now)
+}
+
+/// The redraws in a row with nothing new after this one (`idle_wait`): one
+/// more if it found nothing (the first of a new wait if the last wait was
+/// over: once per refresh, something said new may skip it again), none
+/// once a frame is queued.
+fn idle_streak(streak: u32, nothing_new: bool, queued: bool, wait_over: bool) -> u32 {
+    match (nothing_new, queued) {
+        (true, _) if wait_over => 1,
+        (true, _) => streak.saturating_add(1),
+        (false, true) => 0,
+        (false, false) => streak,
+    }
 }
 
 /// Whether the next frame on an output follows the one just shown with no pause
@@ -569,13 +590,41 @@ mod tests {
         // before the vblank at 116: the next waits until 124.
         let until = Some(idle_until(Some(ms(100)), ms(110), period));
         // A client's new frame at 111 is drawn at once, in time for 116.
-        assert_eq!(idle_wait(until, ms(111), true, false, false), None);
+        assert_eq!(idle_wait(until, ms(111), true, 1, false, false), None);
         // A redraw that may bring nothing (a commit with no new picture) waits.
-        assert_eq!(idle_wait(until, ms(111), false, false, false), Some(ms(13)));
+        assert_eq!(
+            idle_wait(until, ms(111), false, 1, false, false),
+            Some(ms(13))
+        );
         // Nor does anything wait with a frame in flight (its vblank draws
         // it) or a lock waiting for its frame.
-        assert_eq!(idle_wait(until, ms(111), false, true, false), None);
-        assert_eq!(idle_wait(until, ms(111), false, false, true), None);
+        assert_eq!(idle_wait(until, ms(111), false, 1, true, false), None);
+        assert_eq!(idle_wait(until, ms(111), false, 1, false, true), None);
+    }
+
+    #[test]
+    fn redraws_said_to_bring_something_new_that_dont_wait_only_once() {
+        let ms = Duration::from_millis;
+        let until = Some(idle_until(Some(ms(100)), ms(110), ms(16)));
+        // After one redraw with nothing new, something said new is drawn at
+        // once; if that found nothing either, the next waits like the rest:
+        // a client sending what shows nowhere (covered, say) in a loop of
+        // fifo barriers can't make an output redraw as fast as it loops.
+        assert_eq!(idle_wait(until, ms(111), true, 1, false, false), None);
+        assert_eq!(
+            idle_wait(until, ms(111), true, 2, false, false),
+            Some(ms(13))
+        );
+        assert_eq!(
+            idle_wait(until, ms(111), true, 5, false, false),
+            Some(ms(13))
+        );
+        // The streak starts over with each wait (once per refresh), and
+        // with a frame.
+        assert_eq!(idle_streak(5, true, false, true), 1);
+        assert_eq!(idle_streak(1, true, false, false), 2);
+        assert_eq!(idle_streak(5, false, true, false), 0);
+        assert_eq!(idle_streak(5, false, false, false), 5);
     }
 
     #[test]

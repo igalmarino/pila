@@ -189,8 +189,13 @@ struct OutputSurface {
     idle_until: Option<Duration>,
     /// That timer is set.
     idle_timer: bool,
+    /// Redraws in a row that found nothing new, since the last frame queued:
+    /// past one, even a redraw said to bring something new waits
+    /// (`draw::idle_wait`).
+    idle_streak: u32,
     /// A redraw asked for since the last one surely brings something new
-    /// (`redraw.rs`): it doesn't wait.
+    /// (`redraw.rs`): it doesn't wait, unless the last two redraws found
+    /// nothing new (`idle_streak`).
     redraw_content: bool,
     /// The first such request since the last redraw, then the one of the
     /// frame in flight: how late it shows is measured (`frame_stats.rs`).

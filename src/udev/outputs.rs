@@ -527,6 +527,7 @@ pub(super) fn connector_connected(
             first_frame: true,
             idle_until: None,
             idle_timer: false,
+            idle_streak: 0,
             redraw_content: false,
             request: None,
             queued_request: None,

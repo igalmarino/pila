@@ -136,7 +136,10 @@ Key flows and invariants:
   vblank (`draw::idle_until`, `OutputSurface::idle_until`; a one-shot timer,
   `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
   nothing (`draw::idle_wait`): at most one per refresh. A request with something new
-  (`redraw_content`) or a lock waiting for its frame never waits. A frame that fails
+  (`redraw_content`) doesn't wait, once per wait: if that redraw finds nothing new either
+  (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers, say),
+  what's asked next waits too, until the wait is over. A lock waiting for its frame never
+  waits. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
