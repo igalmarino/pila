@@ -32,13 +32,13 @@ Key flows and invariants:
   re-applies what changed: keyboard (`set_xkb_config`), rules (`refresh_rule_props`),
   the workspace count (`apply_workspace_count`), `[input]` on connected devices
   (`UdevData::apply_input_config`), `[[output]]` (`Pila::apply_outputs` →
-  `udev::apply_output_config`: enabled, mode via `use_mode`, scale, transform, position,
-  adaptive sync; nested only scale) with wlr-output-management's runtime overrides on
-  top (`Pila::outputs.overrides`; an edited section drops its monitor's). Anything that reads
+  `backend::apply_output_config`: on udev and headless enabled, mode via `use_mode`, scale,
+  transform, position, adaptive sync; nested only scale; then `fit_to_outputs`) with
+  wlr-output-management's runtime overrides on top (`Pila::outputs.overrides`; an edited section drops its monitor's). Anything that reads
   `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
   re-run. A new setting must either be read when used or be re-applied there. Keep in
   sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES` and the defaults listed in
-  `config.example.toml` (the actions, `NAMED_ACTIONS`, checked against its list); the `USAGE` string in `main.rs` with the
+  `config.example.toml` (the actions, `NAMED_ACTIONS` and `ACTIONS_WITH_ARGUMENT`, checked against its list); the `USAGE` string in `main.rs` with the
   CLI flags and env vars; and the user docs, `docs/MANUAL.md` and the man page `docs/pila.1`
   (tests check both against the default bindings and the man page against `USAGE`).
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
@@ -82,7 +82,10 @@ Key flows and invariants:
   Smithay panics if it can't. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
   imports, `queue_redraw`/`queue_redraw_output`, `draws_cursor`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
-  hard-codes a keyboard and pointer for all. Past startup a panic ends the session, so the code has no
+  hard-codes a keyboard and pointer for all. Each renderer, when created, goes through
+  `render::warm_up` (the rounded-corner and blur shaders, a draw into an offscreen texture),
+  so the first frame that needs them doesn't pay for it.
+- **Panics** (`sync.rs`, `main::log_panics`): past startup a panic ends the session, so the code has no
   `unwrap`/`expect` that rests on more than a local, stated invariant: mutexes go through
   `sync::Locked::locked` (a poisoned one only follows a panic that already ended Pila), user
   data through `get_or_insert`, the rest through `let`-`else` (with a log where it means
@@ -115,6 +118,13 @@ Key flows and invariants:
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
   The dmabuf global is created in `winit::init_dmabuf`. Input is absolute motion only,
   mapped onto the single output; relative motion is derived from it.
+- **Cursor** (`cursor.rs`): a client's cursor surface (`wl_pointer.set_cursor`) is drawn at
+  `surface_position` (pointer minus hotspot, on top as `Kind::Cursor`) and gets frame callbacks
+  like any surface; `handle_commit` moves the hotspot with the buffer's offset on every commit.
+  Named shapes (cursor-shape, Pila's own grab cursors) come from `CursorTheme` on backends that
+  draw them (not nested: the host does): a thread reads the xcursor theme at startup, at
+  buffer scales up to `PRELOADED_SCALES`, and until then the built-in arrow stands in, so no
+  frame reads a file.
 - **Monitors** (`edid.rs`, `Pila::outputs.monitors` by output name): on a connector connecting,
   `udev/` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
   and serial from the base block; a missing or invalid one leaves "Unknown". They go to
@@ -134,11 +144,10 @@ Key flows and invariants:
   a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle
   `render_all`, which renders those; an output with a frame in flight renders at its vblank
   (`frame_finish`), which also sends presentation feedback with the kernel's timestamp. A
-  redraw that may bring nothing new (`content` false: a commit with no new picture, no buffer or one without damage
-  (`redraw::brings_content`), the pointer
-  moving with the cursor hidden) and finds nothing queues no frame, so nothing would pace the
-  next: a client committing nothing in a loop of frame callbacks would make Pila redraw as
-  fast as it loops. After such a redraw the output waits until half a period before its next
+  redraw that finds nothing new queues no frame, so nothing would pace the next: a client
+  committing nothing in a loop of frame callbacks (no new picture: no buffer or one without
+  damage, `redraw::brings_content`) or the pointer moving with the cursor hidden would make Pila
+  redraw as fast as it loops. After any such redraw, whatever was asked, the output waits until half a period before its next
   vblank (`draw::idle_until`, `OutputSurface::idle_until`; a one-shot timer,
   `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
   nothing (`draw::idle_wait`): at most one per refresh. What's asked says what it brings
@@ -147,7 +156,8 @@ Key flows and invariants:
   client's new picture (`Client`) doesn't, once per wait (and `Sure` not after
   `SURE_STREAK` redraws in a row found nothing, a bound on a loop of Pila's own requests): if that redraw finds nothing new
   either (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers,
-  say), it waits too, until the wait is over. A lock waiting for its frame never waits. A frame that fails
+  say), it waits too, until the wait is over. An output with a frame in flight (its vblank draws it)
+  or a lock waiting for its frame never waits. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
@@ -200,8 +210,9 @@ Key flows and invariants:
   output's elements leave out the windows that don't touch it (`SceneWindow::bounds`, from
   `window_visual_rect`; not while one animates or slides, drawn elsewhere than it is), builds elements with
   `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
-  since Pila's custom shaders need `GlesFrame`), and calls the damage tracker's
-  `render_output` directly. Smithay's `space::render_output` isn't used because it can't
+  since Pila's custom shaders need `GlesFrame`), and renders them: nested and headless
+  through the damage tracker's `render_output` directly, bare metal through its `DrmOutput`
+  (`render_frame`, `queue_frame`). Smithay's `space::render_output` isn't used because it can't
   interleave title bars with windows. Afterwards `frame.rs` (backend-neutral) records each
   drawn surface's primary output from the render states, sends presentation-time feedback
   once the frame is submitted, and sends frame callbacks only to surfaces whose primary
@@ -211,10 +222,12 @@ Key flows and invariants:
   else may redraw; a captured window's hidden surfaces, off-space ones included, get theirs
   from its capture instead: see "Screen capture"); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
-  iteration, however many outputs were drawn, `after_frames` (`main.rs`) runs
-  `space.refresh()`, taskbar updates, IPC events and `popups.cleanup()` (when an output was
-  drawn or clients or input were handled), captures and screencopies (when an output was drawn
-  or `capture_due`; see "Redraws are on demand, per output"), then a flush. Buffer age (for partial repaints) needs the window's EGL
+  iteration, however many outputs were drawn, `Pila::after_frames` (`state.rs`, from
+  `main.rs`'s `event_loop.run` callback, a flush after it) saves sessions and sends keyboard
+  layout events, then, when an output was drawn or clients or input were handled: applies the
+  commits fifo unblocked, captures and screencopies (only when an output was drawn or
+  `capture_due`; see "Redraws are on demand, per output"), `space.refresh()`, taskbar updates,
+  IPC events, idle inhibitors, `popups.cleanup()`, animations and hidden surfaces' frames. Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
@@ -244,8 +257,8 @@ Key flows and invariants:
   the next event, however late. So a redraw request pings `Pila::wake` (bare metal, the
   redraw itself is an idle `render_all`), and anything else inserting an idle callback
   outside an event source (e.g. from `after_frames`, the `event_loop.run` callback) must
-  ping it too. Redraws requested from `after_frames` are held back by `defer_redraws` into an
-  idle callback plus the ping: nested, the winit source has already checked for redraw
+  ping it too. Redraws requested from `after_frames` are held back into an
+  idle callback plus the ping (`defer_redraws`; `step_animations` does it by hand): nested, the winit source has already checked for redraw
   requests by then. Smithay calls `cursor_image` with the pointer locked, so its redraw
   (where the pointer is) goes through an idle callback too.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
@@ -264,7 +277,7 @@ Key flows and invariants:
   flight, the vblank after the one that really showed it: one shown late doesn't make the next
   late) but shown at a later one counts its refreshes as missed,
   animation or not, and is counted `late` (`late_refreshes`, from `OutputSurface::request`, the
-  first such request since the last frame; not with adaptive sync, nor for the first frame
+  first such request since the last redraw (one that finds nothing drops it); not with adaptive sync, nor for the first frame
   after a modeset). Each late frame is logged with what made it late: held back by the wait
   (`held`), drawn late (`drawn_after_ms`) or shown late after being drawn in time
   (`shown_after_ms`: the GPU, the commit). `scripts/check` judges these lines and reports the idle redraws per output.
@@ -326,22 +339,26 @@ Key flows and invariants:
   `after_frames` applies what that unblocked (its commits' redraws deferred, `defer_redraws`). So a client gets at most
   one content update per refresh. A barrier a frame didn't signal in a second is signaled by a
   timer (`signal_old_barriers`) wherever the surface is, so hidden clients and clients on an
-  output turned off carry on, once a second. No damage means no flip, so a commit that changes
-  nothing frees its barrier without waiting for a refresh, as with frame callbacks.
+  output turned off carry on, once a second. No damage means no flip: a commit that changes
+  nothing frees its barrier at the next redraw, which finds nothing to show; after one such
+  redraw the next waits (bare metal: until half a period before the vblank, `draw::idle_wait`),
+  so a looping client still gets about one update per refresh.
   wp-commit-timing: `hold_commit_until_timestamp` (pre-commit hook; Smithay's unmanaged mode)
   blocks a commit with a timestamp and arms one timer for the earliest deadline, a period
   before it. The redraw that wakes builds a frame, and before building it
   `signal_commit_timers` applies what will be due when it shows (`Backend::next_frame_time`:
   the next vblank from the kernel's timestamps, nested and headless a period from now).
   At the deadline itself anything left applies whether a frame came or not.
-- **Stacking order** is the `Space` element order (back to front); raising = `raise_element`.
+- **Stacking order** is the `Space` element order (back to front); raising =
+  `Pila::raise_window` (`redraw.rs`: `raise_element` plus its redraw), ending in `keep_on_top`.
   `focus_window` both raises (with its family, see "Transient windows") and sets keyboard
   focus, then flushes pending configures.
 - **Transient windows** (`transients.rs`): a window set on another (`xdg_toplevel.set_parent`,
   xdg-foreign, X11's `WM_TRANSIENT_FOR`) forms a family with it. `focus_window` raises the
   whole family (`raise_family`), each window before its children, so a child is always above
-  its parent, even with the parent focused. `Space::map_element` raises the window it moves,
-  so whatever moves a mapped window calls `keep_transients_above` after it. Minimizing hides
+  its parent, even with the parent focused. `map_window` raises the window it moves
+  (Smithay's `map_element` does, whatever its `activate`), so whatever moves a mapped window
+  calls `keep_transients_above` after it. Minimizing hides
   the descendants too, marked to come back with the parent (`show_window`); one minimized
   alone stays minimized. `move_focused_to_workspace` parks the family, a child opens on its
   parent's workspace unless a rule says otherwise. A drag carrying a window to another
@@ -574,7 +591,8 @@ Key flows and invariants:
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
   output-local); Pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
-  after the next frame (it asks for its output's, as one that may bring nothing), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
+  after the next pass that draws an output or is `capture_due` (it asks for its own output's, as one
+  that may bring nothing), so not faster than redraws; `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
   checked from `after_frames`; a copy that fails drops that tracker, for the same reason as
   `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy
@@ -594,7 +612,7 @@ Key flows and invariants:
   udev (`udev/gamma.rs`): a client's ramps wait in `OutputSurface.gamma_pending` (a newer
   change replaces them) until the CRTC is free, then go out as an atomic commit of
   `GAMMA_LUT` alone that doesn't wait, with a page-flip event (`commit_pending_gamma`, first
-  thing in `render_output`): it takes the vblank a frame would (`frame_pending`,
+  thing in `draw::prepare`, before a pass's scene is built): it takes the vblank a frame would (`frame_pending`,
   `gamma_in_flight`), and at its event `frame_finish` presents nothing, leaves `last_vblank`
   (a running animation counts the refresh missed) and draws. Smithay's DRM compositor can't
   carry `GAMMA_LUT` in a frame's commit. The legacy `set_gamma` ioctl, which atomic drivers
@@ -738,7 +756,8 @@ Key flows and invariants:
   `tests/lock.rs::nothing_but_the_lock_gets_input_or_shows_while_locked` tries every action
   (`Action::examples`, a table a new kind of action doesn't build without), gesture,
   activation, taskbar and pager request and the window menu while locked. The lock is confirmed (`confirm_lock`)
-  only after a full locked frame is submitted. `unlock` defers to `finish_unlock`, which only
+  once every output that's on shows a full locked frame (bare metal: at its vblank,
+  `maybe_confirm_lock`; nested: submitted; headless: drawn), at once with none on. `unlock` defers to `finish_unlock`, which only
   unlocks once the holder's lock object is gone (Smithay 0.7 called `unlock()` even for a
   rogue client's `unlock_and_destroy`; its main branch checks the lock, and Pila still does). A dead locker leaves the session locked;
   a new locker may take over.
@@ -815,7 +834,9 @@ Key flows and invariants:
   `inherit_marks`). `keep_on_top` puts the marked ones back above the others in their order, doing
   nothing if they already are (a change of order means damage). **Whatever raises a window has
   to end in it:** `raise_family` and `keep_transients_above` do, and so every
-  `map_element(.., true)` is followed by one of them. `top_layer_covered` skips a marked window
+  `map_window` (it raises, whatever its `activate`) is followed by one of them, but X11
+  override-redirect windows' (on top by design) and `unpark_active`'s (`show_workspace` ends in
+  `keep_on_top`). `top_layer_covered` skips a marked window
   that isn't fullscreen itself, so one kept over a fullscreen window doesn't bring panels back.
   A window on all workspaces is never parked: `show_workspace` leaves it in the `Space`, raises
   it after focusing, and a slide draws it fixed (`SceneSlide::carried`); `workspace_of` says the
@@ -868,12 +889,13 @@ Key flows and invariants:
   last few used: drawing a window on an output of another scale leaves the others' alone); they can't be shared between windows (element ids must
   be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw
-  without text. The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide
+  without text; once loaded (and warmed up: common characters shaped and rasterized on that
+  thread, `text::init`) a ping asks for a redraw (`main.rs`). The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide
   the window, and `render_with` returns `None` on sizes that overflow.
 - **Rounded corners** (`rounded.rs`, `corner-radius`, default 0): `Pila::scene` gives each
   window a `Rounding` (geometry plus title bar; none when maximized or fullscreen; radius
-  at most half the shorter side and, with a bar, its height). `render::window_elements`
-  then builds the window's elements itself (popups first and unclipped, as
+  at most half the shorter side and, with a bar, its height). `render::single_window_elements`
+  then builds the window's elements itself (`rounded_window_elements`: popups first and unclipped, as
   `Window::render_elements` does) and wraps its own surface elements that reach into a
   corner in `RoundedSurface`, whose `draw` overrides the default texture program with one
   that fades out the corner (`input_to_geo` inverts Smithay's `build_texture_mat`, so
