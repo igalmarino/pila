@@ -43,6 +43,7 @@ mod minimize;
 mod output_management;
 mod output_power;
 mod pointer_constraints;
+mod redraw;
 mod render;
 mod rounded;
 mod rules;

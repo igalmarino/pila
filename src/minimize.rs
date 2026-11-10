@@ -115,7 +115,7 @@ impl Pila {
         leave_space(window, self.workspaces.active, loc);
         // Snapshot taken while it's still mapped.
         self.animate_minimize(window);
-        self.space.unmap_elem(window);
+        self.unmap_window(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_hidden(true);

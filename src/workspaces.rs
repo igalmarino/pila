@@ -235,7 +235,7 @@ impl Pila {
         };
         leave_space(window, index, loc);
         self.forget_animations(window);
-        self.space.unmap_elem(window);
+        self.unmap_window(window);
         deactivate(window);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_hidden(true);

@@ -63,7 +63,9 @@ impl Pila {
             // Back on with a lighter mode: the one it had didn't fit.
             self.fit_to_outputs();
         }
-        if !on {
+        if on {
+            self.queue_redraw_output(output);
+        } else {
             // Nothing draws there until it's back; what's kept for it is big.
             self.blur.forget_output(&output.name());
         }

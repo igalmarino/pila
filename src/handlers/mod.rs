@@ -56,7 +56,13 @@ impl SeatHandler for Pila {
             backend.cursor_changed(&image);
         }
         self.cursor_status = image;
-        self.queue_redraw();
+        // Where the pointer is (Pila may draw it there). Smithay calls this
+        // with the pointer locked, so its location is asked for after.
+        self.loop_handle.insert_idle(|state| {
+            let at = state.pointer_location();
+            state.queue_redraw_pointer(at, at, true);
+        });
+        self.wake.ping();
     }
 
     fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
@@ -66,6 +72,8 @@ impl SeatHandler for Pila {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
+        // Title bars and shadows show which window has focus.
+        self.queue_redraw();
         let focused = focused.and_then(KeyboardFocus::surface);
         // A pointer constraint only holds while its window has keyboard focus.
         self.release_constraint_for_focus(focused.as_ref());

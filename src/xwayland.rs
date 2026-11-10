@@ -299,7 +299,7 @@ impl Pila {
         for window in &windows {
             self.forget_window(window);
             self.forget_animations(window);
-            self.space.unmap_elem(window);
+            self.unmap_window(window);
         }
         self.x11_cleared_selection(SelectionTarget::Clipboard);
         self.x11_cleared_selection(SelectionTarget::Primary);
@@ -422,7 +422,7 @@ impl XwmHandler for Pila {
         if let Some(window) = self.window_for_x11(&surface) {
             self.forget_window(&window);
             self.animate_close(&window);
-            self.space.unmap_elem(&window);
+            self.unmap_window(&window);
         }
         if !surface.is_override_redirect() {
             let _ = surface.set_mapped(false);
@@ -473,7 +473,7 @@ impl XwmHandler for Pila {
             return;
         }
         if let Some(window) = self.window_for_x11(&surface) {
-            self.space.map_element(window, geometry.loc, false);
+            self.map_window(window, geometry.loc, false);
             self.queue_redraw();
         }
     }

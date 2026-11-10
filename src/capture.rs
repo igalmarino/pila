@@ -1390,6 +1390,8 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                     return;
                 }
                 session.pending = true;
+                // Processed in `after_frames`, frame drawn or not.
+                state.capture_due = true;
                 if !session.captured_once {
                     // The first frame is copied right away.
                     state

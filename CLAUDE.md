@@ -152,9 +152,11 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   `schedule_hidden_frames`' and `commit_pacing.rs`'s once-a-second wakes for hidden
   surfaces, the wake for a timestamp a client asked for, the frame callbacks a captured
   hidden window gets at its capture client's rate and, on bare metal, the wait of an output
-  that just redrew with nothing new until half a period before its next vblank
-  (`udev/draw.rs::idle_until`: other outputs' input would redraw it up to thousands of
-  times a second) aren't pacing); idle callbacks
+  that just redrew with nothing new until half a period before its next vblank, for the next
+  redraw that may bring nothing either (`udev/draw.rs::idle_wait`: a client committing no
+  buffer in a loop of frame callbacks would make it redraw as fast as it loops; a redraw
+  with something new never waits) aren't pacing); redraws per output: a change redraws
+  only the outputs it shows on (`redraw.rs`); idle callbacks
   inserted outside an event source come with a `Pila::wake` ping (see "Architecture");
   one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
@@ -207,10 +209,14 @@ in the same commit, and a new feature adds one.
 
 What breaks silently anywhere in the code, whichever subsystem you're in:
 
-- **Redraws are on demand:** state changed outside a client dispatch or winit event
-  (timers, `insert_idle` callbacks) must call `queue_redraw`. An idle callback inserted
-  outside an event source must ping `Pila::wake`, or it runs after the next event, however
-  late; a redraw requested from `after_frames` goes through `insert_idle` plus the ping.
+- **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output unless
+  asked. A change asks for the outputs it shows on (`queue_redraw_output`,
+  `queue_redraw_window`, `queue_redraw_rect`; commits and input already do), `queue_redraw`
+  only for what's global; a change to the `Space`'s windows goes through `map_window`/
+  `unmap_window`/`raise_window`. The tests' headless check (`PILA_HEADLESS_CHECK_REDRAWS`)
+  panics on an output that changed with no redraw asked. An idle callback inserted outside
+  an event source must ping `Pila::wake`, or it runs after the next event, however late;
+  redraws requested from `after_frames` go through `defer_redraws`.
 - **Session lock:** any new input or focus path must respect `is_locked()`.
 - **Input:** a new input path goes through `process_input_event` (or calls
   `notify_activity`) to count as activity, and hit testing through `Pila::under`, which

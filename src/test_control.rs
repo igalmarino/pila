@@ -307,8 +307,9 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
         }
         other => return Err(format!("unknown command {other:?}")),
     };
-    // As after any input event nested: something may have changed.
-    state.queue_redraw();
+    // Input asks for its own redraws (`process_input_event`), as do output
+    // changes; reading the state changes nothing.
+    state.housekeeping = true;
     Ok(result)
 }
 

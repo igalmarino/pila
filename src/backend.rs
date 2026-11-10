@@ -67,6 +67,27 @@ impl Backend {
         }
     }
 
+    /// Ask for a new frame on `output`; `content`: what changed surely shows
+    /// (`redraw.rs`). Nested there's one output, the window.
+    pub fn queue_redraw_output(&mut self, output: &Output, content: bool) {
+        match self {
+            Backend::Winit(backend) => backend.window().request_redraw(),
+            Backend::Udev(data) => data.queue_redraw_output(output, content),
+            Backend::Headless(data) => data.queue_redraw_output(output),
+        }
+    }
+
+    /// Whether Pila draws the pointer as `status` shows it (else the host
+    /// does, nested a named shape, or nothing shows).
+    pub fn draws_cursor(&self, status: &CursorImageStatus) -> bool {
+        match self {
+            Backend::Udev(_) => !matches!(status, CursorImageStatus::Hidden),
+            Backend::Winit(_) | Backend::Headless(_) => {
+                matches!(status, CursorImageStatus::Surface(_))
+            }
+        }
+    }
+
     /// The cursor image changed (a client or a grab set a new one).
     pub fn cursor_changed(&mut self, status: &CursorImageStatus) {
         match self {

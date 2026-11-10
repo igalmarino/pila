@@ -164,7 +164,7 @@ impl Pila {
     /// Put `windows` on top, in order, in X's stacking order too.
     pub(crate) fn raise_in_order(&mut self, windows: &[Window]) {
         for window in windows {
-            self.space.raise_element(window, false);
+            self.raise_window(window, false);
             self.x11_window_raised(window);
         }
     }

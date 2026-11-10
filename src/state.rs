@@ -130,6 +130,16 @@ pub struct Pila {
     /// An output was drawn this event-loop iteration: `after_frames` has
     /// housekeeping to do.
     pub frame_drawn: bool,
+    /// Clients or input were handled this iteration: `after_frames` does its
+    /// housekeeping even if no output was drawn (the change may show on
+    /// none: a minimized window's title for the taskbar, a capture's window).
+    pub housekeeping: bool,
+    /// Captures may have something to do this iteration without a frame
+    /// drawn: a commit that shows on no output (a hidden window's, which may
+    /// be captured; `redraw_committed`), a capture client asking for a frame.
+    pub capture_due: bool,
+    /// Redraws held back by `defer_redraws` (`redraw.rs`), while it runs.
+    pub deferred_redraws: Option<Vec<crate::redraw::Deferred>>,
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
@@ -478,6 +488,9 @@ impl Pila {
             config_path: None,
             config_reload_pending: false,
             frame_drawn: false,
+            housekeeping: false,
+            capture_due: false,
+            deferred_redraws: None,
             hidden_frame_timer: false,
             commit_pacing: Default::default(),
             toplevel_management: Default::default(),
@@ -536,8 +549,10 @@ impl Pila {
                         error!(?err, "can't talk to the clients; quitting");
                         state.loop_signal.stop();
                     }
-                    // Whatever the clients asked for may change the screen.
-                    state.queue_redraw();
+                    // What clients asked for redraws where it shows
+                    // (`redraw.rs`); the rest of what it changed is
+                    // `after_frames`'.
+                    state.housekeeping = true;
                     Ok(PostAction::Continue)
                 },
             )
@@ -910,7 +925,7 @@ impl Pila {
                 if !on_an_output(&self.space, geo) {
                     let loc = centered_location(area, geo.size, bar);
                     debug!(?loc, "moving window off a removed output");
-                    self.space.map_element(window.clone(), loc, false);
+                    self.map_window(window.clone(), loc, false);
                     self.keep_transients_above(&window);
                     self.x11_window_moved(&window);
                 }
@@ -963,7 +978,7 @@ impl Pila {
     /// comes back to when shown again. Nothing for an unmapped window.
     fn place_window(&mut self, window: &Window, loc: Point<i32, Logical>) {
         if self.space.element_location(window).is_some() {
-            self.space.map_element(window.clone(), loc, true);
+            self.map_window(window.clone(), loc, true);
             self.keep_transients_above(window);
         } else if self.off_space_windows().any(|w| w == window) {
             crate::workspaces::set_space_location(window, loc);
@@ -1084,7 +1099,7 @@ impl Pila {
         // The app id, for window rules.
         let app_id = crate::foreign_toplevel::title_and_app_id(&window).1;
         debug!(app_id, ?location, size = ?window.geometry().size, maximized, fullscreen, "mapping window");
-        self.space.map_element(window.clone(), location, true);
+        self.map_window(window.clone(), location, true);
         self.announce_toplevel(&window);
         // A window set on another one opens where that one is.
         let parent_workspace = self
@@ -1334,7 +1349,7 @@ impl Pila {
                 start_data.location.x as i32 - width / 2,
                 start_data.location.y as i32 - y_offset,
             ));
-            self.space.map_element(window.clone(), loc, true);
+            self.map_window(window.clone(), loc, true);
             self.keep_transients_above(&window);
             self.x11_window_moved(&window);
         } else if crate::snap::snapped_side(&window).is_some() {
@@ -1401,18 +1416,6 @@ impl Pila {
         self.set_cursor(CursorImageStatus::Named(edges.cursor_icon()));
     }
 
-    /// Ask the backend for a redraw. pila only redraws when something may
-    /// have changed: input, client requests, or its own state changes outside
-    /// of those (e.g. a deferred unlock).
-    pub fn queue_redraw(&mut self) {
-        if let Some(backend) = &mut self.backend {
-            backend.queue_redraw();
-        }
-        // On bare metal the redraw is an idle callback, which calloop only
-        // runs after the next event; waking the loop makes that now.
-        self.wake.ping();
-    }
-
     /// The `[[output]]` section for the output called `name`, under that
     /// name whatever the section says (what's keyed on it, like
     /// `Outputs::overrides`, goes by the output's name).
@@ -1442,15 +1445,22 @@ impl Pila {
         self.refresh_sessions();
         // A layout can change with no frame to draw (an xkb option's keys).
         self.send_keyboard_events();
-        if !std::mem::take(&mut self.frame_drawn) {
+        let drawn = std::mem::take(&mut self.frame_drawn);
+        let capture_due = std::mem::take(&mut self.capture_due);
+        if !std::mem::take(&mut self.housekeeping) && !drawn && !capture_due {
             // A change no frame follows (every monitor turned off).
             self.send_ipc_events_due();
             return;
         }
         self.apply_unblocked_commits();
-        self.process_captures();
-        self.process_screencopies();
-        self.capture.trim_textures();
+        // What a capture shows changes with a frame, or with a commit that
+        // shows on no output (a hidden window's), and a capture client may
+        // ask for a frame: not with every client dispatch.
+        if drawn || capture_due {
+            self.process_captures();
+            self.process_screencopies();
+            self.capture.trim_textures();
+        }
         // The space knows which outputs each window is on only after its
         // refresh, so that comes before the taskbar listeners are updated.
         self.space.refresh();

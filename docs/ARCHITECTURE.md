@@ -68,7 +68,7 @@ Key flows and invariants:
   (tests, `headless.rs`), chosen by `--backend` or by whether `WAYLAND_DISPLAY`/`DISPLAY`
   is set. `main` checks first that `libEGL.so.1` can be loaded (`missing_library`), since
   Smithay panics if it can't. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
-  imports, `queue_redraw`, `cursor_changed`, LEDs, VT switch) rather than matching. All
+  imports, `queue_redraw`/`queue_redraw_output`, `draws_cursor`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
   hard-codes a keyboard and pointer for all. A panic, on any backend, is logged as "pila
   crashed" with its location, the version and a backtrace, captured whatever `RUST_BACKTRACE`
@@ -76,8 +76,8 @@ Key flows and invariants:
   say where it happened.
 - **Headless (tests):** virtual outputs (`--headless-outputs NAME:WxH[@HZ],...`; each
   also offers 1024x768 and 1920x1080) rendered into offscreen textures on a render node
-  or Mesa's software device, paced by a timer at their refresh rate while a redraw is
-  queued; `[[output]]` applies in full (`headless::apply_output_config`, with
+  or Mesa's software device, each paced by a timer at its refresh rate (at most one redraw
+  per period, `HeadlessOutput::last_render`) while a redraw is asked for it; `[[output]]` applies in full (`headless::apply_output_config`, with
   wlr-output-management's overrides), gamma, power and adaptive sync (every virtual output
   can do it, reported back on its head as udev does) are kept in memory. Mod defaults
   to Super and nothing starts without `-c`/autostart. The control socket
@@ -87,7 +87,11 @@ Key flows and invariants:
   frame, adds/removes outputs, and answers `state` with `Pila::state_json`
   (`introspect.rs`: windows with geometry, stacking, workspace, fill/snap state,
   decorations and rule props; focus, Mod+Tab, layers, outputs, pointer, lock,
-  animations). A new feature exposes there what its tests need to check.
+  animations). A new feature exposes there what its tests need to check. With `PILA_HEADLESS_CHECK_REDRAWS=1` (set by the
+  test harness) each output has a second damage tracker that follows what's drawn
+  (`check_redraws`): on each render pass and every 50 ms, an output no redraw was asked for
+  that has damage anyway is suspect, and Pila panics if no request explains it within 20 ms (a
+  request may come later in the same iteration). Not while animating or a lock is pending.
 - **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`);
   client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer
   leaving the window, so a drawn cursor lingers at the edge. Keys held when the host takes
@@ -110,15 +114,18 @@ Key flows and invariants:
   `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
   primary), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
-  then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
-  `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
-  which also sends presentation feedback with the kernel's timestamp. A redraw asks every
-  output, and one with nothing new (the pointer moves on another) builds its scene for nothing
-  and queues no frame, so nothing paced the next: thousands a second. After one, the output
-  waits until half a period before its next vblank (`draw::idle_until`,
-  `OutputSurface::idle_until`; a one-shot timer, `schedule_idle_redraw`, draws what was asked
-  meanwhile): at most one such redraw per refresh, and a change in the first half of a period
-  still makes the next vblank. A lock waiting for its frame doesn't wait. A frame that fails
+  then, so no frame reads a file). Redraws are per output (see "Redraws are on demand"):
+  a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle
+  `render_all`, which renders those; an output with a frame in flight renders at its vblank
+  (`frame_finish`), which also sends presentation feedback with the kernel's timestamp. A
+  redraw that may bring nothing new (`content` false: a commit with no buffer, the pointer
+  moving with the cursor hidden) and finds nothing queues no frame, so nothing would pace the
+  next: a client committing nothing in a loop of frame callbacks would make Pila redraw as
+  fast as it loops. After such a redraw the output waits until half a period before its next
+  vblank (`draw::idle_until`, `OutputSurface::idle_until`; a one-shot timer,
+  `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
+  nothing (`draw::idle_wait`): at most one per refresh. A request with something new
+  (`redraw_content`) or a lock waiting for its frame never waits. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
@@ -181,17 +188,36 @@ Key flows and invariants:
   screencopies, `space.refresh()`, taskbar updates and `popups.cleanup()`, then a flush. Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
-- **Redraws are on demand** (`Pila::queue_redraw`): after every client dispatch (display
-  source), every winit event, while a resize needs full frames or a lock awaits its
-  first locked frame, and while an animation runs. Nothing else redraws, so state changes
-  outside those paths (timers, `insert_idle` callbacks) must call `queue_redraw`
-  themselves. Clients are flushed after every event-loop iteration (`main.rs`), not only
-  on redraw. calloop doesn't wake the loop for pending idle callbacks: they run after
-  the next event, however late. So `queue_redraw` pings `Pila::wake` (bare metal, the
+- **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
+  request for it. `queue_redraw_output`/`request_redraw` ask one output (with `content`:
+  whether what changed surely shows, see "Bare metal"), `queue_redraw_rect` the outputs a
+  global rectangle overlaps, `queue_redraw_window` those a window's frame, title bar, shadow
+  margin and popups touch (`window_visual_rect`), `queue_redraw_pointer` those of where the
+  pointer was and is. `queue_redraw` asks every output, for what's global: the config,
+  outputs, the lock, workspaces, focus (`focus_changed`: title bars and shadows show it), a
+  key Pila acts on, a click, a gesture, animations. Who asks: a commit asks for its surface's
+  outputs before and after it (`redraw_committed`; `surface_outputs` resolves a subsurface,
+  popup, window, layer, lock, cursor or drag-icon surface, and an unknown one asks every
+  output); every change to the `Space`'s windows goes through `map_window`/`unmap_window`/
+  `raise_window`, which redraw where the window was and is; input asks in
+  `process_input_event` (a key or scroll a client gets is the client's to show); a destroyed
+  surface or popup, a layer surface removed, a title, a lock, an output powered on ask for
+  theirs. `after_frames`' housekeeping (`space.refresh`, taskbar, IPC events, animations) runs
+  after any client dispatch or input (`Pila::housekeeping`) even when no output was drawn: the
+  change may show nowhere (a minimized window's title). Captures run only when an output was
+  drawn or `Pila::capture_due` (a commit that shows on no output, a hidden window's that may be
+  captured; a capture client asking for a frame), not with every dispatch. State changed outside a client
+  dispatch or input (timers, `insert_idle` callbacks) must ask for its redraws. The headless
+  check (`PILA_HEADLESS_CHECK_REDRAWS`, every integration test) panics on an output that
+  changed with none asked. Clients are flushed after every event-loop iteration (`main.rs`),
+  not only on redraw. calloop doesn't wake the loop for pending idle callbacks: they run after
+  the next event, however late. So a redraw request pings `Pila::wake` (bare metal, the
   redraw itself is an idle `render_all`), and anything else inserting an idle callback
   outside an event source (e.g. from `after_frames`, the `event_loop.run` callback) must
-  ping it too. A redraw requested from `after_frames` goes through `insert_idle` plus
-  the ping: nested, the winit source has already checked for redraw requests by then.
+  ping it too. Redraws requested from `after_frames` are held back by `defer_redraws` into an
+  idle callback plus the ping: nested, the winit source has already checked for redraw
+  requests by then. Smithay calls `cursor_image` with the pointer locked, so its redraw
+  (where the pointer is) goes through an idle callback too.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average
   and worst, missed refreshes; each frame over half the period on its own); winit and udev
@@ -201,9 +227,14 @@ Key flows and invariants:
   (`record_capture`, a `captures` line), the blit into them subtracted from the output's
   frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
-  (no frame queued: the pointer moved on another one) is counted apart, `idle` and its summed CPU
-  `idle_cpu_ms` (`record_idle_frame`, udev and headless); an output with only those still
-  reports. `scripts/check` judges these lines and reports the idle redraws per output.
+  (no frame queued: a commit with no buffer, the pointer moving with no cursor drawn) is counted
+  apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless); an
+  output with only those still reports. On bare metal a frame with something new asked for in
+  time for a vblank (`frame_stats::IN_TIME`, 4 ms or half a period, before it; with a frame in
+  flight, the vblank after that one's) but shown at a later one counts its refreshes as missed,
+  animation or not, and is counted `late` (`late_refreshes`, from `OutputSurface::request`, the
+  first such request since the last frame; not with adaptive sync, nor for the first frame
+  after a modeset). `scripts/check` judges these lines and reports the idle redraws per output.
 - **Pointer grabs** (`grabs/move_grab.rs`, `grabs/resize_grab.rs`): Mod+drag installs the
   move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
@@ -231,7 +262,7 @@ Key flows and invariants:
 - **Client rendering** (`handlers/compositor.rs`, `wait_for_client_rendering`): a
   pre-commit hook on every surface blocks a commit whose new dmabuf the client's GPU is
   still writing (`Dmabuf::generate_blocker`, polling its implicit fence). The commit applies
-  when the fence signals (`blocker_cleared`, then `queue_redraw`), so a slow client delays
+  when the fence signals (`blocker_cleared`, whose commits ask for their redraws), so a slow client delays
   its own frame and never Pila's. Commits of one surface still apply in order. With
   linux-drm-syncobj (explicit sync; offered where the backend has a DRM device whose kernel
   has `syncobj_eventfd`: bare metal and headless with a GPU, not nested) a commit's acquire
@@ -259,7 +290,7 @@ Key flows and invariants:
 - **Content update pacing** (`commit_pacing.rs`, wp-fifo): Smithay blocks a commit waiting
   on a barrier; Pila signals barriers. A commit that sets one registers its surface
   (`commit_paced`), `post_render` signals those shown on the output just drawn, and
-  `after_frames` applies what that unblocked and asks for a redraw. So a client gets at most
+  `after_frames` applies what that unblocked (its commits' redraws deferred, `defer_redraws`). So a client gets at most
   one content update per refresh. A barrier a frame didn't signal in a second is signaled by a
   timer (`signal_old_barriers`) wherever the surface is, so hidden clients and clients on an
   output turned off carry on, once a second. No damage means no flip, so a commit that changes

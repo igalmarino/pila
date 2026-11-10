@@ -20,9 +20,13 @@
   (only `--json` had their `power`).
 - **A swipe begun as the screen locks runs nothing:** its action (show the desktop, say) ran
   behind the lock screen if the screen locked during the swipe.
-- **Less CPU with two monitors:** moving the mouse on one monitor redrew the other on every
-  mouse event for nothing (measured: 1000 to 5000 times a second, about 5% of a core). A monitor
-  with nothing new now waits until its next refresh is near, at most once per refresh.
+- **Less CPU with two monitors, and no frame held back:** moving the mouse on one monitor, or an
+  app drawing on it, redrew the others for nothing (measured: 1000 to 5000 times a second, about
+  5% of a core). Each monitor is now redrawn only for what shows on it. An app's new frame on a
+  monitor that had nothing new just before is no longer held back until its next refresh is near
+  (which at 144 Hz and up could cost it a refresh); only redraws that may have nothing to show
+  still wait, at most one per refresh. The frame statistics (`RUST_LOG=pila::frames=debug`)
+  count a frame shown a refresh later than it could have been as missed (`late`).
 - **Window titles appear as soon as the fonts load:** a window that opened before then showed
   its title only at the next redraw of its monitor.
 - **No gamma warning at every login:** the log warned that setting gamma held Pila past a

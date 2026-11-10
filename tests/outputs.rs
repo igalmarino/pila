@@ -893,9 +893,9 @@ fn input_doesnt_wake_a_monitor_a_client_turned_off() {
     pila.wait("B back, A still off", |s| powered(s) == [false, true]);
 }
 
-/// A redraw that finds nothing new on an output (the pointer moved on
-/// another one) queues no frame, and is counted apart in the frame
-/// statistics, `idle` (`frame_stats.rs`).
+/// A redraw that finds nothing new on an output (the pointer moved with no
+/// cursor drawn: headless, a named cursor is the host's) queues no frame, and
+/// is counted apart in the frame statistics, `idle` (`frame_stats.rs`).
 #[test]
 fn redraws_with_nothing_new_on_an_output_are_counted_as_idle() {
     let mut pila = two_outputs();
@@ -910,9 +910,9 @@ fn redraws_with_nothing_new_on_an_output_are_counted_as_idle() {
     let report = log
         .lines()
         .rfind(|l| {
-            l.contains("pila::frames") && l.contains("output=\"B\"") && l.contains(" frames ")
+            l.contains("pila::frames") && l.contains("output=\"A\"") && l.contains(" frames ")
         })
-        .unwrap_or_else(|| panic!("no frame statistics for B:\n{log}"));
+        .unwrap_or_else(|| panic!("no frame statistics for A:\n{log}"));
     let field = |name: &str| -> u64 {
         report
             .split_whitespace()

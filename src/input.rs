@@ -36,6 +36,9 @@ impl Pila {
         I::Device: 'static,
     {
         self.notify_activity();
+        // Whatever the input changed beyond the screen is `after_frames`'.
+        self.housekeeping = true;
+        let pointer_from = self.pointer_location();
         // After `power-off-monitors` any input brings them back; a key or a
         // click that does is kept from apps (`on_keyboard`, `pointer_button`).
         if matches!(
@@ -49,13 +52,39 @@ impl Pila {
         ) {
             self.wake_monitors();
         }
+        let gesture = matches!(
+            event,
+            InputEvent::GestureSwipeBegin { .. }
+                | InputEvent::GestureSwipeUpdate { .. }
+                | InputEvent::GestureSwipeEnd { .. }
+                | InputEvent::GesturePinchBegin { .. }
+                | InputEvent::GesturePinchUpdate { .. }
+                | InputEvent::GesturePinchEnd { .. }
+                | InputEvent::GestureHoldBegin { .. }
+                | InputEvent::GestureHoldEnd { .. }
+        );
+        // What it redraws (`redraw.rs`): a key or a scroll a client gets is
+        // the client's to show (it commits); a key Pila acts on, a click or a
+        // gesture may change anything; the pointer moving, the outputs it
+        // was and is on.
         match event {
-            InputEvent::Keyboard { event, .. } => self.on_keyboard::<I>(event),
-            InputEvent::PointerMotion { event, .. } => self.on_pointer_motion::<I>(event),
-            InputEvent::PointerMotionAbsolute { event, .. } => {
-                self.on_pointer_motion_absolute::<I>(event)
+            InputEvent::Keyboard { event, .. } => {
+                if self.on_keyboard::<I>(event) {
+                    self.queue_redraw();
+                }
             }
-            InputEvent::PointerButton { event, .. } => self.on_pointer_button::<I>(event),
+            InputEvent::PointerMotion { event, .. } => {
+                self.on_pointer_motion::<I>(event);
+                self.redraw_pointer_moved(pointer_from);
+            }
+            InputEvent::PointerMotionAbsolute { event, .. } => {
+                self.on_pointer_motion_absolute::<I>(event);
+                self.redraw_pointer_moved(pointer_from);
+            }
+            InputEvent::PointerButton { event, .. } => {
+                self.on_pointer_button::<I>(event);
+                self.queue_redraw();
+            }
             InputEvent::PointerAxis { event, .. } => self.on_pointer_axis::<I>(event),
             // Touchpad gestures (`gestures.rs`).
             InputEvent::GestureSwipeBegin { event, .. } => self.on_gesture_swipe_begin::<I>(event),
@@ -72,9 +101,29 @@ impl Pila {
             InputEvent::GestureHoldEnd { event, .. } => self.on_gesture_hold_end::<I>(event),
             _ => {}
         }
+        if gesture {
+            self.queue_redraw();
+        }
     }
 
-    fn on_keyboard<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent)
+    /// The pointer moved from `from` (or didn't): redraw where it was and
+    /// is. Something there surely moved if Pila draws the cursor or a drag's
+    /// icon; else only a title bar button's highlight may change.
+    fn redraw_pointer_moved(&mut self, from: Point<f64, Logical>) {
+        let to = self.pointer_location();
+        if to == from {
+            return;
+        }
+        let drawn = self
+            .backend
+            .as_ref()
+            .is_some_and(|backend| backend.draws_cursor(&self.cursor_status));
+        self.queue_redraw_pointer(from, to, drawn || self.dnd_icon.is_some());
+    }
+
+    /// A key: Pila's (a binding, the window menu, ...) or the client's.
+    /// Whether Pila acted on it (else the client with focus got it).
+    fn on_keyboard<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent) -> bool
     where
         I::Device: 'static,
     {
@@ -83,7 +132,7 @@ impl Pila {
         let keycode = event.key_code();
         let key_state = event.state();
         let Some(keyboard) = self.seat.get_keyboard() else {
-            return;
+            return false;
         };
         // Keys of a virtual keyboard (`virtual_keyboard.rs`) are tracked apart
         // from the physical ones; a physical key brings the configured keymap
@@ -159,6 +208,8 @@ impl Pila {
             },
         );
 
+        // Intercepted (`Some`), or forwarded to the client.
+        let mut acted = action.is_some();
         if let Some(sym) = self.input.menu_key.take() {
             self.window_menu_key(sym);
         }
@@ -170,8 +221,10 @@ impl Pila {
             let mods = keyboard.modifier_state();
             if !(mods.ctrl || mods.alt || mods.logo) {
                 self.end_switch();
+                acted = true;
             }
         }
+        acted
     }
 
     /// Whether the surface with keyboard focus (or the window of a focused
@@ -341,10 +394,6 @@ impl Pila {
             },
         );
         pointer.frame(self);
-        // A drag's icon follows the pointer.
-        if self.dnd_icon.is_some() {
-            self.queue_redraw();
-        }
 
         if !pointer.is_grabbed() {
             // Over pila's own decorations no client sets the cursor, so pila does.

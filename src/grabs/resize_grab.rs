@@ -208,7 +208,7 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
                 loc.y += self.initial_rect.size.h - self.last_window_size.h;
             }
             let _ = x11.configure(Rectangle::new(loc, self.last_window_size));
-            data.space.map_element(self.window.clone(), loc, true);
+            data.map_window(self.window.clone(), loc, true);
             data.keep_transients_above(&self.window);
         }
     }

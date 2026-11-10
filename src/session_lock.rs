@@ -252,6 +252,8 @@ impl SessionLockHandler for Pila {
         self.focus_lock_surface(SERIAL_COUNTER.next_serial());
         self.set_cursor(CursorImageStatus::default_named());
         self.refresh_pointer_focus();
+        // Every output goes black until its lock surface shows.
+        self.queue_redraw();
     }
 
     fn unlock(&mut self) {

@@ -3,7 +3,15 @@
 //! device), input injected through the control socket (`test_control.rs`)
 //! as `TestInput` events, which go through `Pila::process_input_event` like
 //! real input. Frames are paced by a timer at each output's refresh rate,
-//! since there is no vblank; only while a redraw was asked for.
+//! since there is no vblank; only while a redraw was asked for, each output
+//! by its own redraws.
+//!
+//! With `PILA_HEADLESS_CHECK_REDRAWS=1` (the test harness sets it) Pila also
+//! checks that nothing changes on an output without a redraw being asked for
+//! it (`check_redraws`): every output not asked for is checked for damage on
+//! each render pass and every `CHECK_EVERY`, and Pila panics if one has some
+//! that no request explains within `CHECK_GRACE`. A change that asked for
+//! none would only show at an unrelated redraw.
 
 use std::{
     os::unix::fs::MetadataExt,
@@ -147,8 +155,16 @@ pub struct HeadlessOutput {
     /// The texture holds a frame (else the next one is drawn whole).
     drawn: bool,
     last_frame: Option<Instant>,
+    /// The last redraw, with something new or not: an output redraws at most
+    /// once per refresh.
+    last_render: Option<Instant>,
+    /// `PILA_HEADLESS_CHECK_REDRAWS`: a damage tracker of its own, and since
+    /// when it has found damage no redraw was asked for (`check_redraws`).
+    check: Option<(OutputDamageTracker, Option<Instant>)>,
     /// Frames drawn, for tests (`frames` in the state).
     pub frames: u64,
+    /// Redraws that found nothing new to show (`idle` in the state).
+    pub idle: u64,
     pub power: bool,
     /// The gamma ramps set (red, green, blue concatenated); `None` linear.
     pub gamma: Option<Vec<u16>>,
@@ -163,9 +179,17 @@ pub struct HeadlessData {
     loop_handle: LoopHandle<'static, Pila>,
     /// The next `apply_output_config` fails, as a modeset can (`output_fail_next`).
     pub fail_next_apply: bool,
-    /// The timer of the next frame, while one is scheduled.
-    timer: Option<RegistrationToken>,
+    /// The timer of the next frame, and when it fires, while one is scheduled.
+    timer: Option<(RegistrationToken, Instant)>,
+    /// `PILA_HEADLESS_CHECK_REDRAWS` is set (see the module docs).
+    check_redraws: bool,
 }
+
+/// How often outputs not asked to redraw are checked for damage, and how long
+/// damage may wait for the request that explains it (one may come later in
+/// the same loop iteration, or from a timer due at the same moment).
+const CHECK_EVERY: Duration = Duration::from_millis(50);
+const CHECK_GRACE: Duration = Duration::from_millis(20);
 
 /// Gamma ramps of virtual outputs are this long.
 pub const GAMMA_SIZE: u32 = 256;
@@ -173,31 +197,46 @@ pub const GAMMA_SIZE: u32 = 256;
 impl HeadlessData {
     pub fn queue_redraw(&mut self) {
         for o in &mut self.outputs {
-            o.redraw_needed = true;
+            o.ask_redraw();
         }
-        if self.timer.is_some() {
-            return;
+        self.schedule();
+    }
+
+    pub fn queue_redraw_output(&mut self, output: &Output) {
+        if let Some(o) = self.find_mut(output) {
+            o.ask_redraw();
         }
-        // The next frame is due one period after the last one; at once if
-        // that's already past.
-        let delay = self
+        self.schedule();
+    }
+
+    /// Set the timer for the earliest output due to redraw: one period after
+    /// its last redraw, at once if that's past.
+    fn schedule(&mut self) {
+        let now = Instant::now();
+        let Some(due) = self
             .outputs
             .iter()
-            .filter_map(|o| {
-                let last = o.last_frame?;
-                let period = crate::frame_stats::refresh_period(&o.output);
-                Some(period.saturating_sub(last.elapsed()))
-            })
+            .filter(|o| o.redraw_needed)
+            .map(|o| o.next_render(now))
             .min()
-            .unwrap_or(Duration::ZERO);
+        else {
+            return;
+        };
+        if let Some((token, at)) = self.timer {
+            if at <= due {
+                return;
+            }
+            self.loop_handle.remove(token);
+            self.timer = None;
+        }
         let token = self
             .loop_handle
-            .insert_source(Timer::from_duration(delay), |_, _, state| {
+            .insert_source(Timer::from_deadline(due), |_, _, state| {
                 render_all(state);
                 TimeoutAction::Drop
             });
         match token {
-            Ok(token) => self.timer = Some(token),
+            Ok(token) => self.timer = Some((token, due)),
             Err(err) => error!(?err, "failed to schedule a frame"),
         }
     }
@@ -326,6 +365,28 @@ impl HeadlessData {
     }
 }
 
+impl HeadlessOutput {
+    fn ask_redraw(&mut self) {
+        self.redraw_needed = true;
+        // A request explains the damage the check found.
+        if let Some((_, suspect)) = &mut self.check {
+            *suspect = None;
+        }
+    }
+
+    /// When this output may redraw next: a period after its last redraw.
+    fn next_render(&self, now: Instant) -> Instant {
+        let period = crate::frame_stats::refresh_period(&self.output);
+        self.last_render
+            .map_or(now, |last| (last + period).max(now))
+    }
+
+    /// Due to redraw at `now` (a timer may fire a little early).
+    fn due(&self, now: Instant) -> bool {
+        self.next_render(now) <= now + Duration::from_millis(1)
+    }
+}
+
 fn texture_size(texture: &GlesTexture) -> Size<i32, smithay::utils::Buffer> {
     use smithay::backend::renderer::Texture;
     texture.size()
@@ -418,13 +479,26 @@ pub fn init_headless(
         state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(dev, &renderer));
     }
 
+    let checking = std::env::var_os("PILA_HEADLESS_CHECK_REDRAWS").is_some_and(|v| v == "1");
     state.backend = Some(Backend::Headless(Box::new(HeadlessData {
         renderer,
         outputs: Vec::new(),
         loop_handle: state.loop_handle.clone(),
         fail_next_apply: false,
         timer: None,
+        check_redraws: checking,
     })));
+    if checking {
+        info!("checking that every change asks for its redraws");
+        let timer = Timer::from_duration(CHECK_EVERY);
+        state
+            .loop_handle
+            .insert_source(timer, |_, _, state| {
+                check_redraws(state);
+                TimeoutAction::ToDuration(CHECK_EVERY)
+            })
+            .map_err(|err| err.error)?;
+    }
     for spec in specs {
         add_output(state, spec);
     }
@@ -485,6 +559,9 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
     }
     output.set_preferred(own);
     output.change_current_state(Some(own), Some(Transform::Normal), None, None);
+    let check = data
+        .check_redraws
+        .then(|| (OutputDamageTracker::from_output(&output), None));
     data.outputs.push(HeadlessOutput {
         damage_tracker: OutputDamageTracker::from_output(&output),
         output,
@@ -495,7 +572,10 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
         redraw_needed: true,
         drawn: false,
         last_frame: None,
+        last_render: None,
+        check,
         frames: 0,
+        idle: 0,
         power: true,
         gamma: None,
         adaptive_sync: false,
@@ -664,13 +744,15 @@ fn render_all(state: &mut Pila) {
         return;
     };
     data.timer = None;
+    let now = Instant::now();
+    // The outputs due now; the others asked for wait their turn.
+    let due: Vec<bool> = data.outputs.iter().map(|o| o.due(now)).collect();
     let lock_pending = state.lock_pending();
-    let count = match &state.backend {
-        Some(Backend::Headless(data)) => data.outputs.len(),
-        _ => 0,
-    };
     let mut locked_everywhere = true;
-    for index in 0..count {
+    for (index, due) in due.into_iter().enumerate() {
+        if !due && !lock_pending {
+            continue;
+        }
         if !render_output(state, index, lock_pending) {
             locked_everywhere = false;
         }
@@ -682,6 +764,96 @@ fn render_all(state: &mut Pila) {
             state.queue_redraw();
         }
     }
+    if let Some(Backend::Headless(data)) = &mut state.backend {
+        data.schedule();
+    }
+    check_redraws(state);
+}
+
+/// `PILA_HEADLESS_CHECK_REDRAWS` (see the module docs): the outputs no
+/// redraw was asked for have no damage, or one is asked for soon after.
+fn check_redraws(state: &mut Pila) {
+    let Some(Backend::Headless(data)) = &state.backend else {
+        return;
+    };
+    if !data.check_redraws || state.lock_pending() || state.animating() {
+        return;
+    }
+    let now = Instant::now();
+    let candidates: Vec<usize> = data
+        .outputs
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.enabled && o.power && o.drawn && !o.redraw_needed)
+        .map(|(index, _)| index)
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    let input = state.frame_input();
+    let Pila { backend, blur, .. } = state;
+    let Some(Backend::Headless(data)) = backend else {
+        return;
+    };
+    let HeadlessData {
+        renderer, outputs, ..
+    } = &mut **data;
+    for index in candidates {
+        let o = &mut outputs[index];
+        let output = o.output.clone();
+        let Some((tracker, suspect)) = &mut o.check else {
+            continue;
+        };
+        if let Some(since) = *suspect {
+            assert!(
+                now.duration_since(since) < CHECK_GRACE,
+                "output {} changed and no redraw was asked for it \
+                 (PILA_HEADLESS_CHECK_REDRAWS; see redraw.rs)",
+                output.name()
+            );
+            continue;
+        }
+        let Some(output_geo) = state_output_geometry(&output) else {
+            continue;
+        };
+        let scale = crate::scale::output_scale(&output);
+        let mut elements = Vec::new();
+        if output_geo.to_f64().contains(input.pointer) {
+            elements = render::pointer_elements(renderer, &input, None, output_geo.loc, scale);
+        }
+        elements.extend(render::output_elements(
+            renderer,
+            blur,
+            &input.scene,
+            &output.name(),
+            output_geo,
+            output_geo.loc,
+            scale,
+        ));
+        if let Ok((Some(damage), _)) = tracker.damage_output(1, &elements) {
+            if !damage.is_empty() {
+                warn!(
+                    output = output.name(),
+                    ?damage,
+                    "damage no redraw was asked for"
+                );
+                *suspect = Some(now);
+            }
+        }
+    }
+}
+
+/// An output's place in the global space, from the output itself (the
+/// `Space` is borrowed elsewhere while checking).
+fn state_output_geometry(output: &Output) -> Option<Rectangle<i32, smithay::utils::Logical>> {
+    let mode = output.current_mode()?;
+    let size = output
+        .current_transform()
+        .transform_size(mode.size)
+        .to_f64()
+        .to_logical(output.current_scale().fractional_scale())
+        .to_i32_round();
+    Some(Rectangle::new(output.current_location(), size))
 }
 
 /// Draw one output if something changed. Returns whether the output now
@@ -725,6 +897,7 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
     } = &mut **data;
     let o = &mut outputs[index];
     o.redraw_needed = false;
+    o.last_render = Some(Instant::now());
 
     let Some(mode) = output.current_mode() else {
         return false;
@@ -761,6 +934,11 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
         output_geo.loc,
         scale,
     ));
+    // The check's tracker follows what's drawn (`check_redraws`).
+    if let Some((tracker, suspect)) = &mut o.check {
+        let _ = tracker.damage_output(1, &elements);
+        *suspect = None;
+    }
     // The texture keeps the last frame: age 1, or 0 to draw it whole. A
     // frame confirming a lock keeps nothing of the unlocked screen.
     let age = if o.drawn && !lock_pending { 1 } else { 0 };
@@ -795,6 +973,8 @@ fn render_output(state: &mut Pila, index: usize, lock_pending: bool) -> bool {
     if damaged {
         o.frames += 1;
         o.last_frame = Some(now);
+    } else {
+        o.idle += 1;
     }
     let cursor_surface = input.cursor_wl_surface();
     frame::update_primary_outputs(scene, cursor_surface, &output, &states);

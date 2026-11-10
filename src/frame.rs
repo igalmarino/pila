@@ -184,8 +184,8 @@ impl Pila {
     /// Frames are drawn on demand, and a surface shown nowhere gets its
     /// throttled frame callback (`HIDDEN_FRAME_THROTTLE`) only when a frame
     /// is drawn: on an idle screen a covered client asking for one would
-    /// wait forever. While such a surface waits, a redraw is asked for once
-    /// the throttle has passed. Not frame pacing: at most one wake-up per
+    /// wait forever. While such a surface waits, a redraw of one output is
+    /// asked for once the throttle has passed. Not frame pacing: at most one wake-up per
     /// period, and none while no hidden client waits. Called from
     /// `after_frames`.
     pub fn schedule_hidden_frames(&mut self) {
@@ -210,7 +210,12 @@ impl Pila {
         let timer = Timer::from_duration(HIDDEN_FRAME_THROTTLE);
         let inserted = self.loop_handle.insert_source(timer, |_, _, state| {
             state.hidden_frame_timer = false;
-            state.queue_redraw();
+            // Any output's redraw sends them (`send_frames`); one is enough,
+            // and it may well have nothing new to show.
+            let output = state.space.outputs().next().cloned();
+            if let Some(output) = output {
+                state.request_redraw(&output, false);
+            }
             TimeoutAction::Drop
         });
         self.hidden_frame_timer = inserted.is_ok();

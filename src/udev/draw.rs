@@ -37,13 +37,19 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         }
     }
     // An output that had nothing new to show just now waits its turn
-    // (`idle_until`), unless a lock waits for it.
+    // (`idle_wait`), unless what's asked surely shows or a lock waits.
     let now: Duration = state.clock.now().into();
     let lock_pending = state.lock_pending();
     if let Some(Backend::Udev(data)) = &mut state.backend {
         let wait = data.outputs.get(&crtc).and_then(|surface| {
-            let until = surface.idle_until.filter(|until| now < *until)?;
-            (surface.redraw_needed && !surface.frame_pending && !lock_pending).then(|| until - now)
+            let wait = idle_wait(
+                surface.idle_until,
+                now,
+                surface.redraw_content,
+                surface.frame_pending,
+                lock_pending,
+            );
+            wait.filter(|_| surface.redraw_needed)
         });
         if let Some(delay) = wait {
             data.schedule_idle_redraw(crtc, delay);
@@ -99,6 +105,8 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     let surface = outputs.get_mut(&crtc).expect("checked above");
     let drm_output = surface.drm_output.as_mut().expect("checked above");
     surface.redraw_needed = false;
+    surface.redraw_content = false;
+    let request = surface.request.take();
 
     let mut elements = Vec::new();
     if pointer_here {
@@ -163,6 +171,9 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
+                        // The first frame after a modeset starts a new grid
+                        // of vblanks: nothing to measure it against.
+                        surface.queued_request = request.filter(|_| !surface.first_frame);
                         if scene.locked {
                             surface.lock_frame = LockFrame::Queued;
                         }
@@ -302,6 +313,16 @@ pub(super) fn frame_finish(
         Some(last) => missed_refreshes(last, seq, surface.back_to_back && animating),
         None => 0,
     };
+    // A frame asked for in time to show at a vblank, shown at a later one
+    // (`frame_stats::late_refreshes`). With adaptive sync vblanks have no
+    // fixed grid to measure by.
+    let shown = hw_time.unwrap_or_else(|| now.into());
+    let request = surface.queued_request.take();
+    let late = request
+        .filter(|_| !surface.presented_variable)
+        .map_or(0, |r| {
+            crate::frame_stats::late_refreshes(r.at, r.in_flight, r.vblank, shown, frame_duration)
+        });
     surface.last_vblank = metadata.is_some().then_some(seq);
     surface.last_vblank_time = Some(hw_time.unwrap_or_else(|| now.into()));
     tracing::trace!(target: "pila::frames", output = surface.output.name(), seq, missed, "shown");
@@ -345,7 +366,10 @@ pub(super) fn frame_finish(
         Err(err) => warn!(?err, "frame submission failed"),
     }
 
-    state.record_missed(&output, u32::try_from(missed).unwrap_or(u32::MAX));
+    // A late frame during an animation is counted once.
+    let missed = u32::try_from(missed).unwrap_or(u32::MAX).max(late);
+    state.record_missed(&output, missed);
+    state.record_late(&output, late);
     if state.lock_pending() {
         maybe_confirm_lock(state);
     }
@@ -376,6 +400,20 @@ pub(super) fn idle_until(last: Option<Duration>, now: Duration, period: Duration
     } else {
         deadline + period
     }
+}
+
+/// How long a redraw of an output waits, given when its wait after a redraw
+/// with nothing new ends (`idle_until`) and whether what was asked brings
+/// something new to show (`content`). `None`: draw now.
+fn idle_wait(
+    idle_until: Option<Duration>,
+    now: Duration,
+    content: bool,
+    frame_pending: bool,
+    lock_pending: bool,
+) -> Option<Duration> {
+    let until = idle_until.filter(|until| now < *until)?;
+    (!content && !frame_pending && !lock_pending).then(|| until - now)
 }
 
 /// Whether the next frame on an output follows the one just shown with no pause
@@ -452,6 +490,23 @@ mod tests {
         assert_eq!(idle_until(Some(ms(100)), ms(108), period), ms(124));
         // No vblank known yet: half a period.
         assert_eq!(idle_until(None, ms(50), period), ms(58));
+    }
+
+    #[test]
+    fn a_clients_frame_after_a_redraw_with_nothing_new_isnt_held_back() {
+        let ms = Duration::from_millis;
+        let period = ms(16);
+        // A redraw with nothing new at 110, in the second half of the period
+        // before the vblank at 116: the next waits until 124.
+        let until = Some(idle_until(Some(ms(100)), ms(110), period));
+        // A client's new frame at 111 is drawn at once, in time for 116.
+        assert_eq!(idle_wait(until, ms(111), true, false, false), None);
+        // A redraw that may bring nothing (a commit with no buffer) waits.
+        assert_eq!(idle_wait(until, ms(111), false, false, false), Some(ms(13)));
+        // Nor does anything wait with a frame in flight (its vblank draws
+        // it) or a lock waiting for its frame.
+        assert_eq!(idle_wait(until, ms(111), false, true, false), None);
+        assert_eq!(idle_wait(until, ms(111), false, false, true), None);
     }
 
     #[test]

@@ -147,7 +147,10 @@ impl TestPila {
         ] {
             cmd.env_remove(var);
         }
-        cmd.env("XDG_RUNTIME_DIR", &dir)
+        // Pila panics if anything changes on an output without a redraw
+        // asked for it (`headless.rs`, `check_redraws`).
+        cmd.env("PILA_HEADLESS_CHECK_REDRAWS", "1")
+            .env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_CONFIG_HOME", dir.join("xdg-config"))
             .env("XDG_STATE_HOME", dir.join("state"))
             .env(

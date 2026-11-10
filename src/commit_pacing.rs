@@ -185,10 +185,10 @@ impl Pila {
     /// Apply the commits that were waiting on barriers just signaled, and
     /// draw them. Called from `after_frames`.
     pub fn apply_unblocked_commits(&mut self) {
-        if self.apply_commits_of_unblocked_clients() {
-            self.loop_handle.insert_idle(|state| state.queue_redraw());
-            self.wake.ping();
-        }
+        // From `after_frames`: the redraws the commits ask for are deferred.
+        self.defer_redraws(|state| {
+            state.apply_commits_of_unblocked_clients();
+        });
     }
 
     /// Whether any client had a barrier signaled.
@@ -274,8 +274,8 @@ impl Pila {
             self.client_compositor_state(client)
                 .blocker_cleared(self, &display);
         }
-        // What applied may be on another output than the one being drawn.
-        self.queue_redraw();
+        // What applied asks for its redraws (`redraw_committed`), on
+        // whichever output it shows.
         self.schedule_deadline_timer();
     }
 
@@ -311,8 +311,9 @@ impl Pila {
             state.commit_pacing.deadline_timer = None;
             // Past deadlines apply even if no frame comes.
             let now = state.clock.now();
+            // The commits that apply ask for their redraws.
             state.signal_timers_until(now, None);
-            state.queue_redraw();
+            state.housekeeping = true;
             state.schedule_deadline_timer();
             TimeoutAction::Drop
         });
@@ -351,9 +352,9 @@ impl Pila {
             }
             !old
         });
-        // Out of a timer, so no ping: the redraw comes right after it.
+        // The commits that apply ask for their redraws.
         if self.apply_commits_of_unblocked_clients() {
-            self.queue_redraw();
+            self.housekeeping = true;
         }
         self.schedule_barrier_timer();
     }

@@ -198,6 +198,7 @@ impl Pila {
                         }),
                         "gamma_set": o.gamma.is_some(),
                         "frames": o.frames,
+                        "idle": o.idle,
                     })
                 })
                 .collect(),

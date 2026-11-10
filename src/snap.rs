@@ -204,7 +204,7 @@ impl Pila {
         } else if let Some(x11) = window.x11_surface() {
             let _ = x11.configure(rect);
         }
-        self.space.map_element(window.clone(), rect.loc, true);
+        self.map_window(window.clone(), rect.loc, true);
         self.keep_transients_above(window);
         self.x11_window_moved(window);
         self.queue_redraw();

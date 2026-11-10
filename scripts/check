@@ -451,8 +451,8 @@ terminal=$(grep -o 'check: terminal [a-z]*' "$log" | head -1 | awk '{print $3}' 
 if [ "${terminal:-none}" = none ]; then
     fail "a terminal ran the window scenarios (install kitty or foot)"
 fi
-# Without animations the frame statistics below have nothing to judge:
-# missed refreshes count only while one runs.
+# Without animations the frame statistics below have little to judge: missed
+# refreshes count while one runs (and, on bare metal, frames shown late).
 n=$(grep -c 'starts what="' "$log" || true)
 [ "$n" -gt 0 ] && pass "animations ran ($n)" || fail "animations ran (none started)"
 if ran capture; then
@@ -500,13 +500,15 @@ stats=$(grep 'pila::frames: frames' "$log" || true)
 if [ -z "$stats" ]; then
     fail "frame statistics were logged"
 else
-    sum() { grep -o "$1=[0-9]*" <<<"$stats" | cut -d= -f2 | awk '{ s += $1 } END { print s + 0 }'; }
+    # A field older logs lack (`late`) sums to 0.
+    sum() { { grep -o "$1=[0-9]*" <<<"$stats" || true; } | cut -d= -f2 | awk '{ s += $1 } END { print s + 0 }'; }
     missed=$(sum missed)
+    late=$(sum late)
     frames=$(sum frames)
     worst_avg=$(grep -o 'cpu_avg_ms=[0-9.]*' <<<"$stats" | cut -d= -f2 | sort -g | tail -1)
     worst=$(grep -o 'cpu_max_ms=[0-9.]*' <<<"$stats" | cut -d= -f2 | sort -g | tail -1)
     [ "$missed" -eq 0 ] && pass "no refresh missed ($frames frames)" ||
-        fail "no refresh missed ($missed missed in $frames frames)"
+        fail "no refresh missed ($missed missed in $frames frames; $late frames shown late)"
     if awk -v v="$worst_avg" 'BEGIN { exit !(v <= 4) }'; then
         pass "CPU per frame on average within 4 ms (worst average ${worst_avg} ms; worst frame ${worst} ms)"
     else
@@ -515,8 +517,9 @@ else
 fi
 
 # Redraws that found nothing new on an output (`idle` in the frame statistics:
-# the pointer moved on another one) queue no frame; on bare metal at most one
-# per refresh (`udev/draw.rs::idle_until`). Reported per output, not judged.
+# a commit with no buffer, the pointer moving with no cursor drawn) queue no
+# frame; on bare metal at most one per refresh (`udev/draw.rs::idle_wait`).
+# Reported per output, not judged.
 if [ -n "$stats" ]; then
     awk '{
         o = ""; n = c = t = 0

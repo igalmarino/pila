@@ -46,12 +46,15 @@ impl CompositorHandler for Pila {
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, _, surface| {
             crate::surface_limits::check_commit(surface);
+            crate::redraw::note_pending_content(surface);
             state.wait_for_client_rendering(surface);
             state.hold_commit_until_timestamp(surface);
         });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // Where it showed before: a window that unmaps shows nowhere after.
+        let before = self.surface_outputs(surface);
         on_commit_buffer_handler::<Self>(surface);
         self.commit_paced(surface);
 
@@ -76,6 +79,16 @@ impl CompositorHandler for Pila {
         }
         crate::cursor::handle_commit(&self.cursor_status, surface);
         self.handle_dnd_icon_commit(surface);
+        self.redraw_committed(surface, before);
+    }
+
+    // Destroying a subsurface takes it off its parent at once, no commit
+    // needed (and a role's destruction may come with no commit either).
+    fn destroyed(&mut self, surface: &WlSurface) {
+        match self.surface_outputs(surface) {
+            Some(outputs) => outputs.iter().for_each(|o| self.queue_redraw_output(o)),
+            None => self.queue_redraw(),
+        }
     }
 }
 
@@ -100,7 +113,7 @@ impl Pila {
         if let Some(delta) = delta {
             icon.offset += delta;
         }
-        self.queue_redraw();
+        // Its redraw is the commit's (`redraw_committed`).
     }
 
     /// Called before a commit applies: if it brings a dmabuf the client's GPU
@@ -147,11 +160,13 @@ impl Pila {
         self.loop_handle
             .insert_source(source, move |_, _, state| {
                 let display = state.display_handle.clone();
+                // The commits that apply ask for their redraws
+                // (`redraw_committed`); outside a client's dispatch, the rest
+                // is `after_frames`' too.
                 state
                     .client_compositor_state(&client)
                     .blocker_cleared(state, &display);
-                // Outside a client's dispatch: nothing else asks for this redraw.
-                state.queue_redraw();
+                state.housekeeping = true;
                 Ok(())
             })
             .is_ok()

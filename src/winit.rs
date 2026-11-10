@@ -84,9 +84,9 @@ pub fn init_winit(
     event_loop
         .handle()
         .insert_source(winit, move |event, _, state| {
-            // Redraws happen on demand: after input or a window event here,
-            // after client requests (`Pila::queue_redraw` in the display
-            // source), and for a few frames after a resize.
+            // Redraws happen on demand: after a window event here, as input
+            // and client requests ask (`redraw.rs`), and for a few frames
+            // after a resize.
             let mut queue_redraw = true;
             match event {
                 WinitEvent::Resized { size, .. } => {
@@ -105,7 +105,10 @@ pub fn init_winit(
                     state.refresh_output_heads();
                     full_redraw = 4;
                 }
-                WinitEvent::Input(event) => state.process_input_event(event),
+                WinitEvent::Input(event) => {
+                    state.process_input_event(event);
+                    queue_redraw = false;
+                }
                 // Keys held when the host takes focus away never get a release.
                 WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => {

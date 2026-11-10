@@ -64,16 +64,18 @@ impl XdgShellHandler for Pila {
         if let Some(window) = self.window_for_surface(wl_surface) {
             self.forget_window(&window);
             self.animate_close(&window);
-            self.space.unmap_elem(&window);
+            self.unmap_window(&window);
         }
         if was_focused {
             self.focus_recent_window();
         }
     }
 
-    // A rule may match the new title or app id (`rules.rs`).
+    // A rule may match the new title or app id (`rules.rs`); the title bar
+    // shows the title.
     fn title_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
+            self.queue_redraw_window(&window);
             self.rules_maybe_changed(&window);
         }
     }
@@ -88,6 +90,12 @@ impl XdgShellHandler for Pila {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.transient_parent_changed(&window);
         }
+    }
+
+    // A popup's surface may live on, but it shows no more. Rare, and gone
+    // from its window's bounds already: every output.
+    fn popup_destroyed(&mut self, _surface: PopupSurface) {
+        self.queue_redraw();
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
@@ -423,7 +431,7 @@ impl Pila {
         debug!(app_id, "window unmapped by its client");
         let was_focused = self.focused_window().as_ref() == Some(&window);
         self.forget_window(&window);
-        self.space.unmap_elem(&window);
+        self.unmap_window(&window);
         self.windows
             .unmapped
             .push(Window::new_wayland_window(toplevel));

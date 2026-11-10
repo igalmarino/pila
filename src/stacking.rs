@@ -201,7 +201,7 @@ impl Pila {
             let rect = Rectangle::new(location, window.geometry().size);
             let loc = moved(rect, bar);
             self.animate_geometry(&window);
-            self.space.map_element(window.clone(), loc, false);
+            self.map_window(window.clone(), loc, false);
             self.x11_window_moved(&window);
         }
         // The rest of the family goes the same way.
@@ -209,7 +209,7 @@ impl Pila {
             let delta = now - location;
             for member in family.iter().filter(|member| **member != window) {
                 if let Some(at) = self.space.element_location(member) {
-                    self.space.map_element(member.clone(), at + delta, false);
+                    self.map_window(member.clone(), at + delta, false);
                     self.x11_window_moved(member);
                 }
             }

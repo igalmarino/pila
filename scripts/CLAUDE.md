@@ -5,7 +5,7 @@ Noctalia if installed: windows opening and closing, minimize, maximize, workspac
 launcher, a capture, a capture stream, a blurred window) and judges the log: the scenarios finished without a panic, animations
 ran (`starts` on `pila::animation`), Noctalia's surfaces follow their layer rule, grim got a
 picture, the stream got frames, monitors were identified from their EDID (bare metal), and the
-frame statistics (no missed refresh, CPU per frame on average within 4 ms, for the outputs'
+frame statistics (no missed refresh, frames shown late included, CPU per frame on average within 4 ms, for the outputs'
 frames and, on average over all of them, the captures'; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
 and exits 1 on a failure; INFO lines report without judging (how long gamma set the blocking

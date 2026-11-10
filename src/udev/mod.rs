@@ -5,9 +5,9 @@
 //! renders and scans out), no direct scan-out tuning, no DRM leasing. Outputs
 //! are placed left to right in connector order.
 //!
-//! Redraws stay on demand (`Backend::queue_redraw`): one idle callback per
-//! loop iteration renders every output that needs it. An output with a frame
-//! in flight renders again at its next vblank (`frame_finish`) instead, so
+//! Redraws stay on demand and per output (`redraw.rs`): one idle callback per
+//! loop iteration renders every output asked for. An output with a frame in
+//! flight renders again at its next vblank (`frame_finish`) instead, so
 //! redraws are paced by the display. A session lock is confirmed only after a
 //! locked frame has been shown on every output.
 
@@ -119,6 +119,8 @@ pub struct UdevData {
     cursor_theme: CursorTheme,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
+    /// When redraws are asked for (`OutputSurface::request`).
+    clock: smithay::utils::Clock<smithay::utils::Monotonic>,
     loop_handle: LoopHandle<'static, Pila>,
     /// Last: see the struct docs.
     pub session: LibSeatSession,
@@ -178,12 +180,50 @@ struct OutputSurface {
     /// swapchain and commits the modeset, a cost of setting the output up
     /// that's logged on its own, not counted in the frame budget.
     first_frame: bool,
-    /// After a redraw that had nothing new to show, the next waits until then
-    /// (`draw::idle_until`), so an output another one's input keeps asking to
-    /// redraw does it at most once per refresh; a timer then draws what's due.
+    /// After a redraw that had nothing new to show, the next that may bring
+    /// nothing either waits until then (`draw::idle_until`, `draw::idle_wait`):
+    /// a client committing no buffer in a loop of frame callbacks, or the
+    /// pointer moving with no cursor drawn, redraw at most once per refresh.
+    /// A timer then draws what's due.
     idle_until: Option<Duration>,
     /// That timer is set.
     idle_timer: bool,
+    /// A redraw asked for since the last one surely brings something new
+    /// (`redraw.rs`): it doesn't wait.
+    redraw_content: bool,
+    /// The first such request since the last redraw, then the one of the
+    /// frame in flight: how late it shows is measured (`frame_stats.rs`).
+    request: Option<Request>,
+    queued_request: Option<Request>,
+}
+
+/// A redraw asked for with something new to show (`OutputSurface::request`).
+#[derive(Clone, Copy, Debug)]
+struct Request {
+    /// When (monotonic).
+    at: Duration,
+    /// A frame was on its way then: the vblank after its own is due.
+    in_flight: bool,
+    /// The last vblank that showed a frame then, the grid of the next ones.
+    vblank: Duration,
+}
+
+impl OutputSurface {
+    /// Something changed on this output at `now`; `content`: surely shows.
+    fn ask_redraw(&mut self, content: bool, now: Duration) {
+        self.redraw_needed = true;
+        if !content {
+            return;
+        }
+        self.redraw_content = true;
+        if self.request.is_none() {
+            self.request = self.last_vblank_time.map(|vblank| Request {
+                at: now,
+                in_flight: self.frame_pending,
+                vblank,
+            });
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -196,9 +236,25 @@ enum LockFrame {
 impl UdevData {
     /// Ask every output for a new frame (see the module docs).
     pub fn queue_redraw(&mut self) {
+        let now = self.clock.now().into();
         for surface in self.outputs.values_mut() {
-            surface.redraw_needed = true;
+            surface.ask_redraw(true, now);
         }
+        self.schedule_render();
+    }
+
+    /// Ask `output` for a new frame; `content`: what changed surely shows.
+    pub fn queue_redraw_output(&mut self, output: &Output, content: bool) {
+        let now = self.clock.now().into();
+        let Some(surface) = self.outputs.values_mut().find(|s| s.output == *output) else {
+            return;
+        };
+        surface.ask_redraw(content, now);
+        self.schedule_render();
+    }
+
+    /// Render the outputs asked for in this loop iteration's idle callback.
+    fn schedule_render(&mut self) {
         if !self.redraw_scheduled {
             self.redraw_scheduled = true;
             self.loop_handle.insert_idle(render_all);
@@ -615,10 +671,8 @@ pub fn init_udev(
         LibinputInputBackend::new(libinput.clone()),
         |mut event, _, state| {
             on_input_device(state, &mut event);
+            // It asks for the redraws it needs (`process_input_event`).
             state.process_input_event(event);
-            // Input moves the cursor and changes hover state even when no
-            // client reacts; coalesced into one render pass per iteration.
-            state.queue_redraw();
         },
     )?;
 
@@ -701,6 +755,7 @@ pub fn init_udev(
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
         redraw_scheduled: false,
+        clock: smithay::utils::Clock::new(),
         cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),

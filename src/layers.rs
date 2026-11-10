@@ -216,6 +216,7 @@ impl Pila {
     pub fn remove_layer(&mut self, surface: &WlSurface) {
         let was_focused = self.has_keyboard_focus(surface);
         let mut zone_changed = false;
+        let mut outputs = Vec::new();
         for output in self.space.outputs() {
             let mut map = layer_map_for_output(output);
             let layer = map
@@ -223,11 +224,15 @@ impl Pila {
                 .find(|layer| layer.wl_surface() == surface)
                 .cloned();
             if let Some(layer) = layer {
+                outputs.push(output.clone());
                 let before = map.non_exclusive_zone();
                 map.unmap_layer(&layer);
                 zone_changed = map.non_exclusive_zone() != before;
                 break;
             }
+        }
+        for output in outputs {
+            self.queue_redraw_output(&output);
         }
         if zone_changed {
             self.refit_maximized();

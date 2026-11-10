@@ -10,16 +10,20 @@
 //! frame while an animation runs. Those are exact on bare metal (by the DRM
 //! sequence numbers of the vblanks that showed frames; `udev/`) and an
 //! estimate nested (a gap of more than 1.5 periods between frames;
-//! `winit.rs`), where the host decides when frames are shown. At trace level
-//! every frame is logged: when it was queued (at a vblank or not) and the
-//! vblank that showed it.
+//! `winit.rs`), where the host decides when frames are shown. On bare metal
+//! a frame with something new (a client's buffer, the cursor moving) that was
+//! asked for in time for a vblank (`IN_TIME` before it) but shown at a later
+//! one counts its refreshes as missed too, animation or not, and is counted
+//! `late` (`late_refreshes`). At trace level every frame is logged: when it
+//! was queued (at a vblank or not) and the vblank that showed it.
 //!
 //! A redraw that found nothing to show on an output (it built the scene and
-//! its elements, and the damage tracker found nothing new: the pointer moved
-//! on another output) queues no frame. Those are counted apart, `idle` with
-//! their CPU time summed, `idle_cpu_ms`. Each input event asks every output
-//! to redraw: on bare metal an output that just had nothing new then waits
-//! (`udev/draw.rs::idle_until`), at most one such redraw per refresh.
+//! its elements, and the damage tracker found nothing new: a commit with no
+//! buffer, the pointer moving with no cursor drawn) queues no frame. Those
+//! are counted apart, `idle` with their CPU time summed, `idle_cpu_ms`. Only
+//! the outputs a change shows on are redrawn (`redraw.rs`); on bare metal one
+//! that just had nothing new waits before the next redraw that may bring
+//! nothing (`udev/draw.rs::idle_wait`), at most one such redraw per refresh.
 //!
 //! Screen captures (`capture.rs`, `screencopy.rs`) build their frames on
 //! the event loop too, after the outputs' (`Pila::after_frames`): a frame's
@@ -46,6 +50,7 @@ pub struct FrameStats {
     cpu_total: Duration,
     cpu_max: Duration,
     missed: u32,
+    late: u32,
     idle: u32,
     idle_cpu: Duration,
 }
@@ -59,6 +64,9 @@ pub struct Report {
     pub cpu_avg: Duration,
     pub cpu_max: Duration,
     pub missed: u32,
+    /// Frames shown later than due (`late_refreshes`; bare metal), counted
+    /// in `missed` too.
+    pub late: u32,
     /// Redraws that had nothing to show, and their CPU time.
     pub idle: u32,
     pub idle_cpu: Duration,
@@ -103,6 +111,7 @@ impl FrameStats {
             cpu_avg: self.cpu_total.checked_div(self.frames).unwrap_or_default(),
             cpu_max: self.cpu_max,
             missed: self.missed,
+            late: self.late,
             idle: self.idle,
             idle_cpu: self.idle_cpu,
         };
@@ -116,6 +125,11 @@ impl FrameStats {
     /// `count` refreshes went by without the frame that was due.
     pub fn missed(&mut self, count: u32) {
         self.missed += count;
+    }
+
+    /// A frame was shown late (its refreshes go to `missed`).
+    pub fn late(&mut self) {
+        self.late += 1;
     }
 }
 
@@ -137,6 +151,41 @@ pub fn missed_in_gap(gap: Duration, period: Duration) -> u32 {
     ((gap.as_secs_f64() / period.as_secs_f64()).round() as u32).saturating_sub(1)
 }
 
+/// A frame asked for at least this long before a vblank (or half a period,
+/// if that's shorter) is in time for it: the pillar's budget per frame.
+pub const IN_TIME: Duration = Duration::from_millis(4);
+
+/// Refreshes a frame was shown late by: asked for at `requested`, with
+/// another frame `in_flight` then or not, shown at `shown`, on an output whose
+/// vblanks are `period` apart from one at `vblank`. Due is the first vblank
+/// at least `IN_TIME` after the request, or with a frame in flight the one
+/// after that frame's.
+pub fn late_refreshes(
+    requested: Duration,
+    in_flight: bool,
+    vblank: Duration,
+    shown: Duration,
+    period: Duration,
+) -> u32 {
+    if period.is_zero() {
+        return 0;
+    }
+    let next = crate::commit_pacing::next_vblank;
+    let due = if in_flight {
+        next(vblank, requested, period) + period
+    } else {
+        // The first vblank at or after the request plus the budget.
+        let earliest = requested + IN_TIME.min(period / 2);
+        next(
+            vblank,
+            earliest.saturating_sub(Duration::from_nanos(1)),
+            period,
+        )
+    };
+    let late = shown.saturating_sub(due).as_secs_f64() / period.as_secs_f64();
+    late.round() as u32
+}
+
 fn log_report(output: &str, report: &Report) {
     debug!(
         target: "pila::frames",
@@ -146,6 +195,7 @@ fn log_report(output: &str, report: &Report) {
         cpu_avg_ms = ms(report.cpu_avg),
         cpu_max_ms = ms(report.cpu_max),
         missed = report.missed,
+        late = report.late,
         idle = report.idle,
         idle_cpu_ms = ms(report.idle_cpu),
         "frames"
@@ -230,6 +280,16 @@ impl Pila {
         }
     }
 
+    /// A frame of `output` was shown `count` refreshes late (counted in
+    /// `missed` by the caller).
+    pub fn record_late(&mut self, output: &Output, count: u32) {
+        if count == 0 {
+            return;
+        }
+        debug!(target: "pila::frames", output = output.name(), count, "late frame");
+        self.frame_stats.entry(output.name()).or_default().late();
+    }
+
     /// `output` missed `count` refreshes.
     pub fn record_missed(&mut self, output: &Output, count: u32) {
         if count == 0 {
@@ -287,6 +347,61 @@ mod tests {
         let report = stats.take(7000 * MS).expect("an idle redraw");
         assert_eq!((report.frames, report.idle), (0, 1));
         assert_eq!(report.cpu_avg, Duration::ZERO);
+    }
+
+    #[test]
+    fn a_frame_asked_for_in_time_but_shown_a_vblank_late_is_counted() {
+        let period = 16 * MS;
+        // Vblanks at 100, 116, 132, ...
+        // Asked for at 111, 5 ms before 116 (more than the 4 ms budget):
+        // due at 116, shown at 132, one late.
+        assert_eq!(
+            late_refreshes(111 * MS, false, 100 * MS, 132 * MS, period),
+            1
+        );
+        assert_eq!(
+            late_refreshes(111 * MS, false, 100 * MS, 116 * MS, period),
+            0
+        );
+        // Asked for 3 ms before a vblank: in time for the next only.
+        assert_eq!(
+            late_refreshes(113 * MS, false, 100 * MS, 132 * MS, period),
+            0
+        );
+        assert_eq!(
+            late_refreshes(113 * MS, false, 100 * MS, 148 * MS, period),
+            1
+        );
+        // With a frame in flight the vblank after its own is due.
+        assert_eq!(
+            late_refreshes(102 * MS, true, 100 * MS, 132 * MS, period),
+            0
+        );
+        assert_eq!(
+            late_refreshes(102 * MS, true, 100 * MS, 164 * MS, period),
+            2
+        );
+        // At 144 Hz the budget is half a period at most.
+        let fast = Duration::from_micros(6944);
+        let vblank = 100 * MS;
+        let next = vblank + fast;
+        assert_eq!(
+            late_refreshes(next - 3 * MS, false, vblank, next + fast, fast),
+            0
+        );
+        assert_eq!(
+            late_refreshes(next - 4 * MS, false, vblank, next + fast, fast),
+            1
+        );
+        // A vblank known from long before still sets the grid.
+        assert_eq!(
+            late_refreshes(1001 * MS, false, 100 * MS, 1012 * MS, period),
+            0
+        );
+        assert_eq!(
+            late_refreshes(1001 * MS, false, 100 * MS, 1028 * MS, period),
+            1
+        );
     }
 
     #[test]
