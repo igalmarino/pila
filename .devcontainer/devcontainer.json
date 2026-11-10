@@ -29,7 +29,8 @@
     "source=${localEnv:HOME}/.local/state/pila,target=/run/host-pila,type=bind,readonly",
     // Claude Code auth/settings/history survive rebuilds.
     "source=claude-code-config-${devcontainerId},target=/home/dev/.claude,type=volume",
-    // The GitHub CLI login (gh auth login), so pushes keep working after a rebuild.
+    // The GitHub CLI login (gh auth login), so gh (API, releases) keeps working
+    // after a rebuild; git itself has no credentials here.
     "source=gh-config-${devcontainerId},target=/home/dev/.config/gh,type=volume",
     // Crate download cache survives rebuilds.
     "source=cargo-registry-${devcontainerId},target=/home/dev/.cargo/registry,type=volume",

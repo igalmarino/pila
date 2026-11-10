@@ -8,7 +8,8 @@ picture, the stream got frames, monitors were identified from their EDID (bare m
 frame statistics (no missed refresh, frames shown late included, CPU per frame on average within 4 ms, for the outputs'
 frames and, on average over all of them, the captures'; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
-and exits 1 on a failure; INFO lines report without judging (how long gamma set the blocking
+and exits 1 on a failure (`scripts/check --judge <log>` judges a log again; `PILA_BIN` runs
+another binary); INFO lines report without judging (how long gamma set the blocking
 way took: after a modeset, or a driver without `GAMMA_LUT`; the first frames after outputs were
 set up, which the budget leaves out; the redraws per output that found nothing new, `idle` in
 the frame statistics, at most one per refresh on bare metal). `--vrr` (bare metal) asks every
@@ -34,7 +35,8 @@ the compositor, checking the shell's answers and Pila's state (the control socke
 step: panels, launcher and keyboard, workspaces, taskbar, notifications, clipboard,
 screenshots, gamma, output management and power, the lock screen. It judges Pila's log (no
 panic, no client disconnected for a protocol error) and prints PASS/FAIL, plus NOTE for known
-bugs of a shell. Results, screenshots included, are in `pila-shells/<shell>/`: look at them.
+bugs of a shell (`scripts/shells --judge <dir>` judges an earlier run again). Results,
+screenshots included, are in `pila-shells/<shell>/`: look at them.
 Each run is sealed off (temporary HOME and runtime dir, private D-Bus) so it never touches the
 session it's run from. Run it after changing a protocol a shell uses, after a Smithay bump and
 before a release; a new shell feature that depends on Pila gets a step. Pitfalls: Quickshell's

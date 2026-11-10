@@ -1,5 +1,5 @@
-# pila as a Nix package: what scripts/install installs, from the flake
-# (flake.nix). pila loads libEGL and libwayland-client at runtime, so they're
+# Pila as a Nix package: what scripts/install installs, from the flake
+# (flake.nix). Pila loads libEGL and libwayland-client at runtime, so they're
 # linked by force to be found outside the standard library paths, as nixpkgs
 # does for niri.
 {

@@ -4,7 +4,7 @@ A plan, not a design that's been tried: no code follows it yet. It moves Pila fr
 (`udev/`: the seat's primary, which renders and scans out) to Smithay's `GpuManager` and
 `MultiRenderer`, so monitors on a second GPU (a dock on a discrete card, a hybrid laptop's
 HDMI port wired to the dGPU) light up. Read with `docs/ARCHITECTURE.md` ("Bare metal",
-"Render loop", "Screen capture", "Blur", "Rounded corners and shadows").
+"Render loop", "Screen capture", "Blur", "Rounded corners", "Shadows").
 
 ## Where Pila is
 
@@ -63,7 +63,7 @@ primary and copies the result to a buffer the target can scan out.
 - **GL, kept GL, behind `AsMut`:** `rounded.rs`'s and `blur.rs`'s shaders and their raw GL
   (`with_context`) need `GlesRenderer`/`GlesFrame`; their `RenderElement<R>` impls take the GL
   one with `renderer.as_mut()` / `frame.as_mut()`. Shaders are compiled once, on the primary
-  (`Shaders::get`, `BlurShaders`), as today. Their `RenderElement` impl is the one place that
+  (`rounded::Shaders::get`, `blur::Shaders::get`), as today. Their `RenderElement` impl is the one place that
   knows of `MultiFrame`; nothing above them changes.
 - **Captures** render on the primary's `GlesRenderer`, as offscreen work. Their dmabuf target is
   the primary's render node (it's what can render into it). The composited-frame blit

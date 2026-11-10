@@ -24,6 +24,8 @@ too; see [Use of AI](README.md#use-of-ai) for the terms.
   performance run with real programs, judged from Pila's log, frame statistics included:
   `--nested` from the dev container, plain from a TTY. A feature adds a scenario there
   only if it's bare-metal only or puts load on rendering.
+- A bug fix starts with a test that reproduces it, seen failing (or says why it can't be
+  tested: bare metal, looks); the test stays in the suite.
 - Small commits, each one building and passing the tests. Keep `config.example.toml`, the
   user manual (`docs/MANUAL.md`), the man page (`docs/pila.1`) and the `USAGE` text in
   `src/main.rs` in step with new settings, bindings and flags (tests check the bindings and
@@ -154,7 +156,7 @@ Inside the container:
 wayland-info | head        # talks to the host session through the mounted socket
 eglinfo -B                 # should list your GPU, not llvmpipe
 weston-simple-egl          # a spinning triangle window appears on your desktop
-cargo run                  # nested pila, with a terminal inside
+cargo run                  # nested Pila, with a terminal inside
 ```
 
 ### 4. Claude Code
@@ -190,7 +192,7 @@ checkout) and reach any host, so only do this with code you trust and commit oft
 
 | What | Where |
 | - | - |
-| Add system packages | `pacman` line in `.devcontainer/Dockerfile`, then rebuild |
+| Add system packages | `pacman` line in `.devcontainer/Dockerfile`, then `scripts/dev rebuild` |
 | Full passwordless sudo | `FULL_SUDO` build arg in `devcontainer.json` (lets anything in the container act as root) |
 
 The `dev` user has no `sudo` unless `FULL_SUDO` is set.
@@ -204,8 +206,10 @@ The `dev` user has no `sudo` unless `FULL_SUDO` is set.
   container's socket is sandboxed through wp-security-context, as a Flatpak's is: no screen
   capture, virtual keyboard, layer shell or the like, so that nothing in the container can
   read the screen or type into your windows. Nested Pila needs none of that, and tools run
-  inside it see all of its protocols. `PILA_DEV_PRIVILEGED=1 scripts/link-wayland` shares the
-  session's own socket instead, and everything in the container gets those powers.
+  inside it see all of its protocols. With `PILA_DEV_PRIVILEGED=1` exported in the terminal you
+  run `scripts/dev` from (it makes the socket again on every command), e.g.
+  `PILA_DEV_PRIVILEGED=1 scripts/dev shell`, the container shares the session's own socket
+  instead, and everything in it gets those powers.
 - **Nested Pila opens on the wrong desktop.** The container uses the session `scripts/dev`
   last ran from. Run `scripts/dev` in a terminal of the session you want.
 - **`Permission denied` on the socket.** Your host UID isn't the one the container user got.

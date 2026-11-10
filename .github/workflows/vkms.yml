@@ -4,7 +4,7 @@
 # modesetting, vblank-paced frames and their statistics, a client drawing,
 # a night light's gamma change (a GAMMA_LUT commit that doesn't wait), and a
 # second monitor plugged in and out (vkms through configfs, kernel 7.0 and
-# later), without real hardware. It stops early, saying so, if the runner's
+# later), without real hardware. It fails early, saying why, if the runner's
 # kernel has no vkms or no configfs for it. Actions are pinned by commit, as
 # in ci.yml.
 name: KMS on vkms

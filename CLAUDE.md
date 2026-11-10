@@ -21,7 +21,7 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   protocols are hidden here too; on GNOME a hard link to the session's socket); the compositor
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
-  `cargo ...`; see CONTRIBUTING.md); any `scripts/dev` command run from a session makes
+  `cargo ...`, `rebuild` after a Dockerfile change; see CONTRIBUTING.md); any `scripts/dev` command run from a session makes
   its Wayland socket again. Logging out and back in leaves `/run/host-wayland/` empty until
   then, and nested runs fail with `EventLoopCreation`.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev/`) cannot be tested in this
@@ -34,13 +34,15 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 ## Commands
 
 - Lint: `cargo clippy --all-targets -- -D warnings`
-- CI (`.github/workflows/ci.yml`, every push) also runs `cargo fmt --check`, builds with
+- CI (`.github/workflows/ci.yml`, every push to `main` and every PR) also runs `cargo fmt --check`, builds with
   `--locked`, does a staged install and runs `shellcheck --severity=warning
   --external-sources` on the scripts: run that after editing one. `compat.yml` (`rust-version`,
   Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when dependencies or packaging change, weekly
   and by hand before a release. `packages.yml` builds the `.deb` and `.rpm` of a release.
-  `vkms.yml` (by hand, an experiment) runs the udev backend on the kernel's virtual KMS
-  driver in the runner's VM: frames, a gamma change, a monitor plugged in and out.
+  `aur.yml` publishes `packaging/aur/pila-git` to the AUR once the user approves it (the
+  `aur` environment). `vkms.yml` (by hand, an experiment) runs the udev backend on the kernel's
+  virtual KMS driver in the runner's VM: frames, a gamma change, a monitor plugged in and out.
+  `fuzz.yml` (by hand) runs the fuzz targets in `fuzz/` for a few minutes each.
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Every feature gets
   integration tests (`tests/*.rs`; how they work is in `tests/CLAUDE.md`) and a new test
   goes into `tests/FEATURES.md`; only bare-metal paths (`udev/`), real frame times
@@ -69,13 +71,16 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   `pila-check.log`) is for you: run it before asking the user to check anything; the user
   runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. What it
   checks and when a feature adds a scenario: `scripts/CLAUDE.md`.
+- Desktop shells: `scripts/shells [noctalia|dms]` walks Noctalia's and Dux Shell's IPC through
+  every feature that depends on Pila, on a sealed-off headless Pila (`scripts/CLAUDE.md`): after
+  changing a protocol a shell uses, after a Smithay bump and before a release.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
   and `grim` in a loop from a script run with `cargo run -- -c`.
 - The login session (the user, on the host): `scripts/install` builds the release binary
   (with the host's cargo if there is one, else `--container`; `--no-build`) and installs it
-  with `resources/session/` (the `pila-session` wrapper and the `wayland-sessions` entry,
+  with `scripts/report` (as `pila-report`), the man page, `resources/session/` (the `pila-session` wrapper and the `wayland-sessions` entry,
   whose `@BINDIR@` it fills in) and the portal configs; `scripts/uninstall` removes them.
   Paths come from `scripts/install-paths` (`PREFIX`, `BINDIR`, `DATADIR`, `SYSCONFDIR`,
   `DESTDIR`), sourced by both. Its log is in the journal (`journalctl -t pila -b`) and in `~/.local/state/pila/pila.log`,
@@ -85,10 +90,13 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 - Arch package: `packaging/aur/pila-git`. Keep `depends` in its `PKGBUILD` in step with the
   libraries Pila links (`readelf -d`) and README's package table. Packaging and releases:
   the `release` skill.
+- Debian/Fedora packages: `packaging/nfpm.yaml`, built by `packages.yml` from a staged
+  `scripts/install`. A directory added to `install_files` and a newly linked library go there
+  too (`contents`, `depends`).
 - Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file added
   to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix job builds it and
   starts Pila from it. `flake.lock` pins nixpkgs; a dependency on a new system library goes in
-  `buildInputs` there too.
+  `package.nix`'s `buildInputs` too.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's
@@ -135,7 +143,8 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   every 5 s, frames, average and worst CPU time and missed refreshes, plus every frame
   over half the period, and apart the redraws that found nothing new to show (`idle`, with
   their summed CPU time; `scripts/check` reports them per output). Missed refreshes are vblanks with no new frame while an
-  animation runs: exact on bare metal (the DRM sequence of the vblanks that showed
+  animation runs and, on bare metal, a frame asked for in time but shown a vblank late,
+  animation or not (`late`): exact on bare metal (the DRM sequence of the vblanks that showed
   frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
   show); `pila::frames=trace` logs every frame. The first frame after an output is set up
   (connected, powered on, a new mode, back from another VT: swapchain and modeset) is a cost of
@@ -218,7 +227,8 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   `unmap_window`/`raise_window`. The tests' headless check (`PILA_HEADLESS_CHECK_REDRAWS`)
   panics on an output that changed with no redraw asked. An idle callback inserted outside
   an event source must ping `Pila::wake`, or it runs after the next event, however late;
-  redraws requested from `after_frames` go through `defer_redraws`.
+  redraws requested from `after_frames` go through `defer_redraws` (`step_animations` does
+  the same by hand).
 - **Session lock:** the focus types (`focus.rs`) refuse input to anything but a lock
   surface while locked, and `Pila::under` hits nothing else; a new path that tries panics in
   debug builds ("refused while locked"). A new path still refuses what it shouldn't do while
@@ -261,5 +271,5 @@ Smithay's `smallvil` (minimal stacking compositor) and `anvil` (full-featured) e
 the canonical references. Clone `https://github.com/Smithay/smithay` outside `/workspace`
 (e.g. `/tmp`) at the `rev` of the `smithay` dependency in `Cargo.toml` and read them before
 inventing new patterns. Moving `rev` forward is a change of its own: read Smithay's
-`CHANGELOG.md` and log since the old one, run the whole suite and `scripts/check --nested`,
-and have the user check bare metal (`udev/`).
+`CHANGELOG.md` and log since the old one, run the whole suite, `scripts/check --nested` and
+`scripts/shells`, and have the user check bare metal (`udev/`).
