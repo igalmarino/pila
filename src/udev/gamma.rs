@@ -9,8 +9,10 @@
 //! commit that holds the event loop for a whole refresh (measured: 16.7 ms
 //! at 60 Hz), stays for drivers without `GAMMA_LUT`, a commit the driver
 //! refuses, and setting gamma again after a modeset, which blocks anyway.
-//! Either way how long it took is logged (`pila::frames`, and once in the
-//! plain log past the frame budget).
+//! Either way how long it took is logged (`pila::frames`), and once in the
+//! plain log when a client's change went past the frame budget: setting the
+//! ramps again after a modeset blocks as the modeset does, at every startup,
+//! and would only spend that one warning.
 
 use std::{
     os::fd::AsFd,
@@ -23,13 +25,27 @@ use super::*;
 /// The CPU budget of a frame (CLAUDE.md, "Performance pillar").
 const FRAME_BUDGET: Duration = Duration::from_millis(4);
 
+/// Why gamma is being set: a client's change (`gamma_control.rs`), or the
+/// ramps put back after the CRTC was set up again (`UdevData::reapply_gamma`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum GammaCause {
+    Client,
+    Modeset,
+}
+
 /// Set a CRTC's gamma ramps through the legacy ioctl, which atomic drivers
 /// serve too, as a blocking commit.
-pub(super) fn apply_gamma(device: &DrmDevice, crtc: crtc::Handle, ramp: &[u16], size: u32) -> bool {
+pub(super) fn apply_gamma(
+    device: &DrmDevice,
+    crtc: crtc::Handle,
+    ramp: &[u16],
+    size: u32,
+    cause: GammaCause,
+) -> bool {
     let n = size as usize;
     let started = Instant::now();
     let result = device.set_gamma(crtc, &ramp[..n], &ramp[n..2 * n], &ramp[2 * n..3 * n]);
-    record_time(started, "ioctl");
+    record_time(started, "ioctl", cause);
     match result {
         Ok(()) => true,
         Err(err) => {
@@ -39,14 +55,20 @@ pub(super) fn apply_gamma(device: &DrmDevice, crtc: crtc::Handle, ramp: &[u16], 
     }
 }
 
+/// Whether setting gamma that took `took` is worth the plain log's one
+/// warning: a client's change past the frame budget, not one after a modeset.
+fn warns(took: Duration, cause: GammaCause) -> bool {
+    cause == GammaCause::Client && took > FRAME_BUDGET
+}
+
 /// Log how long setting gamma held the event loop, and which way it went
 /// (`commit` or the blocking `ioctl`).
-fn record_time(started: Instant, how: &str) {
+fn record_time(started: Instant, how: &str, cause: GammaCause) {
     let took = started.elapsed();
     let ms = took.as_secs_f64() * 1000.0;
     tracing::debug!(target: "pila::frames", ms, how, "gamma");
     static WARNED: AtomicBool = AtomicBool::new(false);
-    if took > FRAME_BUDGET && !WARNED.swap(true, Ordering::Relaxed) {
+    if warns(took, cause) && !WARNED.swap(true, Ordering::Relaxed) {
         warn!(
             ms,
             "setting gamma held the event loop past a frame's budget (logged once)"
@@ -111,7 +133,7 @@ fn commit_gamma_lut(
     if let Err(err) = device.destroy_property_blob(blob) {
         debug!(?err, "couldn't destroy a GAMMA_LUT blob");
     }
-    record_time(started, "commit");
+    record_time(started, "commit", GammaCause::Client);
     match result {
         Ok(()) => true,
         Err(err) => {
@@ -150,7 +172,7 @@ pub(super) fn commit_pending_gamma(data: &mut UdevData, crtc: crtc::Handle) -> b
             return true;
         }
     }
-    if !apply_gamma(drm.device(), crtc, &ramp, size) {
+    if !apply_gamma(drm.device(), crtc, &ramp, size, GammaCause::Client) {
         warn!(name = surface.output.name(), "failed to set gamma");
     }
     false
@@ -177,6 +199,15 @@ pub(super) fn ramp_if_set(ramp: &[u16], size: u32) -> Option<Vec<u16>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_clients_slow_change_warns_not_one_after_a_modeset() {
+        let slow = FRAME_BUDGET * 4;
+        assert!(warns(slow, GammaCause::Client));
+        assert!(!warns(FRAME_BUDGET / 2, GammaCause::Client));
+        // Expected: a modeset blocks anyway, every output at every startup.
+        assert!(!warns(slow, GammaCause::Modeset));
+    }
 
     #[test]
     fn a_gamma_lut_interleaves_the_ramps_with_a_padding_entry() {

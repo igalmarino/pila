@@ -531,7 +531,9 @@ Key flows and invariants:
   which block anyway). Ramps set while the session is on another VT or the output is off
   are only remembered until then: without DRM master the ioctl fails, and so would the
   client's control (a night light stepping its fade then stops for good). Each logs its time and way (`pila::frames` "gamma", `how`; once in
-  the plain log past 4 ms; `scripts/check` judges the commits).
+  the plain log when a client's change goes past 4 ms, `GammaCause::Client`: the ramps put back
+  after a modeset block with it, at every startup, and would spend that warning; `scripts/check`
+  judges the commits).
 - **Output power** (`output_power.rs`, wlr-output-power-management): off = drop the
   `OutputSurface.drm_output` (the CRTC is cleared, the monitor sleeps), on = the CRTC set up
   again with the stored connector and mode through `initialize_with_fallback`

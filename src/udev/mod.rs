@@ -352,7 +352,7 @@ impl UdevData {
                 self.redraw_scheduled = true;
                 self.loop_handle.insert_idle(render_all);
             }
-        } else if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+        } else if !apply_gamma(self.drm.device(), crtc, ramp, size, GammaCause::Client) {
             return false;
         }
         let Some(surface) = self.outputs.get_mut(&crtc) else {
@@ -494,7 +494,7 @@ impl UdevData {
                 &linear
             }
         };
-        if !apply_gamma(self.drm.device(), crtc, ramp, size) {
+        if !apply_gamma(self.drm.device(), crtc, ramp, size, GammaCause::Modeset) {
             warn!(name = surface.output.name(), "failed to re-apply gamma");
         }
     }

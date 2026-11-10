@@ -23,6 +23,9 @@
 - **Less CPU with two monitors:** moving the mouse on one monitor redrew the other on every
   mouse event for nothing (measured: 1000 to 5000 times a second, about 5% of a core). A monitor
   with nothing new now waits until its next refresh is near, at most once per refresh.
+- **No gamma warning at every login:** the log warned that setting gamma held Pila past a
+  frame's budget each time it started, for the expected cost of setting up the monitors. The
+  warning is now kept for a night light's changes, where it means something.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it. The AUR package is no longer stripped, so the backtrace has the names of the
