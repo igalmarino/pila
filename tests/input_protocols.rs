@@ -865,13 +865,9 @@ fn a_clicked_notification_can_activate_a_window() {
     };
     let (note, _) = notifier.layer_surface("notification", &spec, [255, 0, 0, 255]);
     notifier.wait_surface_configured(note);
-    pila.wait("the notification", |s| {
-        s["layers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|l| l["namespace"] == "notification")
-    });
+    // Drawn, not only listed: a layer surface is mapped as it's created,
+    // and takes no click before its first buffer.
+    pila.wait_pixel(1180.0, 30.0, [0, 0, 255, 255]);
     pila.move_to(1180.0, 30.0);
     pila.click("left");
     notifier.wait("the click", |s| {
