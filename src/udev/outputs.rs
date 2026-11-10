@@ -657,6 +657,7 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
         scale,
         x,
         y,
+        gpu = %id.node,
         "output connected"
     );
     if let (Some(on), Some(Backend::Udev(data))) = (output_config.adaptive_sync, &mut state.backend)

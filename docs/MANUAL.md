@@ -176,7 +176,6 @@ too, until you change that monitor's section in the configuration.
 **Monitors on another GPU.** On a laptop with two GPUs, the HDMI or DisplayPort output is often
 wired to the dedicated one, and a dock may have a GPU of its own. Pila draws everything with
 the seat's main GPU and copies the picture of such a monitor to the GPU it's on, which shows it.
-If both GPUs have a connector of the same name, the second one's gets a number: `DP-1-2`.
 `pila-report` says which GPUs Pila uses. This is new and hasn't been tried on such a machine
 yet: a report of how it goes is very welcome.
 

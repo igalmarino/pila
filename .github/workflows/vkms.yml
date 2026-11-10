@@ -158,15 +158,28 @@ jobs:
           outputs=$( (grep -oE 'output connected name="[^"]+"' pila-vkms.log || true) | sort -u | wc -l)
           verdict "a monitor plugged in came on ($outputs outputs)" [ "$outputs" -ge 2 ]
           check "the monitor unplugged went away" 'output disconnected name='
-          drawn=$( (grep -oE 'pila::frames: frames output="[^"]+" .*frames=[1-9]' pila-vkms.log || true) |
-            grep -oE 'output="[^"]+"' | sort -u | wc -l)
-          verdict "both monitors were drawn on ($drawn)" [ "$drawn" -ge 2 ]
+          # A monitor nothing changes on is drawn once, its first frame.
+          drawn=$( (grep -oE 'pila::frames: (frames|first frame after setting the output up) output="[^"]+"( .*frames=[1-9])?' pila-vkms.log || true) |
+            grep -E 'first frame|frames=[1-9]' | grep -oE 'output="[^"]+"' | sort -u | wc -l)
+          verdict "every monitor that came on was drawn on ($drawn of $outputs)" [ "$drawn" -ge "$outputs" ]
           check "the second GPU was opened" 'using another GPU for its monitors'
           check "llvmpipe is known as a software renderer" 'a software renderer: frames for another GPU go through memory'
           check "its frames are copied through memory" 'Falling back to cpu-copy'
-          check "its monitor got a name of its own" 'output connected name="[^"]+-2"'
-          second_drawn=$( (grep -oE 'pila::frames: frames output="[^"]+-2" .*frames=[1-9]' pila-vkms.log || true) | wc -l)
-          verdict "its monitor was drawn on, copied from the first ($second_drawn)" [ "$second_drawn" -ge 1 ]
+          # The second device's node as it was first opened, and its monitor.
+          second_gpu=$( (grep -oE 'using another GPU for its monitors path=/dev/dri/card[0-9]+' pila-vkms.log || true) |
+            head -n 1 | grep -oE 'card[0-9]+$')
+          second_output=$( (grep -E "output connected name=.* gpu=${second_gpu:-none}\$" pila-vkms.log || true) |
+            head -n 1 | grep -oE 'name="[^"]+"' | cut -d'"' -f2)
+          verdict "its monitor came on (${second_output:-none} on ${second_gpu:-none})" [ -n "$second_output" ]
+          # Nothing changes on it afterwards: its first frame is the one drawn.
+          check "its monitor was drawn on, copied from the first" \
+            "pila::frames: first frame after setting the output up output=\"${second_output:-none}\""
+          check "the first monitor went on being drawn after it" \
+            'pila::frames: frames output="[^"]+" .*frames=[1-9][0-9]'
+          readded=$( (grep -E 'output connected name=.* gpu=card[0-9]+$' pila-vkms.log || true) | tail -n 1 |
+            grep -oE 'name="[^"]+"' | cut -d'"' -f2)
+          check "its monitor came back and was drawn on when added again (${readded:-none})" \
+            "pila::frames: first frame after setting the output up output=\"${readded:-none}\""
           check "it went away when removed" 'a GPU went away'
           opened=$( (grep -c 'using another GPU for its monitors' pila-vkms.log || true))
           verdict "it was opened again when added ($opened times)" [ "$opened" -ge 2 ]
