@@ -515,8 +515,8 @@ else
 fi
 
 # Redraws that found nothing new on an output (`idle` in the frame statistics:
-# the pointer moved on another one) queue no frame; on bare metal nothing paces
-# them. Reported per output, not judged yet.
+# the pointer moved on another one) queue no frame; on bare metal at most one
+# per refresh (`udev/draw.rs::idle_until`). Reported per output, not judged.
 if [ -n "$stats" ]; then
     awk '{
         o = ""; n = c = t = 0

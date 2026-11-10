@@ -36,6 +36,20 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
             return;
         }
     }
+    // An output that had nothing new to show just now waits its turn
+    // (`idle_until`), unless a lock waits for it.
+    let now: Duration = state.clock.now().into();
+    let lock_pending = state.lock_pending();
+    if let Some(Backend::Udev(data)) = &mut state.backend {
+        let wait = data.outputs.get(&crtc).and_then(|surface| {
+            let until = surface.idle_until.filter(|until| now < *until)?;
+            (surface.redraw_needed && !surface.frame_pending && !lock_pending).then(|| until - now)
+        });
+        if let Some(delay) = wait {
+            data.schedule_idle_redraw(crtc, delay);
+            return;
+        }
+    }
     let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
@@ -65,7 +79,6 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
     let input = state.frame_input();
     let scene = &input.scene;
     let pointer_here = output_geo.to_f64().contains(input.pointer);
-    let lock_pending = state.lock_pending();
     let scale = crate::scale::output_scale(&output);
 
     let Pila {
@@ -176,6 +189,10 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         surface.lock_frame = LockFrame::None;
     }
     let queued = surface.frame_pending;
+    surface.idle_until = nothing_new.then(|| {
+        let period = crate::frame_stats::refresh_period(&output);
+        idle_until(surface.last_vblank_time, now, period)
+    });
     let mut retry = None;
     if let Some((stage, err)) = failure {
         retry = surface.recovery.failed();
@@ -341,6 +358,26 @@ pub(super) fn frame_finish(
     }
 }
 
+/// Until when an output that rendered nothing new at `now` waits before
+/// rendering again: half a period before the next vblank (`last` is one
+/// it showed, if any), or the one after if that's past. So it renders at
+/// most once per refresh, however often other outputs' input asks, and a
+/// change that comes meanwhile is drawn in time for the vblank it would
+/// have made anyway, unless it comes in the last half of the period. Not
+/// frame pacing: frames with something to show are paced by vblanks.
+pub(super) fn idle_until(last: Option<Duration>, now: Duration, period: Duration) -> Duration {
+    let next = match last {
+        Some(last) => crate::commit_pacing::next_vblank(last, now, period),
+        None => now + period,
+    };
+    let deadline = next.saturating_sub(period / 2);
+    if deadline > now {
+        deadline
+    } else {
+        deadline + period
+    }
+}
+
 /// Whether the next frame on an output follows the one just shown with no pause
 /// meant: an animation runs, and this output has a frame on its way. One that
 /// has nothing new while another output animates just rests, and its idle
@@ -400,6 +437,21 @@ mod tests {
         // None on (or none at all): nothing to wait for.
         assert!(lock_shown([(false, Queued)]));
         assert!(lock_shown([]));
+    }
+
+    #[test]
+    fn an_output_with_nothing_new_waits_until_half_a_period_before_a_vblank() {
+        let ms = Duration::from_millis;
+        let period = ms(16);
+        // A vblank at 100 ms: the next at 116, so until 108.
+        assert_eq!(idle_until(Some(ms(100)), ms(102), period), ms(108));
+        // Past 108 already: until half a period before the one after.
+        assert_eq!(idle_until(Some(ms(100)), ms(110), period), ms(124));
+        // Rendering right at the end of a wait waits a whole period more:
+        // at most one render with nothing new per refresh.
+        assert_eq!(idle_until(Some(ms(100)), ms(108), period), ms(124));
+        // No vblank known yet: half a period.
+        assert_eq!(idle_until(None, ms(50), period), ms(58));
     }
 
     #[test]

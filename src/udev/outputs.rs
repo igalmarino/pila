@@ -525,6 +525,8 @@ pub(super) fn connector_connected(
             adaptive_sync: false,
             presented_variable: false,
             first_frame: true,
+            idle_until: None,
+            idle_timer: false,
         },
     );
     if !enabled {

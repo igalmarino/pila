@@ -20,6 +20,9 @@
   (only `--json` had their `power`).
 - **A swipe begun as the screen locks runs nothing:** its action (show the desktop, say) ran
   behind the lock screen if the screen locked during the swipe.
+- **Less CPU with two monitors:** moving the mouse on one monitor redrew the other on every
+  mouse event for nothing (measured: 1000 to 5000 times a second, about 5% of a core). A monitor
+  with nothing new now waits until its next refresh is near, at most once per refresh.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it.

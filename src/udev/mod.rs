@@ -178,6 +178,12 @@ struct OutputSurface {
     /// swapchain and commits the modeset, a cost of setting the output up
     /// that's logged on its own, not counted in the frame budget.
     first_frame: bool,
+    /// After a redraw that had nothing new to show, the next waits until then
+    /// (`draw::idle_until`), so an output another one's input keeps asking to
+    /// redraw does it at most once per refresh; a timer then draws what's due.
+    idle_until: Option<Duration>,
+    /// That timer is set.
+    idle_timer: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -234,6 +240,41 @@ impl UdevData {
             warn!(err = %err.error, "can't schedule a retry for an output");
             if let Some(surface) = self.outputs.get_mut(&crtc) {
                 surface.recovery.retry();
+            }
+        }
+    }
+
+    /// Draw `crtc` again at `at` (monotonic), when its wait after a redraw
+    /// with nothing new ends (`draw::idle_until`). One timer per output.
+    fn schedule_idle_redraw(&mut self, crtc: crtc::Handle, delay: Duration) {
+        let Some(surface) = self.outputs.get_mut(&crtc) else {
+            return;
+        };
+        if surface.idle_timer {
+            return;
+        }
+        surface.idle_timer = true;
+        let timer = Timer::from_duration(delay);
+        let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
+            if let Some(Backend::Udev(data)) = &mut state.backend {
+                if let Some(surface) = data.outputs.get_mut(&crtc) {
+                    surface.idle_timer = false;
+                    surface.idle_until = None;
+                }
+                if !data.redraw_scheduled {
+                    data.redraw_scheduled = true;
+                    data.loop_handle.insert_idle(render_all);
+                }
+            }
+            TimeoutAction::Drop
+        });
+        if let Err(err) = inserted {
+            // Without a timer the output would wait for the next redraw
+            // asked for: don't wait at all then.
+            warn!(err = %err.error, "can't schedule an output's redraw");
+            if let Some(surface) = self.outputs.get_mut(&crtc) {
+                surface.idle_timer = false;
+                surface.idle_until = None;
             }
         }
     }

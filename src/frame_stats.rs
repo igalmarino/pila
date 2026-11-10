@@ -17,8 +17,9 @@
 //! A redraw that found nothing to show on an output (it built the scene and
 //! its elements, and the damage tracker found nothing new: the pointer moved
 //! on another output) queues no frame. Those are counted apart, `idle` with
-//! their CPU time summed, `idle_cpu_ms`: on bare metal nothing paces them, so
-//! each input event can cost one per output that has nothing new.
+//! their CPU time summed, `idle_cpu_ms`. Each input event asks every output
+//! to redraw: on bare metal an output that just had nothing new then waits
+//! (`udev/draw.rs::idle_until`), at most one such redraw per refresh.
 //!
 //! Screen captures (`capture.rs`, `screencopy.rs`) build their frames on
 //! the event loop too, after the outputs' (`Pila::after_frames`): a frame's

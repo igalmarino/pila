@@ -112,7 +112,13 @@ Key flows and invariants:
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output: `queue_redraw` schedules one idle
   `render_all`; an output with a frame in flight renders at its vblank (`frame_finish`),
-  which also sends presentation feedback with the kernel's timestamp. A frame that fails
+  which also sends presentation feedback with the kernel's timestamp. A redraw asks every
+  output, and one with nothing new (the pointer moves on another) builds its scene for nothing
+  and queues no frame, so nothing paced the next: thousands a second. After one, the output
+  waits until half a period before its next vblank (`draw::idle_until`,
+  `OutputSurface::idle_until`; a one-shot timer, `schedule_idle_redraw`, draws what was asked
+  meanwhile): at most one such redraw per refresh, and a change in the first half of a period
+  still makes the next vblank. A lock waiting for its frame doesn't wait. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by

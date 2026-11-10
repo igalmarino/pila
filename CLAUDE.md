@@ -149,8 +149,11 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   needed; frames paced by vblank (udev) or the host's frame callbacks (nested), never by
   timers (the headless test backend, which has no vblank, is the one exception;
   `schedule_hidden_frames`' and `commit_pacing.rs`'s once-a-second wakes for hidden
-  surfaces, the wake for a timestamp a client asked for and the frame callbacks a captured
-  hidden window gets at its capture client's rate aren't pacing); idle callbacks
+  surfaces, the wake for a timestamp a client asked for, the frame callbacks a captured
+  hidden window gets at its capture client's rate and, on bare metal, the wait of an output
+  that just redrew with nothing new until half a period before its next vblank
+  (`udev/draw.rs::idle_until`: other outputs' input would redraw it up to thousands of
+  times a second) aren't pacing); idle callbacks
   inserted outside an event source come with a `Pila::wake` ping (see "Architecture");
   one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
