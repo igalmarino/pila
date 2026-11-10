@@ -26,7 +26,7 @@
 # Mod+D and tapping Mod alone. Unset, they do nothing.
 # launcher = "fuzzel"              # e.g.
 
-# Commands run at startup instead of the terminal (pila -c overrides them).
+# Commands run at startup instead of the terminal (`pila -c` overrides them).
 # They start once Xwayland is ready, so X11 apps work too. Unset, the terminal.
 # autostart = [                    # e.g.
 #     "swaybg -c 333355",

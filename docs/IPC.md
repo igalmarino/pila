@@ -1,7 +1,7 @@
 # IPC
 
-`pila msg` asks a running Pila about its windows and monitors and runs actions. Other programs
-can talk to the same socket directly.
+`pila msg` asks a running Pila about its windows, monitors, workspaces and keyboard layouts and
+runs actions. Other programs can talk to the same socket directly.
 
 ## `pila msg`
 

@@ -277,7 +277,7 @@ screen:
 autostart = ["noctalia"]
 launcher = "noctalia msg panel-toggle launcher"    # Mod+D opens Noctalia's launcher
 
-# Noctalia animates its own panels; without this, pila animates them as well.
+# Noctalia animates its own panels; without this, Pila animates them as well.
 [[layer-rule]]
 namespace = "noctalia-*"
 animations = false
@@ -306,7 +306,7 @@ systemd or elogind runs it. Elsewhere, or to quit Pila directly, set that button
 autostart = ["dms run"]
 launcher = "dms ipc call spotlight toggle"         # Mod+D opens its launcher
 
-# Dux Shell animates its own panels; without this, pila animates them as well.
+# Dux Shell animates its own panels; without this, Pila animates them as well.
 [[layer-rule]]
 namespace = "dms:*"
 animations = false
@@ -341,6 +341,9 @@ autostart = [
 ]
 ```
 
+Clipboard managers that use ext-data-control, night light (`wlsunset`, through gamma control) and
+screen recorders that use screencopy (`wf-recorder`) work too.
+
 Bars and taskbars can list, focus, minimize and close windows (waybar's taskbar module, for
 instance) and switch workspaces. What no protocol tells, a bar gets from `pila msg`; a waybar
 module that shows the keyboard layout as it changes and switches it on a click:
@@ -351,9 +354,6 @@ module that shows the keyboard layout as it changes and switches it on a click:
     "on-click": "pila msg action switch-layout next"
 }
 ```
- Clipboard managers that use ext-data-control, night light
-(`wlsunset`, through gamma control) and screen recorders that use screencopy (`wf-recorder`)
-work too.
 
 **Programs started by Pila** get `XDG_CURRENT_DESKTOP=pila` and `PILA_SOCKET`, for `pila msg`.
 Programs such as kitty open links with `xdg-open`, from the `xdg-utils` package: without it, a
