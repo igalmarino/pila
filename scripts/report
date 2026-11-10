@@ -125,22 +125,37 @@ gpu_device() {
     echo "${gpu%$'\033'*}"
 }
 
-# With two GPUs (a hybrid laptop), which of them pila draws with.
+# A GPU's kernel driver, from its device path (/dev/dri/card1).
+gpu_driver() {
+    basename "$(readlink -f "/sys/class/drm/${1##*/}/device/driver" 2>/dev/null)" 2>/dev/null
+}
+
+# With two GPUs (a hybrid laptop), which of them pila draws with, and the
+# others it uses for their monitors (drawn on the first, copied there).
 gpu_in_use() {
-    local gpu driver
-    [ -n "$(find_log)" ] || return 0
+    local log gpu driver other
+    log="$(find_log)"
+    [ -n "$log" ] || return 0
     gpu="$(gpu_device)"
     if [ -z "$gpu" ]; then
         echo "In use by Pila: not in the log"
         return 0
     fi
-    driver="$(basename "$(readlink -f "/sys/class/drm/${gpu##*/}/device/driver" 2>/dev/null)" 2>/dev/null)"
+    driver="$(gpu_driver "$gpu")"
     echo "In use by Pila: $gpu${driver:+ (driver $driver)}"
+    grep -a 'using another GPU for its monitors' "$log" \
+        | sed -n 's/.*path=\([^[:space:]]*\).*/\1/p' | sort -u \
+        | while read -r other; do
+            other="${other%$'\033'*}"
+            driver="$(gpu_driver "$other")"
+            echo "Also for its monitors: $other${driver:+ (driver $driver)}"
+        done
 }
 
 # Only what the kernel lists: no EDID, which has the monitor's serial number.
-# pila uses one GPU: a monitor wired to another (often a hybrid laptop's
-# HDMI or DisplayPort, on the dedicated GPU) doesn't show up, and is marked.
+# A monitor wired to another GPU than the one pila draws with (often a hybrid
+# laptop's HDMI or DisplayPort, on the dedicated GPU) is marked: that path is
+# new.
 section_monitors() {
     local connector name mode card used note
     echo "## Monitors"
@@ -154,7 +169,7 @@ section_monitors() {
         mode="$(head -n 1 "$connector/modes" 2>/dev/null)"
         note=""
         if [ -n "$used" ] && [ "$card" != "$used" ]; then
-            note=" (on $card, not the GPU Pila uses: not supported yet, so Pila doesn't show it)"
+            note=" (on $card, another GPU: Pila draws it on its own and copies it there)"
         fi
         echo "${name#"$card"-}: preferred mode ${mode:-unknown}$note"
     done

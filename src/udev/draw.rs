@@ -171,6 +171,7 @@ fn draw(
         gpus,
         primary,
         outputs,
+        devices,
         cursor_theme,
         ..
     } = &mut **data;
@@ -182,10 +183,18 @@ fn draw(
     let Some(drm_output) = surface.drm_output.as_mut() else {
         return;
     };
-    let Some(mut renderer) = super::primary_renderer(gpus, primary) else {
+    let Some(render_node) = devices.get(&id.node).map(|device| device.render_node) else {
         return;
     };
-    let renderer = renderer.as_mut();
+    // On another GPU than the primary: rendered there, copied to this one.
+    let format = drm_output.with_compositor(|compositor| compositor.format());
+    let Some(mut lent) = super::draw_renderer(gpus, primary, &render_node, format) else {
+        return;
+    };
+    // Pila's elements are built on the primary's renderer either way.
+    let renderer = match &mut lent {
+        OutputRenderer::Primary(lent) | OutputRenderer::Secondary(lent) => lent.as_mut(),
+    };
     surface.redraw_needed = false;
     surface.redraw_content = crate::redraw::Content::Maybe;
     let request = surface.request.take();
@@ -205,12 +214,6 @@ fn draw(
         scale,
     ));
 
-    let rendered = drm_output.render_frame(
-        renderer,
-        &elements,
-        render::clear_color(scene),
-        FrameFlags::DEFAULT,
-    );
     let cursor_wl_surface = input.cursor_wl_surface();
     // What failed at the DRM level, and how.
     let mut failure: Option<(&str, String)> = None;
@@ -219,37 +222,67 @@ fn draw(
     let mut capture_cpu = Duration::ZERO;
     // Rendered, with nothing new to show: no frame (`frame_stats.rs`, idle).
     let mut nothing_new = false;
-    match rendered {
-        Ok(result) => {
-            frame::update_primary_outputs(scene, cursor_wl_surface, &output, &result.states);
-            if !result.is_empty {
-                // Captures of this output take the frame just composited,
-                // blitted, rather than drawing the scene again
-                // (`Captures::take_composited`). All of it: the buffer may
-                // hold anything.
-                let capture_started = std::time::Instant::now();
-                for job in capture.take_composited(&output, &elements, pointer_here) {
-                    let (size, scale) = (job.size, job.scale);
-                    let mut blit = |renderer: &mut GlesRenderer, target: &mut GlesTarget<'_>| {
-                        result
-                            .blit_frame_result(
-                                size,
-                                Transform::Normal,
-                                scale,
-                                renderer,
-                                target,
-                                [Rectangle::from_size(size)],
-                                std::iter::empty::<Id>(),
-                            )
-                            .map_err(|err| format!("{err:?}"))
-                    };
-                    let source = Source::Draw(&mut blit);
-                    let copied = copy_frame(renderer, &job.buffer, capture, size, scale, source);
-                    composited.push((job, copied));
+    let clear = render::clear_color(scene);
+    // The elements' states and whether nothing changed, or why it failed.
+    let rendered = match &mut lent {
+        OutputRenderer::Primary(lent) => {
+            let renderer = lent.as_mut();
+            match drm_output.render_frame(renderer, &elements, clear, FrameFlags::DEFAULT) {
+                Ok(result) => {
+                    if !result.is_empty {
+                        // Captures of this output take the frame just
+                        // composited, blitted, rather than drawing the scene
+                        // again (`Captures::take_composited`). All of it:
+                        // the buffer may hold anything. (On another GPU the
+                        // frame is a copy there: they're drawn from the
+                        // scene, `process_captures`.)
+                        let capture_started = std::time::Instant::now();
+                        for job in capture.take_composited(&output, &elements, pointer_here) {
+                            let (size, scale) = (job.size, job.scale);
+                            let mut blit =
+                                |renderer: &mut GlesRenderer, target: &mut GlesTarget<'_>| {
+                                    result
+                                        .blit_frame_result(
+                                            size,
+                                            Transform::Normal,
+                                            scale,
+                                            renderer,
+                                            target,
+                                            [Rectangle::from_size(size)],
+                                            std::iter::empty::<Id>(),
+                                        )
+                                        .map_err(|err| format!("{err:?}"))
+                                };
+                            let source = Source::Draw(&mut blit);
+                            let copied =
+                                copy_frame(renderer, &job.buffer, capture, size, scale, source);
+                            composited.push((job, copied));
+                        }
+                        capture_cpu = capture_started.elapsed();
+                    }
+                    Ok((result.states, result.is_empty))
                 }
-                capture_cpu = capture_started.elapsed();
+                Err(err) => Err(format!("{err:?}")),
+            }
+        }
+        OutputRenderer::Secondary(lent) => {
+            let elements: Vec<_> = elements
+                .into_iter()
+                .map(super::secondary::PrimaryGpuElement)
+                .collect();
+            drm_output
+                .render_frame(lent, &elements, clear, FrameFlags::DEFAULT)
+                .map(|result| (result.states, result.is_empty))
+                .map_err(|err| format!("{err:?}"))
+        }
+    };
+    drop(lent);
+    match rendered {
+        Ok((states, is_empty)) => {
+            frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
+            if !is_empty {
                 let feedback =
-                    frame::presentation_feedback(scene, cursor_wl_surface, &output, &result.states);
+                    frame::presentation_feedback(scene, cursor_wl_surface, &output, &states);
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
@@ -280,7 +313,7 @@ fn draw(
         }
         Err(err) => {
             surface.redraw_needed = true;
-            failure = Some(("render", format!("{err:?}")));
+            failure = Some(("render", err));
         }
     }
     if !scene.locked {

@@ -139,10 +139,17 @@ Key flows and invariants:
   scanner a `GpuDevice` in `UdevData::devices`, outputs keyed by `OutputId`: its node and the
   CRTC) and `UdevData`; `outputs.rs`
   connectors and outputs, `draw.rs` frames and vblanks, `recovery.rs` DRM failures,
-  `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
-  primary; more than one is under way, `docs/MULTI_GPU.md`), whose renderer a `GpuManager`
-  owns (`UdevData::gpus`) and lends for each use (`primary_renderer`; outside the backend,
-  `Backend::renderer`'s `RendererRef`, `None` if it can't), with outputs placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
+  `input.rs` and `gamma.rs` the rest. It renders with one GPU, the seat's
+  primary, whose renderer a `GpuManager` owns (`UdevData::gpus`, every GPU's renderer) and lends
+  for each use (`primary_renderer`; outside the backend, `Backend::renderer`'s `RendererRef`,
+  `None` if it can't). The seat's other GPUs (`secondary.rs`, `docs/MULTI_GPU.md`) only scan out:
+  opened at startup, on `UdevEvent::Added` and after a VT switch back (`add_gpu`; dropped on
+  `Removed`, their outputs as unplugged), each a `GpuDevice` with its own DRM events; their
+  outputs are set up with their GPU's own renderer and drawn with a `MultiRenderer` from the
+  primary (`setup_renderer`, `draw_renderer`: `OutputRenderer`), Pila's elements wrapped in
+  `PrimaryGpuElement` (drawn on its `GlesFrame`, never scanned out directly); their captures are
+  drawn from the scene, not blitted from the frame. A connector name another GPU has gets a
+  number (`unique_name`). Outputs are placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output (see "Redraws are on demand"):
   a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle

@@ -106,12 +106,19 @@ pub(super) fn fallback_order(first: usize, modes: &[ModeKey]) -> Vec<usize> {
 /// Set `surface`'s CRTC up with its mode or, if that fails, with the first
 /// of its `fallback_order` that works, which then becomes its mode (and its
 /// `Output`'s). `None` if none did.
-pub(super) fn initialize_with_fallback(
+pub(super) fn initialize_with_fallback<R, E>(
     drm: &mut PilaDrmOutputManager,
-    renderer: &mut GlesRenderer,
+    renderer: &mut R,
     crtc: crtc::Handle,
     surface: &mut OutputSurface,
-) -> Option<PilaDrmOutput> {
+) -> Option<PilaDrmOutput>
+where
+    R: smithay::backend::renderer::Renderer
+        + smithay::backend::renderer::Bind<smithay::backend::allocator::dmabuf::Dmabuf>,
+    R::TextureId: smithay::backend::renderer::Texture + 'static,
+    R::Error: Send + Sync + 'static,
+    E: smithay::backend::renderer::element::RenderElement<R>,
+{
     let name = surface.output.name();
     let keys: Vec<ModeKey> = surface.modes.iter().map(ModeKey::from).collect();
     let candidates: Vec<DrmMode> = match surface.modes.iter().position(|m| *m == surface.mode) {
@@ -132,7 +139,7 @@ pub(super) fn initialize_with_fallback(
     };
     for mode in &candidates {
         let planes = drm.device().planes(&crtc).ok();
-        match drm.lock().initialize_output::<_, PilaRenderElement>(
+        match drm.lock().initialize_output::<R, E>(
             crtc,
             *mode,
             &[surface.connector],
@@ -165,6 +172,28 @@ pub(super) fn initialize_with_fallback(
     let tried: Vec<String> = candidates.iter().map(describe).collect();
     warn!(name, ?tried, "no mode came on: the output stays off");
     None
+}
+
+/// `initialize_with_fallback` with the renderer the outputs of the GPU
+/// `render_node` are set up with (`setup_renderer`). `None` if none can be
+/// lent or no mode came on.
+pub(super) fn initialize_on(
+    drm: &mut PilaDrmOutputManager,
+    gpus: &mut GpuManager<GpuApi>,
+    primary: &DrmNode,
+    render_node: &DrmNode,
+    crtc: crtc::Handle,
+    surface: &mut OutputSurface,
+) -> Option<PilaDrmOutput> {
+    match setup_renderer(gpus, primary, render_node)? {
+        OutputRenderer::Primary(mut renderer) => {
+            initialize_with_fallback::<_, PilaRenderElement>(drm, renderer.as_mut(), crtc, surface)
+        }
+        OutputRenderer::Secondary(mut renderer) => initialize_with_fallback::<
+            _,
+            secondary::PrimaryGpuElement,
+        >(drm, &mut renderer, crtc, surface),
+    }
 }
 
 /// Re-apply `[[output]]` (mode, scale, position) to the connected outputs
@@ -225,24 +254,44 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             let wl_mode = WlMode::from(mode);
             if surface.output.current_mode() != Some(wl_mode) {
                 // Powered off: the mode is set when the CRTC comes back.
-                let result = match (&surface.drm_output, devices.get_mut(&id.node)) {
-                    (Some(_), Some(GpuDevice { drm, .. })) => {
-                        match super::primary_renderer(gpus, primary) {
-                            Some(mut renderer) => drm
-                                .lock()
-                                .use_mode(
-                                    &id.crtc,
-                                    mode,
-                                    renderer.as_mut(),
-                                    &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
-                                )
-                                .map_err(|err| format!("{err:?}")),
-                            None => Err("no renderer".to_string()),
+                let result =
+                    match (&surface.drm_output, devices.get_mut(&id.node)) {
+                        (
+                            Some(_),
+                            Some(GpuDevice {
+                                drm, render_node, ..
+                            }),
+                        ) => {
+                            match setup_renderer(gpus, primary, render_node) {
+                                Some(OutputRenderer::Primary(mut renderer)) => drm
+                                    .lock()
+                                    .use_mode(
+                                        &id.crtc,
+                                        mode,
+                                        renderer.as_mut(),
+                                        &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
+                                    )
+                                    .map_err(|err| format!("{err:?}")),
+                                Some(OutputRenderer::Secondary(mut renderer)) => {
+                                    drm.lock()
+                                        .use_mode(
+                                            &id.crtc,
+                                            mode,
+                                            &mut renderer,
+                                            &DrmOutputRenderElements::<
+                                                _,
+                                                secondary::PrimaryGpuElement,
+                                            >::default(
+                                            ),
+                                        )
+                                        .map_err(|err| format!("{err:?}"))
+                                }
+                                None => Err("no renderer".to_string()),
+                            }
                         }
-                    }
-                    (Some(_), None) => Err("no DRM device".to_string()),
-                    (None, _) => Ok(()),
-                };
+                        (Some(_), None) => Err("no DRM device".to_string()),
+                        (None, _) => Ok(()),
+                    };
                 match result {
                     Ok(()) => {
                         surface.mode = mode;
@@ -425,6 +474,28 @@ fn retrain_bad_links(state: &mut Pila) {
     data.queue_redraw();
 }
 
+/// `name` for the output `id`, unless an output of another GPU has it (both
+/// may have a `DP-1`): then `free_name`'s.
+pub(super) fn unique_name(data: &UdevData, id: OutputId, name: String) -> String {
+    free_name(name, |candidate| {
+        data.outputs
+            .iter()
+            .any(|(other, s)| other.node != id.node && s.output.name() == candidate)
+    })
+}
+
+/// `name` if it isn't `taken`, else the first of `name-2`, `name-3`, ...
+/// that isn't.
+pub(super) fn free_name(name: String, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(&name) {
+        return name;
+    }
+    (2..)
+        .map(|n| format!("{name}-{n}"))
+        .find(|candidate| !taken(candidate))
+        .expect("an unbounded range has a free name")
+}
+
 /// A connector's name as outputs are known by, e.g. `eDP-1`.
 pub(super) fn connector_name(connector: &connector::Info) -> String {
     format!(
@@ -451,7 +522,10 @@ pub(super) fn logical_width(output: &Output, transform: Transform, scale: f64) -
 }
 
 pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, id: OutputId) {
-    let name = connector_name(&connector);
+    let name = match &state.backend {
+        Some(Backend::Udev(data)) => unique_name(data, id, connector_name(&connector)),
+        _ => connector_name(&connector),
+    };
     // Before its settings: an `[[output]]` section may name the monitor.
     let monitor = match &state.backend {
         Some(Backend::Udev(data)) => data
@@ -609,8 +683,12 @@ pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
         session,
         ..
     } = &mut **data;
-    let (Some(surface), Some(GpuDevice { drm, .. })) =
-        (outputs.get_mut(&id), devices.get_mut(&id.node))
+    let (
+        Some(surface),
+        Some(GpuDevice {
+            drm, render_node, ..
+        }),
+    ) = (outputs.get_mut(&id), devices.get_mut(&id.node))
     else {
         return false;
     };
@@ -623,11 +701,7 @@ pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
         debug!(name, "session inactive: output left off until it's back");
         return false;
     }
-    let Some(mut renderer) = super::primary_renderer(gpus, primary) else {
-        return false;
-    };
-    let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), id.crtc, surface)
-    else {
+    let Some(drm_output) = initialize_on(drm, gpus, primary, render_node, id.crtc, surface) else {
         return false;
     };
     surface.drm_output = Some(drm_output);

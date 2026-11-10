@@ -32,10 +32,10 @@ been tried. Other GPUs, distros and setups
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
 
-Known gaps: touchscreens, drawing tablets, input methods (IME), several GPUs. Pila uses only
-the seat's primary GPU, so **monitors wired to another GPU don't work yet**: on many laptops with
-two GPUs (NVIDIA ones especially) the HDMI and DisplayPort outputs are on the dedicated GPU, and
-monitors plugged in there don't show up. `pila-report` marks them.
+Known gaps: touchscreens, drawing tablets, input methods (IME). **Monitors wired to another GPU**
+(on many laptops with two GPUs, NVIDIA ones especially, the HDMI and DisplayPort outputs are on the
+dedicated GPU) are new and untried: Pila draws them with the seat's primary GPU and copies the
+picture over. `pila-report` marks them; a report from such a machine helps most.
 
 **Toward beta.** Pila becomes beta once:
 
@@ -55,7 +55,8 @@ The biggest unknown is how Pila behaves away from its author's laptop. Most usef
 now, in this order:
 
 - **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs. On a laptop with two
-  GPUs, Pila draws with the seat's primary one, often the integrated one: `pila-report` says which;
+  GPUs, Pila draws with the seat's primary one, often the integrated one, and shows the monitors
+  on the other through it, which has never been tried: `pila-report` says which GPU is which;
 - **no systemd** (Void, Alpine, with elogind or seatd), and other **distros**, such as
   [Ubuntu and Fedora](#debian-ubuntu-and-fedora);
 - **display managers** other than GDM, SDDM, greetd and LightDM;

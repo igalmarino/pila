@@ -1,9 +1,10 @@
 //! Bare-metal backend: DRM/KMS outputs, libinput input, libseat session.
 //! Run from a TTY (`pila --backend udev`, the default without a host session).
 //!
-//! Deliberately smaller than anvil's: one GPU (the seat's primary one, which
-//! renders and scans out), no direct scan-out tuning, no DRM leasing. Outputs
-//! are placed left to right in connector order.
+//! Deliberately smaller than anvil's: one GPU renders (the seat's primary;
+//! the others only scan out their monitors, `secondary.rs`), no direct
+//! scan-out tuning, no DRM leasing. Outputs are placed left to right in
+//! connector order.
 //!
 //! Redraws stay on demand and per output (`redraw.rs`): one idle callback per
 //! loop iteration renders every output asked for. An output with a frame in
@@ -47,7 +48,7 @@ use smithay::{
     reexports::{
         calloop::{
             timer::{TimeoutAction, Timer},
-            EventLoop, LoopHandle,
+            EventLoop, LoopHandle, RegistrationToken,
         },
         drm::{
             control::{
@@ -72,6 +73,7 @@ mod gamma;
 mod input;
 mod outputs;
 mod recovery;
+mod secondary;
 
 use self::{draw::*, gamma::*, input::*, outputs::*, recovery::Recovery};
 pub use outputs::apply_output_config;
@@ -114,22 +116,29 @@ pub type GpuApi = GbmGlesBackend<GlesRenderer, DrmDeviceFd>;
 /// `GlesRenderer` through `as_ref`/`as_mut`.
 pub type PrimaryRenderer<'a> = MultiRenderer<'a, 'a, GpuApi, GpuApi>;
 
-/// Lend the primary GPU's renderer; `None` if the GPU manager can't, logged
-/// once until it can again (it's asked for every frame).
+/// Lend the primary GPU's renderer; `None` if the GPU manager can't (`lend`).
 fn primary_renderer<'a>(
     gpus: &'a mut GpuManager<GpuApi>,
     primary: &DrmNode,
 ) -> Option<PrimaryRenderer<'a>> {
+    lend(gpus.single_renderer(primary))
+}
+
+/// A renderer the GPU manager lent, or `None`, its error logged once until
+/// one is lent again (they're asked for every frame).
+fn lend<'a>(
+    lent: Result<PrimaryRenderer<'a>, smithay::backend::renderer::multigpu::Error<GpuApi, GpuApi>>,
+) -> Option<PrimaryRenderer<'a>> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static FAILING: AtomicBool = AtomicBool::new(false);
-    match gpus.single_renderer(primary) {
+    match lent {
         Ok(renderer) => {
             FAILING.store(false, Ordering::Relaxed);
             Some(renderer)
         }
         Err(err) => {
             if !FAILING.swap(true, Ordering::Relaxed) {
-                warn!(?err, "no renderer for the primary GPU");
+                warn!(?err, "no renderer for a GPU");
             }
             None
         }
@@ -149,6 +158,46 @@ pub(super) struct OutputId {
 pub(super) struct GpuDevice {
     drm: PilaDrmOutputManager,
     scanner: DrmScanner,
+    /// Its render node: its key in `UdevData::gpus`.
+    render_node: DrmNode,
+    /// Its DRM events (vblanks); a secondary GPU's is removed with it.
+    events: Option<RegistrationToken>,
+}
+
+/// The renderer an output is set up or drawn with: on the primary GPU its
+/// own `GlesRenderer` (`as_mut`), with Pila's elements as they are; on
+/// another, a `MultiRenderer` with them wrapped (`secondary::PrimaryGpuElement`).
+pub(super) enum OutputRenderer<'a> {
+    Primary(PrimaryRenderer<'a>),
+    Secondary(PrimaryRenderer<'a>),
+}
+
+/// The renderer to set outputs of the GPU `render_node` up with (its own;
+/// they're drawn with `draw_renderer`). `None` (logged once) if it can't be
+/// lent.
+fn setup_renderer<'a>(
+    gpus: &'a mut GpuManager<GpuApi>,
+    primary: &DrmNode,
+    render_node: &DrmNode,
+) -> Option<OutputRenderer<'a>> {
+    if render_node == primary {
+        return primary_renderer(gpus, primary).map(OutputRenderer::Primary);
+    }
+    lend(gpus.single_renderer(render_node)).map(OutputRenderer::Secondary)
+}
+
+/// The renderer to draw an output of the GPU `render_node` with, whose
+/// frames are in `format`: rendering on the primary, copied to that GPU.
+fn draw_renderer<'a>(
+    gpus: &'a mut GpuManager<GpuApi>,
+    primary: &DrmNode,
+    render_node: &DrmNode,
+    format: Fourcc,
+) -> Option<OutputRenderer<'a>> {
+    if render_node == primary {
+        return primary_renderer(gpus, primary).map(OutputRenderer::Primary);
+    }
+    lend(gpus.renderer(primary, render_node, format)).map(OutputRenderer::Secondary)
 }
 
 /// Fields drop in declaration order, which matters here: the outputs go
@@ -525,7 +574,10 @@ impl UdevData {
             primary,
             ..
         } = self;
-        let Some(GpuDevice { drm, .. }) = devices.get_mut(&id.node) else {
+        let Some(GpuDevice {
+            drm, render_node, ..
+        }) = devices.get_mut(&id.node)
+        else {
             return false;
         };
         let surface = outputs.get_mut(&id).expect("found above");
@@ -533,7 +585,6 @@ impl UdevData {
         if on == surface.drm_output.is_some() {
             return true;
         }
-        let elements = DrmOutputRenderElements::<_, PilaRenderElement>::default();
         if !on {
             surface.drm_output = None;
             surface.frame_pending = false;
@@ -543,23 +594,33 @@ impl UdevData {
             surface.last_vblank = None;
             surface.presented_variable = false;
             // Off goes ahead without a renderer; only this needs one.
-            if let Some(mut renderer) = primary_renderer(gpus, primary) {
-                if let Err(err) = drm
+            let restored = match setup_renderer(gpus, primary, render_node) {
+                Some(OutputRenderer::Primary(mut renderer)) => drm
                     .lock()
-                    .try_to_restore_modifiers(renderer.as_mut(), &elements)
-                {
-                    debug!(?err, "couldn't restore modifiers after powering off");
-                }
+                    .try_to_restore_modifiers(
+                        renderer.as_mut(),
+                        &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
+                    )
+                    .map_err(|err| format!("{err:?}")),
+                Some(OutputRenderer::Secondary(mut renderer)) => drm
+                    .lock()
+                    .try_to_restore_modifiers(
+                        &mut renderer,
+                        &DrmOutputRenderElements::<_, secondary::PrimaryGpuElement>::default(),
+                    )
+                    .map_err(|err| format!("{err:?}")),
+                None => Ok(()),
+            };
+            if let Err(err) = restored {
+                debug!(?err, "couldn't restore modifiers after powering off");
             }
             info!(name, "output powered off");
             return true;
         }
         // Another monitor may have taken the bandwidth meanwhile: then
         // the mode changes (`Pila::fit_to_outputs` follows it).
-        let Some(mut renderer) = primary_renderer(gpus, primary) else {
-            return false;
-        };
-        let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), id.crtc, surface)
+        let Some(drm_output) =
+            outputs::initialize_on(drm, gpus, primary, render_node, id.crtc, surface)
         else {
             warn!(name, "failed to power the output on");
             return false;
@@ -809,9 +870,10 @@ pub fn init_udev(
     )?;
 
     // VT switches.
+    let resumed_seat = seat.clone();
     event_loop
         .handle()
-        .insert_source(notifier, |event, _, state| match event {
+        .insert_source(notifier, move |event, _, state| match event {
             SessionEvent::PauseSession => {
                 info!("session paused");
                 // Keys held for the VT switch never get a release otherwise.
@@ -855,6 +917,10 @@ pub fn init_udev(
                 // Monitors plugged or unplugged while away. Those it found
                 // then couldn't come on without DRM master: they do here.
                 scan_connectors(state, None);
+                // And GPUs added meanwhile, which couldn't be opened then.
+                for path in all_gpus(&resumed_seat).unwrap_or_default() {
+                    secondary::add_gpu(state, &path);
+                }
                 state.apply_outputs();
                 state.queue_redraw();
             }
@@ -868,18 +934,26 @@ pub fn init_udev(
             DrmEvent::Error(err) => error!(?err, "DRM error"),
         })?;
 
-    // Monitor hotplug on this GPU.
+    // Monitors plugged in and out, GPUs added and removed.
     let udev = UdevBackend::new(&seat)?;
     event_loop
         .handle()
         .insert_source(udev, move |event, _, state| match event {
-            UdevEvent::Changed { device_id } if device_id == node.dev_id() => {
-                scan_connectors(state, Some(node))
+            UdevEvent::Changed { device_id } => {
+                let node = match &state.backend {
+                    Some(Backend::Udev(data)) => data
+                        .devices
+                        .keys()
+                        .copied()
+                        .find(|node| node.dev_id() == device_id),
+                    _ => None,
+                };
+                if let Some(node) = node {
+                    scan_connectors(state, Some(node));
+                }
             }
-            UdevEvent::Added { device_id, path } => {
-                debug!(device_id, path = %path.display(), "ignoring additional GPU");
-            }
-            _ => {}
+            UdevEvent::Added { path, .. } => secondary::add_gpu(state, &path),
+            UdevEvent::Removed { device_id } => secondary::remove_gpu(state, device_id),
         })?;
 
     state.backend = Some(Backend::Udev(Box::new(UdevData {
@@ -893,6 +967,8 @@ pub fn init_udev(
             GpuDevice {
                 drm,
                 scanner: DrmScanner::new(),
+                render_node,
+                events: None,
             },
         )]),
         outputs: HashMap::new(),
@@ -904,6 +980,12 @@ pub fn init_udev(
     })));
 
     scan_connectors(state, None);
+    // The seat's other GPUs: their monitors drawn on the primary.
+    for other in all_gpus(&seat).unwrap_or_default() {
+        if other != path {
+            secondary::add_gpu(state, &other);
+        }
+    }
     // Start with the pointer in the middle of the first output.
     if let (Some(geo), Some(pointer)) = (
         state.output_geometry_at((0.0, 0.0).into()),
@@ -917,6 +999,18 @@ pub fn init_udev(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_connector_name_another_gpu_has_gets_a_number() {
+        use super::outputs::free_name;
+        assert_eq!(free_name("DP-1".into(), |_| false), "DP-1");
+        let taken = ["DP-1", "DP-1-2"];
+        assert_eq!(free_name("DP-1".into(), |n| taken.contains(&n)), "DP-1-3");
+        assert_eq!(
+            free_name("HDMI-A-1".into(), |n| taken.contains(&n)),
+            "HDMI-A-1"
+        );
+    }
 
     #[test]
     fn built_in_screens_are_recognized_by_connector() {

@@ -1,9 +1,9 @@
 # Plan: more than one GPU
 
-A plan being carried out (step 1 below is under way). It moves Pila from one GPU
-(`udev/`: the seat's primary, which renders and scans out) to Smithay's `GpuManager` and
-`MultiRenderer`, so monitors on a second GPU (a dock on a discrete card, a hybrid laptop's
-HDMI port wired to the dGPU) light up. Read with `docs/ARCHITECTURE.md` ("Bare metal",
+A plan being carried out: steps 1 and 2 below are done, untried on a machine with two GPUs. It
+moves Pila from one GPU (`udev/`: the seat's primary, which renders and scans out) to Smithay's
+`GpuManager` and `MultiRenderer`, so monitors on a second GPU (a dock on a discrete card, a
+hybrid laptop's HDMI port wired to the dGPU) light up. Read with `docs/ARCHITECTURE.md` ("Bare metal",
 "Render loop", "Screen capture", "Blur", "Rounded corners", "Shadows").
 
 ## Where Pila is
@@ -80,7 +80,8 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
    a `GpuDevice` in `UdevData::devices`, and outputs are keyed by an `OutputId` (the device's
    node and the CRTC), which gamma, output power, recovery and the vblank handler
    (`frame_finish`) take. Then open every GPU of the seat, a `GpuDevice` for each, its
-   connectors scanned like the primary's (`scan_connectors`).
+   connectors scanned like the primary's (`scan_connectors`). (Done: `udev/secondary.rs`. The
+   copy's CPU time counts in its output's frame, not apart.)
    `UdevEvent::Added/Removed` for devices plug them in and out (their outputs as monitors
    unplugged). VT switches pause and resume every device. An output on a secondary device draws
    with `GpuManager::renderer(&primary, &its device, format)` and `PrimaryGpuElement`s; the

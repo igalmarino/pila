@@ -202,12 +202,20 @@ fn the_report_says_which_gpu_pila_uses_however_long_the_log() {
     // More than the report takes from the end of the log.
     let mut log =
         String::from("2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n");
+    log.push_str(
+        "2026-11-06T16:18:40Z INFO pila::udev::secondary: using another GPU for its monitors \
+         path=/dev/dri/card0 render_node=/dev/dri/renderD129\n",
+    );
     log.push_str(&"something else\n".repeat(1000));
     std::fs::write(home.join("state/pila/pila.log"), log).unwrap();
     let out = report(&home);
     assert!(out.status.success(), "{out:?}");
     let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
     assert!(text.contains("In use by Pila: /dev/dri/card1"), "{text}");
+    assert!(
+        text.contains("Also for its monitors: /dev/dri/card0"),
+        "{text}"
+    );
 }
 
 #[test]
