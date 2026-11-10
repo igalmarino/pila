@@ -52,8 +52,8 @@ The config file is reloaded when it changes (all but autostart).
 
 Programs Pila starts get XDG_CURRENT_DESKTOP=pila and PILA_SOCKET (pila msg),
 and commands run by bindings PILA_OUTPUT, the name of the output under the
-pointer. On a TTY, Pila
-exports WAYLAND_DISPLAY, DISPLAY and PILA_SOCKET to the D-Bus session bus (and to
+pointer. On a TTY, Pila exports WAYLAND_DISPLAY, DISPLAY, XDG_CURRENT_DESKTOP,
+XDG_SESSION_TYPE and PILA_SOCKET to the D-Bus session bus (and to
 systemd --user when that's the bus), for the screen-sharing portals and shells
 started as services: run it as a login
 session (scripts/install) or under dbus-run-session (scripts/tty), with

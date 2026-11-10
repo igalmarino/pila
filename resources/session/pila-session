@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Starts a pila login session. The display manager runs this through
+# Starts a Pila login session. The display manager runs this through
 # wayland-sessions/pila.desktop (both installed by scripts/install); it has
 # already set up the session (logind or elogind, or seatd), XDG_RUNTIME_DIR,
-# XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP=pila. pila itself exports
-# its WAYLAND_DISPLAY and DISPLAY to the D-Bus session bus (and, on systemd,
-# to systemd --user), so the portals (screen sharing), pipewire and the rest
+# XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP=pila. Pila itself exports
+# its WAYLAND_DISPLAY, DISPLAY, XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE and
+# PILA_SOCKET to the D-Bus session bus (and, on systemd, to systemd --user),
+# so the portals (screen sharing), pipewire and the rest
 # of the user services find it.
 #
 # Without systemd there may be no per-user bus; then this starts one for the

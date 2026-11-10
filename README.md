@@ -268,7 +268,8 @@ desktop, so portals, PipeWire and the keyring (unlocked by the display manager's
 just work. Without a per-user bus (e.g. elogind or seatd without systemd), the wrapper
 starts one for the session with `dbus-run-session`.
 
-The log goes to `~/.local/state/pila/pila.log` (the previous run's is in `pila.log.old`).
+The log goes to `~/.local/state/pila/pila.log` (`$XDG_STATE_HOME/pila` if that's set; the
+previous run's is in `pila.log.old`).
 A copy goes to the journal with systemd (`journalctl -t pila -b`), or otherwise to syslog
 through `logger`. After changing Pila, run `scripts/install` again and log out and back
 in. `scripts/uninstall`, given the same variables, removes what it installed. Mod+Shift+E
@@ -354,7 +355,8 @@ your home directory, user name and host name, and sends nothing anywhere. By han
 - how Pila was started: login session, `scripts/tty`, or nested;
 - the log: `~/.local/state/pila/pila.log` for a login session (`pila.log.old` is the run
   before; with systemd also `journalctl -t pila -b`), `pila-tty.log` for `scripts/tty`, the
-  terminal for nested. `RUST_LOG=debug` makes it detailed; a crash is logged with where
+  terminal for nested. `RUST_LOG=debug` makes it detailed (run `RUST_LOG=debug pila-session`
+  from a TTY, or `RUST_LOG=debug scripts/tty`); a crash is logged with where
   it happened ("pila crashed" and a backtrace);
 - your config file, if you have one, and the steps to reproduce.
 

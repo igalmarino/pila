@@ -482,7 +482,8 @@ description, the socket and the events included, is in [IPC.md](IPC.md).
 
 **The log** is in `~/.local/state/pila/pila.log` (`$XDG_STATE_HOME/pila` if that's set; the run
 before is in `pila.log.old`), and with
-systemd also in the journal: `journalctl -t pila -b`. `RUST_LOG=debug` makes it detailed.
+systemd also in the journal: `journalctl -t pila -b`. `RUST_LOG=debug` makes it detailed (run
+`RUST_LOG=debug pila-session` from a TTY, or `RUST_LOG=debug scripts/tty` from Pila's source).
 
 **`pila-report`** gathers what a bug report needs (version, system, GPU, monitors, whether the
 configuration is valid, the end of the log) into `pila-report.txt`, without your user name,

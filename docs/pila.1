@@ -273,15 +273,29 @@ leaves it empty.
 .B RUST_LOG
 What the log shows (default: info; debug for details).
 .PP
-Programs Pila starts get
-.BR XDG_CURRENT_DESKTOP =pila
+Programs Pila starts get its
+.B WAYLAND_DISPLAY
+and Xwayland's
+.BR DISPLAY ,
+.BR XDG_CURRENT_DESKTOP =pila,
+.BR XDG_SESSION_TYPE =wayland
 and
 .B PILA_SOCKET
 (for
 .BR "pila msg" ),
-and commands run by key bindings get
+and not other compositors' variables
+.RB ( NIRI_SOCKET ", " SWAYSOCK ", ...),"
+so a shell drives Pila;
+commands run by key bindings also get
 .BR PILA_OUTPUT ,
 the name of the monitor under the pointer.
+.PP
+On a TTY, Pila exports
+.BR WAYLAND_DISPLAY ", " DISPLAY ", " XDG_CURRENT_DESKTOP ", " XDG_SESSION_TYPE
+and
+.B PILA_SOCKET
+to the D\-Bus session bus (and to systemd \-\-user when that's the bus), for the
+screen\-sharing portals and shells started as services.
 .SH FILES
 .TP
 .IR ~/.config/pila/config.toml " (or " $XDG_CONFIG_HOME/pila/config.toml )
@@ -289,7 +303,7 @@ The configuration. Every option is described in
 .IR config.example.toml ,
 installed with the documentation by Pila's packages.
 .TP
-.I ~/.local/state/pila/pila.log
+.IR ~/.local/state/pila/pila.log " (or " $XDG_STATE_HOME/pila/pila.log )
 The log of a session started by
 .BR pila\-session ;
 .I pila.log.old
@@ -300,8 +314,22 @@ A crash is logged as "pila crashed", with where it happened.
 .TP
 .IR ~/.local/state/pila/sessions.json " (or " $XDG_STATE_HOME/pila/sessions.json )
 Where windows were, for apps that ask to get them back (xdg\-session\-management).
-A nested Pila keeps that in memory only.
+A nested Pila, or a second one started next to a session, keeps that in memory only.
+.TP
+.I $XDG_RUNTIME_DIR/pila\-WAYLAND_DISPLAY.sock
+The socket of
+.BR "pila msg" ,
+in
+.B PILA_SOCKET
+for the programs Pila starts.
+.TP
+.I /etc/xdg/xdg\-desktop\-portal/pila\-portals.conf
+.TQ
+.I /etc/xdg/xdg\-desktop\-portal\-wlr/pila
+Which portals serve a Pila session, and how xdg\-desktop\-portal\-wlr picks what to share.
 .SH EXIT STATUS
+.B pila
+exits with 2 for a wrong argument and not 0 if it can't start.
 .B pila \-\-check\-config
 exits with 0 if the configuration is valid and 1 if not.
 .SH SEE ALSO
