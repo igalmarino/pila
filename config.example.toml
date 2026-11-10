@@ -23,7 +23,7 @@
 # gnome-terminal and xterm.
 # terminal = "foot"                # e.g.
 
-# Mod+D. Unset, Mod+D does nothing.
+# Mod+D and tapping Mod alone. Unset, they do nothing.
 # launcher = "fuzzel"              # e.g.
 
 # Commands run at startup instead of the terminal (pila -c overrides them).
@@ -116,7 +116,9 @@
 [bindings]
 # Key bindings: add new ones, replace defaults, or remove them with "none".
 # Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
-# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...).
+# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...). A modifier
+# alone ("Mod", "Super", "Alt", "Ctrl") is a tap: it runs when the key is
+# released with no other key, click, scroll or gesture since it was pressed.
 # Commands get PILA_OUTPUT, the name of the screen under the pointer (e.g.
 # "spawn grim -o \"$PILA_OUTPUT\" ~/shot.png" captures just that screen).
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
@@ -140,6 +142,7 @@
 # The defaults:
 #   "Mod+Return"  = "terminal"
 #   "Mod+D"       = "launcher"
+#   "Mod"         = "launcher"         (tap Mod alone)
 #   "Mod+Tab"     = "cycle-focus"
 #   "Mod+J"       = "cycle-focus"
 #   "Mod+Shift+Tab" = "cycle-focus-back"

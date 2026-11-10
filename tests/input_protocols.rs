@@ -364,6 +364,31 @@ fn an_inhibitor_gets_the_bindings_keys_but_not_quit() {
 }
 
 #[test]
+fn an_inhibitor_keeps_a_mod_tap_from_running() {
+    let mut pila = TestPila::with_config("launcher = \"exec sleep 600\"\n");
+    let client = pila.client();
+    let window = client.window("vm").create();
+    pila.wait_focus("vm");
+    let manager: ZwpKeyboardShortcutsInhibitManagerV1 =
+        client.bind("zwp_keyboard_shortcuts_inhibit_manager_v1", 1);
+    let inhibitor = manager.inhibit_shortcuts(
+        &client.surface(window),
+        &client.seat(),
+        &client.qh,
+        "inhibitor".into(),
+    );
+    client.flush();
+    client.wait_logged("inhibitor", "Active");
+    pila.key("Super");
+    assert_eq!(pila.state()["children"], 0);
+    inhibitor.destroy();
+    client.flush();
+    client.roundtrip();
+    pila.key("Super");
+    assert_eq!(pila.state()["children"], 1);
+}
+
+#[test]
 fn quit_still_works_with_an_inhibitor() {
     let mut pila = TestPila::start();
     let client = pila.client();

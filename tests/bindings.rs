@@ -367,6 +367,100 @@ fn mod_d_without_a_launcher_does_nothing() {
     assert_eq!(state["focused"], "a");
 }
 
+/// A launcher that stays running, so `children` counts its runs at once.
+const STAYING_LAUNCHER: &str = "launcher = \"exec sleep 600\"\n";
+
+/// How many times the launcher has run (and the programs Pila started).
+fn runs(pila: &mut TestPila) -> u64 {
+    pila.state()["children"].as_u64().unwrap()
+}
+
+#[test]
+fn tapping_mod_alone_runs_the_launcher_and_the_client_sees_mod() {
+    let (mut pila, client, _, _) =
+        one_window("launcher = \"echo launcher > $XDG_RUNTIME_DIR/out\"\n");
+    pila.key("Super");
+    assert_eq!(pila.wait_file("out"), "launcher\n");
+    // Like any modifier, it reached the client, release included.
+    const KEY_LEFTMETA: u32 = 125;
+    client.wait("Super's release", |s| {
+        s.events.iter().any(|e| {
+            *e == common::client::Ev::Key {
+                key: KEY_LEFTMETA,
+                pressed: false,
+            }
+        })
+    });
+}
+
+#[test]
+fn either_super_taps_and_holding_it_doesnt_cancel() {
+    let mut pila = TestPila::with_config(STAYING_LAUNCHER);
+    pila.key("Super_R");
+    assert_eq!(runs(&mut pila), 1);
+    // Held a while (moving the pointer), then released.
+    pila.key_press("Super");
+    pila.move_by(50.0, 20.0);
+    assert_eq!(runs(&mut pila), 1, "ran on the press");
+    pila.key_release("Super");
+    assert_eq!(runs(&mut pila), 2);
+}
+
+#[test]
+fn mod_with_another_key_isnt_a_tap() {
+    let mut pila = TestPila::with_config(STAYING_LAUNCHER);
+    // Mod+D runs the launcher once, not twice.
+    pila.combo("Super+d");
+    assert_eq!(runs(&mut pila), 1);
+    // An unbound combo, another modifier, the switcher: nothing.
+    pila.combo("Super+x");
+    pila.combo("Super+Shift");
+    pila.combo("Shift+Super");
+    pila.combo("Ctrl+Super");
+    pila.combo("Super+Tab");
+    pila.key_press("Super");
+    pila.key("Alt");
+    pila.key_release("Super");
+    assert_eq!(runs(&mut pila), 1);
+    // And a tap after them still is one.
+    pila.key("Super");
+    assert_eq!(runs(&mut pila), 2);
+}
+
+#[test]
+fn a_click_or_scroll_while_mod_is_held_isnt_a_tap() {
+    let (mut pila, _client, _, (x, y, ..)) = one_window(STAYING_LAUNCHER);
+    // Mod+drag moves the window.
+    pila.move_to((x + 50) as f64, (y + 50) as f64);
+    pila.key_press("Super");
+    pila.press("left");
+    pila.move_by(30.0, 30.0);
+    pila.release("left");
+    pila.key_release("Super");
+    pila.key_press("Super");
+    pila.scroll("wheel", 0.0, 15.0);
+    pila.key_release("Super");
+    assert_eq!(runs(&mut pila), 0);
+}
+
+#[test]
+fn the_tap_follows_mod_and_can_be_rebound_or_removed() {
+    let mut pila = TestPila::with_config(&format!("mod = \"alt\"\n{STAYING_LAUNCHER}"));
+    pila.key("Super");
+    assert_eq!(runs(&mut pila), 0);
+    pila.key("Alt");
+    assert_eq!(runs(&mut pila), 1);
+
+    let mut pila = TestPila::with_config(&format!(
+        "{STAYING_LAUNCHER}terminal = \"exec sleep 600\"\n\
+         [bindings]\n\"Mod\" = \"none\"\n\"Ctrl\" = \"terminal\"\n"
+    ));
+    pila.key("Super");
+    assert_eq!(runs(&mut pila), 0);
+    pila.key("Ctrl");
+    assert_eq!(runs(&mut pila), 1);
+}
+
 #[test]
 fn spawned_commands_get_the_session_environment() {
     let mut pila = TestPila::start_with(Options {

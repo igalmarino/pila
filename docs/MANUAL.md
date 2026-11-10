@@ -50,6 +50,7 @@ Most bindings use the Mod key: **Super** (the Windows key) from the login screen
 |---|---|
 | `Mod+Return` | Open a terminal (`terminal`, or the first one installed of kitty, foot, alacritty and others) |
 | `Mod+D` | Open the launcher (only if `launcher` is set) |
+| `Mod` | Tapped alone (pressed and released with nothing else in between): open the launcher too |
 | `Mod+Tab`, `Mod+J` | Switch to the previous window; keep Mod held and press again for older ones |
 | `Mod+Shift+Tab` | The same, the other way |
 | `Alt+Tab`, `Alt+Shift+Tab` | The same as `Mod+Tab` and `Mod+Shift+Tab`, whatever Mod is |
@@ -494,7 +495,8 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 | X11 apps don't start | Install Xwayland; the log says if it couldn't start. |
 | Title bars have no text | Install a font (any TrueType or OpenType font). |
 | Stuck on a locked screen after the locker crashed | See [Locking the screen and idling](#locking-the-screen-and-idling). |
-| `Mod+D` does nothing | Set `launcher` to your launcher's command. |
+| `Mod+D` or tapping Mod does nothing | Set `launcher` to your launcher's command. |
+| Tapping Mod opens the launcher and you don't want it | `"Mod" = "none"` under `[bindings]` (nested, Mod is Alt, so tapping Alt opens it). |
 | The screen froze | `Ctrl+Alt+F2`, log in, `pkill pila`; then report it with the log. |
 | Pila crashed (back at the login screen) | Report it with `pila.log.old` (or `pila-report`'s file): its "pila crashed" line and the backtrace after it say where. |
 

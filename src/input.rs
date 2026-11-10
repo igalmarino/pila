@@ -23,7 +23,7 @@ use crate::{
     decoration::{Decoration, TitleBarPart},
     grabs::resize_grab::ResizeEdge,
     pointer_constraints::Constraint,
-    state::{fill_state, Hit, Pila, Under},
+    state::{fill_state, Hit, ModTap, Pila, Under},
 };
 
 // Linux input event codes (linux/input-event-codes.h).
@@ -51,6 +51,19 @@ impl Pila {
                 | InputEvent::GestureHoldBegin { .. }
         ) {
             self.wake_monitors();
+        }
+        // A tap of Mod is Mod alone: a click (Mod+drag), a scroll or a
+        // gesture while it's held means it wasn't one. Moving doesn't count.
+        if matches!(
+            event,
+            InputEvent::PointerButton { .. }
+                | InputEvent::PointerAxis { .. }
+                | InputEvent::GestureSwipeBegin { .. }
+                | InputEvent::GesturePinchBegin { .. }
+                | InputEvent::GestureHoldBegin { .. }
+                | InputEvent::TouchDown { .. }
+        ) {
+            self.input.mod_tap = None;
         }
         let gesture = matches!(
             event,
@@ -155,6 +168,16 @@ impl Pila {
             serial,
             time,
             |state, mods, handle| {
+                // Any other key pressed means a held modifier isn't tapped
+                // alone (a repeat of its own press leaves it).
+                if key_state == KeyState::Pressed
+                    && state
+                        .input
+                        .mod_tap
+                        .is_some_and(|tap| tap.keycode != keycode)
+                {
+                    state.input.mod_tap = None;
+                }
                 // A key that wakes the monitors does only that.
                 if key_state == KeyState::Pressed && state.wake_monitors() {
                     state.input.suppressed_keys.insert(keycode);
@@ -177,22 +200,34 @@ impl Pila {
                     state.input.menu_key = Some(handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
+                // While locked, everything goes to the locker; debug builds
+                // keep Quit to escape a nested session. A client inhibiting
+                // shortcuts gets them, but never Quit.
+                let allowed = |state: &Pila, action: &Action| {
+                    (!state.is_locked() || (cfg!(debug_assertions) && *action == Action::Quit))
+                        && (!inhibited || *action == Action::Quit)
+                };
+                let sym = handle.raw_latin_sym_or_raw_current_sym();
                 match key_state {
+                    // A modifier alone may be a tap, run on its release; the
+                    // client sees it pressed meanwhile, as any modifier.
+                    KeyState::Pressed
+                        if sym.is_some_and(|sym| crate::config::tap_sym(sym).is_some()) =>
+                    {
+                        if state.input.mod_tap.is_none() {
+                            state.input.mod_tap = sym.map(|sym| ModTap {
+                                keycode,
+                                sym,
+                                mods: *mods,
+                            });
+                        }
+                    }
                     // Any key can be bound (media keys need no Mod), so
                     // every press is looked up.
                     KeyState::Pressed => {
-                        let action = handle
-                            .raw_latin_sym_or_raw_current_sym()
+                        let action = sym
                             .and_then(|sym| state.config.action_for(sym, mods))
-                            // While locked, everything goes to the locker;
-                            // debug builds keep Quit to escape a nested session.
-                            .filter(|action| {
-                                !state.is_locked()
-                                    || (cfg!(debug_assertions) && *action == Action::Quit)
-                            })
-                            // A client inhibiting shortcuts gets them, but
-                            // never Quit.
-                            .filter(|action| !inhibited || *action == Action::Quit);
+                            .filter(|action| allowed(state, action));
                         if let Some(action) = action {
                             state.input.suppressed_keys.insert(keycode);
                             return FilterResult::Intercept(Some(action));
@@ -201,6 +236,21 @@ impl Pila {
                     // Don't send the client a release for a press it never saw.
                     KeyState::Released if state.input.suppressed_keys.remove(&keycode) => {
                         return FilterResult::Intercept(None);
+                    }
+                    // A modifier released with nothing since its press: its
+                    // tap, after the client gets the release.
+                    KeyState::Released
+                        if state
+                            .input
+                            .mod_tap
+                            .is_some_and(|tap| tap.keycode == keycode) =>
+                    {
+                        state.input.tap_action = state
+                            .input
+                            .mod_tap
+                            .take()
+                            .and_then(|tap| state.config.tap_action(tap.sym, &tap.mods))
+                            .filter(|action| allowed(state, action));
                     }
                     _ => {}
                 }
@@ -215,6 +265,10 @@ impl Pila {
         }
         if let Some(action) = action.flatten() {
             self.run_action(action, serial);
+        }
+        if let Some(action) = self.input.tap_action.take() {
+            self.run_action(action, serial);
+            acted = true;
         }
         // Mod+Tab ends once Ctrl/Alt/Super are all released.
         if self.windows.switch.is_some() {
@@ -249,6 +303,8 @@ impl Pila {
             return;
         };
         let time = InputTime::now();
+        // A modifier held as focus went (the host's Alt+Tab) wasn't tapped.
+        self.input.mod_tap = None;
         for keycode in keyboard.pressed_keys() {
             let serial = SERIAL_COUNTER.next_serial();
             keyboard.input::<(), _>(

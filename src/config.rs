@@ -17,6 +17,11 @@
 //! keyboard filter and can't be rebound; the mouse bindings aren't
 //! configurable yet.
 //!
+//! A bare modifier (`"Mod"`, `"Super"`, `"Alt"`, `"Ctrl"`) is a tap: it runs
+//! when that key is released with no other key, button, scroll, gesture or
+//! touch since its press (`input.rs`), never on the press (`action_for`
+//! skips modifier keys; `tap_action` looks taps up).
+//!
 //! Nested, Alt is the default because a host desktop such as GNOME grabs
 //! Super while pila runs inside it.
 
@@ -41,6 +46,8 @@ use crate::snap::KEYBOARD_STEP;
 const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Return", "terminal"),
     ("Mod+D", "launcher"),
+    // Mod tapped alone: pressed and released with nothing in between.
+    ("Mod", "launcher"),
     ("Mod+Tab", "cycle-focus"),
     ("Mod+J", "cycle-focus"),
     ("Mod+Shift+Tab", "cycle-focus-back"),
@@ -198,7 +205,19 @@ impl From<&ModifiersState> for Mods {
     }
 }
 
-/// A key combination, e.g. `Mod+Shift+Q`.
+/// The keysym a tap of the modifier key `sym` is bound by (both sides are
+/// the same tap), or `None` if `sym` isn't Alt, Super or Ctrl.
+pub fn tap_sym(sym: Keysym) -> Option<Keysym> {
+    match sym {
+        Keysym::Alt_L | Keysym::Alt_R | Keysym::Meta_L | Keysym::Meta_R => Some(Keysym::Alt_L),
+        Keysym::Super_L | Keysym::Super_R => Some(Keysym::Super_L),
+        Keysym::Control_L | Keysym::Control_R => Some(Keysym::Control_L),
+        _ => None,
+    }
+}
+
+/// A key combination, e.g. `Mod+Shift+Q`, or a modifier tapped alone
+/// (`Mod`: its own modifier and `tap_sym`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyCombo {
     pub mods: Mods,
@@ -211,6 +230,23 @@ impl KeyCombo {
         let mut parts: Vec<&str> = text.split('+').map(str::trim).collect();
         let key = parts.pop().filter(|k| !k.is_empty());
         let key = key.ok_or_else(|| format!("{text:?} has no key"))?;
+        // A modifier alone is a tap of it (`tap_sym`).
+        if parts.is_empty() {
+            let modifier = match key.to_ascii_lowercase().as_str() {
+                "mod" => Some(mod_key),
+                name => ModKey::parse(name).ok(),
+            };
+            if let Some(modifier) = modifier {
+                let mut mods = Mods::default();
+                mods.add(modifier);
+                let sym = match modifier {
+                    ModKey::Alt => Keysym::Alt_L,
+                    ModKey::Super => Keysym::Super_L,
+                    ModKey::Ctrl => Keysym::Control_L,
+                };
+                return Ok(KeyCombo { mods, sym });
+            }
+        }
         let mut mods = Mods::default();
         for part in parts {
             match part.to_ascii_lowercase().as_str() {
@@ -1557,10 +1593,26 @@ impl Config {
     ///
     /// `sym` is the unshifted (latin) keysym, so Shift comes from `mods`.
     pub fn action_for(&self, sym: Keysym, mods: &ModifiersState) -> Option<Action> {
-        let combo = KeyCombo {
+        // A modifier's press is never a binding: a tap runs on its release.
+        if tap_sym(sym).is_some() {
+            return None;
+        }
+        self.bound(KeyCombo {
             mods: mods.into(),
             sym,
-        };
+        })
+    }
+
+    /// The action of tapping the modifier key `sym` alone, `mods` being the
+    /// modifiers its press left (its own).
+    pub fn tap_action(&self, sym: Keysym, mods: &ModifiersState) -> Option<Action> {
+        self.bound(KeyCombo {
+            mods: mods.into(),
+            sym: tap_sym(sym)?,
+        })
+    }
+
+    fn bound(&self, combo: KeyCombo) -> Option<Action> {
         let action = self
             .bindings
             .iter()
@@ -1678,6 +1730,68 @@ mod tests {
         assert_eq!(none.action_for(Keysym::d, &alt), None);
         let some = Config::from_toml(r#"launcher = "fuzzel""#, &no_env).unwrap();
         assert_eq!(some.action_for(Keysym::d, &alt), Some(Action::Launcher));
+    }
+
+    #[test]
+    fn a_modifier_alone_is_a_tap() {
+        let logo = mods(false, false, false, true);
+        let alt = mods(false, true, false, false);
+        let ctrl = mods(true, false, false, false);
+        let config = Config::from_toml(
+            r#"
+            mod = "super"
+            launcher = "fuzzel"
+            [bindings]
+            "Alt" = "terminal"
+            "ctrl" = "maximize"
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        // Never on the press, whichever side.
+        assert_eq!(config.action_for(Keysym::Super_L, &logo), None);
+        assert_eq!(config.action_for(Keysym::Super_R, &logo), None);
+        assert_eq!(
+            config.tap_action(Keysym::Super_R, &logo),
+            Some(Action::Launcher)
+        );
+        assert_eq!(
+            config.tap_action(Keysym::Alt_R, &alt),
+            Some(Action::Terminal)
+        );
+        assert_eq!(
+            config.tap_action(Keysym::Control_L, &ctrl),
+            Some(Action::ToggleMaximize)
+        );
+        // With another modifier held, it isn't a tap.
+        assert_eq!(
+            config.tap_action(Keysym::Super_L, &mods(false, false, true, true)),
+            None
+        );
+        assert_eq!(config.tap_action(Keysym::d, &logo), None);
+
+        // "Mod" follows `mod`; "none" removes it; without a launcher the
+        // default does nothing.
+        let nested = Config::from_toml(r#"launcher = "fuzzel""#, &no_env).unwrap();
+        assert_eq!(nested.mod_key, ModKey::Alt);
+        assert_eq!(
+            nested.tap_action(Keysym::Alt_L, &alt),
+            Some(Action::Launcher)
+        );
+        assert_eq!(nested.tap_action(Keysym::Super_L, &logo), None);
+        let unbound = Config::from_toml(
+            "launcher = \"fuzzel\"\n[bindings]\n\"Mod\" = \"none\"\n",
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(unbound.tap_action(Keysym::Alt_L, &alt), None);
+        let no_launcher = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(no_launcher.tap_action(Keysym::Alt_L, &alt), None);
+
+        // Shift isn't a tap, and a modifier as the key of a combo is no key.
+        for text in ["Shift", "Mod+Alt", "Mod+Super"] {
+            assert!(KeyCombo::parse(text, ModKey::Alt).is_err(), "{text}");
+        }
     }
 
     #[test]

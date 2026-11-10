@@ -254,6 +254,21 @@ pub struct InputState {
     pub last_press: Option<crate::window_menu::LastPress>,
     /// A key pressed while the window menu is open, for it (`window_menu.rs`).
     pub menu_key: Option<smithay::input::keyboard::Keysym>,
+    /// A modifier key pressed alone, which runs its tap binding when
+    /// released if nothing else happened before (`Config::tap_action`).
+    pub mod_tap: Option<ModTap>,
+    /// The action of a tap just released, run after the release reached
+    /// the client.
+    pub tap_action: Option<crate::config::Action>,
+}
+
+/// A modifier key held alone: its keycode, keysym and the modifiers its
+/// press left.
+#[derive(Debug, Clone, Copy)]
+pub struct ModTap {
+    pub keycode: Keycode,
+    pub sym: smithay::input::keyboard::Keysym,
+    pub mods: smithay::input::keyboard::ModifiersState,
 }
 
 /// The state of Smithay's protocols (`Pila::protocols`), which its handler

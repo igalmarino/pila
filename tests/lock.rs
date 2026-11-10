@@ -11,7 +11,11 @@ const LOCK_RGBA: [u8; 4] = [10, 20, 30, 255];
 
 /// A window "a", then a locker locked with a surface on HEADLESS-1.
 fn locked() -> (TestPila, Client, Client, ExtSessionLockV1) {
-    let mut pila = TestPila::start();
+    locked_with("")
+}
+
+fn locked_with(config: &str) -> (TestPila, Client, Client, ExtSessionLockV1) {
+    let mut pila = TestPila::with_config(config);
     let apps = pila.client();
     apps.window("a").size(400, 300).create();
     pila.wait_focus("a");
@@ -56,6 +60,23 @@ fn bindings_and_workspace_switches_dont_run_while_locked() {
     assert_eq!(state["workspace"], 1);
     assert!(!apps.with_window(common::client::Window(0), |w| w.close_requested));
     assert_eq!(window_in(&state, "a").unwrap()["maximized"], false);
+}
+
+#[test]
+fn tapping_mod_doesnt_run_the_launcher_while_locked() {
+    let (mut pila, _apps, locker, _lock) = locked_with("launcher = \"exec sleep 600\"\n");
+    pila.key("Super");
+    // The locker gets the key, and nothing ran.
+    const KEY_LEFTMETA: u32 = 125;
+    locker.wait("Super's release", |s| {
+        s.events.iter().any(|e| {
+            *e == common::client::Ev::Key {
+                key: KEY_LEFTMETA,
+                pressed: false,
+            }
+        })
+    });
+    assert_eq!(pila.state()["children"], 0);
 }
 
 #[test]

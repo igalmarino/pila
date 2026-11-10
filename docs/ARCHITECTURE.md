@@ -44,7 +44,13 @@ Key flows and invariants:
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
   up every key press in `Config::bindings` (modifiers must match exactly, Caps/Num Lock
   ignored; keys without Mod, e.g. media keys, can be bound); intercepted keycodes go in
-  `suppressed_keys` so their release isn't forwarded to the client either. Scrolling
+  `suppressed_keys` so their release isn't forwarded to the client either. A modifier
+  alone (`"Mod" = "launcher"`, a default) is a tap: a modifier key's press is never looked
+  up (`action_for` skips the keysyms `tap_sym` knows) but arms `InputState::mod_tap`, which
+  any other key press, pointer button, scroll, gesture or touch, or `release_all_keys`
+  (nested focus loss), clears; its release, if still armed, looks up `tap_action` (same
+  lock and inhibitor filters) and runs it after the release was forwarded to the client,
+  which saw the press like any modifier's. Scrolling
   (`on_pointer_axis`) goes to the surface under the pointer: a wheel step as `value120` 120
   plus 15 px, a touchpad's pixels, with a stop when the fingers lift.
   Bindings don't run while the focused surface (or its menu's window) holds an active
