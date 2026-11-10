@@ -222,7 +222,8 @@ Key flows and invariants:
   outputs before and after it (`redraw_committed`; `surface_outputs` resolves a subsurface,
   popup, window, layer, lock, cursor or drag-icon surface, and an unknown one asks every
   output); every change to the `Space`'s windows goes through `map_window`/`unmap_window`/
-  `raise_window`, which redraw where the window was and is; input asks in
+  `raise_window`, which redraw where the window was and is (a test reads the sources for a
+  direct `space.map_element`, which moves a window and redraws nothing); input asks in
   `process_input_event` (a key or scroll a client gets is the client's to show); a destroyed
   surface or popup, a layer surface removed, a title, a lock, an output powered on ask for
   theirs. `after_frames`' housekeeping (`space.refresh`, taskbar, IPC events, animations) runs

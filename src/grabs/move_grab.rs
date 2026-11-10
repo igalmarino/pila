@@ -48,8 +48,7 @@ impl PointerGrab<Pila> for MoveSurfaceGrab {
 
         let delta = event.location - self.start_data.location;
         let new_location = self.initial_window_location.to_f64() + delta;
-        data.space
-            .map_element(self.window.clone(), new_location.to_i32_round(), true);
+        data.map_window(self.window.clone(), new_location.to_i32_round(), true);
         data.keep_transients_above(&self.window);
         data.x11_window_moved(&self.window);
 

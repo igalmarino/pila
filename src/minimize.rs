@@ -137,8 +137,7 @@ impl Pila {
         self.windows.minimized.remove(index);
         self.windows.desktop_shown = None;
         went_with_parent(window).set(false);
-        self.space
-            .map_element(window.clone(), space_location(window), false);
+        self.map_window(window.clone(), space_location(window), false);
         if let Some(x11) = window.x11_surface() {
             let _ = x11.set_hidden(false);
         }

@@ -412,8 +412,7 @@ impl XwmHandler for Pila {
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, surface: X11Surface) {
         // Menus and tooltips: exactly where X put them, on top, unfocused.
         let location = surface.last_configure().loc;
-        self.space
-            .map_element(Window::new_x11_window(surface), location, false);
+        self.map_window(Window::new_x11_window(surface), location, false);
         self.queue_redraw();
     }
 

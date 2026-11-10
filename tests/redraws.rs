@@ -159,3 +159,92 @@ fn an_animation_on_one_output_doesnt_redraw_another_for_each_frame() {
         (frames_b + idle_b) - (frames_b0 + idle_b0)
     );
 }
+
+/// A window dragged partly onto another output, the pointer staying on the
+/// first: the other output follows the drag. (The move grab moved the window
+/// without asking for its redraws; only the pointer's output was redrawn, and
+/// the other showed the window wherever it was at its last redraw for
+/// something else.)
+#[test]
+fn a_window_dragged_onto_another_output_is_redrawn_there() {
+    const RED: [u8; 4] = [255, 255, 0, 0];
+    let mut pila = two_fast_outputs();
+    let client = pila.client();
+    pila.move_to(1280.0 + 500.0, 400.0);
+    client.window("a").size(400, 300).color(RED).create();
+    let state = pila.wait_focus("a");
+    let (x, y, ..) = rect(&window_in(&state, "a").unwrap()["geometry"]);
+    assert!(x >= 1280, "the window opens on B");
+    // Grabbed near its right edge, dragged left until 200 px of it are on A:
+    // the pointer ends 150 px into B.
+    pila.move_to((x + 350) as f64, (y + 150) as f64);
+    pila.key_press("Super");
+    pila.press("left");
+    // Settled before and between the steps: the redraw of every output that
+    // the press asks for would otherwise still be due, and draw the last
+    // place.
+    pila.settle();
+    let distance = x - 1280 + 200;
+    for _ in 0..distance / 20 {
+        pila.move_by(-20.0, 0.0);
+        pila.settle();
+    }
+    pila.wait("the window across both outputs", |s| {
+        let (x, ..) = rect(&window_in(s, "a").unwrap()["geometry"]);
+        x <= 1280 - 180
+    });
+    assert!(pila.state()["pointer"]["x"].as_f64().unwrap() > 1280.0);
+    // On A, 100 px left of B, with nothing else happening.
+    pila.wait_pixel(1180.0, (y + 150) as f64, [255, 0, 0, 255]);
+    pila.release("left");
+    pila.key_release("Super");
+}
+
+/// Nothing changes the `Space`'s windows but through `map_window`,
+/// `unmap_window` and `raise_window` (`redraw.rs`), which ask for the redraws:
+/// a direct `space.map_element` moves a window and redraws nothing. (One is
+/// allowed: `resize_grab::handle_commit`, inside a commit, which asks for its
+/// surface's outputs before and after.)
+#[test]
+fn the_spaces_windows_change_only_through_the_helpers_that_redraw() {
+    fn sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    sources(&src, &mut files);
+    let mut direct = Vec::new();
+    for path in files {
+        let name = path.strip_prefix(&src).unwrap().display().to_string();
+        if name == "redraw.rs" {
+            continue;
+        }
+        // Without whitespace: a call may be split over lines.
+        let code: String = std::fs::read_to_string(&path)
+            .unwrap()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        for call in [
+            "space.map_element(",
+            "space.unmap_elem(",
+            "space.raise_element(",
+        ] {
+            for _ in 0..code.matches(call).count() {
+                direct.push(format!("{name}: {call}"));
+            }
+        }
+    }
+    assert_eq!(
+        direct,
+        ["grabs/resize_grab.rs: space.map_element("],
+        "use Pila::map_window, unmap_window or raise_window"
+    );
+}
