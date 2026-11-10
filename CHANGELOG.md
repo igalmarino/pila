@@ -36,18 +36,17 @@
   window now gets nothing.
 - **A swipe begun as the screen locks runs nothing:** its action (show the desktop, say) ran
   behind the lock screen if the screen locked during the swipe.
-- **Less CPU with two monitors, and no frame held back:** moving the mouse on one monitor, or an
-  app drawing on it, redrew the others for nothing (measured: 1000 to 5000 times a second, about
-  5% of a core). Each monitor is now redrawn only for what shows on it. An app's new frame on a
-  monitor that had nothing new just before is no longer held back until its next refresh is near
-  (which at 144 Hz and up could cost it a refresh); only redraws that may have nothing to show
-  still wait, at most one per refresh. The frame statistics (`RUST_LOG=pila::frames=debug`)
-  count a frame shown a refresh later than it could have been as missed (`late`).
+- **Less CPU with two monitors:** moving the mouse on one monitor, or an app drawing on it,
+  redrew the others for nothing (measured: 1000 to 5000 times a second, about 5% of a core). Each
+  monitor is now redrawn only for what shows on it, and no longer builds what it would draw of
+  the windows on the others (measured headless, six windows on one monitor: a redraw of the
+  other a third cheaper). On a TTY, a redraw that may have nothing to show (an app sending the
+  same picture again) waits for the next refresh, at most one per refresh. The frame statistics
+  (`RUST_LOG=pila::frames=debug`) count a frame shown a refresh later than it could have been as
+  missed (`late`).
 - **Less CPU with monitors of different scales:** drawing one monitor re-rasterized the title
   bars of the windows on another monitor of another scale (the title text and the buttons), and
-  the next time that one was drawn, again. Each scale now keeps its own. And a monitor no longer
-  builds what it would draw of the windows on the others (measured, six windows on one monitor:
-  a redraw of the other a third cheaper).
+  the next time that one was drawn, again. Each scale now keeps its own.
 - **Window titles appear as soon as the fonts load:** a window that opened before then showed
   its title only at the next redraw of its monitor.
 - **No gamma warning at every login:** the log warned that setting gamma held Pila past a
@@ -57,12 +56,16 @@
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it. The AUR package is no longer stripped, so the backtrace has the names of the
   functions (about 9 MB more).
-- **A screenshot of a monitor just unplugged fails instead of waiting:** a `wlr-screencopy` copy
-  asked after its monitor went away was never answered, so the tool taking it hung (since
-  each monitor is redrawn on its own, in this release).
+- **The AUR package says when Rust is too old:** with a Rust older than 1.89 it stops with "pila
+  needs Rust 1.89 or newer" instead of Cargo's error about `edition2024`, which didn't say what to
+  do.
 - **For testers: `scripts/check` no longer hangs with fewer than three workspaces:** it took the
   number from your config and stopped at a switch to workspace 3, leaving Pila open. It now sets
   its own, and a step that fails ends the run, with the step's line in the result.
+- **For testers: `pila --version` says `-dirty` for a build of uncommitted changes:** it gave
+  the last build's version instead, so a run with a fix looked like the commit before it.
+- **For testers: redraws that find nothing new are counted:** the frame statistics have them per
+  output apart from frames (`idle`, with their CPU time), and `scripts/check` reports them.
 
 ## 0.4.2 (2026-11-09)
 
