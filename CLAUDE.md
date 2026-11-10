@@ -246,7 +246,7 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   message states; `.locked()` (`sync.rs`) for a mutex, `get_or_insert` for user data, else
   `let`-`else`, logging what means something went wrong.
 - **Settings:** a new one is read when used or re-applied in `apply_config`. Keep in sync:
-  `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc, the
+  `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the
   defaults in `config.example.toml` (every value commented out and marked default or example),
   `USAGE` in `main.rs` for flags and env vars, and the user docs: `docs/MANUAL.md` (by task)
   and the man page `docs/pila.1` (tests check that both list every default binding, and the

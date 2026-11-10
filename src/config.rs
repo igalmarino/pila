@@ -2,48 +2,13 @@
 //! or `--config PATH`), then `PILA_*` environment overrides. See
 //! `config.example.toml` for every option.
 //!
-//! Default bindings (Mod is Super on a TTY and Alt nested, unless configured;
-//! see `mod`/`PILA_MOD`):
-//!
-//! | Binding               | Action                         |
-//! |-----------------------|--------------------------------|
-//! | Mod+Return            | Open terminal                  |
-//! | Mod+D                 | Run launcher (if configured)   |
-//! | Mod+Tab / Mod+J       | Switch to previous window (hold Mod and repeat: older ones) |
-//! | Mod+Shift+Tab         | Same, the other way round      |
-//! | Mod+M                 | Toggle maximize                |
-//! | Mod+N                 | Minimize (Mod+Tab brings it back) |
-//! | Mod+F                 | Toggle fullscreen              |
-//! | Mod+Left / Mod+Right  | Snap to the left / right half (again: restore) |
-//! | Mod+Up / Mod+Down     | Maximize / restore             |
-//! | Mod+Shift+arrows      | Move the window                |
-//! | Mod+Ctrl+arrows       | Resize (Right/Down grow, Left/Up shrink) |
-//! | Mod+C                 | Center the window              |
-//! | Mod+T                 | Keep the window above the others (again: stop) |
-//! | Mod+P                 | Keep the window on all workspaces (again: stop) |
-//! | Mod+H                 | Minimize the workspace's windows (again: bring them back) |
-//! | Mod+O                 | Go to the next output          |
-//! | Mod+Shift+O           | Move the window to the next output |
-//! | Mod+Shift+S           | Screenshot of a region (slurp) to the clipboard |
-//! | Mod+Ctrl+S            | Screenshot of the screen under the pointer to ~/Pictures |
-//! | Mod+1..N              | Go to workspace 1..N (N = `workspaces`, at most 9) |
-//! | Mod+Shift+1..N        | Move the window to workspace 1..N |
-//! | Mod+Page_Down / Mod+Page_Up | Next / previous workspace |
-//! | Mod+Shift+Page_Down / Page_Up | Move the window to the next / previous workspace |
-//! | Mod+Shift+Q           | Close focused window           |
-//! | Mod+Shift+E           | Quit pila                      |
-//! | Mod+Left drag         | Move window                    |
-//! | Mod+Right drag        | Resize window (nearest corner) |
-//! | Ctrl+Alt+F1..F12      | Switch VT (on a TTY)           |
-//!
-//! Default touchpad gestures (`[gestures]`, on a TTY; `gestures.rs`):
-//!
-//! | Gesture               | Action                         |
-//! |-----------------------|--------------------------------|
-//! | 3 fingers left / right | Switch windows, like Mod+Tab / Mod+Shift+Tab |
-//! | 3 fingers up          | Toggle maximize                |
-//! | 3 fingers down        | Restore (undo a snap or maximize) |
-//! | 4 fingers left / right | Next / previous workspace     |
+//! The default bindings and gestures are `DEFAULT_BINDINGS` and
+//! `DEFAULT_GESTURES` (Mod is Super on a TTY and Alt nested, unless configured;
+//! see `mod`/`PILA_MOD`), told to users in `docs/MANUAL.md` and the man page,
+//! which tests check list every one; the actions are `NAMED_ACTIONS` and
+//! `ACTIONS_WITH_ARGUMENT`, which `config.example.toml` lists (checked too).
+//! The mouse bindings: Mod+left drag moves a window, Mod+right drag resizes it
+//! from the nearest corner.
 //!
 //! `[bindings]` in the config adds to or replaces the keyboard bindings above
 //! (`"Mod+Shift+Return" = "spawn kitty -e htop"`, `"Mod+J" = "none"`); the

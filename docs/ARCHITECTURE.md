@@ -37,8 +37,8 @@ Key flows and invariants:
   top (`Pila::outputs.overrides`; an edited section drops its monitor's). Anything that reads
   `self.config` when used (bindings, Mod, terminal) needs nothing; `autostart` isn't
   re-run. A new setting must either be read when used or be re-applied there. Keep in
-  sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc
-  and the defaults listed in `config.example.toml`; the `USAGE` string in `main.rs` with the
+  sync: `DEFAULT_BINDINGS` and `DEFAULT_GESTURES` and the defaults listed in
+  `config.example.toml` (the actions, `NAMED_ACTIONS`, checked against its list); the `USAGE` string in `main.rs` with the
   CLI flags and env vars; and the user docs, `docs/MANUAL.md` and the man page `docs/pila.1`
   (tests check both against the default bindings and the man page against `USAGE`).
 - **Keybindings** are intercepted in the keyboard filter closure (`input.rs`), which looks
