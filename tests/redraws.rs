@@ -121,3 +121,41 @@ fn drawing_an_output_of_another_scale_leaves_a_windows_title_bar_alone() {
         |s| s["locked"] == false,
     );
 }
+
+/// An animation redraws the outputs it shows on, frame after frame, not
+/// every output: a window closing on one output, fading out, leaves the
+/// other alone after the start. (Each step asked every output; one with
+/// nothing new there, queuing no frame, was redrawn as fast as the loop
+/// went, held back by nothing.)
+#[test]
+fn an_animation_on_one_output_doesnt_redraw_another_for_each_frame() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800@144,B:1024x768@144".into()),
+        config: "[animations]\nenabled = true\n".into(),
+        ..Options::default()
+    });
+    let client = pila.client();
+    pila.move_to(600.0, 400.0);
+    let mut window = Some(client.window("a").size(400, 300).create());
+    assert_eq!(pila.wait_window("a")["output"], "A");
+    let before = pila.settle();
+    client.destroy(window.take().unwrap());
+    let after = pila.wait("the close to be over", |s| {
+        s["animations"]["running"] == false && window_in(s, "a").is_none()
+    });
+    let after = pila.wait("pila to settle", |s| {
+        s["redraw_pending"] == false && redraws(s, "A").0 >= redraws(&after, "A").0
+    });
+    let (frames_a, _) = redraws(&after, "A");
+    assert!(
+        frames_a > redraws(&before, "A").0 + 5,
+        "A drew the fade-out: {frames_a}"
+    );
+    let (frames_b, idle_b) = redraws(&after, "B");
+    let (frames_b0, idle_b0) = redraws(&before, "B");
+    assert!(
+        (frames_b + idle_b) - (frames_b0 + idle_b0) <= 3,
+        "B redrawn {} times during A's animation",
+        (frames_b + idle_b) - (frames_b0 + idle_b0)
+    );
+}

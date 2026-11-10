@@ -138,7 +138,8 @@ Key flows and invariants:
   nothing (`draw::idle_wait`): at most one per refresh. What's asked says what it brings
   (`redraw::Content`, the most of the requests since the last redraw: `redraw_content`): a
   change of Pila's own (`Sure`: a window moved, an animation, a drawn cursor) never waits; a
-  client's new picture (`Client`) doesn't, once per wait: if that redraw finds nothing new
+  client's new picture (`Client`) doesn't, once per wait (and `Sure` not after
+  `SURE_STREAK` redraws in a row found nothing, a bound on a loop of Pila's own requests): if that redraw finds nothing new
   either (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers,
   say), it waits too, until the wait is over. A lock waiting for its frame never waits. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
@@ -464,7 +465,10 @@ Key flows and invariants:
   (a stdlib Python taskbar client) minimizes/unminimizes and `scripts/workspace-action`
   (ext-workspace) switches workspaces for scripted tests (`scripts/check`); `wtype`
   can't, the virtual keyboard bypasses bindings. `step_animations` (from
-  `after_frames`) prunes finished ones and requests the next frame; locking drops all.
+  `after_frames`) prunes finished ones and requests the next frame, of the outputs they show on
+  (`animation_outputs`: windows' and snapshots' rectangles grown by the shadow and the drop,
+  layers' outputs; every output during a workspace slide), taken before pruning so the last
+  frame is asked for too; locking drops all.
   Animations are visual only: input sees the real geometry.
 - **Window and layer rules** (`rules.rs`, `[[window-rule]]` / `[[layer-rule]]`): match
   windows by app id (`foreign_toplevel::title_and_app_id`: xdg `app_id` or X11

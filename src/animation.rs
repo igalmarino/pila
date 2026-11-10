@@ -737,6 +737,8 @@ impl Pila {
             self.drop_animations();
             return;
         }
+        // Where they show, before those done now go: their last frame too.
+        let outputs = self.animation_outputs();
         let now = self.animation_time();
         let before = self.animation_count();
         let animations = &mut self.animations;
@@ -783,9 +785,58 @@ impl Pila {
             // away (calloop wouldn't): this runs after the event loop's
             // dispatch, too late for the winit source to see a redraw
             // request before the loop sleeps.
-            self.loop_handle.insert_idle(|state| state.queue_redraw());
+            // Only the outputs they show on: another, with nothing new,
+            // would be redrawn as fast as the loop goes.
+            self.loop_handle.insert_idle(move |state| match outputs {
+                None => state.queue_redraw(),
+                Some(outputs) => {
+                    for output in outputs {
+                        state.queue_redraw_output(&output);
+                    }
+                }
+            });
             self.wake.ping();
         }
+    }
+
+    /// The outputs the animations in progress show on, `None` for every one
+    /// (a workspace slide). A window's or ghost's rectangle grows by its
+    /// shadow and by how far an animation moves it (`MINIMIZE_DROP`).
+    fn animation_outputs(&self) -> Option<Vec<Output>> {
+        if self.workspace_slide.is_some() {
+            return None;
+        }
+        let margin = self.shadow_margin() + MINIMIZE_DROP.ceil() as i32;
+        let grow = |rect| crate::redraw::grown(rect, margin);
+        let a = &self.animations;
+        let mut rects: Vec<Rectangle<i32, Logical>> = Vec::new();
+        for appearing in &a.appearing {
+            rects.extend(self.window_visual_rect(&appearing.window).map(grow));
+        }
+        rects.extend(a.ghosts.iter().map(|g| grow(g.snapshot.rect)));
+        for resizing in &a.resizing {
+            rects.extend(self.window_visual_rect(&resizing.window).map(grow));
+            rects.push(grow(resizing.from));
+            rects.push(grow(resizing.snapshot.rect));
+        }
+        rects.extend(a.layer_ghosts.iter().map(|g| g.snapshot.rect));
+        let mut outputs: Vec<Output> = Vec::new();
+        let mut add = |output: Output| {
+            if !outputs.contains(&output) {
+                outputs.push(output);
+            }
+        };
+        for rect in rects {
+            self.outputs_overlapping(rect)
+                .into_iter()
+                .for_each(&mut add);
+        }
+        for layer in &a.layers {
+            if let Some((output, _)) = self.layer_for_surface(layer.layer.wl_surface()) {
+                add(output);
+            }
+        }
+        Some(outputs)
     }
 
     /// How many animations are in progress.

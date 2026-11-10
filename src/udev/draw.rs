@@ -520,12 +520,17 @@ fn idle_wait(
     // Pila's own change shows; a client's picture, once (it may show
     // nowhere); what may bring nothing waits.
     let surely_new = match content {
-        Content::Sure => true,
+        Content::Sure => idle_streak < SURE_STREAK,
         Content::Client => idle_streak <= 1,
         Content::Maybe => false,
     };
     (!surely_new && !frame_pending && !lock_pending).then(|| until - now)
 }
+
+/// How many redraws in a row may find nothing new before even a change of
+/// Pila's own waits (`idle_wait`): a bound on a loop of requests for what
+/// shows elsewhere, far above what a real change meets.
+const SURE_STREAK: u32 = 8;
 
 /// The redraws in a row with nothing new after this one (`idle_wait`): one
 /// more if it found nothing (the first of a new wait if the last wait was
@@ -677,6 +682,13 @@ mod tests {
         assert_eq!(
             idle_wait(until, ms(111), Content::Sure, 5, false, false),
             None
+        );
+        // Unless it keeps finding nothing (something of Pila's asking in a
+        // loop for what shows elsewhere): then even it waits, so no output
+        // redraws with nothing new more than a few times a refresh.
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Sure, SURE_STREAK, false, false),
+            Some(ms(13))
         );
     }
 

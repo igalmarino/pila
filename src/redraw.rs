@@ -126,6 +126,15 @@ fn outputs_of_all(state: &Pila) -> std::vec::IntoIter<Output> {
         .into_iter()
 }
 
+/// `rect` grown by `margin` on every side.
+pub fn grown(rect: Rectangle<i32, Logical>, margin: i32) -> Rectangle<i32, Logical> {
+    let margin = margin.max(0);
+    Rectangle::new(
+        rect.loc - Point::from((margin, margin)),
+        rect.size + (2 * margin, 2 * margin).into(),
+    )
+}
+
 /// The surface at the root of `surface`'s subsurface tree.
 pub fn root_surface(surface: &WlSurface) -> WlSurface {
     let mut root = surface.clone();
@@ -278,13 +287,13 @@ impl Pila {
         if let Some(bar) = crate::decoration::title_bar_rect(window, loc) {
             rect = rect.merge(bar);
         }
+        Some(grown(rect, self.shadow_margin()))
+    }
+
+    /// How far a window's shadow may reach past its frame, any side.
+    pub fn shadow_margin(&self) -> i32 {
         let shadow = &self.config.shadow;
-        let margin = shadow.size.max(0) + shadow.offset.0.abs().max(shadow.offset.1.abs());
-        if margin > 0 {
-            rect.loc -= Point::from((margin, margin));
-            rect.size += (2 * margin, 2 * margin).into();
-        }
-        Some(rect)
+        shadow.size.max(0) + shadow.offset.0.abs().max(shadow.offset.1.abs())
     }
 
     /// The outputs `surface` (any surface of a tree: a subsurface, a popup)
