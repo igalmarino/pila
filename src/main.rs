@@ -329,8 +329,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })?;
 
     // Slow (system font scan), so it runs in the background; title bars get
-    // their text once it's done.
-    text::init();
+    // their text once it's done, with a redraw it asks for.
+    let (fonts_ready, fonts_source) = calloop::ping::make_ping()?;
+    event_loop
+        .handle()
+        .insert_source(fonts_source, |_, _, state: &mut Pila| state.queue_redraw())?;
+    text::init(move || fonts_ready.ping());
 
     // Nested if there's a host session to be a window in.
     let backend = backend.unwrap_or_else(|| {

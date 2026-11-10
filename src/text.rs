@@ -3,7 +3,7 @@
 //! Loading the system fonts is slow (cosmic-text says up to a second in
 //! release builds and ten times that in debug), so `init` does it on a
 //! background thread. Until it's done `render_title` returns `None` and title
-//! bars are drawn without text; the next frame tries again.
+//! bars are drawn without text; then `init`'s callback asks for a redraw.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -24,10 +24,11 @@ struct Fonts {
 static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
 
 /// Start loading the system fonts in the background. Call once at startup.
-pub fn init() {
+/// `ready` runs on that thread once they're in place (to redraw title bars).
+pub fn init(ready: impl FnOnce() + Send + 'static) {
     let spawned = std::thread::Builder::new()
         .name("pila-fonts".into())
-        .spawn(|| {
+        .spawn(move || {
             let start = std::time::Instant::now();
             let system = FontSystem::new();
             let loaded = start.elapsed();
@@ -37,6 +38,7 @@ pub fn init() {
             };
             let _ = FONTS.set(Mutex::new(fonts));
             info!(elapsed = ?loaded, warm_up = ?(start.elapsed() - loaded), "fonts loaded");
+            ready();
         });
     if let Err(err) = spawned {
         warn!(
