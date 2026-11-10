@@ -25,6 +25,12 @@
 //!   `output_remove` `name`.
 //! - `output_fail_next`: the next time outputs are applied, the backend fails.
 //! - `spawn` `command`: run a command as a binding would.
+//! - `actions`: one example of each kind of action (`Action::examples`), by
+//!   name; `action` `index`: run that one as a binding would (`run_action`).
+//! - `keyboard_focus` / `pointer_focus` `app_id`: hand that window the keyboard
+//!   or the pointer directly, past every check above the lowest layer (to test
+//!   that the session lock refuses it there: `session_lock.rs`), after the
+//!   answer (refused while locked, it crashes a debug build).
 //! - `quit`.
 //! - `panic`: crash right after answering (the crash report in the log).
 
@@ -293,6 +299,63 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
             state.spawn(str_field(request, "command")?);
             json!({})
         }
+        "actions" => {
+            let names: Vec<String> = crate::config::Action::examples()
+                .iter()
+                .map(|action| format!("{action:?}"))
+                .collect();
+            json!({ "actions": names })
+        }
+        "action" => {
+            let index = request
+                .get("index")
+                .and_then(Value::as_u64)
+                .ok_or("missing \"index\"")?;
+            let action = crate::config::Action::examples()
+                .into_iter()
+                .nth(index as usize)
+                .ok_or("no such action")?;
+            state.run_action(action, smithay::utils::SERIAL_COUNTER.next_serial());
+            json!({})
+        }
+        "keyboard_focus" => {
+            let window = window_by_app_id(state, str_field(request, "app_id")?)?;
+            state.loop_handle.insert_idle(move |state| {
+                let focus = crate::state::focus_target(&window);
+                state.set_keyboard_focus(focus, smithay::utils::SERIAL_COUNTER.next_serial());
+            });
+            state.wake.ping();
+            json!({})
+        }
+        "pointer_focus" => {
+            let window = window_by_app_id(state, str_field(request, "app_id")?)?;
+            let surface = smithay::wayland::seat::WaylandFocus::wl_surface(&window)
+                .ok_or("no surface")?
+                .into_owned();
+            let origin = state
+                .space
+                .element_location(&window)
+                .ok_or("not mapped")?
+                .to_f64();
+            state.loop_handle.insert_idle(move |state| {
+                let Some(pointer) = state.seat.get_pointer() else {
+                    return;
+                };
+                let location = pointer.current_location();
+                pointer.motion(
+                    state,
+                    Some((surface.into(), origin)),
+                    &smithay::input::pointer::MotionEvent {
+                        location,
+                        serial: smithay::utils::SERIAL_COUNTER.next_serial(),
+                        time: smithay::backend::input::InputTime::now(),
+                    },
+                );
+                pointer.frame(state);
+            });
+            state.wake.ping();
+            json!({})
+        }
         "quit" => {
             state.loop_signal.stop();
             json!({})
@@ -311,6 +374,17 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
     // changes; reading the state changes nothing.
     state.housekeeping = true;
     Ok(result)
+}
+
+/// A window, mapped or not, by its app id.
+fn window_by_app_id(state: &Pila, app_id: &str) -> Result<smithay::desktop::Window, String> {
+    state
+        .space
+        .elements()
+        .chain(state.off_space_windows())
+        .find(|w| crate::foreign_toplevel::title_and_app_id(w).1 == app_id)
+        .cloned()
+        .ok_or_else(|| format!("no window {app_id:?}"))
 }
 
 /// The keycode of a keysym name in the current keymap (its first level), or

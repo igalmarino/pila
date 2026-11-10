@@ -126,7 +126,7 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
         &mut self,
         data: &mut Pila,
         handle: &mut PointerInnerHandle<'_, Pila>,
-        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        _focus: Option<(crate::focus::PointerFocus, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
@@ -217,7 +217,7 @@ impl PointerGrab<Pila> for ResizeSurfaceGrab {
         &mut self,
         data: &mut Pila,
         handle: &mut PointerInnerHandle<'_, Pila>,
-        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        focus: Option<(crate::focus::PointerFocus, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         handle.relative_motion(data, focus, event);

@@ -669,7 +669,10 @@ fn x11_grab(state: &Pila, surface: &X11Surface) -> Option<PointerGrabStartData<P
     let pointer = state.seat.get_pointer()?;
     let start = pointer.grab_start_data()?;
     let (focus, _) = start.focus.as_ref()?;
-    (Some(focus) == surface.wl_surface().as_ref() && !state.is_locked()).then_some(start)
+    let same = surface
+        .wl_surface()
+        .is_some_and(|wl| focus.surface() == Some(&wl));
+    (same && !state.is_locked()).then_some(start)
 }
 
 #[cfg(test)]

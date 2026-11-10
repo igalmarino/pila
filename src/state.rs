@@ -571,20 +571,23 @@ impl Pila {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        if self.is_locked() {
-            return self.lock_surface_under(pos);
-        }
         match self.under(pos)? {
-            Under::Layer(_, surface, origin) | Under::Window(_, Hit::Surface(surface, origin)) => {
-                Some((surface, origin))
-            }
+            Under::Layer(_, surface, origin)
+            | Under::Window(_, Hit::Surface(surface, origin))
+            | Under::Lock(surface, origin) => Some((surface, origin)),
             Under::Window(_, Hit::Decoration(_)) => None,
         }
     }
 
     /// What's under `pos`, in stacking order: layer surfaces above the
-    /// windows, the windows, then layer surfaces below them.
+    /// windows, the windows, then layer surfaces below them. While locked,
+    /// only the lock surface of the output under it: nothing else can be hit.
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
+        if self.is_locked() {
+            return self
+                .lock_surface_under(pos)
+                .map(|(surface, origin)| Under::Lock(surface, origin));
+        }
         let layer = |layers| {
             crate::layers::layer_surface_under(layers, pos)
                 .map(|(layer, surface, origin)| Under::Layer(layer, surface, origin))
@@ -1485,6 +1488,17 @@ impl Pila {
     // ---------------------------------------------------------------------
 
     pub fn run_action(&mut self, action: Action, serial: Serial) {
+        // Locked, only what gets past nothing (`runs_while_locked`), a VT
+        // switch (the other VT has its own login) and, in debug builds, Quit
+        // to escape a nested session. Bindings, gestures and `pila msg`
+        // refuse the rest before getting here too.
+        let allowed = action.runs_while_locked()
+            || matches!(action, Action::ChangeVt(_))
+            || (cfg!(debug_assertions) && action == Action::Quit);
+        if self.is_locked() && !allowed {
+            debug!(?action, "refused while locked");
+            return;
+        }
         match action {
             Action::Spawn(command) => self.spawn(&command),
             Action::Terminal => {
@@ -1779,6 +1793,8 @@ impl Pila {
 pub enum Under {
     Layer(LayerSurface, WlSurface, Point<f64, Logical>),
     Window(Window, Hit),
+    /// While locked, the (sub)surface of a lock surface, and nothing else.
+    Lock(WlSurface, Point<f64, Logical>),
 }
 
 impl Under {
@@ -1786,7 +1802,7 @@ impl Under {
     pub fn layer(&self) -> Option<Layer> {
         match self {
             Under::Layer(layer, ..) => Some(layer.layer()),
-            Under::Window(..) => None,
+            Under::Window(..) | Under::Lock(..) => None,
         }
     }
 }
@@ -1857,7 +1873,7 @@ pub fn close_window(window: &Window) {
 
 /// What to give keyboard focus to for `window`: its xdg toplevel surface, or
 /// the X11 window (so Smithay also sets the X input focus).
-fn focus_target(window: &Window) -> Option<KeyboardFocus> {
+pub(crate) fn focus_target(window: &Window) -> Option<KeyboardFocus> {
     if let Some(x11) = window.x11_surface() {
         return Some(x11.clone().into());
     }

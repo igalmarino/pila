@@ -269,3 +269,203 @@ fn activation_does_nothing_while_locked() {
     let state = pila.settle();
     assert_eq!(window_in(&state, "hidden").unwrap()["minimized"], true);
 }
+
+/// Whether `event` is input: focus or anything sent to a focus.
+fn is_input(event: &common::client::Ev) -> bool {
+    use common::client::Ev;
+    matches!(
+        event,
+        Ev::KeyboardEnter(_)
+            | Ev::Key { .. }
+            | Ev::Modifiers { .. }
+            | Ev::PointerEnter { .. }
+            | Ev::Motion { .. }
+            | Ev::Button { .. }
+            | Ev::Axis { .. }
+            | Ev::AxisV120 { .. }
+    )
+}
+
+/// Locked, everything that could hand a client the keyboard or the pointer,
+/// or show it, is tried: every action as a binding or `pila msg` runs it
+/// (`run_action`; the list comes from Pila, so a new action is tried too),
+/// the gestures, keys, clicks, the pointer and scrolling over a window,
+/// xdg-activation with a token from before the lock, a taskbar's activate, a
+/// pager's workspace activate and the window menu. Only the lock surfaces
+/// get input, and only they are drawn.
+#[test]
+fn nothing_but_the_lock_gets_input_or_shows_while_locked() {
+    use wayland_protocols::ext::workspace::v1::client::{
+        ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+        ext_workspace_manager_v1::ExtWorkspaceManagerV1,
+    };
+    use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
+    use wayland_protocols_wlr::foreign_toplevel::v1::client::{
+        zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1,
+        zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1,
+    };
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        // Actions that start programs start nothing that shows.
+        config: "terminal = \"true\"\nlauncher = \"true\"\n".into(),
+        ..Options::default()
+    });
+    pila.move_to(100.0, 100.0);
+    let apps = pila.client();
+    let hidden = apps.window("hidden").create();
+    pila.wait_focus("hidden");
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "hidden").unwrap()["minimized"] == true
+    });
+    let a = apps.window("a").size(400, 300).create();
+    let state = pila.wait_focus("a");
+    let (x, y, ..) = rect(&window_in(&state, "a").unwrap()["geometry"]);
+    // A token and a press serial from before the lock.
+    pila.move_to((x + 20) as f64, (y + 20) as f64);
+    pila.click("left");
+    apps.wait("the click", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, common::client::Ev::Button { pressed: false, .. }))
+    });
+    let serial = apps.last_serial();
+    let activation: XdgActivationV1 = apps.bind("xdg_activation_v1", 1);
+    let token = activation.get_activation_token(&apps.qh, "token".into());
+    token.set_serial(serial, &apps.seat());
+    token.commit();
+    apps.flush();
+    apps.wait_logged("token", "Done");
+    let token_string = apps.logged("token")[0]
+        .split('"')
+        .nth(1)
+        .unwrap()
+        .to_string();
+    let shell = pila.client();
+    let _toplevels: ZwlrForeignToplevelManagerV1 =
+        shell.bind("zwlr_foreign_toplevel_manager_v1", 3);
+    let workspaces: ExtWorkspaceManagerV1 = shell.bind("ext_workspace_manager_v1", 1);
+    shell.wait_logged("ext_workspace_manager_v1", "Done");
+    for app_id in ["a", "hidden"] {
+        shell.wait_logged("wlr_toplevel", &format!("AppId {{ app_id: \"{app_id}\" }}"));
+    }
+
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    for output in ["A", "B"] {
+        let surf = locker.lock_surface(&lock, output, LOCK_COLOR);
+        locker.wait_surface_configured(surf);
+    }
+    locker.wait_logged("lock", "Locked");
+    pila.wait("locked", |s| {
+        s["locked"] == true && s["lock_pending"] == false
+    });
+    apps.roundtrip();
+    apps.clear_events();
+
+    // Every action, as a binding runs it.
+    let actions = pila.request(json!({ "cmd": "actions" }));
+    let actions = actions["actions"].as_array().unwrap().clone();
+    assert!(actions.len() > 30, "{actions:?}");
+    for (index, name) in actions.iter().enumerate() {
+        // It ends Pila (and debug builds allow it while locked, to escape a
+        // nested session).
+        if name == "Quit" {
+            continue;
+        }
+        pila.request(json!({ "cmd": "action", "index": index }));
+    }
+    // The gestures, every way.
+    for fingers in [3, 4] {
+        for (dx, dy) in [(300.0, 0.0), (-300.0, 0.0), (0.0, 300.0), (0.0, -300.0)] {
+            pila.gesture(json!({ "kind": "swipe", "phase": "begin", "fingers": fingers }));
+            for _ in 0..5 {
+                pila.gesture(
+                    json!({ "kind": "swipe", "phase": "update", "dx": dx / 5.0, "dy": dy / 5.0 }),
+                );
+            }
+            pila.gesture(json!({ "kind": "swipe", "phase": "end" }));
+        }
+    }
+    pila.gesture(json!({ "kind": "pinch", "phase": "begin", "fingers": 2 }));
+    pila.gesture(json!({ "kind": "pinch", "phase": "update", "scale": 2.0 }));
+    pila.gesture(json!({ "kind": "pinch", "phase": "end" }));
+    pila.gesture(json!({ "kind": "hold", "phase": "begin", "fingers": 3 }));
+    pila.gesture(json!({ "kind": "hold", "phase": "end" }));
+    // Input over the window, and keys.
+    pila.move_to((x + 30) as f64, (y + 30) as f64);
+    pila.click("left");
+    pila.click("right");
+    pila.scroll("wheel", 0.0, 15.0);
+    pila.key("a");
+    pila.combo("Super+Tab");
+    // The window menu, with the serial of a press from before the lock.
+    let seat = apps.seat();
+    apps.request(a, |t| t.show_window_menu(&seat, serial, 10, 10));
+    // Activation, a taskbar's and a pager's.
+    activation.activate(token_string, &apps.surface(hidden));
+    for app_id in ["a", "hidden"] {
+        let handle: ZwlrForeignToplevelHandleV1 =
+            shell.object("wlr_toplevel", &format!("AppId {{ app_id: \"{app_id}\" }}"));
+        handle.activate(&shell.seat());
+        handle.unset_minimized();
+    }
+    let two: ExtWorkspaceHandleV1 = shell.object("workspace", "Name { name: \"2\" }");
+    two.activate();
+    workspaces.commit();
+    shell.flush();
+    apps.roundtrip();
+    shell.roundtrip();
+    let state = pila.settle();
+
+    assert_eq!(state["locked"], true);
+    assert_eq!(state["keyboard_focus"], "lock");
+    assert!(state["window_menu"].is_null(), "{state:#}");
+    apps.roundtrip();
+    let leaked: Vec<_> = apps.events().into_iter().filter(is_input).collect();
+    assert!(leaked.is_empty(), "input reached an app: {leaked:?}");
+    // Nothing but the lock on either output.
+    for (ox, w, h) in [(0, 1280, 800), (1280, 1024, 768)] {
+        for i in 0..5 {
+            for j in 0..5 {
+                let px = (ox + w * (2 * i + 1) / 10) as f64;
+                let py = (h * (2 * j + 1) / 10) as f64;
+                assert_eq!(pila.pixel(px, py), LOCK_RGBA, "at {px},{py}");
+            }
+        }
+    }
+}
+
+/// The keyboard can't go to anything but a lock surface while locked, from
+/// any path: the lowest layer refuses it (and in a debug build, as tests
+/// run, says so by crashing, to show the path that tried).
+#[test]
+fn the_keyboard_is_refused_to_anything_but_the_lock_at_the_lowest_layer() {
+    let (mut pila, apps, _locker, _lock) = locked();
+    apps.clear_events();
+    pila.expect_crash();
+    pila.request(json!({ "cmd": "keyboard_focus", "app_id": "a" }));
+    pila.wait_exit();
+    assert!(
+        pila.log().contains("keyboard focus refused while locked"),
+        "{}",
+        pila.log_tail()
+    );
+    assert!(!apps.events().iter().any(is_input));
+}
+
+/// The same for the pointer.
+#[test]
+fn the_pointer_is_refused_to_anything_but_the_lock_at_the_lowest_layer() {
+    let (mut pila, apps, _locker, _lock) = locked();
+    apps.clear_events();
+    pila.expect_crash();
+    pila.request(json!({ "cmd": "pointer_focus", "app_id": "a" }));
+    pila.wait_exit();
+    assert!(
+        pila.log().contains("pointer focus refused while locked"),
+        "{}",
+        pila.log_tail()
+    );
+    assert!(!apps.events().iter().any(is_input));
+}

@@ -18,6 +18,14 @@
   and the `outputs` events waited for a frame, so a subscriber never saw `power: false`.
 - **`pila msg outputs` shows monitors that are off:** marked `[off]`, as 0.4.2 said it did
   (only `--json` had their `power`).
+- **Nothing reaches an app behind the lock screen, by construction:** while the screen is
+  locked Pila refuses keyboard and pointer input (focus, keys, clicks, scrolls, gestures, drags)
+  to anything but the lock screen where input reaches apps, whatever path sends it, instead of
+  relying on each path to check. It found one: locking sent the window under the pointer one
+  last pointer motion, after the lock had begun.
+- **No crash for an X11 window without a surface given the pointer:** a popup grab could hand
+  the pointer to an X11 window Xwayland hadn't given a surface yet, which crashed Pila; such a
+  window now gets nothing.
 - **A swipe begun as the screen locks runs nothing:** its action (show the desktop, say) ran
   behind the lock screen if the screen locked during the swipe.
 - **Less CPU with two monitors, and no frame held back:** moving the mouse on one monitor, or an

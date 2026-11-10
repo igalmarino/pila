@@ -355,7 +355,7 @@ impl Pila {
         };
         pointer.relative_motion(
             self,
-            under_current.clone(),
+            under_current.clone().map(|(s, at)| (s.into(), at)),
             &RelativeMotionEvent {
                 delta,
                 delta_unaccel,
@@ -386,7 +386,7 @@ impl Pila {
         let under = self.surface_under(location);
         pointer.motion(
             self,
-            under.clone(),
+            under.clone().map(|(s, at)| (s.into(), at)),
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -422,7 +422,7 @@ impl Pila {
         let under = self.surface_under(location);
         pointer.motion(
             self,
-            under.clone(),
+            under.clone().map(|(s, at)| (s.into(), at)),
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -443,7 +443,7 @@ impl Pila {
             return;
         }
         let icon = match self.under(pos) {
-            Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..)) => return,
+            Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..) | Under::Lock(..)) => return,
             Some(Under::Window(_, Hit::Decoration(Decoration::Border(edges)))) => {
                 edges.cursor_icon()
             }
@@ -518,9 +518,9 @@ impl Pila {
         if button_state == ButtonState::Pressed {
             let client = pointer
                 .current_focus()
-                .and_then(|surface| {
+                .and_then(|focus| {
                     use smithay::reexports::wayland_server::Resource;
-                    self.display_handle.get_client(surface.id()).ok()
+                    self.display_handle.get_client(focus.surface()?.id()).ok()
                 })
                 .map(|client| client.id());
             self.input.last_press = Some(crate::window_menu::LastPress {
@@ -599,6 +599,8 @@ impl Pila {
                         }
                     }
                 }
+                // Locked (handled above, as `under` gives nothing else).
+                Some(Under::Lock(..)) => self.focus_lock_surface(serial),
                 None => self.focus_window(None, serial),
             }
         }

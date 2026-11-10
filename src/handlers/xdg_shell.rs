@@ -353,7 +353,7 @@ fn check_grab(
     }
     let start_data = pointer.grab_start_data()?;
     let (focus, _) = start_data.focus.as_ref()?;
-    if !focus.id().same_client_as(&surface.id()) {
+    if !focus.surface()?.id().same_client_as(&surface.id()) {
         return None;
     }
     Some(start_data)

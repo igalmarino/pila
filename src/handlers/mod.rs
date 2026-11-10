@@ -42,7 +42,7 @@ use crate::{focus::KeyboardFocus, Pila};
 
 impl SeatHandler for Pila {
     type KeyboardFocus = KeyboardFocus;
-    type PointerFocus = WlSurface;
+    type PointerFocus = crate::focus::PointerFocus;
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<Pila> {
@@ -106,6 +106,13 @@ impl Pila {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        // While locked, only a lock surface (`focus.rs` refuses the rest
+        // again where input reaches clients).
+        if let Some(target) = &focus {
+            if self.refused_while_locked(target.surface().as_ref(), "keyboard focus") {
+                return;
+            }
+        }
         let cleared = focus.is_none();
         keyboard.set_focus(self, focus, serial);
         if cleared {

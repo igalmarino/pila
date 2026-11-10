@@ -217,7 +217,11 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   panics on an output that changed with no redraw asked. An idle callback inserted outside
   an event source must ping `Pila::wake`, or it runs after the next event, however late;
   redraws requested from `after_frames` go through `defer_redraws`.
-- **Session lock:** any new input or focus path must respect `is_locked()`.
+- **Session lock:** the focus types (`focus.rs`) refuse input to anything but a lock
+  surface while locked, and `Pila::under` hits nothing else; a new path that tries panics in
+  debug builds ("refused while locked"). A new path still refuses what it shouldn't do while
+  locked (`is_locked()`) on its own; a new kind of action goes into `Action::examples`
+  (`config.rs`), which the lock test runs.
 - **Input:** a new input path goes through `process_input_event` (or calls
   `notify_activity`) to count as activity, and hit testing through `Pila::under`, which
   must agree with the order `Pila::scene` renders.

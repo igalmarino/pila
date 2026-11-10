@@ -121,7 +121,10 @@ impl Pila {
             pointer
                 .last_enter()
                 .is_some_and(|enter| serial.is_no_older_than(&enter))
-                && pointer.current_focus().and_then(|s| client_of(&s)) == data.client_id
+                && pointer
+                    .current_focus()
+                    .and_then(|focus| focus.surface().and_then(client_of))
+                    == data.client_id
         });
         keyboard || pointer
     }

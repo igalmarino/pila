@@ -465,6 +465,60 @@ impl Action {
     }
 }
 
+/// One example of each kind of action (`Action::examples`, for a test that
+/// runs them all: `tests/lock.rs`), from the same table as an exhaustive
+/// match, so a new kind of action doesn't build until it's in the table.
+macro_rules! action_examples {
+    ($($kind:pat => $example:expr,)*) => {
+        impl Action {
+            pub(crate) fn examples() -> Vec<Action> {
+                vec![$($example),*]
+            }
+        }
+
+        #[allow(dead_code)]
+        fn every_kind_of_action_has_an_example(action: &Action) {
+            match action {
+                $($kind)|* => {}
+            }
+        }
+    };
+}
+
+action_examples! {
+    Action::Spawn(_) => Action::Spawn("true".into()),
+    Action::Terminal => Action::Terminal,
+    Action::Launcher => Action::Launcher,
+    Action::CloseFocused => Action::CloseFocused,
+    Action::CycleFocus => Action::CycleFocus,
+    Action::CycleFocusBack => Action::CycleFocusBack,
+    Action::Minimize => Action::Minimize,
+    Action::SnapLeft => Action::SnapLeft,
+    Action::SnapRight => Action::SnapRight,
+    Action::SnapTopLeft => Action::SnapTopLeft,
+    Action::SnapTopRight => Action::SnapTopRight,
+    Action::SnapBottomLeft => Action::SnapBottomLeft,
+    Action::SnapBottomRight => Action::SnapBottomRight,
+    Action::Restore => Action::Restore,
+    Action::MoveWindow(..) => Action::MoveWindow(KEYBOARD_STEP, 0),
+    Action::ResizeWindow(..) => Action::ResizeWindow(KEYBOARD_STEP, 0),
+    Action::Center => Action::Center,
+    Action::ToggleMaximize => Action::ToggleMaximize,
+    Action::ToggleFullscreen => Action::ToggleFullscreen,
+    Action::Quit => Action::Quit,
+    Action::Workspace(_) => Action::Workspace(WorkspaceTarget::Index(1)),
+    Action::MoveToWorkspace(_) => Action::MoveToWorkspace(WorkspaceTarget::Index(1)),
+    Action::ToggleAlwaysOnTop => Action::ToggleAlwaysOnTop,
+    Action::ToggleAllWorkspaces => Action::ToggleAllWorkspaces,
+    Action::ShowDesktop => Action::ShowDesktop,
+    Action::FocusOutput(_) => Action::FocusOutput(OutputTarget::Next),
+    Action::MoveToOutput(_) => Action::MoveToOutput(OutputTarget::Next),
+    Action::SwitchLayout(_) => Action::SwitchLayout(LayoutTarget::Next),
+    Action::PowerOffMonitors => Action::PowerOffMonitors,
+    Action::PowerOnMonitors => Action::PowerOnMonitors,
+    Action::ChangeVt(_) => Action::ChangeVt(2),
+}
+
 /// `[keyboard]`: passed to xkbcommon, plus key repeat.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -1535,6 +1589,15 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_examples_are_one_of_each_kind_of_action() {
+        let kinds: std::collections::HashSet<_> = Action::examples()
+            .iter()
+            .map(std::mem::discriminant)
+            .collect();
+        assert_eq!(kinds.len(), Action::examples().len());
+    }
 
     fn no_env(_: &str) -> Option<String> {
         None

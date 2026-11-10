@@ -54,6 +54,8 @@ pub struct SessionLock {
     lock: Option<ExtSessionLockV1>,
     /// One per output, from the client holding the lock.
     surfaces: Vec<(Output, LockSurface)>,
+    /// A refusal was logged during this lock (`refused_while_locked`).
+    refusal_logged: bool,
 }
 
 impl Pila {
@@ -64,6 +66,41 @@ impl Pila {
     /// Locking, but not confirmed yet: the next frame must be drawn in full.
     pub fn lock_pending(&self) -> bool {
         matches!(self.session_lock.state, LockState::Locking(_))
+    }
+
+    /// Whether `surface` belongs to a lock surface (it, or a subsurface).
+    pub fn is_lock_surface(&self, surface: &WlSurface) -> bool {
+        let root = crate::redraw::root_surface(surface);
+        self.session_lock
+            .surfaces
+            .iter()
+            .any(|(_, lock)| *lock.wl_surface() == root)
+    }
+
+    /// The session lock's guarantee (`focus.rs`): whether `what` (keyboard
+    /// or pointer focus, an event to it) must not reach `surface` (`None`:
+    /// no surface, an X11 window without one), because the session is locked
+    /// and it isn't a lock surface. Logs the attempt once per lock, and panics
+    /// in debug builds to show the path that tried: every such path is a bug,
+    /// a check missing above (each path refuses what it shouldn't do while
+    /// locked on its own too).
+    pub fn refused_while_locked(&mut self, surface: Option<&WlSurface>, what: &str) -> bool {
+        if !self.is_locked() || surface.is_some_and(|s| self.is_lock_surface(s)) {
+            return false;
+        }
+        if !std::mem::replace(&mut self.session_lock.refusal_logged, true) {
+            warn!(
+                what,
+                backtrace = %std::backtrace::Backtrace::force_capture(),
+                "{what} refused while locked"
+            );
+        }
+        debug_assert!(
+            false,
+            "{what} refused while locked: something tried to give it to a client \
+             other than the locker's (see the backtrace)"
+        );
+        true
     }
 
     /// The lock surface for `output`, if the locker made one.
@@ -165,7 +202,7 @@ impl Pila {
         };
         let under = self
             .surface_under(pointer.current_location())
-            .map(|(s, _)| s);
+            .map(|(s, _)| s.into());
         if pointer.current_focus() != under {
             self.refresh_pointer_focus();
         }
@@ -181,7 +218,7 @@ impl Pila {
         let under = self.surface_under(location);
         pointer.motion(
             self,
-            under,
+            under.map(|(s, at)| (s.into(), at)),
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -229,6 +266,14 @@ impl SessionLockHandler for Pila {
             return;
         }
 
+        // Drop menus, drags and moves first: ending a grab sends the pointer's
+        // focus a motion, which must not come once the session is locked.
+        self.dismiss_popup_grab();
+        if let Some(pointer) = self.seat.get_pointer() {
+            let time = smithay::backend::input::InputTime::now();
+            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
+        }
+
         let already_locked = matches!(self.session_lock.state, LockState::Locked);
         self.session_lock.lock = Some(confirmation.ext_session_lock().clone());
         self.session_lock.surfaces.clear();
@@ -243,12 +288,7 @@ impl SessionLockHandler for Pila {
             LockState::Locking(confirmation)
         };
 
-        // Drop menus, drags and keyboard focus so nothing keeps input.
-        self.dismiss_popup_grab();
-        if let Some(pointer) = self.seat.get_pointer() {
-            let time = smithay::backend::input::InputTime::now();
-            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
-        }
+        // The keyboard and the pointer go to the lock surfaces (or nothing).
         self.focus_lock_surface(SERIAL_COUNTER.next_serial());
         self.set_cursor(CursorImageStatus::default_named());
         self.refresh_pointer_focus();

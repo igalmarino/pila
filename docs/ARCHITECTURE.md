@@ -679,11 +679,23 @@ Key flows and invariants:
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
   commit and closed in `toplevel_destroyed`.
-- **Session lock** (`session_lock.rs`, ext-session-lock): while `is_locked()`, `scene()`
-  holds only lock surfaces (on black), `surface_under` returns only lock surfaces,
-  `focus_window`/`focus_layer` keep the keyboard on a lock surface, popup and move/resize
-  grabs are refused and bindings don't run (Quit still works in debug builds). Any new
-  input or focus path must respect `is_locked()`. The lock is confirmed (`confirm_lock`)
+- **Session lock** (`session_lock.rs`, ext-session-lock): guaranteed where input reaches
+  clients, not by each path. While `is_locked()`, `scene()` holds only lock surfaces (on
+  black); `Pila::under` gives only `Under::Lock` (and so `surface_under`); and the
+  focus types refuse everything that isn't a lock surface (`Pila::is_lock_surface`: one or a
+  subsurface of one): `KeyboardTarget for KeyboardFocus` (enter, keys, modifiers),
+  `PointerTarget`/`DndFocus for PointerFocus` (enter, motion, buttons, scrolls, gestures, drags)
+  and `set_keyboard_focus`, through `refused_while_locked`, which logs the attempt once per lock
+  with a backtrace and panics in debug builds (the tests' builds): any path that gets there is
+  a bug. Every input reaches clients through those types, whatever sent it (Pila or a Smithay
+  grab); leaving is always allowed. Above that, each path still refuses what it shouldn't do
+  while locked (`focus_window`/`focus_layer` keep the keyboard on a lock surface, popup and
+  move/resize grabs are refused, bindings, gestures and `pila msg` don't run their actions,
+  nor does `run_action` itself, save `runs_while_locked`, a VT switch and Quit in debug
+  builds). `lock` ends grabs before the state changes (ending one sends its focus a motion).
+  `tests/lock.rs::nothing_but_the_lock_gets_input_or_shows_while_locked` tries every action
+  (`Action::examples`, a table a new kind of action doesn't build without), gesture,
+  activation, taskbar and pager request and the window menu while locked. The lock is confirmed (`confirm_lock`)
   only after a full locked frame is submitted. `unlock` defers to `finish_unlock`, which only
   unlocks once the holder's lock object is gone (Smithay 0.7 called `unlock()` even for a
   rogue client's `unlock_and_destroy`; its main branch checks the lock, and Pila still does). A dead locker leaves the session locked;

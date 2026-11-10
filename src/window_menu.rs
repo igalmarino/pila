@@ -364,7 +364,7 @@ impl PointerGrab<Pila> for WindowMenuGrab {
         &mut self,
         data: &mut Pila,
         handle: &mut PointerInnerHandle<'_, Pila>,
-        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        _focus: Option<(crate::focus::PointerFocus, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
@@ -379,7 +379,7 @@ impl PointerGrab<Pila> for WindowMenuGrab {
         &mut self,
         data: &mut Pila,
         handle: &mut PointerInnerHandle<'_, Pila>,
-        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        _focus: Option<(crate::focus::PointerFocus, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         handle.relative_motion(data, None, event);
