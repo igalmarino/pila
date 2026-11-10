@@ -165,6 +165,9 @@ impl Pila {
                 old.output(name, monitor) == config.output(name, monitor)
             });
         }
+        if old.other_gpus != self.config.other_gpus {
+            crate::backend::apply_other_gpus(self);
+        }
         if outputs_changed {
             self.apply_outputs();
         }

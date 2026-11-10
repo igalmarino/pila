@@ -142,7 +142,9 @@ Key flows and invariants:
   `input.rs` and `gamma.rs` the rest. It renders with one GPU, the seat's
   primary, whose renderer a `GpuManager` owns (`UdevData::gpus`, every GPU's renderer) and lends
   for each use (`primary_renderer`; outside the backend, `Backend::renderer`'s `RendererRef`,
-  `None` if it can't). The seat's other GPUs (`secondary.rs`, `docs/MULTI_GPU.md`) only scan out:
+  `None` if it can't). The seat's other GPUs (`secondary.rs`, `docs/MULTI_GPU.md`) only scan out,
+  and only with `other-gpus = true` (off by default: untried on real hardware; `apply_other_gpus`
+  opens or drops them when the setting changes):
   opened at startup, on `UdevEvent::Added` and after a VT switch back (`add_gpu`; dropped on
   `Removed`, their outputs as unplugged), each a `GpuDevice` with its own DRM events; their
   outputs are set up with their GPU's own renderer and drawn with a `MultiRenderer` from the

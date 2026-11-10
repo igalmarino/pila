@@ -130,12 +130,24 @@ gpu_driver() {
     basename "$(readlink -f "/sys/class/drm/${1##*/}/device/driver" 2>/dev/null)" 2>/dev/null
 }
 
-# With two GPUs (a hybrid laptop), which of them pila draws with, and the
-# others it uses for their monitors (drawn on the first, copied there).
-gpu_in_use() {
-    local log gpu driver other
+# The other GPUs pila uses for their monitors (`other-gpus = true`: drawn on
+# the first, copied there), as device paths, one per line.
+other_gpus() {
+    local log other
     log="$(find_log)"
     [ -n "$log" ] || return 0
+    grep -a 'using another GPU for its monitors' "$log" \
+        | sed -n 's/.*path=\([^[:space:]]*\).*/\1/p' | sort -u \
+        | while read -r other; do
+            echo "${other%$'\033'*}"
+        done
+}
+
+# With two GPUs (a hybrid laptop), which of them pila draws with, and the
+# others it uses for their monitors.
+gpu_in_use() {
+    local gpu driver other
+    [ -n "$(find_log)" ] || return 0
     gpu="$(gpu_device)"
     if [ -z "$gpu" ]; then
         echo "In use by Pila: not in the log"
@@ -143,24 +155,22 @@ gpu_in_use() {
     fi
     driver="$(gpu_driver "$gpu")"
     echo "In use by Pila: $gpu${driver:+ (driver $driver)}"
-    grep -a 'using another GPU for its monitors' "$log" \
-        | sed -n 's/.*path=\([^[:space:]]*\).*/\1/p' | sort -u \
-        | while read -r other; do
-            other="${other%$'\033'*}"
-            driver="$(gpu_driver "$other")"
-            echo "Also for its monitors: $other${driver:+ (driver $driver)}"
-        done
+    other_gpus | while read -r other; do
+        driver="$(gpu_driver "$other")"
+        echo "Also for its monitors: $other${driver:+ (driver $driver)}"
+    done
 }
 
 # Only what the kernel lists: no EDID, which has the monitor's serial number.
 # A monitor wired to another GPU than the one pila draws with (often a hybrid
-# laptop's HDMI or DisplayPort, on the dedicated GPU) is marked: that path is
-# new.
+# laptop's HDMI or DisplayPort, on the dedicated GPU) is marked: it shows
+# only with `other-gpus = true`, a path that's new.
 section_monitors() {
-    local connector name mode card used note
+    local connector name mode card used others note
     echo "## Monitors"
     used="$(gpu_device)"
     used="${used##*/}"
+    others="$(other_gpus)"
     for connector in /sys/class/drm/card[0-9]*-*; do
         [ -e "$connector/status" ] || continue
         [ "$(cat "$connector/status")" = connected ] || continue
@@ -169,7 +179,11 @@ section_monitors() {
         mode="$(head -n 1 "$connector/modes" 2>/dev/null)"
         note=""
         if [ -n "$used" ] && [ "$card" != "$used" ]; then
-            note=" (on $card, another GPU: Pila draws it on its own and copies it there)"
+            if grep -qx "/dev/dri/$card" <<<"$others"; then
+                note=" (on $card, another GPU: Pila draws it on its own and copies it there)"
+            else
+                note=" (on $card, another GPU, which Pila isn't using: \`other-gpus = true\` in the config turns it on)"
+            fi
         fi
         echo "${name#"$card"-}: preferred mode ${mode:-unknown}$note"
     done

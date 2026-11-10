@@ -80,8 +80,9 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
    a `GpuDevice` in `UdevData::devices`, and outputs are keyed by an `OutputId` (the device's
    node and the CRTC), which gamma, output power, recovery and the vblank handler
    (`frame_finish`) take. Then open every GPU of the seat, a `GpuDevice` for each, its
-   connectors scanned like the primary's (`scan_connectors`). (Done: `udev/secondary.rs`. The
-   copy's CPU time counts in its output's frame, not apart.)
+   connectors scanned like the primary's (`scan_connectors`). (Done: `udev/secondary.rs`, behind
+   `other-gpus = true`, off by default until someone with two GPUs has tried it. The copy's CPU
+   time counts in its output's frame, not apart.)
    `UdevEvent::Added/Removed` for devices plug them in and out (their outputs as monitors
    unplugged). VT switches pause and resume every device. An output on a secondary device draws
    with `GpuManager::renderer(&primary, &its device, format)` and `PrimaryGpuElement`s; the

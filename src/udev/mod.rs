@@ -78,6 +78,7 @@ mod secondary;
 
 use self::{draw::*, gamma::*, input::*, outputs::*, recovery::Recovery};
 pub use outputs::apply_output_config;
+pub use secondary::apply_other_gpus;
 
 use crate::{
     backend::Backend,
@@ -870,10 +871,9 @@ pub fn init_udev(
     )?;
 
     // VT switches.
-    let resumed_seat = seat.clone();
     event_loop
         .handle()
-        .insert_source(notifier, move |event, _, state| match event {
+        .insert_source(notifier, |event, _, state| match event {
             SessionEvent::PauseSession => {
                 info!("session paused");
                 // Keys held for the VT switch never get a release otherwise.
@@ -918,9 +918,7 @@ pub fn init_udev(
                 // then couldn't come on without DRM master: they do here.
                 scan_connectors(state, None);
                 // And GPUs added meanwhile, which couldn't be opened then.
-                for path in all_gpus(&resumed_seat).unwrap_or_default() {
-                    secondary::add_gpu(state, &path);
-                }
+                secondary::apply_other_gpus(state);
                 state.apply_outputs();
                 state.queue_redraw();
             }
@@ -952,7 +950,13 @@ pub fn init_udev(
                     scan_connectors(state, Some(node));
                 }
             }
-            UdevEvent::Added { path, .. } => secondary::add_gpu(state, &path),
+            UdevEvent::Added { path, .. } => {
+                if state.config.other_gpus {
+                    secondary::add_gpu(state, &path);
+                } else {
+                    secondary::say_unused(&path);
+                }
+            }
             UdevEvent::Removed { device_id } => secondary::remove_gpu(state, device_id),
         })?;
 
@@ -980,12 +984,9 @@ pub fn init_udev(
     })));
 
     scan_connectors(state, None);
-    // The seat's other GPUs: their monitors drawn on the primary.
-    for other in all_gpus(&seat).unwrap_or_default() {
-        if other != path {
-            secondary::add_gpu(state, &other);
-        }
-    }
+    // The seat's other GPUs: their monitors drawn on the primary, if the
+    // config asks for them.
+    secondary::apply_other_gpus(state);
     // Start with the pointer in the middle of the first output.
     if let (Some(geo), Some(pointer)) = (
         state.output_geometry_at((0.0, 0.0).into()),

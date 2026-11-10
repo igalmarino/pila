@@ -117,6 +117,8 @@ jobs:
             sleep 3
             echo 1 | sudo tee "$VKMS_SECOND" >/dev/null && echo "second GPU added at $(date +%T.%N)"
           ) &
+          # The second device is a second GPU: used only when asked for.
+          echo 'other-gpus = true' >vkms-config.toml
           status=0
           # A crash leaves a core for the next step's backtrace.
           echo '/tmp/pila-core.%p' | sudo tee /proc/sys/kernel/core_pattern >/dev/null
@@ -124,7 +126,7 @@ jobs:
             env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd "${extra[@]}" \
             RUST_LOG=info,pila::frames=debug \
             "${launch[@]}" timeout -s TERM 24 \
-            target/release/pila --backend udev \
+            target/release/pila --backend udev --config vkms-config.toml \
             -c 'weston-simple-egl & sleep 3; gammastep -m wayland -O 4000 & wait' \
             >pila-vkms.log 2>&1 || status=$?
           wait || true

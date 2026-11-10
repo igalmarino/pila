@@ -174,10 +174,12 @@ Programs that change monitor settings at runtime (`wlr-randr`, a shell's display
 too, until you change that monitor's section in the configuration.
 
 **Monitors on another GPU.** On a laptop with two GPUs, the HDMI or DisplayPort output is often
-wired to the dedicated one, and a dock may have a GPU of its own. Pila draws everything with
-the seat's main GPU and copies the picture of such a monitor to the GPU it's on, which shows it.
-`pila-report` says which GPUs Pila uses. This is new and hasn't been tried on such a machine
-yet: a report of how it goes is very welcome.
+wired to the dedicated one, and a dock may have a GPU of its own. Such monitors stay off unless
+the configuration says `other-gpus = true`: Pila then draws everything with the seat's main GPU
+and copies the picture of such a monitor to the GPU it's on, which shows it. It's off by default
+because it's new and hasn't been tried on such a machine yet: a report of how it goes is very
+welcome. Saving the file turns it on or off at once, and `pila-report` says which GPUs Pila uses
+and which monitors are on another one.
 
 `Mod+O` moves the pointer and the focus to the next monitor, and `Mod+Shift+O` sends the focused
 window there, keeping its place, or still filling the monitor or the same half.

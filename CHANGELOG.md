@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- **Monitors on another GPU light up:** on a laptop with two GPUs, the HDMI or DisplayPort output
-  is often wired to the dedicated one, and a dock may have its own; Pila showed nothing there.
-  It now draws them with the main GPU and copies the picture to theirs, GPUs plugged in and out
-  included. New and not yet tried on such a machine: reports are very welcome. `pila-report` lists
-  the GPUs in use.
+- **Monitors on another GPU, to try:** on a laptop with two GPUs, the HDMI or DisplayPort output
+  is often wired to the dedicated one, and a dock may have its own; Pila shows nothing there.
+  With `other-gpus = true` in the configuration it draws them with the main GPU and copies the
+  picture to theirs, GPUs plugged in and out included. Off by default: it's new and not yet tried
+  on such a machine, so reports are very welcome. `pila-report` lists the GPUs in use and says
+  which monitors are on one that isn't.
 
 - **X11 windows show up at once:** an X11 window could open blank (and the window focused
   before kept its focused title bar) until something else redrew the screen, when Xwayland

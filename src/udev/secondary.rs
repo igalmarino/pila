@@ -113,9 +113,7 @@ impl<'a> RenderElement<PrimaryRenderer<'a>> for PrimaryGpuElement {
     }
 }
 
-use super::{
-    draw::frame_finish, outputs, scan_connectors, GpuDevice, OutputId, UdevData, COLOR_FORMATS,
-};
+use super::{draw::frame_finish, outputs, scan_connectors, GpuDevice, OutputId, COLOR_FORMATS};
 use crate::{backend::Backend, state::Pila};
 use smithay::{
     backend::{
@@ -215,21 +213,31 @@ fn try_add_gpu(state: &mut Pila, path: &Path) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// A GPU went away: its monitors as unplugged. The primary can't: it draws
-/// everything.
+/// A GPU went away: its monitors as unplugged.
 pub(super) fn remove_gpu(state: &mut Pila, device_id: u64) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let Some(node) = data
+    let node = data
         .devices
         .keys()
         .copied()
-        .find(|node| node.dev_id() == device_id)
-    else {
+        .find(|node| node.dev_id() == device_id);
+    if let Some(node) = node {
+        drop_gpu(state, node);
+    }
+}
+
+/// Stop using the GPU `node`: its monitors as unplugged, its device, DRM
+/// events and renderer dropped. Not the primary: it draws everything.
+fn drop_gpu(state: &mut Pila, node: DrmNode) {
+    let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    if data.devices[&node].render_node == data.primary {
+    let Some(device) = data.devices.get(&node) else {
+        return;
+    };
+    if device.render_node == data.primary {
         warn!(%node, "the primary GPU went away: its monitors stay as they were");
         return;
     }
@@ -245,18 +253,55 @@ pub(super) fn remove_gpu(state: &mut Pila, device_id: u64) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    remove_device(data, node);
+    if let Some(device) = data.devices.remove(&node) {
+        if let Some(events) = device.events {
+            data.loop_handle.remove(events);
+        }
+        data.gpus.as_mut().remove_node(&device.render_node);
+    }
     info!(%node, "a GPU went away");
     state.apply_outputs();
 }
 
-/// Drop a secondary GPU's device, its DRM events and its renderer.
-fn remove_device(data: &mut UdevData, node: DrmNode) {
-    let Some(device) = data.devices.remove(&node) else {
+/// Use the seat's other GPUs for their monitors if `other-gpus` says so
+/// (those not open yet are opened), else stop using those that are.
+pub fn apply_other_gpus(state: &mut Pila) {
+    let Some(Backend::Udev(data)) = &state.backend else {
         return;
     };
-    if let Some(events) = device.events {
-        data.loop_handle.remove(events);
+    let seat = data.session.seat();
+    let paths = smithay::backend::udev::all_gpus(&seat).unwrap_or_default();
+    if state.config.other_gpus {
+        for path in paths {
+            add_gpu(state, &path);
+        }
+        return;
     }
-    data.gpus.as_mut().remove_node(&device.render_node);
+    let others: Vec<DrmNode> = data
+        .devices
+        .iter()
+        .filter(|(_, device)| device.render_node != data.primary)
+        .map(|(node, _)| *node)
+        .collect();
+    if others.is_empty() {
+        // Nothing open: say which GPUs are left alone, and how to use them.
+        let open: Vec<u64> = data.devices.keys().map(|node| node.dev_id()).collect();
+        for path in paths {
+            let unused = DrmNode::from_path(&path).is_ok_and(|node| !open.contains(&node.dev_id()));
+            if unused {
+                say_unused(&path);
+            }
+        }
+    }
+    for node in others {
+        drop_gpu(state, node);
+    }
+}
+
+/// A GPU left alone because `other-gpus` is off.
+pub(super) fn say_unused(path: &Path) {
+    info!(
+        path = %path.display(),
+        "another GPU isn't used: its monitors stay off (`other-gpus = true` in the config uses it)"
+    );
 }

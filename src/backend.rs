@@ -223,6 +223,14 @@ impl Backend {
     }
 }
 
+/// Use the seat's other GPUs for their monitors, or stop, as `other-gpus`
+/// says (bare metal only).
+pub fn apply_other_gpus(state: &mut crate::Pila) {
+    if let Some(Backend::Udev(_)) = state.backend {
+        crate::udev::apply_other_gpus(state);
+    }
+}
+
 /// Apply the outputs' settings (`[[output]]` with the runtime overrides on
 /// top) as the backend can. Whether it could do all of it.
 pub fn apply_output_config(state: &mut crate::Pila) -> bool {

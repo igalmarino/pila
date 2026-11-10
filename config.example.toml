@@ -44,6 +44,12 @@
 # the window's shorter side, and with a title bar at most the bar's height (28).
 # corner-radius = 0                # (default)
 
+# Monitors on the seat's other GPUs (a laptop's HDMI or DisplayPort wired to
+# its dedicated GPU, a dock with a GPU of its own): drawn with the main GPU
+# and copied to theirs. Off by default while it's new: untried on real
+# hardware. Turned on or off as soon as the file is saved.
+# other-gpus = false               # (default)
+
 # The shadow under each window, stronger for the focused one. None for a
 # maximized or fullscreen window, or one whose app draws its own (past its
 # geometry, as GTK's do); a window rule's `shadow` can say otherwise, except

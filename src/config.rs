@@ -1082,6 +1082,7 @@ struct ConfigFile {
     input: InputFile,
     workspaces: Option<usize>,
     corner_radius: Option<u32>,
+    other_gpus: Option<bool>,
     shadow: ShadowFile,
     colors: ColorsFile,
     animations: AnimationsFile,
@@ -1315,6 +1316,10 @@ pub struct Config {
     pub workspaces: usize,
     /// Window corner radius in logical pixels; 0 is square (`rounded.rs`).
     pub corner_radius: u32,
+    /// Whether monitors on the seat's other GPUs are used, drawn on the
+    /// primary and copied over (`udev/secondary.rs`). Off unless asked for:
+    /// untried on real hardware.
+    pub other_gpus: bool,
     pub shadow: ShadowConfig,
     pub colors: Colors,
     /// Which animations play and how long they last (`animation.rs`).
@@ -1538,6 +1543,7 @@ impl Config {
             input,
             workspaces,
             corner_radius,
+            other_gpus: file.other_gpus.unwrap_or(false),
             shadow,
             colors,
             animations,
@@ -2055,6 +2061,14 @@ mod tests {
         assert!(Config::from_toml("[shadow]\nsize = 65", &no_env).is_err());
         assert!(Config::from_toml("[shadow]\nsize = -1", &no_env).is_err());
         assert!(Config::from_toml("[shadow]\noffset = [0, 65]", &no_env).is_err());
+    }
+
+    #[test]
+    fn other_gpus_are_off_unless_asked_for() {
+        assert!(!Config::from_toml("", &no_env).unwrap().other_gpus);
+        let config = Config::from_toml("other-gpus = true", &no_env).unwrap();
+        assert!(config.other_gpus);
+        assert!(Config::from_toml("other-gpus = 2", &no_env).is_err());
     }
 
     #[test]
