@@ -163,6 +163,13 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
         "outputs" => list("outputs")
             .iter()
             .map(|o| {
+                let mut marks = Vec::new();
+                if o["focused"] == true {
+                    marks.push("focused");
+                }
+                if o["power"] == false {
+                    marks.push("off");
+                }
                 format!(
                     "{}  {}x{}+{}+{}  scale {}{}",
                     plain(&o["name"]),
@@ -171,10 +178,10 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
                     o["x"],
                     o["y"],
                     o["scale"],
-                    if o["focused"] == true {
-                        "  [focused]"
+                    if marks.is_empty() {
+                        String::new()
                     } else {
-                        ""
+                        format!("  [{}]", marks.join(", "))
                     },
                 )
             })

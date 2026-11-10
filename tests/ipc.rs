@@ -915,3 +915,17 @@ fn a_subscriber_hears_the_monitors_go_off_and_on() {
     pila.key("a");
     outputs.wait("outputs", "on again", |e| e["outputs"][0]["power"] == true);
 }
+
+/// Without `--json` too, `outputs` says which monitors are off.
+#[test]
+fn the_outputs_listing_says_which_monitors_are_off() {
+    let mut pila = TestPila::start();
+    assert!(!text(&msg(&pila, &["outputs"])).contains("off]"));
+    action(&pila, &["power-off-monitors"]);
+    pila.wait("off", |s| s["outputs"][0]["power"] == false);
+    let listing = text(&msg(&pila, &["outputs"]));
+    assert!(
+        listing.contains("HEADLESS-1") && listing.contains("[focused, off]"),
+        "{listing}"
+    );
+}
