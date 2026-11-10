@@ -838,7 +838,8 @@ Key flows and invariants:
   decorations. Layout (placement, maximize) uses the *pending* decoration mode via
   `layout_offset`; drawing and hit testing use the *committed* state (`has_title_bar`).
   Bar textures (buttons, title) are per-window `MemoryRenderBuffer`s cached by a key and
-  re-rendered only when it changes; they can't be shared between windows (element ids must
+  re-rendered only when it changes, one set per buffer scale (`TitleBarBuffers::scaled`, the
+  last few used: drawing a window on an output of another scale leaves the others' alone); they can't be shared between windows (element ids must
   be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw
   without text. The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide

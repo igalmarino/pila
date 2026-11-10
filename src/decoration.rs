@@ -235,6 +235,19 @@ struct ButtonTexture {
 #[derive(Default)]
 struct TitleBarBuffers {
     bar: SolidColorBuffer,
+    /// The rasterized parts, per buffer scale, the one drawn last at the end:
+    /// a window drawn on outputs of different scales keeps each's, so drawing
+    /// one doesn't replace (and re-rasterize) another's.
+    scaled: Vec<(i32, ScaledParts)>,
+}
+
+/// How many scales' parts a window keeps (`TitleBarBuffers::scaled`): more
+/// than outputs of different scales one window spans.
+const SCALES_KEPT: usize = 3;
+
+/// A title bar's rasterized parts at one buffer scale.
+#[derive(Default)]
+struct ScaledParts {
     minimize: Option<ButtonTexture>,
     maximize: Option<ButtonTexture>,
     close: Option<ButtonTexture>,
@@ -314,16 +327,22 @@ pub fn title_bar_elements(
         .user_data()
         .get_or_insert(|| RefCell::new(TitleBarBuffers::default()))
         .borrow_mut();
-    let TitleBarBuffers {
-        bar,
+    let TitleBarBuffers { bar, scaled } = &mut *buffers;
+
+    let maximized = is_maximized(window);
+    let buffer_scale = crate::scale::buffer_scale(scale);
+    // This scale's parts, taken out while drawing and put back last.
+    let mut parts = scaled
+        .iter()
+        .position(|(s, _)| *s == buffer_scale)
+        .map(|i| scaled.remove(i).1)
+        .unwrap_or_default();
+    let ScaledParts {
         minimize,
         maximize,
         close,
         title,
-    } = &mut *buffers;
-
-    let maximized = is_maximized(window);
-    let buffer_scale = crate::scale::buffer_scale(scale);
+    } = &mut parts;
     let icon_color = if focused {
         colors.icon
     } else {
@@ -452,6 +471,10 @@ pub fn title_bar_elements(
         }
         _ => bar.into(),
     });
+    scaled.push((buffer_scale, parts));
+    if scaled.len() > SCALES_KEPT {
+        scaled.remove(0);
+    }
     elements
 }
 

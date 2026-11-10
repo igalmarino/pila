@@ -95,3 +95,29 @@ fn a_window_across_two_outputs_redraws_both() {
         redraws(s, "A").0 > redraws(&before, "A").0 && redraws(s, "B").0 > redraws(&before, "B").0
     });
 }
+
+/// A window's title bar is rasterized per output scale (`decoration.rs`):
+/// drawing another output, of another scale, leaves this one's textures
+/// alone. (It used to swap them for the other scale's, so the output the
+/// window is on found new elements with no redraw asked for it.)
+#[test]
+fn drawing_an_output_of_another_scale_leaves_a_windows_title_bar_alone() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[[output]]\nname = \"B\"\nscale = 2\n".into(),
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    assert_eq!(pila.wait_window("a")["output"], "A");
+    pila.settle();
+    // Redraws of B alone, with the window's title bar in the scene.
+    for i in 0..20 {
+        pila.move_to(1280.0 + 100.0 + f64::from(i), 100.0);
+    }
+    pila.stays(
+        "pila alive, A untouched",
+        std::time::Duration::from_millis(300),
+        |s| s["locked"] == false,
+    );
+}

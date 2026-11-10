@@ -35,6 +35,9 @@
   (which at 144 Hz and up could cost it a refresh); only redraws that may have nothing to show
   still wait, at most one per refresh. The frame statistics (`RUST_LOG=pila::frames=debug`)
   count a frame shown a refresh later than it could have been as missed (`late`).
+- **Less CPU with monitors of different scales:** drawing one monitor re-rasterized the title
+  bars of the windows on another monitor of another scale (the title text and the buttons), and
+  the next time that one was drawn, again. Each scale now keeps its own.
 - **Window titles appear as soon as the fonts load:** a window that opened before then showed
   its title only at the next redraw of its monitor.
 - **No gamma warning at every login:** the log warned that setting gamma held Pila past a
