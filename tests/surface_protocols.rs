@@ -574,6 +574,87 @@ fn a_subsurface_is_drawn_and_gets_the_pointer() {
     });
 }
 
+/// A 400x300 red window "a" with a green 60x40 subsurface at (20, 30), with
+/// `config`; returns them and the window's top-left corner.
+fn window_with_subsurface(
+    config: &str,
+) -> (
+    TestPila,
+    Client,
+    wayland_client::protocol::wl_surface::WlSurface,
+    common::protocols::Surf,
+    wayland_client::protocol::wl_subsurface::WlSubsurface,
+    (f64, f64),
+) {
+    let mut pila = TestPila::with_config(config);
+    let client = pila.client();
+    let a = client
+        .window("a")
+        .size(400, 300)
+        .color([255, 255, 0, 0])
+        .create();
+    pila.wait_focus("a");
+    let parent = client.surface(a);
+    let (sub, subsurface) = client.subsurface(&parent, "sub", (20, 30), (60, 40), [255, 0, 255, 0]);
+    parent.commit();
+    client.flush();
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    let inside = ((x + 40) as f64, (y + 50) as f64);
+    pila.wait("the subsurface drawn", |_| true);
+    pila.settle();
+    assert_eq!(pila.pixel(inside.0, inside.1), [0, 255, 0, 255]);
+    (pila, client, parent, sub, subsurface, inside)
+}
+
+/// Both ways Pila builds a window's elements: Smithay's, and its own for
+/// rounded corners (`render::single_window_elements`).
+const CORNERS: [&str; 2] = ["", "corner-radius = 8\n"];
+
+#[test]
+fn a_synced_subsurface_shows_its_new_picture_with_its_parents_commit() {
+    for config in CORNERS {
+        let (mut pila, client, parent, sub, subsurface, (px, py)) = window_with_subsurface(config);
+        subsurface.set_sync();
+        let shm = client.lock().shm.clone().unwrap();
+        common::client::paint(
+            &shm,
+            &client.qh,
+            &client.wl_surface_of(sub),
+            [255, 0, 0, 255],
+            (60, 40),
+        );
+        client.roundtrip();
+        pila.settle();
+        assert_eq!(
+            pila.pixel(px, py),
+            [0, 255, 0, 255],
+            "{config:?}: shown before the parent's commit"
+        );
+        parent.commit();
+        client.flush();
+        pila.wait(&format!("{config:?}: the new picture"), |_| true);
+        pila.settle();
+        assert_eq!(pila.pixel(px, py), [0, 0, 255, 255], "{config:?}");
+    }
+}
+
+#[test]
+fn a_subsurface_placed_below_its_parent_is_hidden_by_it() {
+    for config in CORNERS {
+        let (mut pila, client, parent, _sub, subsurface, (px, py)) = window_with_subsurface(config);
+        subsurface.place_below(&parent);
+        parent.commit();
+        client.roundtrip();
+        pila.settle();
+        assert_eq!(pila.pixel(px, py), [255, 0, 0, 255], "{config:?}: below");
+        subsurface.place_above(&parent);
+        parent.commit();
+        client.roundtrip();
+        pila.settle();
+        assert_eq!(pila.pixel(px, py), [0, 255, 0, 255], "{config:?}: above");
+    }
+}
+
 // --- Frames ---------------------------------------------------------------------
 
 #[test]

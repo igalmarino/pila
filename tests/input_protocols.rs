@@ -489,6 +489,66 @@ fn a_drag_reaches_another_window_and_drops() {
     assert_eq!(text, "dragged text");
 }
 
+/// A drop nobody accepted cancels the drag: the source hears it, the window
+/// under the pointer gets no drop, and clicks reach windows again.
+#[test]
+fn a_drop_nobody_accepts_is_cancelled_and_clicks_work_again() {
+    use wayland_client::protocol::wl_data_device_manager::{DndAction, WlDataDeviceManager};
+    let mut pila = TestPila::start();
+    let source_client = pila.client();
+    let source_window = source_client.window("source").size(400, 300).create();
+    pila.wait_focus("source");
+    let target_client = pila.client();
+    target_client.window("target").size(400, 300).create();
+    let state = pila.wait_focus("target");
+    let manager: WlDataDeviceManager = target_client.bind("wl_data_device_manager", 3);
+    let _device = manager.get_data_device(&target_client.seat(), &target_client.qh, "dnd".into());
+    target_client.flush();
+
+    let (sx, sy, ..) = rect(&window_in(&state, "source").unwrap()["geometry"]);
+    let (tx, ty, tw, th) = rect(&window_in(&state, "target").unwrap()["geometry"]);
+    pila.move_to(sx as f64 + 8.0, sy as f64 + 8.0);
+    pila.press("left");
+    source_client.wait("the press", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Button { pressed: true, .. }))
+    });
+    let source = source_client.data_source("drag", "dragged text");
+    source.set_actions(DndAction::Copy);
+    let manager: WlDataDeviceManager = source_client.bind("wl_data_device_manager", 3);
+    let device = manager.get_data_device(&source_client.seat(), &source_client.qh, "src".into());
+    let serial = source_client.last_serial();
+    device.start_drag(
+        Some(&source),
+        &source_client.surface(source_window),
+        None,
+        serial,
+    );
+    source_client.flush();
+
+    // Over the target, which never accepts.
+    let (fx, fy) = ((tx + tw - 8) as f64, (ty + th - 8) as f64);
+    pila.move_to(fx, fy);
+    target_client.wait("the drag entering", |s| s.dnd_offer.is_some());
+    pila.release("left");
+    source_client.wait_logged("drag", "Cancelled");
+    target_client.roundtrip();
+    assert!(
+        !target_client.has_logged("dnd", "Drop"),
+        "a drop: {:?}",
+        target_client.logged("dnd")
+    );
+
+    // The drag's grab is over: a click goes to the target again.
+    pila.click("left");
+    target_client.wait("the click", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Button { pressed: false, .. }))
+    });
+}
+
 /// A drag's icon follows the pointer while it lasts, over the windows, and
 /// goes with the drop.
 #[test]
