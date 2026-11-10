@@ -112,7 +112,9 @@ arrow resizes it (right and down grow it, left and up shrink it), and `Mod+C` ce
 **Switching windows.** `Mod+Tab` goes to the window you used before, so a quick `Mod+Tab`
 toggles between the last two. Keep Mod held and press Tab again to go further back; each window
 comes forward as you reach it, and releasing Mod settles on it. `Mod+Shift+Tab` goes the other
-way. `Alt+Tab` and `Alt+Shift+Tab` do the same whatever Mod is, as on other desktops. Clicking a
+way. `Alt+Tab` and `Alt+Shift+Tab` do the same whatever Mod is, as on other desktops, so apps
+no longer get them; `"Alt+Tab" = "none"` and `"Alt+Shift+Tab" = "none"` in `[bindings]` give
+them back. Clicking a
 window, or a taskbar entry in your bar, focuses it too.
 
 **Windows asking for attention.** An app can ask for your attention without taking the focus
@@ -169,15 +171,16 @@ whichever port it's plugged into. `wlr-randr` lists the connected monitors with 
 makes and models; Pila's log has them too.
 
 Programs that change monitor settings at runtime (`wlr-randr`, a shell's display settings) work
-too, until the next time you save that monitor's section in the configuration.
+too, until you change that monitor's section in the configuration.
 
 `Mod+O` moves the pointer and the focus to the next monitor, and `Mod+Shift+O` sends the focused
 window there, keeping its place, or still filling the monitor or the same half.
 
 To turn the monitors off without unplugging them, for instance when idle, run
 `pila msg action power-off-monitors` (or bind the action to a key): any key, click or move of the
-pointer turns them back on, and that first key or click does nothing else. It works with the
-screen locked too, as idling usually locks first. `pila msg action power-on-monitors` turns them
+pointer turns them back on, and that first key or click does nothing else. Through `pila msg` it
+works with the screen locked too, as idling usually locks first; a key binding doesn't run while
+the screen is locked. `pila msg action power-on-monitors` turns them
 on from a script. `wlopm --off '*'` and `wlopm --on '*'` work as well; monitors a tool turned off
 stay off until that tool turns them on. `pila msg outputs` marks the monitors that are off
 `[off]`.
@@ -286,6 +289,7 @@ naming a monitor. Give its idle behavior Pila's action instead (Settings → Idl
 `[idle.behavior.screen-off]`), with no resume command: any input turns the monitors back on.
 
 ```toml
+# In Noctalia's settings file, not Pila's
 [idle.behavior.screen-off]
 timeout = 660
 action = "command"
@@ -406,8 +410,9 @@ autostart = [
 A video playing in a visible window keeps the session from idling, if the player asks for it,
 as most do.
 
-If the lock screen crashes, the session stays locked, for safety. Switch to another virtual
-terminal (`Ctrl+Alt+F2`), log in and start a new lock screen on Pila's display, for instance
+If the lock screen crashes, the session stays locked, for safety. Switch to a free virtual
+terminal (`Ctrl+Alt+F3`, or another free one: F1 and F2 may be the login screen or this very
+session), log in and start a new lock screen on Pila's display, for instance
 `WAYLAND_DISPLAY=wayland-1 swaylock` (`ls $XDG_RUNTIME_DIR` shows the name); unlocking it gives
 you the session back.
 
@@ -420,7 +425,7 @@ Apps that ask for every key while they have the focus (virtual machines, remote 
 keyboard-shortcuts-inhibit) get Pila's bindings and touchpad gestures too, all but the one that
 quits Pila.
 
-A rule turns off the opening and closing animations for Steam games:
+A rule turns off the window animations for Steam games:
 
 ```toml
 [[window-rule]]
@@ -497,7 +502,7 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 | Stuck on a locked screen after the locker crashed | See [Locking the screen and idling](#locking-the-screen-and-idling). |
 | `Mod+D` or tapping Mod does nothing | Set `launcher` to your launcher's command. |
 | Tapping Mod opens the launcher and you don't want it | `"Mod" = "none"` under `[bindings]` (nested, Mod is Alt, so tapping Alt opens it). |
-| The screen froze | `Ctrl+Alt+F2`, log in, `pkill pila`; then report it with the log. |
+| The screen froze | `Ctrl+Alt+F3` (any free virtual terminal), log in, `pkill pila`; then report it with the log. |
 | Pila crashed (back at the login screen) | Report it with `pila.log.old` (or `pila-report`'s file): its "pila crashed" line and the backtrace after it say where. |
 
 Bugs go to the [issues](https://github.com/igalmarino/pila/issues), with `pila-report`'s file

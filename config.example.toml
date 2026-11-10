@@ -46,7 +46,8 @@
 
 # The shadow under each window, stronger for the focused one. None for a
 # maximized or fullscreen window, or one whose app draws its own (past its
-# geometry, as GTK's do); a window rule's `shadow` can say otherwise.
+# geometry, as GTK's do); a window rule's `shadow` can say otherwise, except
+# for a maximized or fullscreen window.
 [shadow]
 # enabled = true                   # (default)
 # size = 24                        # (default) how far it reaches, in logical pixels: 0 to 64
@@ -249,7 +250,7 @@
 # The rules below are examples: take the `#` off a whole one, header included.
 #
 # [[window-rule]]
-# app-id = "steam_app_*"           # games: no open/close animation
+# app-id = "steam_app_*"           # games: no window animations
 # animations = false               # or per animation: { open = false,
 #                                  #   close = false, minimize = false,
 #                                  #   maximize = false }
@@ -281,8 +282,8 @@
 # always-on-top = true             # above the others, from when it opens
 # all-workspaces = true            # on every workspace, from when it opens
 #
-# # A layer surface's namespace: scripts/layer-namespaces lists those of
-# # what you run.
+# # A layer surface's namespace: the `RUST_LOG` line above logs it; in Pila's
+# # source, scripts/layer-namespaces lists those of what you run.
 #
 # [[layer-rule]]
 # namespace = "noctalia-*"         # a shell that animates its own surfaces

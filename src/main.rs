@@ -39,7 +39,8 @@ Environment (overrides the config file):
   PILA_TERMINAL  Terminal for Mod+Return and startup (default: the first
                  installed of kitty, foot, alacritty, ghostty, wezterm,
                  konsole, gnome-terminal, xterm)
-  PILA_LAUNCHER  Command for Mod+D (unset: binding disabled)
+  PILA_LAUNCHER  Command for Mod+D and tapping Mod alone (unset: both do
+                 nothing)
   XCURSOR_THEME  Cursor theme on a TTY (default: default)
   XCURSOR_SIZE   Cursor size on a TTY (default: 24)
   XKB_DEFAULT_LAYOUT, _VARIANT, _OPTIONS

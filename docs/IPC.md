@@ -83,8 +83,9 @@ terminal escapes included. Text from `pila msg` without `--json` has control cha
 
 **An output:** `name`, `make`, `model`, `x`, `y`, `width`, `height` (logical pixels), `refresh`
 (mHz, or null), `scale`, `transform` (as in `[[output]]`), `focused` (the pointer is on it), `power` (its display is on: off
-after `power-off-monitors` or a tool such as `wlopm`). Only
-those turned on.
+after `power-off-monitors` or a tool such as `wlopm`). Only enabled monitors are listed (not those
+with `enabled = false` or turned off through output management); one whose display is powered off
+is listed with `power: false`.
 
 **A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on
 all workspaces counts for the active one).
