@@ -57,6 +57,9 @@ features = [
     "backend_libinput",
     "backend_udev",
     "backend_session_libseat",
+    # GpuManager and MultiRenderer: monitors on more than one GPU
+    # (`docs/MULTI_GPU.md`)
+    "renderer_multi",
     # X11 apps (`xwayland.rs`)
     "xwayland",
 ]

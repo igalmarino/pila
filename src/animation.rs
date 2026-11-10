@@ -618,10 +618,13 @@ impl Pila {
             .unwrap_or_else(|| 1.0.into());
         let output_name = self.window_output(window).map(|o| o.name());
         let Pila { backend, blur, .. } = self;
-        let renderer = backend.as_mut()?.renderer();
+        let Some(mut renderer) = backend.as_mut().and_then(|b| b.renderer()) else {
+            debug!("no renderer for a closing window's snapshot; it just goes");
+            return None;
+        };
         // Its backdrop goes with it.
         let snapshot = render::snapshot_window(
-            renderer,
+            &mut renderer,
             &entry,
             surfaces,
             scale,
@@ -1071,10 +1074,12 @@ impl Pila {
             return;
         };
         let scale = crate::scale::output_scale(&output);
-        let Some(renderer) = self.backend.as_mut().map(|b| b.renderer()) else {
+        let Some(mut renderer) = self.backend.as_mut().and_then(|b| b.renderer()) else {
             return;
         };
-        let Some(snapshot) = render::snapshot_layer(renderer, &layer, rect, surfaces, scale) else {
+        let snapshot = render::snapshot_layer(&mut renderer, &layer, rect, surfaces, scale);
+        drop(renderer);
+        let Some(snapshot) = snapshot else {
             debug!("no snapshot of a closing layer surface; it just goes");
             return;
         };

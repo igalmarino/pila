@@ -11,8 +11,38 @@ use smithay::{
 };
 
 use crate::{
-    cursor::CursorTheme, headless::HeadlessData, output_management::HeadInfo, udev::UdevData,
+    cursor::CursorTheme,
+    headless::HeadlessData,
+    output_management::HeadInfo,
+    udev::{PrimaryRenderer, UdevData},
 };
+
+/// The renderer a backend lends (`Backend::renderer`): its own, or on bare
+/// metal the primary GPU's, which the GPU manager keeps and lends for as long
+/// as this lives (`docs/MULTI_GPU.md`). Derefs to the `GlesRenderer`.
+pub enum RendererRef<'a> {
+    Own(&'a mut GlesRenderer),
+    Primary(PrimaryRenderer<'a>),
+}
+
+impl std::ops::Deref for RendererRef<'_> {
+    type Target = GlesRenderer;
+    fn deref(&self) -> &GlesRenderer {
+        match self {
+            RendererRef::Own(renderer) => renderer,
+            RendererRef::Primary(renderer) => renderer.as_ref(),
+        }
+    }
+}
+
+impl std::ops::DerefMut for RendererRef<'_> {
+    fn deref_mut(&mut self) -> &mut GlesRenderer {
+        match self {
+            RendererRef::Own(renderer) => renderer,
+            RendererRef::Primary(renderer) => renderer.as_mut(),
+        }
+    }
+}
 
 pub enum Backend {
     Winit(Box<WinitGraphicsBackend<GlesRenderer>>),
@@ -21,25 +51,28 @@ pub enum Backend {
 }
 
 impl Backend {
-    /// The renderer that client buffers are imported with.
-    pub fn renderer(&mut self) -> &mut GlesRenderer {
+    /// The renderer that client buffers are imported with, and offscreen
+    /// work done; `None` (logged) if bare metal's GPU manager can't lend it.
+    pub fn renderer(&mut self) -> Option<RendererRef<'_>> {
         match self {
-            Backend::Winit(backend) => backend.renderer(),
-            Backend::Udev(data) => &mut data.renderer,
-            Backend::Headless(data) => &mut data.renderer,
+            Backend::Winit(backend) => Some(RendererRef::Own(backend.renderer())),
+            Backend::Udev(data) => data.renderer().map(RendererRef::Primary),
+            Backend::Headless(data) => Some(RendererRef::Own(&mut data.renderer)),
         }
     }
 
     /// The renderer, and the cursor theme where pila draws named cursors
     /// itself (bare metal), for rendering outside the backend's own loop.
-    pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, Option<&mut CursorTheme>) {
+    pub fn renderer_and_cursor_theme(
+        &mut self,
+    ) -> Option<(RendererRef<'_>, Option<&mut CursorTheme>)> {
         match self {
-            Backend::Winit(backend) => (backend.renderer(), None),
+            Backend::Winit(backend) => Some((RendererRef::Own(backend.renderer()), None)),
             Backend::Udev(data) => {
                 let (renderer, theme) = data.renderer_and_cursor_theme();
-                (renderer, Some(theme))
+                Some((RendererRef::Primary(renderer?), Some(theme)))
             }
-            Backend::Headless(data) => (&mut data.renderer, None),
+            Backend::Headless(data) => Some((RendererRef::Own(&mut data.renderer), None)),
         }
     }
 

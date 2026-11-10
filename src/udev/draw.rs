@@ -168,7 +168,8 @@ fn draw(
         return;
     };
     let UdevData {
-        renderer,
+        gpus,
+        primary,
         outputs,
         cursor_theme,
         ..
@@ -181,6 +182,10 @@ fn draw(
     let Some(drm_output) = surface.drm_output.as_mut() else {
         return;
     };
+    let Some(mut renderer) = super::primary_renderer(gpus, primary) else {
+        return;
+    };
+    let renderer = renderer.as_mut();
     surface.redraw_needed = false;
     surface.redraw_content = crate::redraw::Content::Maybe;
     let request = surface.request.take();

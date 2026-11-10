@@ -551,7 +551,10 @@ impl Pila {
         let Some(backend) = backend.as_mut() else {
             return;
         };
-        let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
+        let Some((mut renderer, cursor_theme)) = backend.renderer_and_cursor_theme() else {
+            return;
+        };
+        let renderer = &mut *renderer;
 
         let mut elements: Vec<PilaRenderElement> = Vec::new();
         if session.paint_cursors {
@@ -785,8 +788,8 @@ impl Pila {
                     trace!("capture: the frame is gone; its copy is dropped");
                     return;
                 }
-                let result = match state.backend.as_mut() {
-                    Some(backend) => finish(backend.renderer()),
+                let result = match state.backend.as_mut().and_then(|b| b.renderer()) {
+                    Some(mut renderer) => finish(&mut renderer),
                     None => Err(CopyError::Render("no renderer".into())),
                 };
                 then(state, result);

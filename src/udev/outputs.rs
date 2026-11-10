@@ -208,7 +208,8 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
     let UdevData {
         outputs,
         drm,
-        renderer,
+        gpus,
+        primary,
         ..
     } = &mut **data;
     let mut placed: Vec<(Output, Point<i32, Logical>)> = Vec::new();
@@ -225,12 +226,18 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             if surface.output.current_mode() != Some(wl_mode) {
                 // Powered off: the mode is set when the CRTC comes back.
                 let result = match surface.drm_output {
-                    Some(_) => drm.lock().use_mode(
-                        &crtc,
-                        mode,
-                        renderer,
-                        &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
-                    ),
+                    Some(_) => match super::primary_renderer(gpus, primary) {
+                        Some(mut renderer) => drm
+                            .lock()
+                            .use_mode(
+                                &crtc,
+                                mode,
+                                renderer.as_mut(),
+                                &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
+                            )
+                            .map_err(|err| format!("{err:?}")),
+                        None => Err("no renderer".to_string()),
+                    },
                     None => Ok(()),
                 };
                 match result {
@@ -571,7 +578,8 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     let UdevData {
         outputs,
         drm,
-        renderer,
+        gpus,
+        primary,
         session,
         ..
     } = &mut **data;
@@ -587,7 +595,10 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
         debug!(name, "session inactive: output left off until it's back");
         return false;
     }
-    let Some(drm_output) = initialize_with_fallback(drm, renderer, crtc, surface) else {
+    let Some(mut renderer) = super::primary_renderer(gpus, primary) else {
+        return false;
+    };
+    let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), crtc, surface) else {
         return false;
     };
     surface.drm_output = Some(drm_output);

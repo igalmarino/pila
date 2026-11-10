@@ -33,7 +33,11 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
-        renderer::{gles::GlesRenderer, ImportDma, ImportMemWl},
+        renderer::{
+            gles::GlesRenderer,
+            multigpu::{gbm::GbmGlesBackend, GpuManager, MultiRenderer},
+            ImportDma, ImportMemWl,
+        },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
@@ -103,6 +107,35 @@ type PilaDrmOutputManager = DrmOutputManager<
     DrmDeviceFd,
 >;
 
+/// The GPUs' renderers (`docs/MULTI_GPU.md`): OpenGL ES on GBM devices.
+pub type GpuApi = GbmGlesBackend<GlesRenderer, DrmDeviceFd>;
+
+/// The primary GPU's renderer, lent by the `GpuManager` that owns it: a
+/// `GlesRenderer` through `as_ref`/`as_mut`.
+pub type PrimaryRenderer<'a> = MultiRenderer<'a, 'a, GpuApi, GpuApi>;
+
+/// Lend the primary GPU's renderer; `None` if the GPU manager can't, logged
+/// once until it can again (it's asked for every frame).
+fn primary_renderer<'a>(
+    gpus: &'a mut GpuManager<GpuApi>,
+    primary: &DrmNode,
+) -> Option<PrimaryRenderer<'a>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static FAILING: AtomicBool = AtomicBool::new(false);
+    match gpus.single_renderer(primary) {
+        Ok(renderer) => {
+            FAILING.store(false, Ordering::Relaxed);
+            Some(renderer)
+        }
+        Err(err) => {
+            if !FAILING.swap(true, Ordering::Relaxed) {
+                warn!(?err, "no renderer for the primary GPU");
+            }
+            None
+        }
+    }
+}
+
 /// Fields drop in declaration order, which matters here: the outputs go
 /// before the DRM device, and the DRM device (which restores the previous
 /// display state when dropped) before the session that grants access to it.
@@ -110,7 +143,11 @@ pub struct UdevData {
     outputs: HashMap<crtc::Handle, OutputSurface>,
     drm: PilaDrmOutputManager,
     scanner: DrmScanner,
-    pub renderer: GlesRenderer,
+    /// Every GPU's renderer; only the primary's for now, which renders
+    /// everything (`primary_renderer`).
+    gpus: GpuManager<GpuApi>,
+    /// The primary GPU's render node: its key in `gpus`.
+    primary: DrmNode,
     libinput: Libinput,
     /// Keyboards, for the Caps/Num/Scroll Lock LEDs.
     keyboards: Vec<libinput::Device>,
@@ -459,7 +496,8 @@ impl UdevData {
         let UdevData {
             outputs,
             drm,
-            renderer,
+            gpus,
+            primary,
             ..
         } = self;
         let surface = outputs.get_mut(&crtc).expect("found above");
@@ -476,15 +514,25 @@ impl UdevData {
             // The vblanks of the dark gap aren't missed refreshes.
             surface.last_vblank = None;
             surface.presented_variable = false;
-            if let Err(err) = drm.lock().try_to_restore_modifiers(renderer, &elements) {
-                debug!(?err, "couldn't restore modifiers after powering off");
+            // Off goes ahead without a renderer; only this needs one.
+            if let Some(mut renderer) = primary_renderer(gpus, primary) {
+                if let Err(err) = drm
+                    .lock()
+                    .try_to_restore_modifiers(renderer.as_mut(), &elements)
+                {
+                    debug!(?err, "couldn't restore modifiers after powering off");
+                }
             }
             info!(name, "output powered off");
             return true;
         }
         // Another monitor may have taken the bandwidth meanwhile: then
         // the mode changes (`Pila::fit_to_outputs` follows it).
-        let Some(drm_output) = initialize_with_fallback(drm, renderer, crtc, surface) else {
+        let Some(mut renderer) = primary_renderer(gpus, primary) else {
+            return false;
+        };
+        let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), crtc, surface)
+        else {
             warn!(name, "failed to power the output on");
             return false;
         };
@@ -595,8 +643,18 @@ impl UdevData {
             .last_vblank_time
     }
 
-    pub fn renderer_and_cursor_theme(&mut self) -> (&mut GlesRenderer, &mut CursorTheme) {
-        (&mut self.renderer, &mut self.cursor_theme)
+    /// The primary GPU's renderer; `None` (logged) if it can't be lent.
+    pub fn renderer(&mut self) -> Option<PrimaryRenderer<'_>> {
+        primary_renderer(&mut self.gpus, &self.primary)
+    }
+
+    /// The primary GPU's renderer (`None`, logged, if it can't be lent),
+    /// and the cursor theme.
+    pub fn renderer_and_cursor_theme(&mut self) -> (Option<PrimaryRenderer<'_>>, &mut CursorTheme) {
+        (
+            primary_renderer(&mut self.gpus, &self.primary),
+            &mut self.cursor_theme,
+        )
     }
 
     pub fn cursor_changed(&mut self, _status: &CursorImageStatus) {
@@ -639,21 +697,44 @@ pub fn init_udev(
     let (drm, drm_notifier) = DrmDevice::new(fd.clone(), true)?;
     let gbm = GbmDevice::new(fd)?;
 
-    // SAFETY: the GBM device outlives the display (both live in `UdevData`
-    // via the renderer and output manager).
+    // Only to find the render node. Smithay shares one display per GBM
+    // device: the GPU manager's (`add_node`) is this one, which the manager
+    // keeps alive. SAFETY: the GBM device outlives it (the output manager and
+    // the GPU manager hold it, in `UdevData`).
     let display = unsafe { EGLDisplay::new(gbm.clone())? };
     let render_node = EGLDevice::device_for_display(&display)?
         .try_get_render_node()
         .ok()
         .flatten()
         .unwrap_or(node);
-    let context = EGLContext::new(&display)?;
-    // SAFETY: the context was just created for this renderer only.
-    let mut renderer = unsafe { GlesRenderer::new(context)? };
-    crate::render::warm_up(&mut renderer);
+    // The GPU manager owns the renderer, keyed by the render node. It only
+    // logs a renderer it can't create and leaves the GPU out: keep the error
+    // to say why the GPU is missing.
+    let factory_error = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let error_slot = factory_error.clone();
+    let mut api = GpuApi::with_factory(move |display| {
+        let created = EGLContext::new(display)
+            .map_err(smithay::backend::renderer::multigpu::gbm::Error::from)
+            // SAFETY: the context was just created for this renderer only.
+            .and_then(|context| Ok(unsafe { GlesRenderer::new(context)? }));
+        if let Err(err) = &created {
+            *error_slot.borrow_mut() = Some(err.to_string());
+        }
+        created
+    });
+    api.add_node(render_node, gbm.clone())?;
+    let mut gpus = GpuManager::new(api)?;
+    let mut lent = gpus.single_renderer(&render_node).map_err(|err| {
+        match factory_error.borrow_mut().take() {
+            Some(cause) => format!("could not set up the GPU's renderer: {cause}"),
+            None => format!("could not set up the GPU's renderer: {err}"),
+        }
+    })?;
+    let renderer = lent.as_mut();
+    crate::render::warm_up(renderer);
     state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(
         render_node.dev_id(),
-        &renderer,
+        renderer,
     ));
 
     let allocator = GbmAllocator::new(
@@ -675,6 +756,7 @@ pub fn init_udev(
     state.protocols.shm.update_formats(renderer.shm_formats());
     let feedback =
         DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()?;
+    drop(lent);
     state
         .protocols
         .dmabuf
@@ -769,7 +851,8 @@ pub fn init_udev(
         session,
         loop_handle: event_loop.handle(),
         libinput,
-        renderer,
+        gpus,
+        primary: render_node,
         drm,
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),

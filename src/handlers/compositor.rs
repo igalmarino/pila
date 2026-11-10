@@ -230,7 +230,8 @@ impl DmabufHandler for Pila {
         let imported = self
             .backend
             .as_mut()
-            .is_some_and(|backend| backend.renderer().import_dmabuf(&dmabuf, None).is_ok());
+            .and_then(|backend| backend.renderer())
+            .is_some_and(|mut renderer| renderer.import_dmabuf(&dmabuf, None).is_ok());
         if imported {
             let _ = notifier.successful::<Pila>();
         } else {

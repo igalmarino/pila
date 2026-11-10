@@ -250,7 +250,11 @@ impl Pila {
             frame.failed();
             return true;
         };
-        let (renderer, cursor_theme) = backend.renderer_and_cursor_theme();
+        let Some((mut renderer, cursor_theme)) = backend.renderer_and_cursor_theme() else {
+            frame.failed();
+            return true;
+        };
+        let renderer = &mut *renderer;
         let mut elements: Vec<PilaRenderElement> = Vec::new();
         if overlay_cursor {
             elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);

@@ -109,9 +109,10 @@ impl Pila {
             })
             .collect();
         let Pila { backend, blur, .. } = self;
-        let Some(renderer) = backend.as_mut().map(|b| b.renderer()) else {
+        let Some(mut renderer) = backend.as_mut().and_then(|b| b.renderer()) else {
             return;
         };
+        let renderer = &mut *renderer;
         let old: Vec<_> = outputs
             .into_iter()
             .filter_map(|(rect, scale, name)| {
