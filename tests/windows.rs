@@ -192,7 +192,7 @@ fn the_pointer_enters_the_window_under_it_at_surface_coordinates() {
 }
 
 #[test]
-fn closing_the_focused_window_focuses_the_one_below() {
+fn closing_the_focused_window_focuses_the_one_used_before() {
     let mut pila = TestPila::start();
     let client = pila.client();
     client.window("a").create();
