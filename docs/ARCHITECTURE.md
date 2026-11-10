@@ -135,11 +135,12 @@ Key flows and invariants:
   fast as it loops. After such a redraw the output waits until half a period before its next
   vblank (`draw::idle_until`, `OutputSurface::idle_until`; a one-shot timer,
   `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
-  nothing (`draw::idle_wait`): at most one per refresh. A request with something new
-  (`redraw_content`) doesn't wait, once per wait: if that redraw finds nothing new either
-  (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers, say),
-  what's asked next waits too, until the wait is over. A lock waiting for its frame never
-  waits. A frame that fails
+  nothing (`draw::idle_wait`): at most one per refresh. What's asked says what it brings
+  (`redraw::Content`, the most of the requests since the last redraw: `redraw_content`): a
+  change of Pila's own (`Sure`: a window moved, an animation, a drawn cursor) never waits; a
+  client's new picture (`Client`) doesn't, once per wait: if that redraw finds nothing new
+  either (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers,
+  say), it waits too, until the wait is over. A lock waiting for its frame never waits. A frame that fails
   at the DRM level (render or queue: no DRM master yet after a VT switch, a monitor beyond
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
@@ -211,7 +212,7 @@ Key flows and invariants:
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
   request for it. `queue_redraw_output`/`request_redraw` ask one output (with `content`:
-  whether what changed surely shows, see "Bare metal"), `queue_redraw_rect` the outputs a
+  `request_redraw_as` and `redraw::Content`, see "Bare metal"), `queue_redraw_rect` the outputs a
   global rectangle overlaps, `queue_redraw_window` those a window's frame, title bar, shadow
   margin and popups touch (`window_visual_rect`), `queue_redraw_pointer` those of where the
   pointer was and is. `queue_redraw` asks every output, for what's global: the config,
@@ -252,7 +253,8 @@ Key flows and invariants:
   apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless); an
   output with only those still reports. On bare metal a frame with something new asked for in
   time for a vblank (`frame_stats::IN_TIME`, 4 ms or half a period, before it; with a frame in
-  flight, the vblank after that one's) but shown at a later one counts its refreshes as missed,
+  flight, the vblank after the one that really showed it: one shown late doesn't make the next
+  late) but shown at a later one counts its refreshes as missed,
   animation or not, and is counted `late` (`late_refreshes`, from `OutputSurface::request`, the
   first such request since the last frame; not with adaptive sync, nor for the first frame
   after a modeset). Each late frame is logged with what made it late: held back by the wait

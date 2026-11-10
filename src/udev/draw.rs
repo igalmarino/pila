@@ -182,7 +182,7 @@ fn draw(
         return;
     };
     surface.redraw_needed = false;
-    surface.redraw_content = false;
+    surface.redraw_content = crate::redraw::Content::Maybe;
     let request = surface.request.take();
 
     let mut elements = Vec::new();
@@ -253,6 +253,7 @@ fn draw(
                         surface.queued_request =
                             request.filter(|_| !surface.first_frame).map(|r| Request {
                                 drawn: Some(now),
+                                after: surface.last_vblank_time.filter(|_| r.in_flight),
                                 ..r
                             });
                         if scene.locked {
@@ -404,7 +405,7 @@ pub(super) fn frame_finish(
     let late = request
         .filter(|_| !surface.presented_variable)
         .map_or(0, |r| {
-            crate::frame_stats::late_refreshes(r.at, r.in_flight, r.vblank, shown, frame_duration)
+            crate::frame_stats::late_refreshes(r.at, r.after, r.vblank, shown, frame_duration)
         });
     // What made it late: held back by the wait, drawn late, or shown late
     // after being drawn in time (the GPU, the commit).
@@ -507,7 +508,7 @@ pub(super) fn idle_until(last: Option<Duration>, now: Duration, period: Duration
 fn idle_wait(
     idle_until: Option<Duration>,
     now: Duration,
-    content: bool,
+    content: crate::redraw::Content,
     idle_streak: u32,
     frame_pending: bool,
     lock_pending: bool,
@@ -515,7 +516,14 @@ fn idle_wait(
     let until = idle_until.filter(|until| now < *until)?;
     // Something said new doesn't wait, once: a second redraw in a row that
     // finds nothing means it wasn't, whatever the next says.
-    let surely_new = content && idle_streak <= 1;
+    use crate::redraw::Content;
+    // Pila's own change shows; a client's picture, once (it may show
+    // nowhere); what may bring nothing waits.
+    let surely_new = match content {
+        Content::Sure => true,
+        Content::Client => idle_streak <= 1,
+        Content::Maybe => false,
+    };
     (!surely_new && !frame_pending && !lock_pending).then(|| until - now)
 }
 
@@ -578,6 +586,7 @@ fn lock_shown(outputs: impl IntoIterator<Item = (bool, LockFrame)>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::redraw::Content;
 
     #[test]
     fn the_lock_waits_for_every_output_on_to_show_it() {
@@ -616,16 +625,25 @@ mod tests {
         // before the vblank at 116: the next waits until 124.
         let until = Some(idle_until(Some(ms(100)), ms(110), period));
         // A client's new frame at 111 is drawn at once, in time for 116.
-        assert_eq!(idle_wait(until, ms(111), true, 1, false, false), None);
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Client, 1, false, false),
+            None
+        );
         // A redraw that may bring nothing (a commit with no new picture) waits.
         assert_eq!(
-            idle_wait(until, ms(111), false, 1, false, false),
+            idle_wait(until, ms(111), Content::Maybe, 1, false, false),
             Some(ms(13))
         );
         // Nor does anything wait with a frame in flight (its vblank draws
         // it) or a lock waiting for its frame.
-        assert_eq!(idle_wait(until, ms(111), false, 1, true, false), None);
-        assert_eq!(idle_wait(until, ms(111), false, 1, false, true), None);
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Maybe, 1, true, false),
+            None
+        );
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Maybe, 1, false, true),
+            None
+        );
     }
 
     #[test]
@@ -636,13 +654,16 @@ mod tests {
         // once; if that found nothing either, the next waits like the rest:
         // a client sending what shows nowhere (covered, say) in a loop of
         // fifo barriers can't make an output redraw as fast as it loops.
-        assert_eq!(idle_wait(until, ms(111), true, 1, false, false), None);
         assert_eq!(
-            idle_wait(until, ms(111), true, 2, false, false),
+            idle_wait(until, ms(111), Content::Client, 1, false, false),
+            None
+        );
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Client, 2, false, false),
             Some(ms(13))
         );
         assert_eq!(
-            idle_wait(until, ms(111), true, 5, false, false),
+            idle_wait(until, ms(111), Content::Client, 5, false, false),
             Some(ms(13))
         );
         // The streak starts over with each wait (once per refresh), and
@@ -651,6 +672,12 @@ mod tests {
         assert_eq!(idle_streak(1, true, false, false), 2);
         assert_eq!(idle_streak(5, false, true, false), 0);
         assert_eq!(idle_streak(5, false, false, false), 5);
+        // A change of Pila's own (an animation starting, a window moved)
+        // never waits: it shows, whatever came before.
+        assert_eq!(
+            idle_wait(until, ms(111), Content::Sure, 5, false, false),
+            None
+        );
     }
 
     #[test]

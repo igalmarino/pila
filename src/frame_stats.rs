@@ -155,14 +155,14 @@ pub fn missed_in_gap(gap: Duration, period: Duration) -> u32 {
 /// if that's shorter) is in time for it: the pillar's budget per frame.
 pub const IN_TIME: Duration = Duration::from_millis(4);
 
-/// Refreshes a frame was shown late by: asked for at `requested`, with
-/// another frame `in_flight` then or not, shown at `shown`, on an output whose
-/// vblanks are `period` apart from one at `vblank`. Due is the first vblank
-/// at least `IN_TIME` after the request, or with a frame in flight the one
-/// after that frame's.
+/// Refreshes a frame was shown late by: asked for at `requested`, shown at
+/// `shown`, on an output whose vblanks are `period` apart from one at
+/// `vblank`. Due is the first vblank at least `IN_TIME` after the request,
+/// or, with another frame in flight then, the one after the vblank that
+/// showed that frame (`in_flight`): it's drawn then, at the earliest.
 pub fn late_refreshes(
     requested: Duration,
-    in_flight: bool,
+    in_flight: Option<Duration>,
     vblank: Duration,
     shown: Duration,
     period: Duration,
@@ -171,8 +171,8 @@ pub fn late_refreshes(
         return 0;
     }
     let next = crate::commit_pacing::next_vblank;
-    let due = if in_flight {
-        next(vblank, requested, period) + period
+    let due = if let Some(in_flight_shown) = in_flight {
+        in_flight_shown + period
     } else {
         // The first vblank at or after the request plus the budget.
         let earliest = requested + IN_TIME.min(period / 2);
@@ -356,50 +356,56 @@ mod tests {
         // Asked for at 111, 5 ms before 116 (more than the 4 ms budget):
         // due at 116, shown at 132, one late.
         assert_eq!(
-            late_refreshes(111 * MS, false, 100 * MS, 132 * MS, period),
+            late_refreshes(111 * MS, None, 100 * MS, 132 * MS, period),
             1
         );
         assert_eq!(
-            late_refreshes(111 * MS, false, 100 * MS, 116 * MS, period),
+            late_refreshes(111 * MS, None, 100 * MS, 116 * MS, period),
             0
         );
         // Asked for 3 ms before a vblank: in time for the next only.
         assert_eq!(
-            late_refreshes(113 * MS, false, 100 * MS, 132 * MS, period),
+            late_refreshes(113 * MS, None, 100 * MS, 132 * MS, period),
             0
         );
         assert_eq!(
-            late_refreshes(113 * MS, false, 100 * MS, 148 * MS, period),
+            late_refreshes(113 * MS, None, 100 * MS, 148 * MS, period),
             1
         );
         // With a frame in flight the vblank after its own is due.
         assert_eq!(
-            late_refreshes(102 * MS, true, 100 * MS, 132 * MS, period),
+            late_refreshes(102 * MS, Some(116 * MS), 100 * MS, 132 * MS, period),
             0
         );
         assert_eq!(
-            late_refreshes(102 * MS, true, 100 * MS, 164 * MS, period),
+            late_refreshes(102 * MS, Some(116 * MS), 100 * MS, 164 * MS, period),
             2
+        );
+        // That frame was itself shown late (at 132, queued right before 116,
+        // say): this one, drawn at once then, isn't.
+        assert_eq!(
+            late_refreshes(102 * MS, Some(132 * MS), 100 * MS, 148 * MS, period),
+            0
         );
         // At 144 Hz the budget is half a period at most.
         let fast = Duration::from_micros(6944);
         let vblank = 100 * MS;
         let next = vblank + fast;
         assert_eq!(
-            late_refreshes(next - 3 * MS, false, vblank, next + fast, fast),
+            late_refreshes(next - 3 * MS, None, vblank, next + fast, fast),
             0
         );
         assert_eq!(
-            late_refreshes(next - 4 * MS, false, vblank, next + fast, fast),
+            late_refreshes(next - 4 * MS, None, vblank, next + fast, fast),
             1
         );
         // A vblank known from long before still sets the grid.
         assert_eq!(
-            late_refreshes(1001 * MS, false, 100 * MS, 1012 * MS, period),
+            late_refreshes(1001 * MS, None, 100 * MS, 1012 * MS, period),
             0
         );
         assert_eq!(
-            late_refreshes(1001 * MS, false, 100 * MS, 1028 * MS, period),
+            late_refreshes(1001 * MS, None, 100 * MS, 1028 * MS, period),
             1
         );
     }

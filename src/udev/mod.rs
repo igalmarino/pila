@@ -193,10 +193,11 @@ struct OutputSurface {
     /// past one, even a redraw said to bring something new waits
     /// (`draw::idle_wait`).
     idle_streak: u32,
-    /// A redraw asked for since the last one surely brings something new
-    /// (`redraw.rs`): it doesn't wait, unless the last two redraws found
-    /// nothing new (`idle_streak`).
-    redraw_content: bool,
+    /// The most the redraws asked for since the last one bring
+    /// (`redraw::Content`): a change of Pila's own never waits, a client's
+    /// new picture doesn't unless the last two redraws found nothing new
+    /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
+    redraw_content: crate::redraw::Content,
     /// The first such request since the last redraw, then the one of the
     /// frame in flight: how late it shows is measured (`frame_stats.rs`).
     request: Option<Request>,
@@ -217,16 +218,19 @@ struct Request {
     /// shown late).
     held: bool,
     drawn: Option<Duration>,
+    /// With a frame in flight when asked for: the vblank that showed that
+    /// frame, set when this one is drawn (it's due one period later).
+    after: Option<Duration>,
 }
 
 impl OutputSurface {
     /// Something changed on this output at `now`; `content`: surely shows.
-    fn ask_redraw(&mut self, content: bool, now: Duration) {
+    fn ask_redraw(&mut self, content: crate::redraw::Content, now: Duration) {
         self.redraw_needed = true;
-        if !content {
+        if content == crate::redraw::Content::Maybe {
             return;
         }
-        self.redraw_content = true;
+        self.redraw_content = self.redraw_content.max(content);
         if self.request.is_none() {
             self.request = self.last_vblank_time.map(|vblank| Request {
                 at: now,
@@ -234,6 +238,7 @@ impl OutputSurface {
                 vblank,
                 held: false,
                 drawn: None,
+                after: None,
             });
         }
     }
@@ -251,13 +256,13 @@ impl UdevData {
     pub fn queue_redraw(&mut self) {
         let now = self.clock.now().into();
         for surface in self.outputs.values_mut() {
-            surface.ask_redraw(true, now);
+            surface.ask_redraw(crate::redraw::Content::Sure, now);
         }
         self.schedule_render();
     }
 
     /// Ask `output` for a new frame; `content`: what changed surely shows.
-    pub fn queue_redraw_output(&mut self, output: &Output, content: bool) {
+    pub fn queue_redraw_output(&mut self, output: &Output, content: crate::redraw::Content) {
         let now = self.clock.now().into();
         let Some(surface) = self.outputs.values_mut().find(|s| s.output == *output) else {
             return;

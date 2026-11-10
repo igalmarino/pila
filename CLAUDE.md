@@ -155,8 +155,9 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   that just redrew with nothing new until half a period before its next vblank, for the next
   redraw that may bring nothing either (`udev/draw.rs::idle_wait`: a client committing no
   new picture (no buffer, or one without damage) in a loop of frame callbacks or fifo
-  barriers would make it redraw as fast as it loops; a redraw
-  with something new doesn't wait, once per wait: `idle_streak`) aren't pacing); redraws per output: a change redraws
+  barriers would make it redraw as fast as it loops; a change
+  of Pila's own never waits, a client's new picture once per wait: `redraw::Content`,
+  `idle_streak`) aren't pacing); redraws per output: a change redraws
   only the outputs it shows on (`redraw.rs`); idle callbacks
   inserted outside an event source come with a `Pila::wake` ping (see "Architecture");
   one-time costs are paid at startup, not in the

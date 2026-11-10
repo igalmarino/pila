@@ -528,7 +528,7 @@ pub(super) fn connector_connected(
             idle_until: None,
             idle_timer: false,
             idle_streak: 0,
-            redraw_content: false,
+            redraw_content: crate::redraw::Content::Maybe,
             request: None,
             queued_request: None,
         },

@@ -69,7 +69,7 @@ impl Backend {
 
     /// Ask for a new frame on `output`; `content`: what changed surely shows
     /// (`redraw.rs`). Nested there's one output, the window.
-    pub fn queue_redraw_output(&mut self, output: &Output, content: bool) {
+    pub fn queue_redraw_output(&mut self, output: &Output, content: crate::redraw::Content) {
         match self {
             Backend::Winit(backend) => backend.window().request_redraw(),
             Backend::Udev(data) => data.queue_redraw_output(output, content),

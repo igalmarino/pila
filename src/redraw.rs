@@ -10,8 +10,9 @@
 //! bring nothing waits after one that found nothing new (`udev/draw.rs`,
 //! `idle_wait`), so that a client committing nothing new (no buffer, or one
 //! without damage: `brings_content`) in a loop of frame callbacks or fifo
-//! barriers can't make Pila redraw as fast as it loops; one with content
-//! doesn't wait, once per wait: a second redraw in a row that finds nothing
+//! barriers can't make Pila redraw as fast as it loops. A change of Pila's
+//! own never waits (`Content::Sure`); a client's new picture doesn't, once
+//! per wait (`Content::Client`): a second redraw in a row that finds nothing
 //! means it wasn't new (a covered surface's, say), and the next waits too.
 
 use smithay::{
@@ -24,11 +25,38 @@ use smithay::{
 
 use crate::{sync::Locked, Pila};
 
+/// What a redraw asked for brings to show, which decides on bare metal
+/// whether it waits after redraws that found nothing new
+/// (`udev/draw.rs::idle_wait`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Content {
+    /// Maybe nothing: a commit with no new picture, the pointer moving with
+    /// no cursor drawn. Waits.
+    Maybe,
+    /// A client's new picture, which may still show nowhere (covered, say):
+    /// doesn't wait, once per wait.
+    Client,
+    /// A change of Pila's own (a window moved, an animation, the cursor
+    /// drawn): never waits.
+    Sure,
+}
+
+impl Content {
+    /// `Sure` or `Maybe`.
+    pub fn sure(sure: bool) -> Self {
+        if sure {
+            Content::Sure
+        } else {
+            Content::Maybe
+        }
+    }
+}
+
 /// A redraw held back by `Pila::defer_redraws`.
 #[derive(Clone)]
 pub enum Deferred {
     All,
-    Output(Output, bool),
+    Output(Output, Content),
 }
 
 /// Set on a surface by a commit that brings a buffer (or removes it), until
@@ -125,12 +153,17 @@ impl Pila {
 
     /// Ask for a redraw of `output`, for something new to show there.
     pub fn queue_redraw_output(&mut self, output: &Output) {
-        self.request_redraw(output, true);
+        self.request_redraw_as(output, Content::Sure);
     }
 
     /// Ask for a redraw of `output`; `content`: what changed surely shows
     /// (else it may be nothing, see the module docs).
     pub fn request_redraw(&mut self, output: &Output, content: bool) {
+        self.request_redraw_as(output, Content::sure(content));
+    }
+
+    /// Ask for a redraw of `output`, bringing `content`.
+    pub fn request_redraw_as(&mut self, output: &Output, content: Content) {
         if let Some(deferred) = &mut self.deferred_redraws {
             deferred.push(Deferred::Output(output.clone(), content));
             return;
@@ -216,7 +249,7 @@ impl Pila {
             for request in asked {
                 match request {
                     Deferred::All => state.queue_redraw(),
-                    Deferred::Output(output, content) => state.request_redraw(&output, content),
+                    Deferred::Output(output, content) => state.request_redraw_as(&output, content),
                 }
             }
         });
@@ -316,10 +349,15 @@ impl Pila {
     /// Redraw what a commit of `surface` changed: the outputs it showed on
     /// before (`before`, from `surface_outputs`) and shows on now.
     pub fn redraw_committed(&mut self, surface: &WlSurface, before: Option<Vec<Output>>) {
-        let content = self.commit_brings_content(surface);
+        // A client's picture: new, maybe shown nowhere.
+        let content = if self.commit_brings_content(surface) {
+            Content::Client
+        } else {
+            Content::Maybe
+        };
         let (Some(mut outputs), Some(after)) = (before, self.surface_outputs(surface)) else {
             tracing::trace!(target: "pila::frames", "commit of an unknown surface: every output");
-            outputs_of_all(self).for_each(|output| self.request_redraw(&output, content));
+            outputs_of_all(self).for_each(|output| self.request_redraw_as(&output, content));
             return;
         };
         for output in after {
@@ -330,7 +368,7 @@ impl Pila {
         // Shown nowhere, it may still be captured (`after_frames`).
         self.capture_due |= outputs.is_empty();
         for output in outputs {
-            self.request_redraw(&output, content);
+            self.request_redraw_as(&output, content);
         }
     }
 }
