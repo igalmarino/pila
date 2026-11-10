@@ -154,6 +154,28 @@ fn gestures_do_nothing_while_locked() {
     );
 }
 
+/// A swipe begun before the screen locked runs nothing once it's locked
+/// (here one that needs no focused window, which a lock takes away).
+#[test]
+fn a_swipe_that_crosses_a_lock_does_nothing() {
+    let mut pila = TestPila::with_config("[gestures]\n\"swipe-3-up\" = \"show-desktop\"\n");
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    pila.gesture(json!({ "kind": "swipe", "phase": "begin", "fingers": 3 }));
+    pila.gesture(json!({ "kind": "swipe", "phase": "update", "dx": 0.0, "dy": -10.0 }));
+    let lock = client.lock_session();
+    client.lock_surface(&lock, "HEADLESS-1", [255, 0, 0, 0]);
+    client.wait_logged("lock", "Locked");
+    pila.gesture(json!({ "kind": "swipe", "phase": "update", "dx": 0.0, "dy": -80.0 }));
+    pila.gesture(json!({ "kind": "swipe", "phase": "end" }));
+    pila.stays(
+        "a still shown",
+        std::time::Duration::from_millis(100),
+        |s| window_in(s, "a").unwrap()["minimized"] == false,
+    );
+}
+
 #[test]
 fn a_gesture_config_rebinds_swipes() {
     let mut pila = TestPila::with_config("[gestures]\n\"swipe-3-down\" = \"minimize\"\n");

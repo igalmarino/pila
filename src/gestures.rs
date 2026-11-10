@@ -15,7 +15,8 @@
 //! `LOCK` along one axis; after `TRIGGER` the action runs, and window
 //! switching steps once more for every further `STEP`, ending the switch
 //! when the fingers lift. Not while the session is locked or a client
-//! inhibits shortcuts (a VM gets the swipe then).
+//! inhibits shortcuts (a VM gets the swipe then); a swipe begun before the
+//! session locked runs nothing once it is.
 
 use smithay::{
     backend::input::{
@@ -175,6 +176,11 @@ impl Pila {
     /// Run a swipe's action for `steps` new steps: window switching steps
     /// each time, anything else runs once, when the swipe takes its `first`.
     fn run_swipe(&mut self, gesture: Gesture, steps: u32, first: bool) {
+        // Begun before the screen locked: kept from the clients still, but
+        // it runs nothing.
+        if self.is_locked() {
+            return;
+        }
         let Some(action) = self.config.gesture_action(gesture) else {
             return;
         };

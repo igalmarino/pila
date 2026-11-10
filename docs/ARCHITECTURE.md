@@ -152,7 +152,8 @@ Key flows and invariants:
   pointer focus through pointer-gestures (`gestures.rs`), except swipes with a finger
   count that `[gestures]` binds: those are kept whole from begin to end (`Pila::input.swipe`,
   direction fixed after a small move, action after a threshold, window switching stepping
-  per further stretch and ending on lift), unless locked or shortcuts are inhibited.
+  per further stretch and ending on lift), unless locked or shortcuts are inhibited (a swipe
+  begun before a lock runs nothing once locked).
   Output transforms (rotation) are the `Output`'s: Smithay rotates the rendered frame and
   the `Space` swaps a turned output's logical size, so Pila only sets it (and sizes output
   captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.

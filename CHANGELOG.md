@@ -18,6 +18,8 @@
   and the `outputs` events waited for a frame, so a subscriber never saw `power: false`.
 - **`pila msg outputs` shows monitors that are off:** marked `[off]`, as 0.4.2 said it did
   (only `--json` had their `power`).
+- **A swipe begun as the screen locks runs nothing:** its action (show the desktop, say) ran
+  behind the lock screen if the screen locked during the swipe.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
   reproducing it.
