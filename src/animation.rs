@@ -785,14 +785,19 @@ impl Pila {
             // away (calloop wouldn't): this runs after the event loop's
             // dispatch, too late for the winit source to see a redraw
             // request before the loop sleeps.
-            // Only the outputs they show on: another, with nothing new,
-            // would be redrawn as fast as the loop goes.
-            self.loop_handle.insert_idle(move |state| match outputs {
-                None => state.queue_redraw(),
-                Some(outputs) => {
-                    for output in outputs {
-                        state.queue_redraw_output(&output);
-                    }
+            // Only the outputs they show on, and as what may bring nothing
+            // (`redraw::Content::Maybe`): the next frame is for the next
+            // vblank, not for now. An output with a frame in flight draws it
+            // at its vblank anyway; one whose redraw just found nothing new
+            // (nothing animates there, or an animation is waiting for its
+            // client) waits for it, where asking for it as a change would
+            // redraw it as fast as this runs, every redraw calling this
+            // again. An animation's first frame is asked as a change, where
+            // it starts.
+            self.loop_handle.insert_idle(move |state| {
+                let outputs = outputs.unwrap_or_else(|| state.space.outputs().cloned().collect());
+                for output in outputs {
+                    state.request_redraw(&output, false);
                 }
             });
             self.wake.ping();

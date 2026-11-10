@@ -461,8 +461,12 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
         frame_state.with_damage = with_damage;
         state.capture.screencopies.push(resource.clone());
         // Copied after the next frame (`after_frames`): at most once per
-        // refresh however fast a client asks, as with damage.
-        state.queue_redraw();
+        // refresh however fast a client asks, as with damage. Its output's
+        // frame, which may well have nothing new (`redraw::Content::Maybe`).
+        match frame_state.output.upgrade() {
+            Some(output) => state.request_redraw(&output, false),
+            None => state.queue_redraw(),
+        }
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyFrameV1, _: &FrameData) {

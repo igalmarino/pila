@@ -465,7 +465,10 @@ Key flows and invariants:
   (a stdlib Python taskbar client) minimizes/unminimizes and `scripts/workspace-action`
   (ext-workspace) switches workspaces for scripted tests (`scripts/check`); `wtype`
   can't, the virtual keyboard bypasses bindings. `step_animations` (from
-  `after_frames`) prunes finished ones and requests the next frame, of the outputs they show on
+  `after_frames`) prunes finished ones and requests the next frame, as one that may bring nothing
+  (`Content::Maybe`: it's for the next vblank, and an output whose redraw found nothing new
+  waits for it; asked as a change, each such redraw would run `after_frames` and this again,
+  as fast as the loop goes), of the outputs they show on
   (`animation_outputs`: windows' and snapshots' rectangles grown by the shadow and the drop,
   layers' outputs; every output during a workspace slide), taken before pruning so the last
   frame is asked for too; locking drops all.
@@ -564,7 +567,7 @@ Key flows and invariants:
   ext-image-copy-capture): a frame names an output and optionally a region (logical,
   output-local); Pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
-  after the next frame (it queues a redraw), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
+  after the next frame (it asks for its output's, as one that may bring nothing), so at most once per refresh; `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
   checked from `after_frames`; a copy that fails drops that tracker, for the same reason as
   `Session::start_over`. A mode/scale change or a removed output fails the frame.
