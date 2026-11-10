@@ -19,8 +19,9 @@ fn main() {
     });
     println!("cargo:rustc-env=PILA_GIT_VERSION={describe}");
     // A new commit or checkout moves HEAD or the index; staging changes the
-    // index too (close enough for "dirty").
-    for path in [".git/HEAD", ".git/index"] {
+    // index too; an edit to the sources makes the tree dirty (so a build of
+    // uncommitted changes doesn't say the last build's version, clean).
+    for path in [".git/HEAD", ".git/index", "src", "Cargo.toml"] {
         if std::path::Path::new(path).exists() {
             println!("cargo:rerun-if-changed={path}");
         }
