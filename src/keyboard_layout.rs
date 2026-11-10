@@ -5,6 +5,7 @@
 //! keyboard's that count: their names as last read, and the layout saved to
 //! come back to, which a switch changes instead.
 
+use crate::sync::Locked;
 use smithay::input::keyboard::Layout;
 
 use crate::{config::LayoutTarget, Pila};
@@ -19,7 +20,7 @@ impl Pila {
             return (Vec::new(), 0);
         };
         let (names, active) = keyboard.with_xkb_state(self, |context| {
-            let xkb = context.xkb().lock().unwrap();
+            let xkb = context.xkb().locked();
             let names: Vec<String> = xkb
                 .layouts()
                 .map(|layout| xkb.layout_name(layout).to_string())

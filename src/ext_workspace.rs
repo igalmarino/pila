@@ -108,7 +108,9 @@ impl Manager {
         let count = states.len();
         let mut changed = false;
         while self.workspaces.len() > count {
-            let handle = self.workspaces.pop().unwrap();
+            let Some(handle) = self.workspaces.pop() else {
+                break;
+            };
             self.group.workspace_leave(&handle);
             handle.removed();
             changed = true;

@@ -34,6 +34,7 @@
 //! - `quit`.
 //! - `panic`: crash right after answering (the crash report in the log).
 
+use crate::sync::Locked;
 use std::{
     io::{Read, Write},
     os::unix::net::{UnixListener, UnixStream},
@@ -413,7 +414,7 @@ fn keycode(state: &mut Pila, name: &str) -> Result<Keycode, String> {
     let keyboard = state.seat.get_keyboard().ok_or("no keyboard")?;
     keyboard
         .with_xkb_state(state, |context| {
-            let xkb = context.xkb().lock().unwrap();
+            let xkb = context.xkb().locked();
             // SAFETY: the keymap isn't kept beyond this closure.
             let keymap = unsafe { xkb.keymap() };
             let (min, max) = (keymap.min_keycode().raw(), keymap.max_keycode().raw());

@@ -70,7 +70,11 @@ Key flows and invariants:
   Smithay panics if it can't. Code outside the backends uses `Backend`'s methods (renderer for dmabuf
   imports, `queue_redraw`/`queue_redraw_output`, `draws_cursor`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
-  hard-codes a keyboard and pointer for all. A panic, on any backend, is logged as "pila
+  hard-codes a keyboard and pointer for all. Past startup a panic ends the session, so the code has no
+  `unwrap`/`expect` that rests on more than a local, stated invariant: mutexes go through
+  `sync::Locked::locked` (a poisoned one only follows a panic that already ended Pila), user
+  data through `get_or_insert`, the rest through `let`-`else` (with a log where it means
+  something went wrong). A panic, on any backend, is logged as "pila
   crashed" with its location, the version and a backtrace, captured whatever `RUST_BACKTRACE`
   says (`main::log_panics`): a login session doesn't set it, and a tester's first report should
   say where it happened.

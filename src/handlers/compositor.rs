@@ -37,6 +37,8 @@ impl CompositorHandler for Pila {
         if let Some(state) = client.get_data::<XWaylandClientData>() {
             return &state.compositor_state;
         }
+        // Every client is inserted with it (`init_wayland_listener`), but
+        // Xwayland, handled above.
         &client
             .get_data::<ClientState>()
             .expect("client without pila's client data")

@@ -51,8 +51,7 @@ struct OffSpace {
 }
 
 fn on_workspace(window: &Window) -> &OffSpace {
-    window.user_data().insert_if_missing(OffSpace::default);
-    window.user_data().get::<OffSpace>().unwrap()
+    window.user_data().get_or_insert(OffSpace::default)
 }
 
 /// Record that `window`, leaving the `Space` from `at`, is on workspace

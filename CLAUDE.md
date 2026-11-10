@@ -240,6 +240,9 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 - **Grabs:** `Pila::set_cursor` must be called after `set_grab` (`Focus::Clear` resets the
   cursor).
 - **Backends:** code outside them uses `Backend`'s methods rather than matching on it.
+- **Panics end the session:** past startup no `unwrap`/`expect` but on a local invariant the
+  message states; `.locked()` (`sync.rs`) for a mutex, `get_or_insert` for user data, else
+  `let`-`else`, logging what means something went wrong.
 - **Settings:** a new one is read when used or re-applied in `apply_config`. Keep in sync:
   `DEFAULT_BINDINGS` and `DEFAULT_GESTURES`, the tables in `config.rs`'s module doc, the
   defaults in `config.example.toml` (every value commented out and marked default or example),

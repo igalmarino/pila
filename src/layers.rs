@@ -9,6 +9,7 @@
 //! order (`Pila::upper_layers`, `Pila::lower_layers`; `Pila::scene`,
 //! `Pila::under`).
 
+use crate::sync::Locked;
 use smithay::{
     desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType},
     output::Output,
@@ -178,7 +179,7 @@ impl Pila {
             states
                 .data_map
                 .get::<LayerSurfaceData>()
-                .is_some_and(|data| data.lock().unwrap().initial_configure_sent)
+                .is_some_and(|data| data.locked().initial_configure_sent)
         });
         // Hidden by this commit: shown again by the next one.
         let change = crate::state::commit_map_change(surface);

@@ -18,6 +18,7 @@
 //!   when the device goes: the masks are absolute, so which bits were the
 //!   device's can't be told apart from other keyboards' (niri's reasoning).
 
+use crate::sync::Locked;
 use std::any::Any;
 
 use smithay::{
@@ -161,10 +162,11 @@ impl Pila {
     }
 
     fn keyboard_state(&mut self) -> SavedKeyboardState {
+        // `Pila::new` gives the seat its keyboard, and it's never removed.
         let keyboard = self.seat.get_keyboard().expect("a keyboard");
         let mods = keyboard.modifier_state();
         let (layout, names) = keyboard.with_xkb_state(self, |context| {
-            let xkb = context.xkb().lock().unwrap();
+            let xkb = context.xkb().locked();
             let names: Vec<String> = xkb
                 .layouts()
                 .map(|layout| xkb.layout_name(layout).to_string())
@@ -198,7 +200,7 @@ impl Pila {
         // `set_modifier_state` can reset the layout: after it.
         keyboard.with_xkb_state(self, |mut context| {
             let (exists, current) = {
-                let xkb = context.xkb().lock().unwrap();
+                let xkb = context.xkb().locked();
                 (
                     xkb.layouts().any(|l| l == saved.layout),
                     xkb.active_layout(),

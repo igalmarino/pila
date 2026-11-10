@@ -57,6 +57,7 @@ mod stacking;
 mod state;
 mod surface_limits;
 mod switcher;
+mod sync;
 mod test_control;
 mod text;
 mod toplevel_management;

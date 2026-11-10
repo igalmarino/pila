@@ -361,6 +361,10 @@ impl XWaylandShellHandler for Pila {
 }
 
 impl XwmHandler for Pila {
+    // Smithay asks only from the window manager's own event sources, which
+    // `stop_xwayland`/`xwayland_gone` end with it; and it takes a reference,
+    // so it can't be told there's none. (A clipboard transfer's source that
+    // fired after the window manager went away would still get here.)
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.xwayland
             .wm

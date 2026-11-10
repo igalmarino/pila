@@ -393,6 +393,8 @@ impl Pila {
         let dmabuf_state = DmabufState::new();
         let popups = PopupManager::default();
         let loop_handle = event_loop.handle();
+        // The `expect`s here are startup's: without these there's nothing to
+        // run, and no session to lose yet (`main` logs the crash).
         // Wakes the event loop (`queue_redraw`); there's nothing to do on
         // waking but run the idle callbacks that follow every dispatch.
         let (wake, wake_source) =
@@ -1239,10 +1241,7 @@ impl Pila {
         {
             self.animate_geometry(window);
         }
-        window
-            .user_data()
-            .insert_if_missing(RestoreGeometry::default);
-        let restore = &window.user_data().get::<RestoreGeometry>().unwrap().0;
+        let restore = &window.user_data().get_or_insert(RestoreGeometry::default).0;
 
         if maximized || fullscreen {
             let usable = !fullscreen;
@@ -1922,11 +1921,7 @@ pub fn commit_map_change(surface: &WlSurface) -> MapChange {
     let was = smithay::wayland::compositor::with_states(surface, |states| {
         states
             .data_map
-            .insert_if_missing_threadsafe(|| WasMapped(Default::default()));
-        states
-            .data_map
-            .get::<WasMapped>()
-            .unwrap()
+            .get_or_insert_threadsafe(|| WasMapped(Default::default()))
             .0
             .swap(mapped, std::sync::atomic::Ordering::Relaxed)
     });

@@ -13,6 +13,7 @@
 //! frame (`Pila::after_frames`). A region is in the output's logical
 //! coordinates, copied at the output's scale.
 
+use crate::sync::Locked;
 use std::{sync::Mutex, time::Instant};
 
 use smithay::{
@@ -196,7 +197,7 @@ impl Pila {
             return true;
         };
         let (manager, output, region, size, overlay_cursor, buffer, with_damage) = {
-            let state = data.lock().unwrap();
+            let state = data.locked();
             let Some(state) = state.as_ref() else {
                 return true;
             };
@@ -331,8 +332,7 @@ impl Pila {
     pub fn fail_screencopies_of(&mut self, output: &Output) {
         self.capture.screencopies.retain(|frame| {
             let gone = frame.data::<FrameData>().is_some_and(|d| {
-                d.lock()
-                    .unwrap()
+                d.locked()
                     .as_ref()
                     .is_some_and(|s| s.output.upgrade().as_ref() == Some(output))
             });
@@ -434,7 +434,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
             frame::Request::CopyWithDamage { buffer } => (buffer, true),
             _ => return,
         };
-        let mut frame_state = data.lock().unwrap();
+        let mut frame_state = data.locked();
         let Some(frame_state) = frame_state.as_mut() else {
             // Failed at creation; nothing to copy into.
             return;

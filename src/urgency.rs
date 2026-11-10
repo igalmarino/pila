@@ -36,8 +36,7 @@ impl Pila {
     /// Mark `window` urgent or not; the focused window never is.
     pub fn set_urgent(&mut self, window: &Window, urgent: bool) {
         let urgent = urgent && self.focused_window().as_ref() != Some(window);
-        window.user_data().insert_if_missing(Urgent::default);
-        let mark = window.user_data().get::<Urgent>().unwrap();
+        let mark = window.user_data().get_or_insert(Urgent::default);
         if mark.0.replace(urgent) != urgent {
             tracing::debug!(
                 app_id = crate::foreign_toplevel::title_and_app_id(window).1,

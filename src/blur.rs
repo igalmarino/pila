@@ -23,6 +23,7 @@
 //! it goes along wherever the window is drawn into a texture: while it
 //! animates, in a workspace slide, and in the picture of one that's closing.
 
+use crate::sync::Locked;
 use std::{collections::HashMap, sync::Mutex};
 
 use smithay::{
@@ -110,7 +111,7 @@ fn client_region(surface: &WlSurface) -> Option<(Option<RegionAttributes>, Size<
         let size = states
             .data_map
             .get::<smithay::backend::renderer::utils::RendererSurfaceStateUserData>()
-            .and_then(|s| s.lock().unwrap().surface_size());
+            .and_then(|s| s.locked().surface_size());
         size.map(|size| (region, size))
     })
 }
@@ -194,7 +195,7 @@ pub fn is_opaque(window: &Window) -> bool {
         else {
             return false;
         };
-        let state = state.lock().unwrap();
+        let state = state.locked();
         state.opaque_regions().is_some_and(|opaque| {
             Rectangle::subtract_rects_many([geometry], opaque.iter().copied()).is_empty()
         })
@@ -850,15 +851,10 @@ impl Dispatch<ExtBackgroundEffectManagerV1, ()> for Pila {
             return;
         };
         let exists = with_states(&surface, |states| {
-            states
+            let slot = states
                 .data_map
-                .insert_if_missing_threadsafe(BlurEffect::default);
-            let slot = states.data_map.get::<BlurEffect>().expect("inserted");
-            slot.0
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|e| e.is_alive())
+                .get_or_insert_threadsafe(BlurEffect::default);
+            slot.0.locked().as_ref().is_some_and(|e| e.is_alive())
         });
         if exists {
             resource.post_error(
@@ -870,7 +866,7 @@ impl Dispatch<ExtBackgroundEffectManagerV1, ()> for Pila {
         let effect = data_init.init(id, surface.clone());
         with_states(&surface, |states| {
             if let Some(slot) = states.data_map.get::<BlurEffect>() {
-                *slot.0.lock().unwrap() = Some(effect);
+                *slot.0.locked() = Some(effect);
             }
         });
     }
@@ -909,7 +905,7 @@ impl Dispatch<ExtBackgroundEffectSurfaceV1, WlSurface> for Pila {
         with_states(surface, |states| {
             *states.cached_state.get::<BlurRegion>().pending() = BlurRegion(None);
             if let Some(slot) = states.data_map.get::<BlurEffect>() {
-                *slot.0.lock().unwrap() = None;
+                *slot.0.locked() = None;
             }
         });
     }

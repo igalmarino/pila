@@ -6,6 +6,7 @@
 //! callbacks. These are free functions over `Pila` fields so a render loop
 //! can call them while it holds a mutable borrow of the backend.
 
+use crate::sync::Locked;
 use smithay::{
     backend::{allocator::Fourcc, renderer::element::memory::MemoryRenderBuffer},
     input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData},
@@ -32,7 +33,7 @@ pub fn surface_position(
         states
             .data_map
             .get::<CursorImageSurfaceData>()
-            .map(|attrs| attrs.lock().unwrap().hotspot)
+            .map(|attrs| attrs.locked().hotspot)
             .unwrap_or_default()
     });
     Some((surface.clone(), pointer.to_i32_round() - hotspot))
@@ -55,7 +56,7 @@ pub fn handle_commit(status: &CursorImageStatus, surface: &WlSurface) {
             .buffer_delta
             .take();
         if let Some(delta) = delta {
-            attrs.lock().unwrap().hotspot -= delta;
+            attrs.locked().hotspot -= delta;
         }
     });
 }

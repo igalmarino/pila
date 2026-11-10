@@ -23,6 +23,7 @@
 //! isn't frame pacing: the client asked for that moment. A surface is held
 //! for as long as its client asks, whatever it's showing.
 
+use crate::sync::Locked;
 use std::time::{Duration, Instant};
 
 use smithay::{
@@ -99,7 +100,7 @@ fn deadline_wait(until: Duration, period: Duration) -> Duration {
 fn next_deadline(surface: &WlSurface) -> Option<Time<Monotonic>> {
     with_states(surface, |states| {
         let barriers = states.data_map.get::<CommitTimerBarrierStateUserData>()?;
-        let deadline = barriers.lock().unwrap().next_deadline()?;
+        let deadline = barriers.locked().next_deadline()?;
         Some(deadline.into())
     })
 }
@@ -111,7 +112,7 @@ fn signal_timer(surface: &WlSurface, until: Time<Monotonic>) -> bool {
         states
             .data_map
             .get::<CommitTimerBarrierStateUserData>()
-            .is_some_and(|barriers| barriers.lock().unwrap().signal_until(until))
+            .is_some_and(|barriers| barriers.locked().signal_until(until))
     })
 }
 
@@ -212,7 +213,7 @@ impl Pila {
             let barriers = states
                 .data_map
                 .get_or_insert_threadsafe(CommitTimerBarrierStateUserData::default);
-            let barrier = barriers.lock().unwrap().register(timestamp);
+            let barrier = barriers.locked().register(timestamp);
             Some(barrier)
         });
         let Some(barrier) = barrier else {

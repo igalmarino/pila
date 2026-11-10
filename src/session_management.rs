@@ -621,7 +621,11 @@ impl Dispatch<XdgSessionManagerV1, ()> for Pila {
             return;
         }
         if is_known {
-            let owner = state.session_management.sessions[&session_id].owner.clone();
+            let owner = state
+                .session_management
+                .sessions
+                .get(&session_id)
+                .and_then(|saved| saved.owner.clone());
             if let Some(owner) = owner {
                 if owner.client().as_ref() == Some(client) {
                     manager.post_error(
@@ -633,11 +637,10 @@ impl Dispatch<XdgSessionManagerV1, ()> for Pila {
                 owner.replaced();
                 state.untrack_session(&session_id);
             }
-            let saved = state
-                .session_management
-                .sessions
-                .get_mut(&session_id)
-                .expect("known");
+            // `is_known`, and nothing above removes a session.
+            let Some(saved) = state.session_management.sessions.get_mut(&session_id) else {
+                return;
+            };
             saved.owner = Some(session.clone());
             saved.last_used = now();
             debug!(session = session_id, "session restored");

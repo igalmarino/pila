@@ -643,12 +643,11 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                     data_init.init(id, None::<(String, ZwlrOutputConfigurationV1)>);
                     return;
                 }
-                let configuration = state
-                    .outputs
-                    .management
-                    .configurations
-                    .get_mut(resource)
-                    .expect("live");
+                // `live`: it's there.
+                let Some(configuration) = state.outputs.management.configurations.get_mut(resource)
+                else {
+                    return;
+                };
                 if configuration.heads.contains_key(&name) {
                     data_init.init(id, None::<(String, ZwlrOutputConfigurationV1)>);
                     resource.post_error(
@@ -671,12 +670,11 @@ impl Dispatch<ZwlrOutputConfigurationV1, u32> for Pila {
                     return;
                 }
                 let name = head.data::<String>().cloned().unwrap_or_default();
-                let configuration = state
-                    .outputs
-                    .management
-                    .configurations
-                    .get_mut(resource)
-                    .expect("live");
+                // `live`: it's there.
+                let Some(configuration) = state.outputs.management.configurations.get_mut(resource)
+                else {
+                    return;
+                };
                 if configuration.heads.contains_key(&name) {
                     resource.post_error(
                         configuration::Error::AlreadyConfiguredHead,

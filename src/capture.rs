@@ -29,6 +29,7 @@
 //! sessions are created stopped. Any client but a sandboxed one
 //! (`state::is_privileged`) may capture, as with other compositors.
 
+use crate::sync::Locked;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -247,7 +248,7 @@ impl Captures {
             };
             let buffer = frame
                 .data::<FrameData>()
-                .and_then(|data| data.state.lock().unwrap().buffer.clone());
+                .and_then(|data| data.state.locked().buffer.clone());
             let Some(buffer) = buffer else {
                 continue;
             };
@@ -490,7 +491,7 @@ impl Pila {
         let Some(frame_data) = frame.data::<FrameData>() else {
             return;
         };
-        let Some(buffer) = frame_data.state.lock().unwrap().buffer.clone() else {
+        let Some(buffer) = frame_data.state.locked().buffer.clone() else {
             return;
         };
 
@@ -1245,7 +1246,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
     ) {
         match request {
             cursor_session::Request::GetCaptureSession { session } => {
-                let mut got = got_session.lock().unwrap();
+                let mut got = got_session.locked();
                 if *got {
                     resource.post_error(
                         cursor_session::Error::DuplicateSession,
@@ -1342,7 +1343,7 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
         _: &DisplayHandle,
         _: &mut DataInit<'_, Self>,
     ) {
-        let mut frame_state = data.state.lock().unwrap();
+        let mut frame_state = data.state.locked();
         match request {
             frame::Request::AttachBuffer { buffer } => {
                 if frame_state.captured {

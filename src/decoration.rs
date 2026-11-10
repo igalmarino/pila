@@ -310,13 +310,9 @@ pub fn title_bar_elements(
     // Rounded top corners, if the shaders for them work (`rounded.rs`).
     let shaders = radius.and_then(|_| rounded::Shaders::get(renderer));
     let radius = radius.filter(|_| shaders.is_some());
-    window
-        .user_data()
-        .insert_if_missing(|| RefCell::new(TitleBarBuffers::default()));
     let mut buffers = window
         .user_data()
-        .get::<RefCell<TitleBarBuffers>>()
-        .unwrap()
+        .get_or_insert(|| RefCell::new(TitleBarBuffers::default()))
         .borrow_mut();
     let TitleBarBuffers {
         bar,
@@ -426,13 +422,15 @@ pub fn title_bar_elements(
         };
         let (background, color) = button_colors(part);
         let key = (icon, background, color, buffer_scale, corner);
-        if slot.as_ref().is_none_or(|texture| texture.key != key) {
-            *slot = Some(ButtonTexture {
+        if slot.as_ref().is_some_and(|texture| texture.key != key) {
+            *slot = None;
+        }
+        let buffer = &slot
+            .get_or_insert_with(|| ButtonTexture {
                 key,
                 buffer: button_buffer(icon, background, color, buffer_scale, corner),
-            });
-        }
-        let buffer = &slot.as_ref().unwrap().buffer;
+            })
+            .buffer;
         elements.extend(upload(renderer, buffer, loc).map(Into::into));
     }
 

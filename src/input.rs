@@ -369,8 +369,12 @@ impl Pila {
                 return;
             }
             // Confined: drop motion that would leave the surface or region.
+            // (A constraint comes from a surface, `constrained`.)
             Constraint::Confined(region) => {
-                let (surface, origin) = constrained.as_ref().expect("constraint without surface");
+                let Some((surface, origin)) = constrained.as_ref() else {
+                    pointer.frame(self);
+                    return;
+                };
                 let stays = self
                     .constraint_surface_under(location)
                     .is_some_and(|(under, _)| under == *surface)

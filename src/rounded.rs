@@ -689,17 +689,15 @@ impl ShadowElement {
         origin: Point<i32, Logical>,
         scale: Scale<f64>,
     ) -> Self {
-        window.user_data().insert_if_missing(|| {
-            RefCell::new(ShadowState {
-                id: Id::new(),
-                commit: CommitCounter::default(),
-                last: None,
-            })
-        });
         let mut state = window
             .user_data()
-            .get::<RefCell<ShadowState>>()
-            .expect("inserted above")
+            .get_or_insert(|| {
+                RefCell::new(ShadowState {
+                    id: Id::new(),
+                    commit: CommitCounter::default(),
+                    last: None,
+                })
+            })
             .borrow_mut();
         let mut look = *shadow;
         look.frame.loc = Point::default();
@@ -831,17 +829,15 @@ impl ShapeDamage {
         origin: Point<i32, Logical>,
         scale: Scale<f64>,
     ) -> Self {
-        window.user_data().insert_if_missing(|| {
-            RefCell::new(ShapeState {
-                id: Id::new(),
-                commit: CommitCounter::default(),
-                last: None,
-            })
-        });
         let mut state = window
             .user_data()
-            .get::<RefCell<ShapeState>>()
-            .expect("inserted above")
+            .get_or_insert(|| {
+                RefCell::new(ShapeState {
+                    id: Id::new(),
+                    commit: CommitCounter::default(),
+                    last: None,
+                })
+            })
             .borrow_mut();
         let shape = Some((rounding.rect.size, rounding.radius, rounding.title_bar));
         if state.last != shape {

@@ -102,8 +102,14 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
         cursor_theme,
         ..
     } = &mut **data;
-    let surface = outputs.get_mut(&crtc).expect("checked above");
-    let drm_output = surface.drm_output.as_mut().expect("checked above");
+    // Checked above; the commits applied since (`signal_commit_timers`)
+    // can't take an output away, but nothing is lost by not counting on it.
+    let Some(surface) = outputs.get_mut(&crtc) else {
+        return;
+    };
+    let Some(drm_output) = surface.drm_output.as_mut() else {
+        return;
+    };
     surface.redraw_needed = false;
     surface.redraw_content = false;
     let request = surface.request.take();

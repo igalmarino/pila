@@ -26,10 +26,7 @@ use crate::{
 struct WentWithParent(Cell<bool>);
 
 fn went_with_parent(window: &Window) -> &Cell<bool> {
-    window
-        .user_data()
-        .insert_if_missing(WentWithParent::default);
-    &window.user_data().get::<WentWithParent>().unwrap().0
+    &window.user_data().get_or_insert(WentWithParent::default).0
 }
 
 /// What `show-desktop` took off screen, to bring back on that workspace.

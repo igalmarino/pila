@@ -1,3 +1,4 @@
+use crate::sync::Locked;
 use smithay::{
     desktop::{
         find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
@@ -307,16 +308,11 @@ fn set_decoration_mode(toplevel: &ToplevelSurface, mode: DecorationMode) {
         state.decoration_mode = Some(mode);
     });
     smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
-        states
-            .data_map
-            .insert_if_missing_threadsafe(|| ChosenDecoration(std::sync::Mutex::new(mode)));
         *states
             .data_map
-            .get::<ChosenDecoration>()
-            .unwrap()
+            .get_or_insert_threadsafe(|| ChosenDecoration(std::sync::Mutex::new(mode)))
             .0
-            .lock()
-            .unwrap() = mode;
+            .locked() = mode;
     });
     // The protocol requires a configure in response, even if the mode is unchanged.
     if toplevel.is_initial_configure_sent() {
@@ -331,7 +327,7 @@ fn restore_decoration_mode(toplevel: &ToplevelSurface) {
         states
             .data_map
             .get::<ChosenDecoration>()
-            .map(|chosen| *chosen.0.lock().unwrap())
+            .map(|chosen| *chosen.0.locked())
     });
     if let Some(mode) = chosen {
         toplevel.with_pending_state(|state| {
@@ -367,14 +363,17 @@ impl Pila {
         if self.unmap_if_buffer_removed(surface) {
             return;
         }
-        if let Some(index) = self
+        let unmapped = self
             .windows
             .unmapped
             .iter()
-            .position(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
-        {
-            let window = self.windows.unmapped[index].clone();
-            let toplevel = window.toplevel().unwrap();
+            .enumerate()
+            .find_map(|(index, w)| {
+                let toplevel = w.toplevel().filter(|t| t.wl_surface() == surface)?;
+                Some((index, w.clone(), toplevel.clone()))
+            });
+        if let Some((index, window, toplevel)) = unmapped {
+            let toplevel = &toplevel;
             if !toplevel.is_initial_configure_sent() {
                 restore_decoration_mode(toplevel);
                 self.send_initial_scale(surface, self.session_output(&window));
@@ -396,8 +395,11 @@ impl Pila {
             if !xdg.is_initial_configure_sent() && !hidden {
                 let output = self.output_for_surface(surface);
                 self.send_initial_scale(surface, output);
-                // The initial configure is always allowed.
-                xdg.send_configure().expect("initial configure failed");
+                // The initial configure is always allowed: an error (only
+                // for a configure after it) would be Smithay's.
+                if let Err(err) = xdg.send_configure() {
+                    warn!(?err, "initial popup configure refused");
+                }
             }
         }
     }

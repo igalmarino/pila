@@ -81,19 +81,22 @@ impl Pila {
     /// Who gets the focus when `window` should: its topmost modal child on
     /// screen, that one's if it has one, and so on; else `window` itself.
     pub fn focus_redirect(&self, window: Window) -> Window {
-        let mut seen = vec![window];
+        let mut seen = Vec::new();
+        let mut current = window;
         loop {
-            let current = seen.last().expect("starts with the window");
             let modal = self
-                .transient_children(current)
+                .transient_children(&current)
                 .into_iter()
                 .rev()
                 .find(|w| {
-                    is_modal(w) && self.space.element_location(w).is_some() && !seen.contains(w)
+                    is_modal(w)
+                        && self.space.element_location(w).is_some()
+                        && *w != current
+                        && !seen.contains(w)
                 });
             match modal {
-                Some(modal) => seen.push(modal),
-                None => return seen.pop().expect("starts with the window"),
+                Some(modal) => seen.push(std::mem::replace(&mut current, modal)),
+                None => return current,
             }
         }
     }

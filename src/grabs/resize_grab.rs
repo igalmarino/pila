@@ -55,7 +55,8 @@ impl ResizeEdge {
 impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     #[inline]
     fn from(x: xdg_toplevel::ResizeEdge) -> Self {
-        Self::from_bits(x as u32).unwrap()
+        // Every xdg edge is a combination of these bits.
+        Self::from_bits_truncate(x as u32)
     }
 }
 
@@ -382,8 +383,7 @@ impl ResizeSurfaceState {
         F: FnOnce(&mut Self) -> T,
     {
         compositor::with_states(surface, |states| {
-            states.data_map.insert_if_missing(RefCell::<Self>::default);
-            let state = states.data_map.get::<RefCell<Self>>().unwrap();
+            let state = states.data_map.get_or_insert(RefCell::<Self>::default);
 
             cb(&mut state.borrow_mut())
         })

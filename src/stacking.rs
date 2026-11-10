@@ -36,8 +36,7 @@ struct Marks {
 }
 
 fn marks(window: &Window) -> &Marks {
-    window.user_data().insert_if_missing(Marks::default);
-    window.user_data().get::<Marks>().unwrap()
+    window.user_data().get_or_insert(Marks::default)
 }
 
 pub fn is_always_on_top(window: &Window) -> bool {
