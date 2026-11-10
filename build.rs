@@ -21,8 +21,16 @@ fn main() {
     // A new commit or checkout moves HEAD or the index; staging changes the
     // index too; an edit to the sources makes the tree dirty (so a build of
     // uncommitted changes doesn't say the last build's version, clean).
-    for path in [".git/HEAD", ".git/index", "src", "Cargo.toml"] {
-        if std::path::Path::new(path).exists() {
+    let mut paths = vec![".git/HEAD".to_string(), ".git/index".to_string()];
+    // A commit moves the branch HEAD names (`ref: refs/heads/...`), not HEAD.
+    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
+        if let Some(branch) = head.trim().strip_prefix("ref: ") {
+            paths.push(format!(".git/{branch}"));
+        }
+    }
+    paths.extend(["src".to_string(), "Cargo.toml".to_string()]);
+    for path in paths {
+        if std::path::Path::new(&path).exists() {
             println!("cargo:rerun-if-changed={path}");
         }
     }
