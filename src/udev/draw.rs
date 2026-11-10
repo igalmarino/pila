@@ -89,6 +89,13 @@ fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
             wait.filter(|_| surface.redraw_needed)
         });
         if let Some(delay) = wait {
+            if let Some(request) = data
+                .outputs
+                .get_mut(&crtc)
+                .and_then(|surface| surface.request.as_mut())
+            {
+                request.held = true;
+            }
             data.schedule_idle_redraw(crtc, delay);
             return None;
         }
@@ -243,7 +250,11 @@ fn draw(
                         surface.frame_pending = true;
                         // The first frame after a modeset starts a new grid
                         // of vblanks: nothing to measure it against.
-                        surface.queued_request = request.filter(|_| !surface.first_frame);
+                        surface.queued_request =
+                            request.filter(|_| !surface.first_frame).map(|r| Request {
+                                drawn: Some(now),
+                                ..r
+                            });
                         if scene.locked {
                             surface.lock_frame = LockFrame::Queued;
                         }
@@ -395,6 +406,21 @@ pub(super) fn frame_finish(
         .map_or(0, |r| {
             crate::frame_stats::late_refreshes(r.at, r.in_flight, r.vblank, shown, frame_duration)
         });
+    // What made it late: held back by the wait, drawn late, or shown late
+    // after being drawn in time (the GPU, the commit).
+    if let Some(r) = request.filter(|_| late > 0) {
+        let ms = |d: Duration| (d.as_secs_f64() * 1e5).round() / 100.0;
+        debug!(
+            target: "pila::frames",
+            output = surface.output.name(),
+            in_flight = r.in_flight,
+            held = r.held,
+            drawn_after_ms = r.drawn.map(|d| ms(d.saturating_sub(r.at))),
+            shown_after_ms = ms(shown.saturating_sub(r.at)),
+            period_ms = ms(frame_duration),
+            "late frame: asked for, drawn, shown"
+        );
+    }
     surface.last_vblank = metadata.is_some().then_some(seq);
     surface.last_vblank_time = Some(hw_time.unwrap_or_else(|| now.into()));
     tracing::trace!(target: "pila::frames", output = surface.output.name(), seq, missed, "shown");

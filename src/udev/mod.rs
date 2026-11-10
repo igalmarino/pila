@@ -212,6 +212,11 @@ struct Request {
     in_flight: bool,
     /// The last vblank that showed a frame then, the grid of the next ones.
     vblank: Duration,
+    /// Held back by the wait after a redraw with nothing new
+    /// (`draw::idle_wait`), and when it was drawn (for the log of a frame
+    /// shown late).
+    held: bool,
+    drawn: Option<Duration>,
 }
 
 impl OutputSurface {
@@ -227,6 +232,8 @@ impl OutputSurface {
                 at: now,
                 in_flight: self.frame_pending,
                 vblank,
+                held: false,
+                drawn: None,
             });
         }
     }

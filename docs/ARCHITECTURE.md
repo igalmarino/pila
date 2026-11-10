@@ -255,7 +255,9 @@ Key flows and invariants:
   flight, the vblank after that one's) but shown at a later one counts its refreshes as missed,
   animation or not, and is counted `late` (`late_refreshes`, from `OutputSurface::request`, the
   first such request since the last frame; not with adaptive sync, nor for the first frame
-  after a modeset). `scripts/check` judges these lines and reports the idle redraws per output.
+  after a modeset). Each late frame is logged with what made it late: held back by the wait
+  (`held`), drawn late (`drawn_after_ms`) or shown late after being drawn in time
+  (`shown_after_ms`: the GPU, the commit). `scripts/check` judges these lines and reports the idle redraws per output.
 - **Pointer grabs** (`grabs/move_grab.rs`, `grabs/resize_grab.rs`): Mod+drag installs the
   move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor
