@@ -36,7 +36,7 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             gles::GlesRenderer,
-            multigpu::{gbm::GbmGlesBackend, GpuManager, MultiRenderer},
+            multigpu::{GpuManager, MultiRenderer},
             ImportDma, ImportMemWl,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
@@ -70,6 +70,7 @@ use tracing::{debug, error, info, warn};
 
 mod draw;
 mod gamma;
+mod gpus;
 mod input;
 mod outputs;
 mod recovery;
@@ -109,8 +110,7 @@ type PilaDrmOutputManager = DrmOutputManager<
     DrmDeviceFd,
 >;
 
-/// The GPUs' renderers (`docs/MULTI_GPU.md`): OpenGL ES on GBM devices.
-pub type GpuApi = GbmGlesBackend<GlesRenderer, DrmDeviceFd>;
+pub use gpus::GpuApi;
 
 /// The primary GPU's renderer, lent by the `GpuManager` that owns it: a
 /// `GlesRenderer` through `as_ref`/`as_mut`.

@@ -6,6 +6,7 @@ use smithay::{
     backend::renderer::{
         element::{Element, Id, Kind, RenderElement, UnderlyingStorage},
         gles::GlesRenderer,
+        multigpu::Error as MultiError,
         utils::{CommitCounter, DamageSet, OpaqueRegions},
         RendererSuper,
     },
@@ -90,7 +91,7 @@ impl<'a> RenderElement<PrimaryRenderer<'a>> for PrimaryGpuElement {
             opaque_regions,
             cache,
         )
-        .map_err(Into::into)
+        .map_err(MultiError::Render)
     }
 
     fn underlying_storage(
@@ -108,7 +109,7 @@ impl<'a> RenderElement<PrimaryRenderer<'a>> for PrimaryGpuElement {
         cache: &UserDataMap,
     ) -> Result<(), <PrimaryRenderer<'a> as RendererSuper>::Error> {
         RenderElement::<GlesRenderer>::capture_framebuffer(&self.0, frame.as_mut(), src, dst, cache)
-            .map_err(Into::into)
+            .map_err(MultiError::Render)
     }
 }
 

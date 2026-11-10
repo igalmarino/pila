@@ -148,7 +148,11 @@ Key flows and invariants:
   outputs are set up with their GPU's own renderer and drawn with a `MultiRenderer` from the
   primary (`setup_renderer`, `draw_renderer`: `OutputRenderer`), Pila's elements wrapped in
   `PrimaryGpuElement` (drawn on its `GlesFrame`, never scanned out directly); their captures are
-  drawn from the scene, not blitted from the frame. A connector name another GPU has gets a
+  drawn from the scene, not blitted from the frame. The frame is copied through a dmabuf the
+  other GPU imports or, failing that, through memory; always through memory with a software
+  renderer, which would crash reading an imported buffer, and which `gpus.rs` (`GpuApi`, around
+  Smithay's `GbmGlesBackend`) knows by its `GL_RENDERER` name too: llvmpipe on a KMS device
+  isn't a software EGL device, which is all Smithay asks. A connector name another GPU has gets a
   number (`unique_name`). Outputs are placed by their `[[output]]` config (mode, scale, position, transform) or else left to right. Pila draws named cursors from the xcursor
   theme (`cursor::CursorTheme`; read by a thread at startup, the built-in arrow until
   then, so no frame reads a file). Redraws are per output (see "Redraws are on demand"):

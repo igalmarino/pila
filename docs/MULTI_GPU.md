@@ -101,6 +101,12 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
   like captures).
 - **Formats and modifiers.** The copy needs a format both devices share; with none in common
   Smithay falls back to a CPU copy, which a 4K monitor can't afford at 60 Hz. Log the path taken.
+- **Software renderers.** llvmpipe can't read a buffer imported from another device (Mesa maps it
+  as a dumb buffer, which the kernel refuses for an imported one: a segfault in its shaders, seen
+  in `vkms.yml` with two vkms devices). Smithay keeps software renderers out of such imports but
+  knows them only by `EGL_MESA_device_software`, which `kms_swrast` lacks; `udev/gpus.rs` goes by
+  the renderer's name as well, and their frames are copied through memory. Worth reporting to
+  Smithay.
 - **Explicit sync across devices.** Fences for the copy are Smithay's; Pila's
   `wait_for_client_rendering` (implicit fences, syncobj points) is for the primary only.
 - **Drivers.** NVIDIA's proprietary driver's GBM, and a dGPU that sleeps (runtime PM: an output on

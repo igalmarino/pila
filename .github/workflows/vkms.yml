@@ -162,6 +162,8 @@ jobs:
             grep -oE 'output="[^"]+"' | sort -u | wc -l)
           verdict "both monitors were drawn on ($drawn)" [ "$drawn" -ge 2 ]
           check "the second GPU was opened" 'using another GPU for its monitors'
+          check "llvmpipe is known as a software renderer" 'a software renderer: frames for another GPU go through memory'
+          check "its frames are copied through memory" 'Falling back to cpu-copy'
           check "its monitor got a name of its own" 'output connected name="[^"]+-2"'
           second_drawn=$( (grep -oE 'pila::frames: frames output="[^"]+-2" .*frames=[1-9]' pila-vkms.log || true) | wc -l)
           verdict "its monitor was drawn on, copied from the first ($second_drawn)" [ "$second_drawn" -ge 1 ]
