@@ -136,13 +136,29 @@ fn primary_renderer<'a>(
     }
 }
 
-/// Fields drop in declaration order, which matters here: the outputs go
-/// before the DRM device, and the DRM device (which restores the previous
-/// display state when dropped) before the session that grants access to it.
-pub struct UdevData {
-    outputs: HashMap<crtc::Handle, OutputSurface>,
+/// An output: a CRTC of a GPU's DRM device (two GPUs may number their
+/// CRTCs alike).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct OutputId {
+    /// The device's primary node: its key in `UdevData::devices`.
+    pub node: DrmNode,
+    pub crtc: crtc::Handle,
+}
+
+/// A GPU's display side: its DRM device and connectors.
+pub(super) struct GpuDevice {
     drm: PilaDrmOutputManager,
     scanner: DrmScanner,
+}
+
+/// Fields drop in declaration order, which matters here: the outputs go
+/// before the DRM devices, and the DRM devices (which restore the previous
+/// display state when dropped) before the session that grants access to
+/// them.
+pub struct UdevData {
+    outputs: HashMap<OutputId, OutputSurface>,
+    /// By primary node.
+    devices: HashMap<DrmNode, GpuDevice>,
     /// Every GPU's renderer; only the primary's for now, which renders
     /// everything (`primary_renderer`).
     gpus: GpuManager<GpuApi>,
@@ -322,20 +338,22 @@ impl UdevData {
     /// been seen missing; the kernel lets a process that was master once
     /// take it back without privileges.
     fn take_master(&self) {
-        if let Err(err) = self.drm.device().acquire_master_lock() {
-            debug!(?err, "couldn't take DRM master");
+        for device in self.devices.values() {
+            if let Err(err) = device.drm.device().acquire_master_lock() {
+                debug!(?err, "couldn't take DRM master");
+            }
         }
     }
 
-    /// A frame on `crtc` failed at the DRM level: draw it again after
+    /// A frame on `id` failed at the DRM level: draw it again after
     /// `delay` (`Recovery::failed`), taking DRM master first in case that
     /// was it. The other outputs go on meanwhile.
-    fn schedule_recovery(&mut self, crtc: crtc::Handle, delay: Duration) {
+    fn schedule_recovery(&mut self, id: OutputId, delay: Duration) {
         let timer = Timer::from_duration(delay);
         let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
             if let Some(Backend::Udev(data)) = &mut state.backend {
                 data.take_master();
-                if let Some(surface) = data.outputs.get_mut(&crtc) {
+                if let Some(surface) = data.outputs.get_mut(&id) {
                     surface.recovery.retry();
                     surface.redraw_needed = true;
                 }
@@ -350,16 +368,16 @@ impl UdevData {
             // Without a timer the output would wait forever: retry on the
             // next redraw instead.
             warn!(err = %err.error, "can't schedule a retry for an output");
-            if let Some(surface) = self.outputs.get_mut(&crtc) {
+            if let Some(surface) = self.outputs.get_mut(&id) {
                 surface.recovery.retry();
             }
         }
     }
 
-    /// Draw `crtc` again at `at` (monotonic), when its wait after a redraw
+    /// Draw `id` again at `at` (monotonic), when its wait after a redraw
     /// with nothing new ends (`draw::idle_until`). One timer per output.
-    fn schedule_idle_redraw(&mut self, crtc: crtc::Handle, delay: Duration) {
-        let Some(surface) = self.outputs.get_mut(&crtc) else {
+    fn schedule_idle_redraw(&mut self, id: OutputId, delay: Duration) {
+        let Some(surface) = self.outputs.get_mut(&id) else {
             return;
         };
         if surface.idle_timer {
@@ -369,7 +387,7 @@ impl UdevData {
         let timer = Timer::from_duration(delay);
         let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
             if let Some(Backend::Udev(data)) = &mut state.backend {
-                if let Some(surface) = data.outputs.get_mut(&crtc) {
+                if let Some(surface) = data.outputs.get_mut(&id) {
                     surface.idle_timer = false;
                     surface.idle_until = None;
                 }
@@ -384,7 +402,7 @@ impl UdevData {
             // Without a timer the output would wait for the next redraw
             // asked for: don't wait at all then.
             warn!(err = %err.error, "can't schedule an output's redraw");
-            if let Some(surface) = self.outputs.get_mut(&crtc) {
+            if let Some(surface) = self.outputs.get_mut(&id) {
                 surface.idle_timer = false;
                 surface.idle_until = None;
             }
@@ -412,19 +430,23 @@ impl UdevData {
         }
     }
 
-    fn crtc_of(&self, output: &Output) -> Option<crtc::Handle> {
+    fn output_id(&self, output: &Output) -> Option<OutputId> {
         self.outputs
             .iter()
             .find(|(_, s)| &s.output == output)
-            .map(|(crtc, _)| *crtc)
+            .map(|(id, _)| *id)
+    }
+
+    /// The DRM device of `id`'s GPU.
+    fn drm_device(&self, id: OutputId) -> Option<&DrmDevice> {
+        Some(self.devices.get(&id.node)?.drm.device())
     }
 
     /// The length of the output's gamma ramps (0 = no gamma support).
     pub fn gamma_size(&self, output: &Output) -> Option<u32> {
-        let crtc = self.crtc_of(output)?;
-        self.drm
-            .device()
-            .get_crtc(crtc)
+        let id = self.output_id(output)?;
+        self.drm_device(id)?
+            .get_crtc(id.crtc)
             .ok()
             .map(|info| info.gamma_length())
             .filter(|n| *n > 0)
@@ -432,7 +454,7 @@ impl UdevData {
 
     /// Set the output's gamma ramps (`None`: linear) and remember them.
     pub fn set_gamma(&mut self, output: &Output, ramp: Option<&[u16]>) -> bool {
-        let Some(crtc) = self.crtc_of(output) else {
+        let Some(id) = self.output_id(output) else {
             return false;
         };
         let Some(size) = self.gamma_size(output) else {
@@ -448,7 +470,7 @@ impl UdevData {
             }
         };
         let active = self.session.is_active();
-        let Some(surface) = self.outputs.get_mut(&crtc) else {
+        let Some(surface) = self.outputs.get_mut(&id) else {
             return false;
         };
         if !active || surface.drm_output.is_none() {
@@ -464,10 +486,13 @@ impl UdevData {
                 self.redraw_scheduled = true;
                 self.loop_handle.insert_idle(render_all);
             }
-        } else if !apply_gamma(self.drm.device(), crtc, ramp, size, GammaCause::Client) {
+        } else if !self
+            .drm_device(id)
+            .is_some_and(|drm| apply_gamma(drm, id.crtc, ramp, size, GammaCause::Client))
+        {
             return false;
         }
-        let Some(surface) = self.outputs.get_mut(&crtc) else {
+        let Some(surface) = self.outputs.get_mut(&id) else {
             return false;
         };
         surface.gamma = ramp_if_set(ramp, size);
@@ -481,8 +506,8 @@ impl UdevData {
 
     /// Whether the output is powered on; `None` for an unknown output.
     pub fn output_power(&self, output: &Output) -> Option<bool> {
-        let crtc = self.crtc_of(output)?;
-        Some(self.outputs[&crtc].drm_output.is_some())
+        let id = self.output_id(output)?;
+        Some(self.outputs[&id].drm_output.is_some())
     }
 
     /// Turn an output's display off (its CRTC is cleared, so the monitor
@@ -490,17 +515,20 @@ impl UdevData {
     /// mode). The output stays mapped: windows and the pointer keep their
     /// places. `false` if it couldn't be done.
     pub fn set_output_power(&mut self, output: &Output, on: bool) -> bool {
-        let Some(crtc) = self.crtc_of(output) else {
+        let Some(id) = self.output_id(output) else {
             return false;
         };
         let UdevData {
             outputs,
-            drm,
+            devices,
             gpus,
             primary,
             ..
         } = self;
-        let surface = outputs.get_mut(&crtc).expect("found above");
+        let Some(GpuDevice { drm, .. }) = devices.get_mut(&id.node) else {
+            return false;
+        };
+        let surface = outputs.get_mut(&id).expect("found above");
         let name = surface.output.name();
         if on == surface.drm_output.is_some() {
             return true;
@@ -531,7 +559,7 @@ impl UdevData {
         let Some(mut renderer) = primary_renderer(gpus, primary) else {
             return false;
         };
-        let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), crtc, surface)
+        let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), id.crtc, surface)
         else {
             warn!(name, "failed to power the output on");
             return false;
@@ -543,7 +571,7 @@ impl UdevData {
         surface.first_frame = true;
         info!(name, "output powered on");
         outputs::apply_vrr(surface);
-        self.reapply_gamma(crtc);
+        self.reapply_gamma(id);
         self.queue_redraw();
         true
     }
@@ -600,12 +628,12 @@ impl UdevData {
     /// power on): the remembered ramps, or linear when no client set any
     /// (whoever had the CRTC may have left theirs).
     /// Blocking, which a modeset is too. Ramps still pending go with it.
-    fn reapply_gamma(&mut self, crtc: crtc::Handle) {
-        let Some(surface) = self.outputs.get_mut(&crtc) else {
+    fn reapply_gamma(&mut self, id: OutputId) {
+        let Some(surface) = self.outputs.get_mut(&id) else {
             return;
         };
         surface.gamma_pending = None;
-        let surface = &self.outputs[&crtc];
+        let surface = &self.outputs[&id];
         let Some(size) = self.gamma_size(&surface.output) else {
             return;
         };
@@ -617,7 +645,10 @@ impl UdevData {
                 &linear
             }
         };
-        if !apply_gamma(self.drm.device(), crtc, ramp, size, GammaCause::Modeset) {
+        let applied = self
+            .drm_device(id)
+            .is_some_and(|drm| apply_gamma(drm, id.crtc, ramp, size, GammaCause::Modeset));
+        if !applied {
             warn!(name = surface.output.name(), "failed to re-apply gamma");
         }
     }
@@ -625,11 +656,11 @@ impl UdevData {
     /// Linear gamma on every output: on exit, so the next compositor on
     /// the seat doesn't inherit a client's ramps.
     pub fn reset_gamma(&mut self) {
-        let crtcs: Vec<_> = self.outputs.keys().copied().collect();
-        for crtc in crtcs {
-            if let Some(surface) = self.outputs.get_mut(&crtc) {
+        let ids: Vec<_> = self.outputs.keys().copied().collect();
+        for id in ids {
+            if let Some(surface) = self.outputs.get_mut(&id) {
                 if surface.gamma.take().is_some() {
-                    self.reapply_gamma(crtc);
+                    self.reapply_gamma(id);
                 }
             }
         }
@@ -787,7 +818,9 @@ pub fn init_udev(
                 state.release_all_keys();
                 if let Some(Backend::Udev(data)) = &mut state.backend {
                     data.libinput.suspend();
-                    data.drm.pause();
+                    for device in data.devices.values_mut() {
+                        device.drm.pause();
+                    }
                 }
             }
             SessionEvent::ActivateSession => {
@@ -802,24 +835,26 @@ pub fn init_udev(
                     // seat may have left the connectors on other CRTCs than
                     // pila's, and moving them over piecemeal fails
                     // (EINVAL). Disabling everything costs one modeset.
-                    if let Err(err) = data.drm.lock().activate(true) {
-                        error!(?err, "failed to resume the DRM device");
+                    for device in data.devices.values_mut() {
+                        if let Err(err) = device.drm.lock().activate(true) {
+                            error!(?err, "failed to resume the DRM device");
+                        }
                     }
-                    let crtcs: Vec<_> = data.outputs.keys().copied().collect();
-                    for crtc in crtcs {
-                        let surface = data.outputs.get_mut(&crtc).expect("listed");
+                    let ids: Vec<_> = data.outputs.keys().copied().collect();
+                    for id in ids {
+                        let surface = data.outputs.get_mut(&id).expect("listed");
                         surface.frame_pending = false;
                         surface.gamma_in_flight = false;
                         // Failures while away were for lack of DRM master.
                         surface.recovery = Recovery::default();
                         surface.first_frame = true;
                         // Another VT may have changed the LUTs.
-                        data.reapply_gamma(crtc);
+                        data.reapply_gamma(id);
                     }
                 }
                 // Monitors plugged or unplugged while away. Those it found
                 // then couldn't come on without DRM master: they do here.
-                scan_connectors(state);
+                scan_connectors(state, None);
                 state.apply_outputs();
                 state.queue_redraw();
             }
@@ -828,8 +863,8 @@ pub fn init_udev(
     // Vblanks.
     event_loop
         .handle()
-        .insert_source(drm_notifier, |event, metadata, state| match event {
-            DrmEvent::VBlank(crtc) => frame_finish(state, crtc, metadata),
+        .insert_source(drm_notifier, move |event, metadata, state| match event {
+            DrmEvent::VBlank(crtc) => frame_finish(state, OutputId { node, crtc }, metadata),
             DrmEvent::Error(err) => error!(?err, "DRM error"),
         })?;
 
@@ -839,7 +874,7 @@ pub fn init_udev(
         .handle()
         .insert_source(udev, move |event, _, state| match event {
             UdevEvent::Changed { device_id } if device_id == node.dev_id() => {
-                scan_connectors(state)
+                scan_connectors(state, Some(node))
             }
             UdevEvent::Added { device_id, path } => {
                 debug!(device_id, path = %path.display(), "ignoring additional GPU");
@@ -853,8 +888,13 @@ pub fn init_udev(
         libinput,
         gpus,
         primary: render_node,
-        drm,
-        scanner: DrmScanner::new(),
+        devices: HashMap::from([(
+            node,
+            GpuDevice {
+                drm,
+                scanner: DrmScanner::new(),
+            },
+        )]),
         outputs: HashMap::new(),
         redraw_scheduled: false,
         clock: smithay::utils::Clock::new(),
@@ -863,7 +903,7 @@ pub fn init_udev(
         pointers: Vec::new(),
     })));
 
-    scan_connectors(state);
+    scan_connectors(state, None);
     // Start with the pointer in the middle of the first output.
     if let (Some(geo), Some(pointer)) = (
         state.output_geometry_at((0.0, 0.0).into()),

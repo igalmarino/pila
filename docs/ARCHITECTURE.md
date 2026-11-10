@@ -135,7 +135,9 @@ Key flows and invariants:
   `Outputs::overrides` and `is_internal` go by the connector. Set before the output's settings
   are read, removed when it goes. Serials aren't logged. Headless outputs get a monitor from
   their spec.
-- **Bare metal (udev):** `udev/mod.rs` has the session, the GPU and `UdevData`; `outputs.rs`
+- **Bare metal (udev):** `udev/mod.rs` has the session, the GPU (its DRM device and connector
+  scanner a `GpuDevice` in `UdevData::devices`, outputs keyed by `OutputId`: its node and the
+  CRTC) and `UdevData`; `outputs.rs`
   connectors and outputs, `draw.rs` frames and vblanks, `recovery.rs` DRM failures,
   `input.rs` and `gamma.rs` the rest. It uses one GPU (the seat's
   primary; more than one is under way, `docs/MULTI_GPU.md`), whose renderer a `GpuManager`

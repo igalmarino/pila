@@ -15,12 +15,12 @@ pub(super) fn render_all(state: &mut Pila) {
         return;
     };
     data.redraw_scheduled = false;
-    let crtcs: Vec<_> = data.outputs.keys().copied().collect();
+    let ids: Vec<_> = data.outputs.keys().copied().collect();
     // One scene for every output drawn in this pass, built once each one's
     // commit timers have applied; its cost counts in the first one's frame.
-    let ready: Vec<_> = crtcs
+    let ready: Vec<_> = ids
         .into_iter()
-        .filter_map(|crtc| prepare(state, crtc))
+        .filter_map(|id| prepare(state, id))
         .collect();
     if !ready.is_empty() {
         let started = std::time::Instant::now();
@@ -40,8 +40,8 @@ pub(super) fn render_all(state: &mut Pila) {
 /// Draw one output, unless it has a frame in flight (then it's drawn at the
 /// next vblank) or nothing changed. `at_vblank`: called right after one, so
 /// the frame is due at the next (`frame_stats.rs`).
-pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: bool) {
-    let Some(ready) = prepare(state, crtc) else {
+pub(super) fn render_output(state: &mut Pila, id: OutputId, at_vblank: bool) {
+    let Some(ready) = prepare(state, id) else {
         return;
     };
     let started = std::time::Instant::now();
@@ -52,7 +52,7 @@ pub(super) fn render_output(state: &mut Pila, crtc: crtc::Handle, at_vblank: boo
 
 /// An output about to be drawn (`prepare`).
 pub(super) struct Ready {
-    crtc: crtc::Handle,
+    id: OutputId,
     output: Output,
     output_geo: Rectangle<i32, smithay::utils::Logical>,
     /// When `prepare` decided to draw it (for `idle_until`).
@@ -62,13 +62,13 @@ pub(super) struct Ready {
     cpu: Duration,
 }
 
-/// Whether `crtc` is to be drawn now (nothing in flight, something asked for,
+/// Whether `id` is to be drawn now (nothing in flight, something asked for,
 /// not held back: see `render_output`); if so, its commit timers applied, so
 /// the scene built next has what they unblocked.
-fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
+fn prepare(state: &mut Pila, id: OutputId) -> Option<Ready> {
     // A gamma change takes the CRTC first; drawing goes on at its vblank.
     if let Some(Backend::Udev(data)) = &mut state.backend {
-        if commit_pending_gamma(data, crtc) {
+        if commit_pending_gamma(data, id) {
             return None;
         }
     }
@@ -77,7 +77,7 @@ fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
     let now: Duration = state.clock.now().into();
     let lock_pending = state.lock_pending();
     if let Some(Backend::Udev(data)) = &mut state.backend {
-        let wait = data.outputs.get(&crtc).and_then(|surface| {
+        let wait = data.outputs.get(&id).and_then(|surface| {
             let wait = idle_wait(
                 surface.idle_until,
                 now,
@@ -91,19 +91,19 @@ fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
         if let Some(delay) = wait {
             if let Some(request) = data
                 .outputs
-                .get_mut(&crtc)
+                .get_mut(&id)
                 .and_then(|surface| surface.request.as_mut())
             {
                 request.held = true;
             }
-            data.schedule_idle_redraw(crtc, delay);
+            data.schedule_idle_redraw(id, delay);
             return None;
         }
     }
     let Some(Backend::Udev(data)) = &state.backend else {
         return None;
     };
-    let surface = data.outputs.get(&crtc)?;
+    let surface = data.outputs.get(&id)?;
     if surface.frame_pending
         || !surface.redraw_needed
         || surface.drm_output.is_none()
@@ -122,7 +122,7 @@ fn prepare(state: &mut Pila, crtc: crtc::Handle) -> Option<Ready> {
     }
     state.signal_commit_timers(&output);
     Some(Ready {
-        crtc,
+        id,
         output,
         output_geo,
         now,
@@ -141,7 +141,7 @@ fn draw(
     scene_cpu: Duration,
 ) {
     let Ready {
-        crtc,
+        id,
         output,
         output_geo,
         now,
@@ -176,7 +176,7 @@ fn draw(
     } = &mut **data;
     // Checked above; the commits applied since (`signal_commit_timers`)
     // can't take an output away, but nothing is lost by not counting on it.
-    let Some(surface) = outputs.get_mut(&crtc) else {
+    let Some(surface) = outputs.get_mut(&id) else {
         return;
     };
     let Some(drm_output) = surface.drm_output.as_mut() else {
@@ -313,7 +313,7 @@ fn draw(
         }
     }
     if let Some(delay) = retry {
-        data.schedule_recovery(crtc, delay);
+        data.schedule_recovery(id, delay);
     }
 
     if lock_pending {
@@ -340,7 +340,7 @@ fn draw(
         let first = match &mut state.backend {
             Some(Backend::Udev(data)) => data
                 .outputs
-                .get_mut(&crtc)
+                .get_mut(&id)
                 .is_some_and(|s| std::mem::take(&mut s.first_frame)),
             _ => false,
         };
@@ -365,7 +365,7 @@ fn draw(
 /// again if something changed meanwhile.
 pub(super) fn frame_finish(
     state: &mut Pila,
-    crtc: crtc::Handle,
+    id: OutputId,
     metadata: &mut Option<DrmEventMetadata>,
 ) {
     let now = state.clock.now();
@@ -373,7 +373,7 @@ pub(super) fn frame_finish(
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let Some(surface) = data.outputs.get_mut(&crtc) else {
+    let Some(surface) = data.outputs.get_mut(&id) else {
         return;
     };
     surface.frame_pending = false;
@@ -381,7 +381,7 @@ pub(super) fn frame_finish(
     // shown, and `last_vblank` stays the last frame's, so a running
     // animation counts this refresh as missed.
     if std::mem::take(&mut surface.gamma_in_flight) {
-        render_output(state, crtc, true);
+        render_output(state, id, true);
         return;
     }
     if surface.lock_frame == LockFrame::Queued {
@@ -477,10 +477,10 @@ pub(super) fn frame_finish(
     if state.lock_pending() {
         maybe_confirm_lock(state);
     }
-    render_output(state, crtc, true);
+    render_output(state, id, true);
     let animating = state.animating();
     if let Some(Backend::Udev(data)) = &mut state.backend {
-        if let Some(surface) = data.outputs.get_mut(&crtc) {
+        if let Some(surface) = data.outputs.get_mut(&id) {
             surface.back_to_back = back_to_back(animating, surface.frame_pending);
         }
     }

@@ -176,29 +176,29 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
     let Some(Backend::Udev(data)) = &state.backend else {
         return false;
     };
-    let mut order: Vec<(crtc::Handle, i32)> = data
+    let mut order: Vec<(OutputId, i32)> = data
         .outputs
         .iter()
-        .map(|(crtc, s)| (*crtc, s.output.current_location().x))
+        .map(|(id, s)| (*id, s.output.current_location().x))
         .collect();
     order.sort_by_key(|(_, x)| *x);
-    let configs: Vec<(crtc::Handle, OutputConfig)> = order
+    let configs: Vec<(OutputId, OutputConfig)> = order
         .iter()
-        .map(|(crtc, _)| {
-            let name = data.outputs[crtc].output.name();
-            (*crtc, effective_output_config(state, &name))
+        .map(|(id, _)| {
+            let name = data.outputs[id].output.name();
+            (*id, effective_output_config(state, &name))
         })
         .collect();
 
     // Enabling and disabling first: they change what the space holds.
-    for (crtc, config) in &configs {
+    for (id, config) in &configs {
         if config.enabled.unwrap_or(true) {
-            applied &= enable_output(state, *crtc);
+            applied &= enable_output(state, *id);
         }
     }
-    for (crtc, config) in &configs {
+    for (id, config) in &configs {
         if !config.enabled.unwrap_or(true) {
-            disable_output(state, *crtc);
+            disable_output(state, *id);
         }
     }
 
@@ -207,38 +207,41 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
     };
     let UdevData {
         outputs,
-        drm,
+        devices,
         gpus,
         primary,
         ..
     } = &mut **data;
     let mut placed: Vec<(Output, Point<i32, Logical>)> = Vec::new();
-    let mut remodeled: Vec<crtc::Handle> = Vec::new();
-    let mut vrr: Vec<(crtc::Handle, bool)> = Vec::new();
+    let mut remodeled: Vec<OutputId> = Vec::new();
+    let mut vrr: Vec<(OutputId, bool)> = Vec::new();
     let mut right_edge = 0;
-    for (crtc, config) in &configs {
-        let crtc = *crtc;
-        let surface = outputs.get_mut(&crtc).expect("listed above");
+    for (id, config) in &configs {
+        let id = *id;
+        let surface = outputs.get_mut(&id).expect("listed above");
         let name = surface.output.name();
         let config = Some(config);
         if let Some(mode) = pick_mode(&name, &surface.modes, config) {
             let wl_mode = WlMode::from(mode);
             if surface.output.current_mode() != Some(wl_mode) {
                 // Powered off: the mode is set when the CRTC comes back.
-                let result = match surface.drm_output {
-                    Some(_) => match super::primary_renderer(gpus, primary) {
-                        Some(mut renderer) => drm
-                            .lock()
-                            .use_mode(
-                                &crtc,
-                                mode,
-                                renderer.as_mut(),
-                                &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
-                            )
-                            .map_err(|err| format!("{err:?}")),
-                        None => Err("no renderer".to_string()),
-                    },
-                    None => Ok(()),
+                let result = match (&surface.drm_output, devices.get_mut(&id.node)) {
+                    (Some(_), Some(GpuDevice { drm, .. })) => {
+                        match super::primary_renderer(gpus, primary) {
+                            Some(mut renderer) => drm
+                                .lock()
+                                .use_mode(
+                                    &id.crtc,
+                                    mode,
+                                    renderer.as_mut(),
+                                    &DrmOutputRenderElements::<_, PilaRenderElement>::default(),
+                                )
+                                .map_err(|err| format!("{err:?}")),
+                            None => Err("no renderer".to_string()),
+                        }
+                    }
+                    (Some(_), None) => Err("no DRM device".to_string()),
+                    (None, _) => Ok(()),
                 };
                 match result {
                     Ok(()) => {
@@ -248,7 +251,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
                             .change_current_state(Some(wl_mode), None, None, None);
                         info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
                         surface.first_frame = true;
-                        remodeled.push(crtc);
+                        remodeled.push(id);
                     }
                     Err(err) => {
                         warn!(name, ?err, "failed to change the output mode");
@@ -277,7 +280,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
         // Rotated a quarter turn, width and height swap.
         let width = logical_width(&surface.output, transform, scale);
         if let Some(on) = config.and_then(|c| c.adaptive_sync) {
-            vrr.push((crtc, on));
+            vrr.push((id, on));
         }
         if !surface.enabled {
             continue;
@@ -286,11 +289,11 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
         surface.redraw_needed = true;
         placed.push((surface.output.clone(), loc));
     }
-    for crtc in remodeled {
-        data.reapply_gamma(crtc);
+    for id in remodeled {
+        data.reapply_gamma(id);
     }
-    for (crtc, on) in vrr {
-        set_vrr(data, crtc, on);
+    for (id, on) in vrr {
+        set_vrr(data, id, on);
     }
     for (output, loc) in placed {
         state.space.map_output(&output, loc);
@@ -298,12 +301,36 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
     applied
 }
 
-/// Set up newly connected monitors and drop disconnected ones.
-pub(super) fn scan_connectors(state: &mut Pila) {
+/// Set up newly connected monitors and drop disconnected ones, on the GPU
+/// `only` or on every GPU; then, with all of them seen, retrain bad links
+/// and keep a screen on.
+pub(super) fn scan_connectors(state: &mut Pila, only: Option<DrmNode>) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let events = match data.scanner.scan_connectors(data.drm.device()) {
+    let nodes: Vec<DrmNode> = data
+        .devices
+        .keys()
+        .copied()
+        .filter(|node| only.is_none_or(|only| only == *node))
+        .collect();
+    for node in nodes {
+        scan_device(state, node);
+    }
+    retrain_bad_links(state);
+    // Once every new output is set up (or failed to be).
+    keep_a_screen_on(state);
+}
+
+/// Connectors connected and disconnected on one GPU.
+fn scan_device(state: &mut Pila, node: DrmNode) {
+    let Some(Backend::Udev(data)) = &mut state.backend else {
+        return;
+    };
+    let Some(GpuDevice { drm, scanner, .. }) = data.devices.get_mut(&node) else {
+        return;
+    };
+    let events = match scanner.scan_connectors(drm.device()) {
         Ok(result) => result.into_iter().collect::<Vec<_>>(),
         Err(err) => {
             warn!(?err, "failed to scan connectors");
@@ -315,16 +342,13 @@ pub(super) fn scan_connectors(state: &mut Pila) {
             DrmScanEvent::Connected {
                 connector,
                 crtc: Some(crtc),
-            } => connector_connected(state, connector, crtc),
+            } => connector_connected(state, connector, OutputId { node, crtc }),
             DrmScanEvent::Disconnected {
                 crtc: Some(crtc), ..
-            } => connector_disconnected(state, crtc),
+            } => connector_disconnected(state, OutputId { node, crtc }),
             _ => {}
         }
     }
-    retrain_bad_links(state);
-    // Once every new output is set up (or failed to be).
-    keep_a_screen_on(state);
 }
 
 /// `link-status` values (`drm_mode.h`).
@@ -354,20 +378,23 @@ fn retrain_bad_links(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let bad: Vec<(crtc::Handle, Output, Option<property::Handle>)> = data
+    let bad: Vec<(OutputId, Output, Option<property::Handle>)> = data
         .outputs
         .iter()
         .filter(|(_, s)| s.enabled && s.drm_output.is_some())
-        .filter_map(|(crtc, s)| {
-            let (prop, value) = link_status(&data.drm, s.connector)?;
-            (value == LINK_STATUS_BAD).then(|| (*crtc, s.output.clone(), Some(prop)))
+        .filter_map(|(id, s)| {
+            let (prop, value) = link_status(&data.devices.get(&id.node)?.drm, s.connector)?;
+            (value == LINK_STATUS_BAD).then(|| (*id, s.output.clone(), Some(prop)))
         })
         .collect();
-    for (crtc, output, prop) in bad {
+    for (id, output, prop) in bad {
         let name = output.name();
         warn!(name, "the monitor's link went bad: setting it up again");
-        let connector = data.outputs[&crtc].connector;
-        let retrained = data.drm.device().is_atomic()
+        let connector = data.outputs[&id].connector;
+        let Some(device) = data.drm_device(id) else {
+            continue;
+        };
+        let retrained = device.is_atomic()
             && prop.is_some_and(|prop| {
                 let mut request = AtomicModeReq::new();
                 request.add_property(
@@ -375,11 +402,7 @@ fn retrain_bad_links(state: &mut Pila) {
                     prop,
                     property::Value::UnsignedRange(LINK_STATUS_GOOD),
                 );
-                match data
-                    .drm
-                    .device()
-                    .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, request)
-                {
+                match device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, request) {
                     Ok(()) => true,
                     Err(err) => {
                         warn!(name, ?err, "couldn't set the link back to good");
@@ -394,7 +417,7 @@ fn retrain_bad_links(state: &mut Pila) {
             continue;
         }
         // A frame in flight still gets its vblank (`frame_finish`).
-        if let Some(surface) = data.outputs.get_mut(&crtc) {
+        if let Some(surface) = data.outputs.get_mut(&id) {
             surface.redraw_needed = true;
         }
         info!(name, "link set up again");
@@ -427,15 +450,14 @@ pub(super) fn logical_width(output: &Output, transform: Transform, scale: f64) -
         .unwrap_or(0)
 }
 
-pub(super) fn connector_connected(
-    state: &mut Pila,
-    connector: connector::Info,
-    crtc: crtc::Handle,
-) {
+pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, id: OutputId) {
     let name = connector_name(&connector);
     // Before its settings: an `[[output]]` section may name the monitor.
     let monitor = match &state.backend {
-        Some(Backend::Udev(data)) => read_monitor(&data.drm, &connector),
+        Some(Backend::Udev(data)) => data
+            .devices
+            .get(&id.node)
+            .and_then(|device| read_monitor(&device.drm, &connector)),
         _ => None,
     };
     let (make, model) = match &monitor {
@@ -483,7 +505,10 @@ pub(super) fn connector_connected(
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    if is_non_desktop(&data.drm, &connector) {
+    let Some(device) = data.devices.get(&id.node) else {
+        return;
+    };
+    if is_non_desktop(&device.drm, &connector) {
         info!(name, "skipping non-desktop connector (e.g. a VR headset)");
         return;
     }
@@ -508,8 +533,9 @@ pub(super) fn connector_connected(
         Some((x, y).into()),
     );
 
+    let gamma_lut = gamma_lut_property(&device.drm, id.crtc);
     data.outputs.insert(
-        crtc,
+        id,
         OutputSurface {
             output: output.clone(),
             drm_output: None,
@@ -525,7 +551,7 @@ pub(super) fn connector_connected(
             lock_frame: LockFrame::None,
             modes,
             gamma: None,
-            gamma_lut: gamma_lut_property(&data.drm, crtc),
+            gamma_lut,
             gamma_pending: None,
             gamma_in_flight: false,
             recovery: Recovery::default(),
@@ -545,7 +571,7 @@ pub(super) fn connector_connected(
         state.refresh_output_heads();
         return;
     }
-    if !enable_output(state, crtc) {
+    if !enable_output(state, id) {
         return;
     }
     // A lighter one if that one didn't come on.
@@ -561,7 +587,7 @@ pub(super) fn connector_connected(
     );
     if let (Some(on), Some(Backend::Udev(data))) = (output_config.adaptive_sync, &mut state.backend)
     {
-        set_vrr(data, crtc, on);
+        set_vrr(data, id, on);
     }
     state.refit_maximized();
     state.configure_lock_surfaces();
@@ -571,19 +597,21 @@ pub(super) fn connector_connected(
 
 /// Set a connected output up: its CRTC, its `wl_output` global and its
 /// place in the space. `false` if the CRTC couldn't be set up.
-pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
+pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return false;
     };
     let UdevData {
         outputs,
-        drm,
+        devices,
         gpus,
         primary,
         session,
         ..
     } = &mut **data;
-    let Some(surface) = outputs.get_mut(&crtc) else {
+    let (Some(surface), Some(GpuDevice { drm, .. })) =
+        (outputs.get_mut(&id), devices.get_mut(&id.node))
+    else {
         return false;
     };
     if surface.enabled {
@@ -598,7 +626,8 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     let Some(mut renderer) = super::primary_renderer(gpus, primary) else {
         return false;
     };
-    let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), crtc, surface) else {
+    let Some(drm_output) = initialize_with_fallback(drm, renderer.as_mut(), id.crtc, surface)
+    else {
         return false;
     };
     surface.drm_output = Some(drm_output);
@@ -611,7 +640,7 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
     surface.global = Some(surface.output.create_global::<Pila>(&state.display_handle));
     let output = surface.output.clone();
     let loc = output.current_location();
-    data.reapply_gamma(crtc);
+    data.reapply_gamma(id);
     state.space.map_output(&output, loc);
     layer_map_for_output(&output).arrange();
     true
@@ -619,11 +648,11 @@ pub(super) fn enable_output(state: &mut Pila, crtc: crtc::Handle) -> bool {
 
 /// Take an output out of use: its CRTC is cleared, its global removed and
 /// its windows moved elsewhere. It stays known, to be enabled again.
-pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
+pub(super) fn disable_output(state: &mut Pila, id: OutputId) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let Some(surface) = data.outputs.get_mut(&crtc) else {
+    let Some(surface) = data.outputs.get_mut(&id) else {
         return;
     };
     if !surface.enabled {
@@ -647,8 +676,8 @@ pub(super) fn disable_output(state: &mut Pila, crtc: crtc::Handle) {
 
 /// Turn variable refresh rate on or off where the monitor supports it,
 /// now and whenever the CRTC is set up again (powered on, enabled).
-pub(super) fn set_vrr(data: &mut UdevData, crtc: crtc::Handle, on: bool) {
-    let Some(surface) = data.outputs.get_mut(&crtc) else {
+pub(super) fn set_vrr(data: &mut UdevData, id: OutputId, on: bool) {
+    let Some(surface) = data.outputs.get_mut(&id) else {
         return;
     };
     surface.adaptive_sync = on;
@@ -719,18 +748,18 @@ pub(super) fn keep_a_screen_on(state: &mut Pila) {
     if data.outputs.values().any(|s| s.enabled) {
         return;
     }
-    let internal: Vec<crtc::Handle> = data
+    let internal: Vec<OutputId> = data
         .outputs
         .iter()
         .filter(|(_, s)| is_internal(&s.output.name()))
-        .map(|(crtc, _)| *crtc)
+        .map(|(id, _)| *id)
         .collect();
     if internal.is_empty() {
         return;
     }
     warn!("no output is on: turning the built-in screen on");
-    for crtc in internal {
-        enable_output(state, crtc);
+    for id in internal {
+        enable_output(state, id);
     }
     state.fixup_windows();
     state.refit_maximized();
@@ -739,11 +768,11 @@ pub(super) fn keep_a_screen_on(state: &mut Pila) {
     state.queue_redraw();
 }
 
-pub(super) fn connector_disconnected(state: &mut Pila, crtc: crtc::Handle) {
+pub(super) fn connector_disconnected(state: &mut Pila, id: OutputId) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
-    let Some(surface) = data.outputs.remove(&crtc) else {
+    let Some(surface) = data.outputs.remove(&id) else {
         return;
     };
     info!(name = surface.output.name(), "output disconnected");

@@ -147,12 +147,17 @@ fn commit_gamma_lut(
 /// frame on its way). `true` if it went out as a commit of its own: drawing
 /// waits for its vblank. Refused, it's set the blocking way, and drawing
 /// goes on.
-pub(super) fn commit_pending_gamma(data: &mut UdevData, crtc: crtc::Handle) -> bool {
+pub(super) fn commit_pending_gamma(data: &mut UdevData, id: OutputId) -> bool {
     let active = data.session.is_active();
-    let UdevData { outputs, drm, .. } = data;
-    let Some(surface) = outputs.get_mut(&crtc) else {
+    let UdevData {
+        outputs, devices, ..
+    } = data;
+    let (Some(surface), Some(GpuDevice { drm, .. })) =
+        (outputs.get_mut(&id), devices.get(&id.node))
+    else {
         return false;
     };
+    let crtc = id.crtc;
     if surface.gamma_pending.is_none()
         || surface.frame_pending
         || surface.drm_output.is_none()

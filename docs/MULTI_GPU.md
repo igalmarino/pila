@@ -24,10 +24,10 @@ HDMI port wired to the dGPU) light up. Read with `docs/ARCHITECTURE.md` ("Bare m
   - `capture.rs`: the EGL context's dmabuf render formats, binding a client's dmabuf,
     `ExportMem` reads into shm, and on bare metal a blit of the frame the DRM compositor just
     composited (`blit_frame_result`, `GlesTarget`).
-- `udev/mod.rs`: one `GbmDevice`, one `GlesRenderer` (`UdevData::renderer`), one
-  `DrmOutputManager`, outputs keyed by CRTC; dmabuf feedback, the capture dmabuf target and
-  linux-drm-syncobj all name that one device.
-- `Backend::renderer()` hands out that one renderer for imports (dmabuf test-imports,
+- `udev/mod.rs` (before step 1): one `GbmDevice`, one `GlesRenderer`, one `DrmOutputManager`,
+  outputs keyed by CRTC; dmabuf feedback, the capture dmabuf target and linux-drm-syncobj all
+  name that one device.
+- `Backend::renderer()` handed out that one renderer for imports (dmabuf test-imports,
   captures, blur, animation snapshots).
 
 ## Where it goes
@@ -76,9 +76,11 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
    DrmDeviceFd>>` with the primary in it, and takes its renderer from there (`RendererRef`
    outside the backend); outputs draw exactly as now. Bare metal must be
    unchanged: `scripts/check` on a TTY (and `vkms.yml`) before going on.
-2. **Secondary GPUs.** Open every GPU of the seat, a `DrmOutputManager` and scanner for each;
-   connectors of every device become outputs, keyed by `(DrmNode, crtc::Handle)`; `recovery.rs`,
-   gamma, output power and the vblank handler (`frame_finish`) take the node.
+2. **Secondary GPUs.** First, still with one GPU (done): each GPU's DRM device and scanner are
+   a `GpuDevice` in `UdevData::devices`, and outputs are keyed by an `OutputId` (the device's
+   node and the CRTC), which gamma, output power, recovery and the vblank handler
+   (`frame_finish`) take. Then open every GPU of the seat, a `GpuDevice` for each, its
+   connectors scanned like the primary's (`scan_connectors`).
    `UdevEvent::Added/Removed` for devices plug them in and out (their outputs as monitors
    unplugged). VT switches pause and resume every device. An output on a secondary device draws
    with `GpuManager::renderer(&primary, &its device, format)` and `PrimaryGpuElement`s; the
