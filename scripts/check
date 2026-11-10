@@ -36,8 +36,9 @@
 #
 # pila quits by itself when the scenarios are done (about a minute). On a
 # TTY the base is your config (~/.config/pila/config.toml: monitors,
-# keyboard, input) without its [animations] and rules, so that what the
-# checks expect doesn't depend on them: animations on, their own rules.
+# keyboard, input) without its [animations], rules and workspaces, so that
+# what the checks expect doesn't depend on them: animations on, their own
+# rules, four workspaces.
 # Nested there's no base. Programs it uses when installed: kitty or foot
 # (needed), xterm, python3 (minimize, maximize, workspaces, the capture stream), fuzzel
 # (launcher), grim (capture), noctalia and notify-send or gdbus (Noctalia).
@@ -51,6 +52,30 @@ if [ "${1:-}" = "--workload" ]; then
     # Written to pila's log (programs' output goes there): the analysis
     # below finds each scenario's events between these.
     mark() { echo "check: $*"; }
+
+    # Quit pila (SIGTERM quits cleanly): the nearest pila among this
+    # script's ancestors, never another one (the login session's).
+    quit_pila() {
+        local pid=$PPID
+        while [ "$pid" -gt 1 ]; do
+            if [ "$(ps -o comm= -p "$pid")" = pila ]; then
+                kill -TERM "$pid"
+                return
+            fi
+            pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+        done
+        mark "Pila not found among the ancestors; quit it with Mod+Shift+E"
+    }
+    # A step that fails ends the scenarios (set -e): say which, and quit pila
+    # all the same, or it would wait there until someone quits it.
+    set -E
+    failed_line=
+    trap 'failed_line=$LINENO' ERR
+    trap 'status=$?
+        if [ "$status" -ne 0 ]; then
+            mark "workload failed: line ${failed_line:-?} exited with $status"
+        fi
+        quit_pila' EXIT
 
     terminal="${PILA_CHECK_TERMINAL:-}"
     if [ -z "$terminal" ]; then
@@ -268,17 +293,7 @@ if [ "${1:-}" = "--workload" ]; then
 
     mark "done"
     sleep 1
-    # Quit pila (SIGTERM quits cleanly): the nearest pila among this
-    # script's ancestors, never another one (the login session's).
-    pid=$PPID
-    while [ "$pid" -gt 1 ]; do
-        if [ "$(ps -o comm= -p "$pid")" = pila ]; then
-            kill -TERM "$pid"
-            exit 0
-        fi
-        pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
-    done
-    mark "Pila not found among the ancestors; quit it with Mod+Shift+E"
+    # The EXIT trap quits pila.
     exit 0
 fi
 
@@ -324,10 +339,14 @@ if ! $judge_only; then
             base_config=$user_config
         fi
     fi
+    # The workload switches among workspaces 1 to 3: the count is the
+    # check's, whatever the base config says (top-level keys come first).
+    printf 'workspaces = 4\n' >"$config"
     if [ -n "$base_config" ]; then
-        awk '/^[ \t]*\[/ { skip = ($0 ~ /^[ \t]*\[(animations\]|\[window-rule\]\]|\[layer-rule\]\])/) }
-             !skip' "$base_config" >"$config"
-        echo "Base config: $base_config (without its [animations] and rules)."
+        awk '/^[ \t]*\[/ { table = 1; skip = ($0 ~ /^[ \t]*\[(animations\]|\[window-rule\]\]|\[layer-rule\]\])/) }
+             !table && /^[ \t]*workspaces[ \t]*=/ { next }
+             !skip' "$base_config" >>"$config"
+        echo "Base config: $base_config (without its [animations], rules and workspaces)."
     fi
     if $vrr; then
         # The first [[output]] that matches a monitor applies: each of yours
@@ -441,7 +460,8 @@ lacks() {
 echo
 echo "== Checks ($log) =="
 if ! grep -q "check: done" "$log"; then
-    fail "the scenarios finished (Pila quit or crashed before; see the log)"
+    why=$(grep -o "check: workload failed.*" "$log" | sed 's/check: //' | head -1 || true)
+    fail "the scenarios finished (${why:-Pila quit or crashed before}; see the log)"
 fi
 if grep -q "panicked" "$log"; then
     fail "no panic"

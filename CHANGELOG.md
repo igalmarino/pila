@@ -52,6 +52,9 @@
 - **A screenshot of a monitor just unplugged fails instead of waiting:** a `wlr-screencopy` copy
   asked after its monitor went away was never answered, so the tool taking it hung (since
   each monitor is redrawn on its own, in this release).
+- **For testers: `scripts/check` no longer hangs with fewer than three workspaces:** it took the
+  number from your config and stopped at a switch to workspace 3, leaving Pila open. It now sets
+  its own, and a step that fails ends the run, with the step's line in the result.
 
 ## 0.4.2 (2026-11-09)
 
