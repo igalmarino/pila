@@ -81,7 +81,7 @@ A short report helps even if everything works:
   maximize and fullscreen; snapping to screen halves and quarters by keyboard or by dragging to
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
-  between monitors; switching by recent use (Mod+Tab); workspaces spanning all monitors (Mod+1..N,
+  between monitors; switching by recent use (Mod+Tab, Alt+Tab); workspaces spanning all monitors (Mod+1..N,
   four-finger swipes); a window menu on the title bar (right click); windows asking for
   attention marked with an amber title bar; a shadow under each window (`[shadow]`); optional
   rounded corners (`corner-radius`); your own colors (`[colors]`).

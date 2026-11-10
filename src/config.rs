@@ -44,6 +44,9 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Tab", "cycle-focus"),
     ("Mod+J", "cycle-focus"),
     ("Mod+Shift+Tab", "cycle-focus-back"),
+    // What other desktops use, whatever Mod is (the same combo when it's Alt).
+    ("Alt+Tab", "cycle-focus"),
+    ("Alt+Shift+Tab", "cycle-focus-back"),
     ("Mod+M", "maximize"),
     ("Mod+N", "minimize"),
     ("Mod+F", "fullscreen"),

@@ -52,6 +52,7 @@ Most bindings use the Mod key: **Super** (the Windows key) from the login screen
 | `Mod+D` | Open the launcher (only if `launcher` is set) |
 | `Mod+Tab`, `Mod+J` | Switch to the previous window; keep Mod held and press again for older ones |
 | `Mod+Shift+Tab` | The same, the other way |
+| `Alt+Tab`, `Alt+Shift+Tab` | The same as `Mod+Tab` and `Mod+Shift+Tab`, whatever Mod is |
 | `Mod+M`, `Mod+Up` | Maximize; again, restore |
 | `Mod+N` | Minimize |
 | `Mod+F` | Fullscreen, or leave it |
@@ -110,7 +111,8 @@ arrow resizes it (right and down grow it, left and up shrink it), and `Mod+C` ce
 **Switching windows.** `Mod+Tab` goes to the window you used before, so a quick `Mod+Tab`
 toggles between the last two. Keep Mod held and press Tab again to go further back; each window
 comes forward as you reach it, and releasing Mod settles on it. `Mod+Shift+Tab` goes the other
-way. Clicking a window, or a taskbar entry in your bar, focuses it too.
+way. `Alt+Tab` and `Alt+Shift+Tab` do the same whatever Mod is, as on other desktops. Clicking a
+window, or a taskbar entry in your bar, focuses it too.
 
 **Windows asking for attention.** An app can ask for your attention without taking the focus
 (a chat message, a finished download): its title bar turns amber (`[colors] bar-urgent`), and

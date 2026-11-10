@@ -42,6 +42,27 @@ fn mod_tab_switches_to_the_previous_window_and_ends_on_release() {
 }
 
 #[test]
+fn alt_tab_switches_windows_too_whatever_the_mod_key() {
+    // Mod is Super here: Alt+Tab is a default of its own, as on other desktops.
+    let (mut pila, _client, _) = windows(&["a", "b", "c"]);
+    pila.key_press("Alt");
+    pila.key("Tab");
+    pila.wait_focus("b");
+    pila.key("Tab");
+    pila.wait_focus("a");
+    pila.key_release("Alt");
+    let state = pila.wait("the switch to end", |s| s["switch"].is_null());
+    assert_eq!(history(&state), vec!["a", "c", "b"]);
+    pila.key_press("Alt");
+    pila.key_press("Shift");
+    pila.key("Tab");
+    pila.wait_focus("b");
+    pila.key_release("Shift");
+    pila.key_release("Alt");
+    pila.wait("the switch to end", |s| s["switch"].is_null());
+}
+
+#[test]
 fn a_window_closing_during_mod_tab_doesnt_upset_the_order() {
     let (mut pila, client, handles) = windows(&["a", "b", "c", "d"]);
     pila.key_press("Super");

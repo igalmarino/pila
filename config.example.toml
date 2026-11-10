@@ -143,6 +143,8 @@
 #   "Mod+Tab"     = "cycle-focus"
 #   "Mod+J"       = "cycle-focus"
 #   "Mod+Shift+Tab" = "cycle-focus-back"
+#   "Alt+Tab"     = "cycle-focus"      (also with Mod set to super or ctrl,
+#   "Alt+Shift+Tab" = "cycle-focus-back" as on other desktops)
 #   "Mod+M"       = "maximize"
 #   "Mod+N"       = "minimize"
 #   "Mod+F"       = "fullscreen"
