@@ -133,7 +133,8 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   144 Hz).
 - **Measure it:** `RUST_LOG=pila::frames=debug` (`frame_stats.rs`) logs per output,
   every 5 s, frames, average and worst CPU time and missed refreshes, plus every frame
-  over half the period. Missed refreshes are vblanks with no new frame while an
+  over half the period, and apart the redraws that found nothing new to show (`idle`, with
+  their summed CPU time; `scripts/check` reports them per output). Missed refreshes are vblanks with no new frame while an
   animation runs: exact on bare metal (the DRM sequence of the vblanks that showed
   frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
   show); `pila::frames=trace` logs every frame. The first frame after an output is set up

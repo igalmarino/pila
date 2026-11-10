@@ -176,7 +176,8 @@ To turn the monitors off without unplugging them, for instance when idle, run
 pointer turns them back on, and that first key or click does nothing else. It works with the
 screen locked too, as idling usually locks first. `pila msg action power-on-monitors` turns them
 on from a script. `wlopm --off '*'` and `wlopm --on '*'` work as well; monitors a tool turned off
-stay off until that tool turns them on.
+stay off until that tool turns them on. `pila msg outputs` marks the monitors that are off
+`[off]`.
 
 ## Keyboard, mouse and touchpad
 
@@ -493,6 +494,7 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 | Stuck on a locked screen after the locker crashed | See [Locking the screen and idling](#locking-the-screen-and-idling). |
 | `Mod+D` does nothing | Set `launcher` to your launcher's command. |
 | The screen froze | `Ctrl+Alt+F2`, log in, `pkill pila`; then report it with the log. |
+| Pila crashed (back at the login screen) | Report it with `pila.log.old` (or `pila-report`'s file): its "pila crashed" line and the backtrace after it say where. |
 
 Bugs go to the [issues](https://github.com/igalmarino/pila/issues), with `pila-report`'s file
 or the log; questions and ideas to the

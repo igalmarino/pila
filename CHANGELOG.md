@@ -25,7 +25,8 @@
   with nothing new now waits until its next refresh is near, at most once per refresh.
 - **Crashes say where they happened:** the log has a backtrace after "pila crashed" without
   setting `RUST_BACKTRACE`, so a crash in a login session can be reported as it is, without
-  reproducing it.
+  reproducing it. The AUR package is no longer stripped, so the backtrace has the names of the
+  functions (about 9 MB more).
 
 ## 0.4.2 (2026-11-09)
 

@@ -15,7 +15,10 @@ Integration tests (`tests/*.rs`, harness in `tests/common/`) run a headless Pila
   events.
 - A failing test prints the state and Pila's log; `PILA_TEST_LOG` sets its `RUST_LOG`,
   `PILA_TEST_KEEP=1` keeps a failed test's directory, `PILA_HEADLESS_DEVICE=software` renders
-  on llvmpipe as CI does. A Pila that panics fails its test.
+  on llvmpipe as CI does. A Pila that panics fails its test, unless the test made it crash on
+  purpose (the control socket's `panic`, after `TestPila::expect_crash`). The harness starts
+  Pila without `RUST_BACKTRACE` (Pila logs a crash's backtrace by itself) and, with
+  `Options::soft_file_limit`, with a lower soft limit of open files.
 
 `tests/FEATURES.md` maps every feature to its tests (or says why it has none), and
 `features_inventory_is_complete` fails if a test it names is gone or an integration test

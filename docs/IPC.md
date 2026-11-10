@@ -110,6 +110,6 @@ Each event is the whole list, as the request of the same name answers it (`keybo
 `layouts`): replace what you had.
 Windows in events leave out `x`, `y`, `width` and `height`, which change in every frame of a move;
 ask `windows` for them. Events come once things settle on screen, as taskbars hear about them
-(the keyboard's right away). A
+(the keyboard's right away, and the monitors' power even when none is on to draw). A
 subscribed connection still answers requests (answers have `ok`, events `event`); subscribing
 again replaces the list. A subscriber that leaves more than 1 MiB unread is disconnected.
