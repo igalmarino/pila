@@ -81,7 +81,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libseat-dev libinput-dev libudev-dev libgbm-dev \
             libxkbcommon-dev libegl1 libegl-mesa0 libgl1-mesa-dri xwayland seatd weston \
-            gammastep
+            gammastep gdb
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: rustup update stable && rustup default stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -111,7 +111,10 @@ jobs:
             echo 1 | sudo tee "$VKMS_SECOND" >/dev/null && echo "second GPU added at $(date +%T.%N)"
           ) &
           status=0
-          sudo env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd \
+          # A crash leaves a core for the next step's backtrace.
+          echo '/tmp/pila-core.%p' | sudo tee /proc/sys/kernel/core_pattern >/dev/null
+          sudo bash -c 'ulimit -c unlimited && exec "$@"' bash \
+            env XDG_RUNTIME_DIR="$runtime" LIBSEAT_BACKEND=seatd \
             RUST_LOG=info,pila::frames=debug \
             "${launch[@]}" timeout -s TERM 24 \
             target/release/pila --backend udev \
@@ -121,6 +124,15 @@ jobs:
           tail -n 40 pila-vkms.log
           echo "exit status: $status"
           test "$status" = 124
+      # Where a crash (a segfault in the GPU stack has no log of its own) was.
+      - name: Backtrace of a crash
+        if: failure()
+        run: |
+          for core in /tmp/pila-core.*; do
+            [ -e "$core" ] || continue
+            sudo gdb -q -batch -ex 'thread apply all bt 40' target/release/pila "$core" 2>&1 \
+              | tee -a pila-vkms-backtrace.txt
+          done
       - name: Judge the log
         run: |
           fail=0
@@ -156,4 +168,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pila-vkms-log
-          path: pila-vkms.log
+          path: |
+            pila-vkms.log
+            pila-vkms-backtrace.txt
