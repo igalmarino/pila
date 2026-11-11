@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 (2026-11-11)
 
+- **Shake the mouse to find the pointer:** as on KDE Plasma, shaking the pointer quickly back and
+  forth makes the cursor grow, up to three times its size, while you shake it; it shrinks back a
+  moment after you stop. Moving it along a line or round a circle doesn't count. It's on by
+  default: `[cursor]` sets how big it gets (`shake-magnification`, 1.5 to 5) or turns it off
+  (`shake-to-find = false`). Named cursors are drawn from the theme's larger images, so they stay
+  sharp; on the lock screen too.
 - **A workspace switch no longer starts a frame late:** its slide made textures as large as each
   monitor as it began, which cost the graphics card several milliseconds and, on a TTY, could make
   the slide's first frame miss a refresh. They're now made ahead and kept (two per monitor, some
