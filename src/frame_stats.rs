@@ -36,6 +36,12 @@
 //! source changed. That's CPU time on top of the outputs' frames, logged on
 //! its own line, `captures`, with the same fields (`passes` for frames), so
 //! the outputs' own budget stays readable.
+//!
+//! The event loop's own bookkeeping after each iteration (`Pila::after_frames`:
+//! taskbars, IPC events, the `Space`'s refresh, animations; captures left out)
+//! runs as often as events come (input, clients), not once per frame: a
+//! `loop` line counts the iterations, those that did all of it
+//! (`housekeeping`) and their CPU time, summed and worst (`LoopStats`).
 
 use std::time::Duration;
 
@@ -148,6 +154,73 @@ impl FrameStats {
     }
 }
 
+/// The event loop's iterations since the last report (see the module docs).
+#[derive(Debug, Default)]
+pub struct LoopStats {
+    start: Option<Duration>,
+    iterations: u32,
+    housekeeping: u32,
+    cpu_total: Duration,
+    cpu_max: Duration,
+    /// Iterations and full housekeeping runs since startup (`state_json`).
+    pub total: (u64, u64),
+}
+
+/// What `LoopStats` logs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoopReport {
+    pub secs: f64,
+    pub iterations: u32,
+    /// Iterations that did all of `after_frames`' work.
+    pub housekeeping: u32,
+    pub cpu_total: Duration,
+    pub cpu_max: Duration,
+}
+
+impl LoopStats {
+    /// An iteration at `now` took `cpu` after its events, `housekeeping`
+    /// whether it did all of it. Returns a report when one is due.
+    pub fn record(
+        &mut self,
+        now: Duration,
+        housekeeping: bool,
+        cpu: Duration,
+    ) -> Option<LoopReport> {
+        self.iterations += 1;
+        self.housekeeping += u32::from(housekeeping);
+        self.total.0 += 1;
+        self.total.1 += u64::from(housekeeping);
+        self.cpu_total += cpu;
+        self.cpu_max = self.cpu_max.max(cpu);
+        let start = *self.start.get_or_insert(now);
+        if now.saturating_sub(start) < REPORT_EVERY {
+            return None;
+        }
+        self.take(now)
+    }
+
+    /// What was recorded since the last report, starting over at `now`.
+    pub fn take(&mut self, now: Duration) -> Option<LoopReport> {
+        let start = self.start?;
+        if self.iterations == 0 {
+            return None;
+        }
+        let report = LoopReport {
+            secs: now.saturating_sub(start).as_secs_f64(),
+            iterations: self.iterations,
+            housekeeping: self.housekeeping,
+            cpu_total: self.cpu_total,
+            cpu_max: self.cpu_max,
+        };
+        *self = Self {
+            start: Some(now),
+            total: self.total,
+            ..Self::default()
+        };
+        Some(report)
+    }
+}
+
 /// How long one refresh of `output` lasts (60 Hz if it doesn't say).
 pub fn refresh_period(output: &Output) -> Duration {
     output
@@ -229,6 +302,18 @@ fn log_capture_report(report: &Report) {
     );
 }
 
+fn log_loop_report(report: &LoopReport) {
+    debug!(
+        target: "pila::frames",
+        secs = (report.secs * 10.0).round() / 10.0,
+        iterations = report.iterations,
+        housekeeping = report.housekeeping,
+        cpu_ms = ms(report.cpu_total),
+        cpu_max_ms = ms(report.cpu_max),
+        "loop"
+    );
+}
+
 fn ms(duration: Duration) -> f64 {
     (duration.as_secs_f64() * 1e5).round() / 100.0
 }
@@ -282,8 +367,17 @@ impl Pila {
         }
     }
 
-    /// Log what each output drew since its last report, and the captures
-    /// (pila is quitting).
+    /// An event-loop iteration's `after_frames` took `cpu` (captures left
+    /// out), `housekeeping` whether it did all of it (see the module docs).
+    pub fn record_loop(&mut self, housekeeping: bool, cpu: Duration) {
+        let now = self.animation_time();
+        if let Some(report) = self.loop_stats.record(now, housekeeping, cpu) {
+            log_loop_report(&report);
+        }
+    }
+
+    /// Log what each output drew since its last report, the captures and
+    /// the event loop's own work (pila is quitting).
     pub fn report_frames(&mut self) {
         let now = self.animation_time();
         for (name, stats) in &mut self.frame_stats {
@@ -293,6 +387,9 @@ impl Pila {
         }
         if let Some(report) = self.capture_stats.take(now) {
             log_capture_report(&report);
+        }
+        if let Some(report) = self.loop_stats.take(now) {
+            log_loop_report(&report);
         }
     }
 
@@ -383,6 +480,25 @@ mod tests {
         // And start over with the report.
         let report = stats.record(12000 * MS, MS).expect("due after 5 s");
         assert_eq!((report.frames, report.direct), (1, 0));
+    }
+
+    #[test]
+    fn the_loops_iterations_are_reported_apart_with_their_housekeeping() {
+        let mut stats = LoopStats::default();
+        assert_eq!(stats.record(Duration::ZERO, true, 2 * MS), None);
+        assert_eq!(stats.record(1000 * MS, false, MS / 2), None);
+        let report = stats
+            .record(5000 * MS, false, MS / 2)
+            .expect("due after 5 s");
+        assert_eq!((report.iterations, report.housekeeping), (3, 1));
+        assert_eq!((report.cpu_total, report.cpu_max), (3 * MS, 2 * MS));
+        assert_eq!(report.secs, 5.0);
+        // Starting over, with the totals kept.
+        assert_eq!(stats.take(6000 * MS), None);
+        stats.record(6000 * MS, true, MS);
+        let report = stats.take(7000 * MS).expect("one iteration left");
+        assert_eq!((report.iterations, report.housekeeping), (1, 1));
+        assert_eq!(stats.total, (4, 2));
     }
 
     #[test]

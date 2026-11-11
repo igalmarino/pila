@@ -341,6 +341,10 @@ impl Pila {
                 "entries": self.blur.stats().2,
             },
             "capture": { "textures": self.capture.texture_count() },
+            "event_loop": {
+                "iterations": self.loop_stats.total.0,
+                "housekeeping": self.loop_stats.total.1,
+            },
             "xwayland": self.xwayland.display,
             "children": self.children.len(),
         })

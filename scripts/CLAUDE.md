@@ -13,7 +13,8 @@ another binary; `PILA_CHECK_RUST_LOG` adds `RUST_LOG` directives to the run's ow
 `smithay::backend::drm::compositor=trace` for why direct scanout starts and stops); INFO lines report without judging (how long gamma set the blocking
 way took: after a modeset, or a driver without `GAMMA_LUT`; the first frames after outputs were
 set up, which the budget leaves out; the redraws per output that found nothing new, `idle` in
-the frame statistics, at most one per refresh on bare metal; on bare metal, how many frames
+the frame statistics, at most one per refresh on bare metal; the event loop's own work after each iteration, `loop`,
+how often it did all of its housekeeping and the CPU it took; on bare metal, how many frames
 were an app's buffer as it is, `direct`: direct scanout, which the fullscreen terminal may
 bring). `--vrr` (bare metal) asks every
 monitor for adaptive sync and checks it comes on where a monitor can do it, that Pila then

@@ -347,7 +347,12 @@ Key flows and invariants:
   first such request since the last redraw (one that finds nothing drops it); not with adaptive sync, nor for the first frame
   after a modeset). Each late frame is logged with what made it late: held back by the wait
   (`held`), drawn late (`drawn_after_ms`) or shown late after being drawn in time
-  (`shown_after_ms`: the GPU, the commit). `scripts/check` judges these lines and reports the idle redraws per output.
+  (`shown_after_ms`: the GPU, the commit). The event loop's own work after each iteration
+  (`Pila::after_frames`, captures left out), which runs as often as input and clients bring
+  events, not once per frame, is a `loop` line (`record_loop`): iterations, those that did all
+  of the housekeeping, and its CPU time, summed and worst; `state_json` has the totals
+  (`event_loop`). `scripts/check` judges these lines and reports the idle redraws per output
+  and the loop's work.
 - **Pointer grabs** (`grabs/move_grab.rs`, `grabs/resize_grab.rs`): Mod+drag installs the
   move/resize grab *before* the press is
   forwarded, so the client never sees that click. Move/resize grabs show their own cursor

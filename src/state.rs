@@ -175,6 +175,9 @@ pub struct Pila {
     pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
     /// The screen captures' frames (`frame_stats.rs`, `Pila::record_capture`).
     pub capture_stats: crate::frame_stats::FrameStats,
+    /// The event loop's own work after each iteration (`frame_stats.rs`,
+    /// `Pila::record_loop`).
+    pub loop_stats: crate::frame_stats::LoopStats,
 
     /// The mapped windows of the active workspace and those on every
     /// workspace, in stacking order (back to front); the others are
@@ -534,6 +537,7 @@ impl Pila {
             slide_pool: Default::default(),
             frame_stats: HashMap::new(),
             capture_stats: Default::default(),
+            loop_stats: Default::default(),
             space: Space::default(),
             popups,
             session_lock: SessionLock::default(),
@@ -1483,6 +1487,15 @@ impl Pila {
     /// without (`capture_due`). Session saves and keyboard layout events every
     /// iteration.
     pub fn after_frames(&mut self) {
+        let started = std::time::Instant::now();
+        let (housekeeping, captures) = self.after_frames_work();
+        let cpu = started.elapsed().saturating_sub(captures);
+        self.record_loop(housekeeping, cpu);
+    }
+
+    /// `after_frames`' work: whether it did all of it (the housekeeping),
+    /// and the time the captures took (counted apart, `record_capture`).
+    fn after_frames_work(&mut self) -> (bool, std::time::Duration) {
         // Every iteration: a window can close before its last move is drawn.
         self.refresh_sessions();
         // A layout can change with no frame to draw (an xkb option's keys).
@@ -1492,18 +1505,21 @@ impl Pila {
         if !std::mem::take(&mut self.housekeeping) && !drawn && !capture_due {
             // A change no frame follows (every monitor turned off).
             self.send_ipc_events_due();
-            return;
+            return (false, std::time::Duration::ZERO);
         }
         self.apply_unblocked_commits();
+        let mut captures = std::time::Duration::ZERO;
         // What a capture shows changes with a frame, or with a commit that
         // shows on no output (a hidden window's), and a capture client may
         // ask for a frame: not with every client dispatch.
         if drawn || capture_due {
+            let started = std::time::Instant::now();
             // One scene for every capture of this pass, built at the first.
             let mut input = None;
             self.process_captures_with(&mut input);
             self.process_screencopies(&mut input);
             self.capture.trim_textures();
+            captures = started.elapsed();
         }
         // The space knows which outputs each window is on only after its
         // refresh, so that comes before the taskbar listeners are updated.
@@ -1515,6 +1531,7 @@ impl Pila {
         self.step_animations();
         self.schedule_hidden_frames();
         self.prepare_slide_textures();
+        (true, captures)
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The

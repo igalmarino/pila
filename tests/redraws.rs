@@ -283,3 +283,35 @@ fn the_spaces_windows_change_only_through_the_helpers_that_redraw() {
         "use Pila::map_window, unmap_window or raise_window"
     );
 }
+
+/// The event loop's iterations and those that did all of `after_frames`'
+/// bookkeeping, since startup (`frame_stats::LoopStats`).
+fn loop_counts(state: &Value) -> (u64, u64) {
+    let counts = &state["event_loop"];
+    (
+        counts["iterations"].as_u64().unwrap(),
+        counts["housekeeping"].as_u64().unwrap(),
+    )
+}
+
+#[test]
+fn the_event_loops_iterations_and_housekeeping_are_counted() {
+    let mut pila = TestPila::start();
+    let before = loop_counts(&pila.settle());
+    for i in 0..10 {
+        pila.move_by(if i % 2 == 0 { 3.0 } else { -3.0 }, 0.0);
+    }
+    let after = loop_counts(&pila.settle());
+    assert!(
+        after.0 > before.0,
+        "no iteration counted: {before:?} {after:?}"
+    );
+    assert!(
+        after.1 > before.1,
+        "no housekeeping counted: {before:?} {after:?}"
+    );
+    assert!(
+        after.1 <= after.0,
+        "more housekeeping than iterations: {after:?}"
+    );
+}

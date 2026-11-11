@@ -580,6 +580,23 @@ if [ -n "$stats" ]; then
     done
 fi
 
+# The event loop's own work after each iteration (`loop` in the frame
+# statistics: `Pila::after_frames`, captures apart), paced by input and clients
+# rather than by frames. Reported, not judged.
+loops=$(grep 'pila::frames: loop' "$log" || true)
+if [ -n "$loops" ]; then
+    read -r iterations housekeeping cpu worst rate < <(awk '{
+        for (i = 1; i <= NF; i++) {
+            if ($i ~ /^iterations=/) n += substr($i, 12)
+            if ($i ~ /^housekeeping=/) h += substr($i, 14)
+            if ($i ~ /^cpu_ms=/) c += substr($i, 8)
+            if ($i ~ /^cpu_max_ms=/) { m = substr($i, 12) + 0; if (m > w) w = m }
+            if ($i ~ /^secs=/) t += substr($i, 6)
+        }
+    } END { printf "%d %d %.1f %.2f %.0f\n", n, h, c, w, t ? h / t : 0 }' <<<"$loops")
+    info "event loop: $iterations iterations, $housekeeping with all the housekeeping (${rate}/s), ${cpu} ms of CPU in all, worst ${worst} ms"
+fi
+
 # Frames that were an app's buffer as it is (direct scanout, bare metal:
 # `direct` in the frame statistics; `udev/draw.rs::frame_flags`), which the
 # fullscreen scenario may bring: it depends on the terminal (an opaque buffer
