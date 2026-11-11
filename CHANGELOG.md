@@ -12,10 +12,13 @@
   picture to theirs, GPUs plugged in and out included. Off by default: it's new and not yet tried
   on such a machine, so reports are very welcome. `pila-report` lists the GPUs in use and says
   which monitors are on one that isn't.
-
 - **X11 windows show up at once:** an X11 window could open blank (and the window focused
   before kept its focused title bar) until something else redrew the screen, when Xwayland
   told Pila which surface was the window's after drawing it.
+- **Smithay moved forward** (10 commits, to 3a08ff9): an X11 app that withdraws its window the
+  ICCCM way (a synthetic `UnmapNotify`) now has it unmapped, an endless loop of unmaps when an X11
+  window was reparented is gone, and damage with a negative size from an app, which crashed a
+  debug build of Pila, is dropped.
 
 ## 0.5.0 (2026-11-10)
 

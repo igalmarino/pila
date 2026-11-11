@@ -45,7 +45,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # on purpose, with a full test run and a bare-metal check.
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay.git"
-rev = "65aa86fa5236e41775c313408102a5d5c2d1e2ca"
+rev = "3a08ff960e90e5ee472f6195254d02167571f428"
 default-features = false
 features = [
     "backend_winit",

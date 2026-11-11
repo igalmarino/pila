@@ -262,10 +262,6 @@ fn apply(
         }
         Op::Damage { surface, x, y, w, h, buffer } => {
             let Some(surface) = pick(&c.surfaces, surface) else { return };
-            // A negative size crashes a debug build in Smithay's handler
-            // (`surface_limits::damage_of_a_negative_size_harms_nothing`,
-            // ignored): left out until Smithay fixes it, so the rest is found.
-            let (w, h) = (w.max(0), h.max(0));
             if buffer && surface.version() >= 4 {
                 surface.damage_buffer(x, y, w, h);
             } else {

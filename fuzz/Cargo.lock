@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "aliasable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1037,7 +1043,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pila"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "bitflags",
  "calloop",
@@ -1504,8 +1510,9 @@ checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/Smithay/smithay.git?rev=65aa86fa5236e41775c313408102a5d5c2d1e2ca#65aa86fa5236e41775c313408102a5d5c2d1e2ca"
+source = "git+https://github.com/Smithay/smithay.git?rev=3a08ff960e90e5ee472f6195254d02167571f428#3a08ff960e90e5ee472f6195254d02167571f428"
 dependencies = [
+ "aliasable",
  "appendlist",
  "bitflags",
  "calloop",

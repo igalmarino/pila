@@ -1463,7 +1463,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/Smithay/smithay.git?rev=65aa86fa5236e41775c313408102a5d5c2d1e2ca#65aa86fa5236e41775c313408102a5d5c2d1e2ca"
+source = "git+https://github.com/Smithay/smithay.git?rev=3a08ff960e90e5ee472f6195254d02167571f428#3a08ff960e90e5ee472f6195254d02167571f428"
 dependencies = [
  "aliasable",
  "appendlist",
