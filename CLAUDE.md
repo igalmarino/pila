@@ -242,8 +242,8 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   (`config.rs`), which the lock test runs, and its name into `NAMED_ACTIONS` (or
   `ACTIONS_WITH_ARGUMENT`), which parsing and its error message read and a test checks
   `config.example.toml` lists.
-- **Input:** a new input path goes through `process_input_event` (or calls
-  `notify_activity`) to count as activity, and hit testing through `Pila::under`, which
+- **Input:** a new input path goes through `process_input_event` (or sets
+  `input_activity`) to count as activity, and hit testing through `Pila::under`, which
   must agree with the order `Pila::scene` renders.
 - **X11:** `window.toplevel()` may be `None`: use `wl_surface()`, `fill_state`,
   `close_window` and `focus_target`, and branch on `x11_surface()`. Moving a managed X11

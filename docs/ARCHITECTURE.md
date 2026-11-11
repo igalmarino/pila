@@ -841,12 +841,14 @@ Key flows and invariants:
   unlocks once the holder's lock object is gone (Smithay 0.7 called `unlock()` even for a
   rogue client's `unlock_and_destroy`; its main branch checks the lock, and Pila still does). A dead locker leaves the session locked;
   a new locker may take over.
-- **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event calls
-  `notify_activity`; Smithay runs the notification timers on `loop_handle`. Idle inhibitors
+- **Idle** (`idle.rs`, ext-idle-notify + idle-inhibit): every input event sets
+  `Pila::input_activity`, which `after_frames` turns into one `notify_activity` per loop
+  iteration (each re-arms every notification's timer: not a thousand times a second for a
+  1000 Hz mouse); Smithay runs the notification timers on `loop_handle`. Idle inhibitors
   only count while their surface is part of a mapped window or layer surface and the
   session isn't locked; `update_idle_inhibit` re-checks in `after_frames` (after a frame,
   a client dispatch or input). A new input path
-  must go through `process_input_event` (or call `notify_activity`) to count as activity.
+  must go through `process_input_event` (or set `input_activity`) to count as activity.
 - **Pointer constraints** (`pointer_constraints.rs`): a lock/confine activates only while
   the pointer is over its surface (inside its region) and that window has keyboard focus;
   `SeatHandler::focus_changed` releases it (`release_constraint_for_focus`), which makes

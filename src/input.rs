@@ -42,7 +42,9 @@ impl Pila {
     where
         I::Device: 'static,
     {
-        self.notify_activity();
+        // Activity for the idle notifier, told after the events
+        // (`after_frames`).
+        self.input_activity = true;
         // Whatever the input changed beyond the screen is `after_frames`'.
         // The pointer moving changes little of it, and comes up to a thousand
         // times a second: only if it changes what that looks at

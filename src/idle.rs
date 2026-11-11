@@ -1,7 +1,8 @@
 //! ext-idle-notify and idle-inhibit: tell clients such as swayidle when the
 //! user has been idle, unless something visible (a video player) inhibits it.
 //!
-//! Every input event counts as activity (`Pila::process_input_event`).
+//! Every input event counts as activity (`Pila::process_input_event`), told
+//! the notifier once per event-loop iteration (`Pila::after_frames`).
 //! Smithay runs the per-notification timers on `Pila::loop_handle`. An idle
 //! inhibitor only counts while its surface is visible: part of a mapped window
 //! or layer surface, and the session not locked. `update_idle_inhibit`

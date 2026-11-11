@@ -134,6 +134,9 @@ pub struct Pila {
     /// housekeeping even if no output was drawn (the change may show on
     /// none: a minimized window's title for the taskbar, a capture's window).
     pub housekeeping: bool,
+    /// Input came this iteration: `after_frames` tells the idle notifier,
+    /// once however many events (`Pila::notify_activity`).
+    pub input_activity: bool,
     /// Captures may have something to do this iteration without a frame
     /// drawn: a commit that shows on no output (a hidden window's, which may
     /// be captured; `redraw_committed`), a capture client asking for a frame.
@@ -521,6 +524,7 @@ impl Pila {
             config_reload_pending: false,
             frame_drawn: false,
             housekeeping: false,
+            input_activity: false,
             capture_due: false,
             deferred_redraws: None,
             hidden_frame_timer: false,
@@ -1496,6 +1500,11 @@ impl Pila {
     /// `after_frames`' work: whether it did all of it (the housekeeping),
     /// and the time the captures took (counted apart, `record_capture`).
     fn after_frames_work(&mut self) -> (bool, std::time::Duration) {
+        // Once per iteration: each call re-arms every idle notification's
+        // timer, and a 1000 Hz mouse brings an event a millisecond.
+        if std::mem::take(&mut self.input_activity) {
+            self.notify_activity();
+        }
         // Every iteration: a window can close before its last move is drawn.
         self.refresh_sessions();
         // A layout can change with no frame to draw (an xkb option's keys).
