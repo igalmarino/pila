@@ -175,7 +175,8 @@ fn draw(
     let pointer_here = output_geo.to_f64().contains(input.pointer);
     let scale = crate::scale::output_scale(&output);
 
-    let flags = frame_flags(state.config.direct_scanout);
+    let direct_scanout = state.config.direct_scanout;
+    let flags = frame_flags(direct_scanout);
     let Pila {
         backend,
         blur,
@@ -191,6 +192,7 @@ fn draw(
         outputs,
         devices,
         cursor_theme,
+        dmabuf_feedback,
         ..
     } = &mut **data;
     // Checked above; the commits applied since (`signal_commit_timers`)
@@ -301,6 +303,24 @@ fn draw(
     match rendered {
         Ok((states, is_empty)) => {
             frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
+            // The formats this output's primary plane takes, for a surface
+            // it showed as it is or tried to; back to the usual ones for the
+            // others, and for all with direct scanout off.
+            if let Some(scanout) = &surface.scanout_feedback {
+                let scanout = if direct_scanout {
+                    scanout
+                } else {
+                    &*dmabuf_feedback
+                };
+                frame::send_dmabuf_feedback(
+                    scene,
+                    cursor_wl_surface,
+                    &output,
+                    &states,
+                    dmabuf_feedback,
+                    scanout,
+                );
+            }
             if !is_empty {
                 let feedback =
                     frame::presentation_feedback(scene, cursor_wl_surface, &output, &states);

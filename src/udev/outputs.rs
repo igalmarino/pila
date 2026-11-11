@@ -3,6 +3,8 @@
 
 use super::*;
 
+use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
+
 /// The mode `config` asks for among a connector's `modes`, else its
 /// preferred mode, else its first.
 pub(super) fn pick_mode(
@@ -633,6 +635,7 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
             presented_variable: false,
             first_frame: true,
             direct: false,
+            scanout_feedback: None,
             idle_until: None,
             idle_timer: false,
             idle_streak: 0,
@@ -671,6 +674,28 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
     state.queue_redraw();
 }
 
+/// What a surface that an output shows as it is, or could, is told about
+/// dmabufs: first the formats the output's primary plane takes (`plane`, of
+/// the DRM device `scanout`) among those the renderer reads (`render`, of the
+/// device `main`), so a buffer in one can be drawn too when it isn't shown as
+/// it is; then all the renderer's. `None` if the two share no format.
+fn scanout_feedback(
+    main: libc::dev_t,
+    render: &FormatSet,
+    scanout: libc::dev_t,
+    plane: &FormatSet,
+) -> Option<DmabufFeedback> {
+    let formats: Vec<_> = plane.intersection(render).copied().collect();
+    if formats.is_empty() {
+        return None;
+    }
+    DmabufFeedbackBuilder::new(main, render.iter().copied())
+        .add_preference_tranche(scanout, TrancheFlags::Scanout, formats, 4..=6)
+        .build()
+        .inspect_err(|err| warn!(%err, "can't tell clients an output's formats"))
+        .ok()
+}
+
 /// Set a connected output up: its CRTC, its `wl_output` global and its
 /// place in the space. `false` if the CRTC couldn't be set up.
 pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
@@ -683,6 +708,7 @@ pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
         gpus,
         primary,
         session,
+        dmabuf_formats,
         ..
     } = &mut **data;
     let (
@@ -706,6 +732,14 @@ pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
     let Some(drm_output) = initialize_on(drm, gpus, primary, render_node, id.crtc, surface) else {
         return false;
     };
+    // Only the primary's outputs show a client's buffer as it is.
+    surface.scanout_feedback = (*render_node == *primary)
+        .then(|| {
+            let plane = drm_output
+                .with_compositor(|compositor| compositor.surface().plane_info().formats.clone());
+            scanout_feedback(primary.dev_id(), dmabuf_formats, id.node.dev_id(), &plane)
+        })
+        .flatten();
     surface.drm_output = Some(drm_output);
     surface.enabled = true;
     surface.frame_pending = false;
@@ -736,6 +770,7 @@ pub(super) fn disable_output(state: &mut Pila, id: OutputId) {
     }
     surface.enabled = false;
     surface.drm_output = None;
+    surface.scanout_feedback = None;
     surface.frame_pending = false;
     surface.gamma_in_flight = false;
     surface.lock_frame = LockFrame::None;
@@ -899,6 +934,30 @@ pub(super) fn is_non_desktop(drm: &PilaDrmOutputManager, connector: &connector::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_outputs_formats_are_told_only_if_the_renderer_reads_some() {
+        use smithay::backend::allocator::{Format, Modifier};
+        let format = |code, modifier| Format { code, modifier };
+        let render: FormatSet = [
+            format(Fourcc::Argb8888, Modifier::Linear),
+            format(Fourcc::Xrgb8888, Modifier::Linear),
+        ]
+        .into_iter()
+        .collect();
+        let shared: FormatSet = [
+            format(Fourcc::Xrgb8888, Modifier::Linear),
+            format(Fourcc::Nv12, Modifier::Linear),
+        ]
+        .into_iter()
+        .collect();
+        let apart: FormatSet = [format(Fourcc::Nv12, Modifier::Linear)]
+            .into_iter()
+            .collect();
+        assert!(scanout_feedback(1, &render, 2, &shared).is_some());
+        assert!(scanout_feedback(1, &render, 2, &apart).is_none());
+        assert!(scanout_feedback(1, &render, 2, &FormatSet::default()).is_none());
+    }
 
     fn mode(w: i32, h: i32, hz: i32) -> ModeKey {
         ModeKey {

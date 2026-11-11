@@ -21,6 +21,7 @@ use crate::edid::Monitor;
 use smithay::{
     backend::{
         allocator::{
+            format::FormatSet,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
             Fourcc,
         },
@@ -63,7 +64,10 @@ use smithay::{
         wayland_server::backend::GlobalId,
     },
     utils::{DeviceFd, IsAlive, Logical, Point, Transform},
-    wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
+    wayland::{
+        dmabuf::{DmabufFeedback, DmabufFeedbackBuilder},
+        presentation::Refresh,
+    },
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use tracing::{debug, error, info, warn};
@@ -214,6 +218,12 @@ pub struct UdevData {
     gpus: GpuManager<GpuApi>,
     /// The primary GPU's render node: its key in `gpus`.
     primary: DrmNode,
+    /// What clients are told about dmabufs: the primary's formats. A surface
+    /// an output shows as it is gets the output's instead
+    /// (`OutputSurface::scanout_feedback`).
+    dmabuf_feedback: DmabufFeedback,
+    /// The dmabuf formats the primary's renderer reads.
+    dmabuf_formats: FormatSet,
     libinput: Libinput,
     /// Keyboards, for the Caps/Num/Scroll Lock LEDs.
     keyboards: Vec<libinput::Device>,
@@ -286,6 +296,10 @@ struct OutputSurface {
     /// The frame last queued was a client's buffer as it is, on the primary
     /// plane (`draw::frame_flags`); logged when it changes.
     direct: bool,
+    /// What a surface this output shows as it is, or could, is told about
+    /// dmabufs: the formats its primary plane takes first (`scanout_feedback`).
+    /// Only for an output on the primary GPU, with a CRTC.
+    scanout_feedback: Option<DmabufFeedback>,
     /// After a redraw that had nothing new to show, the next that may bring
     /// nothing either waits until then (`draw::idle_until`, `draw::idle_wait`):
     /// a client committing no new picture (no buffer, or one without damage)
@@ -855,8 +869,9 @@ pub fn init_udev(
 
     // Client buffers: shm in the formats the renderer reads, dmabuf on this GPU.
     state.protocols.shm.update_formats(renderer.shm_formats());
+    let dmabuf_formats = renderer.dmabuf_formats();
     let feedback =
-        DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()?;
+        DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats.clone()).build()?;
     drop(lent);
     state
         .protocols
@@ -974,6 +989,8 @@ pub fn init_udev(
         libinput,
         gpus,
         primary: render_node,
+        dmabuf_feedback: feedback,
+        dmabuf_formats,
         devices: HashMap::from([(
             node,
             GpuDevice {

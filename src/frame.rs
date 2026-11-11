@@ -6,20 +6,25 @@
 use std::time::Duration;
 
 use smithay::{
-    backend::renderer::element::{default_primary_scanout_output_compare, RenderElementStates},
+    backend::renderer::element::{
+        default_primary_scanout_output_compare, utils::select_dmabuf_feedback, RenderElementStates,
+    },
     desktop::layer_map_for_output,
     desktop::utils::{
-        send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
-        surface_primary_scanout_output, take_presentation_feedback_surface_tree,
-        update_surface_primary_scanout_output, with_surfaces_surface_tree,
-        OutputPresentationFeedback,
+        send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
+        surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+        take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
+        with_surfaces_surface_tree, OutputPresentationFeedback,
     },
     output::Output,
     reexports::{
         calloop::timer::{TimeoutAction, Timer},
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    wayland::compositor::{SurfaceAttributes, SurfaceData},
+    wayland::{
+        compositor::{SurfaceAttributes, SurfaceData},
+        dmabuf::DmabufFeedback,
+    },
 };
 
 use crate::{animation::WindowEffect, render::Scene, Pila};
@@ -71,6 +76,37 @@ pub fn update_primary_outputs(
     }
     for surface in other_trees(scene, cursor) {
         with_surfaces_surface_tree(surface, update);
+    }
+}
+
+/// Tell the surfaces `output` showed in the frame described by `states`, those
+/// that asked, which dmabuf formats to use: `scanout`'s (what `output` can
+/// show as it is, first) for a surface that went to the screen as it is or was
+/// tried and refused, `render`'s for the others. Sent only when it changes
+/// (bare metal's direct scanout, `udev/draw.rs`).
+pub fn send_dmabuf_feedback(
+    scene: &Scene,
+    cursor: Option<&WlSurface>,
+    output: &Output,
+    states: &RenderElementStates,
+    render: &DmabufFeedback,
+    scanout: &DmabufFeedback,
+) {
+    let select = |surface: &WlSurface, _: &SurfaceData| {
+        select_dmabuf_feedback(surface, states, render, scanout)
+    };
+    for entry in &scene.windows {
+        entry
+            .window
+            .send_dmabuf_feedback(output, surface_primary_scanout_output, select);
+    }
+    for entry in scene.layers() {
+        entry
+            .layer
+            .send_dmabuf_feedback(output, surface_primary_scanout_output, select);
+    }
+    for surface in other_trees(scene, cursor) {
+        send_dmabuf_feedback_surface_tree(surface, output, surface_primary_scanout_output, select);
     }
 }
 

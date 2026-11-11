@@ -291,7 +291,12 @@ Key flows and invariants:
   elements have no `underlying_storage` either). The frame flags allow the primary plane,
   whatever the buffer's format, and the cursor plane; not overlay planes (what they take
   differs by driver, and they'd be for a window among others, which saves little). A capture
-  of such a frame draws the buffer (Smithay's `blit_frame_result`). Such frames are counted
+  of such a frame draws the buffer (Smithay's `blit_frame_result`). So that the client's buffer
+  is one the plane takes, a surface an output showed as it is, or tried to and was refused, is
+  told that output's formats first (per-surface dmabuf feedback: `OutputSurface::scanout_feedback`,
+  the primary plane's formats among those the renderer reads, as a scanout tranche;
+  `frame::send_dmabuf_feedback` after each frame, sent when it changes), and the usual ones
+  again once it's drawn among other things. Such frames are counted
   apart in the frame statistics (`direct`) and an output starting or stopping them is logged
   (`direct scanout`, `pila::frames`). Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.

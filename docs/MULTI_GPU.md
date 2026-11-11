@@ -90,15 +90,15 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
    (`vkms.yml`): device handling and outputs on the second one, not real copies between GPUs.
 3. **What clients are told.** Per-surface dmabuf feedback (Smithay's `DmabufFeedbackBuilder`
    with a scanout tranche for the output's device) lets a fullscreen client allocate buffers a
-   device scans out. It only matters where a client's buffer is scanned out at all: on the
-   primary since direct scanout (`docs/ARCHITECTURE.md`, "Direct scanout": Smithay's
-   `GbmFramebufferExporter` takes a client's dmabuf that names the output's device, which
-   `dmabuf_imported` sets to the primary), never on another GPU, where `PrimaryGpuElement` has
-   no `underlying_storage` and the buffer names the primary. Left: whether an output on another
-   GPU scans out a client's buffer (one allocated on the primary, imported by the other GPU),
-   and then its tranche. linux-drm-syncobj stays on the primary. Captures stay on the primary;
-   the composited-frame blit (`take_composited`) only applies to outputs on it, the others'
-   captures are drawn from the scene.
+   device scans out. Done where a client's buffer is scanned out at all: on the primary's
+   outputs (`docs/ARCHITECTURE.md`, "Direct scanout": Smithay's `GbmFramebufferExporter` takes
+   a client's dmabuf that names the output's device, which `dmabuf_imported` sets to the
+   primary; `OutputSurface::scanout_feedback`). Never on another GPU, where `PrimaryGpuElement`
+   has no `underlying_storage` and the buffer names the primary. Left: whether an output on
+   another GPU scans out a client's buffer (one allocated on the primary, imported by the other
+   GPU), and then its tranche. linux-drm-syncobj stays on the primary. Captures stay on the
+   primary; the composited-frame blit (`take_composited`) only applies to outputs on it, the
+   others' captures are drawn from the scene.
 
 ## Risks
 
