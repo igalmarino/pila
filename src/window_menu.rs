@@ -543,8 +543,9 @@ pub fn elements(
         let key = (*label, buffer_scale);
         if let std::collections::hash_map::Entry::Vacant(slot) = buffers.labels.entry(key) {
             let width = WIDTH - TEXT_INSET * 2 - MARK_SIZE;
-            if let Some((pixels, w)) =
-                crate::text::render_title(label, colors.icon, width, ITEM_HEIGHT, buffer_scale)
+            if let Some(crate::text::Title {
+                pixels, width: w, ..
+            }) = crate::text::render_title(label, colors.icon, width, ITEM_HEIGHT, buffer_scale)
             {
                 let buffer = MemoryRenderBuffer::from_slice(
                     &pixels,

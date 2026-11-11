@@ -257,10 +257,24 @@ struct ScaledParts {
 /// The rendered title and what it was rendered for (text, width, color,
 /// buffer scale), so it's only re-shaped when one of those changes.
 struct TitleTexture {
-    key: (String, i32, [f32; 3], i32),
+    /// The text, its color and the buffer scale.
+    key: (String, [f32; 3], i32),
+    /// The room it was drawn in (logical).
+    max_width: i32,
+    /// The whole text fit (`text::Title::whole`).
+    whole: bool,
     buffer: MemoryRenderBuffer,
     /// Width of the rendered text in logical pixels, for centering.
     width: i32,
+}
+
+impl TitleTexture {
+    /// Whether it's what `key` drawn in `max_width` would be: drawn so, or
+    /// the whole text, which any room it fits in leaves as it is (a resize
+    /// changes the room every frame).
+    fn shows(&self, key: &(String, [f32; 3], i32), max_width: i32) -> bool {
+        self.key == *key && (self.max_width == max_width || (self.whole && self.width <= max_width))
+    }
 }
 
 /// Where a title `text_width` wide starts in a bar at `bar_x`, `bar_width`
@@ -386,8 +400,11 @@ pub fn title_bar_elements(
         (rect.size.w - BUTTONS * BUTTON_WIDTH - 2 * TITLE_PADDING).min(MAX_TITLE_WIDTH);
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
-            let key = (text, title_width, icon_color, buffer_scale);
-            if title.as_ref().is_none_or(|texture| texture.key != key) {
+            let key = (text, icon_color, buffer_scale);
+            if title
+                .as_ref()
+                .is_none_or(|texture| !texture.shows(&key, title_width))
+            {
                 // None until the fonts have loaded; then the next frame draws it.
                 *title = crate::text::render_title(
                     &key.0,
@@ -396,16 +413,18 @@ pub fn title_bar_elements(
                     TITLE_BAR_HEIGHT,
                     buffer_scale,
                 )
-                .map(|(pixels, width)| TitleTexture {
+                .map(|drawn| TitleTexture {
                     buffer: MemoryRenderBuffer::from_slice(
-                        &pixels,
+                        &drawn.pixels,
                         Fourcc::Argb8888,
-                        (width, TITLE_BAR_HEIGHT * buffer_scale),
+                        (drawn.width, TITLE_BAR_HEIGHT * buffer_scale),
                         buffer_scale,
                         Transform::Normal,
                         None,
                     ),
-                    width: width / buffer_scale,
+                    width: drawn.width / buffer_scale,
+                    max_width: title_width,
+                    whole: drawn.whole,
                     key,
                 });
             }
@@ -598,6 +617,30 @@ fn box_sdf(p: (f64, f64), c: (f64, f64), half: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_whole_titles_texture_serves_any_room_it_fits_in() {
+        let key = ("Files".to_string(), [1.0; 3], 1);
+        let texture = |whole| TitleTexture {
+            key: key.clone(),
+            max_width: 300,
+            whole,
+            buffer: MemoryRenderBuffer::new(Fourcc::Argb8888, (1, 1), 1, Transform::Normal, None),
+            width: 40,
+        };
+        // A resize: the room changes, the whole text still fits.
+        assert!(texture(true).shows(&key, 300));
+        assert!(texture(true).shows(&key, 120));
+        assert!(texture(true).shows(&key, 40));
+        assert!(!texture(true).shows(&key, 39));
+        // Cut short ("…"): only the room it was drawn in.
+        assert!(!texture(false).shows(&key, 120));
+        assert!(texture(false).shows(&key, 300));
+        // Another text, color or scale is another texture.
+        assert!(!texture(true).shows(&("Edit".to_string(), [1.0; 3], 1), 300));
+        assert!(!texture(true).shows(&("Files".to_string(), [0.5; 3], 1), 300));
+        assert!(!texture(true).shows(&("Files".to_string(), [1.0; 3], 2), 300));
+    }
 
     fn bar() -> Rectangle<i32, Logical> {
         // A 300px-wide bar at (100, 50).

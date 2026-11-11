@@ -978,7 +978,9 @@ Key flows and invariants:
   Bar textures (buttons, title) are per-window `MemoryRenderBuffer`s cached by a key and
   re-rendered only when it changes, one set per buffer scale (`TitleBarBuffers::scaled`, the
   last few used: drawing a window on an output of another scale leaves the others' alone); they can't be shared between windows (element ids must
-  be unique per frame). Titles come from `text.rs` (cosmic-text): fonts load on a
+  be unique per frame). A title that fit whole is kept for any room it still fits in
+  (`TitleTexture::shows`): a resize changes the room every frame, and it would be shaped and
+  uploaded again each time. Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw
   without text; once loaded (and warmed up: common characters shaped and rasterized on that
   thread, `text::init`) a ping asks for a redraw (`main.rs`). The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide

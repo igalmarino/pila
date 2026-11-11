@@ -72,19 +72,30 @@ fn prepare(system: FontSystem) -> Option<Fonts> {
 const WARM_UP_TEXT: &str = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ \
      0123456789 .,:;-_/\\|()[]{}<>@#%&*+=~'\"!?… áéíóúñü";
 
+/// A title drawn by `render_title`.
+pub struct Title {
+    /// Premultiplied ARGB8888 (little-endian: B, G, R, A), cropped to the
+    /// text.
+    pub pixels: Vec<u8>,
+    /// Their width in physical pixels (a multiple of the scale), so callers
+    /// can position it.
+    pub width: i32,
+    /// The whole text fit, with room to spare: drawn at any `max_width` at
+    /// least `width` (logical), it comes out the same.
+    pub whole: bool,
+}
+
 /// `title` in `color` as one line at most `max_width` wide (ending in "…" if
 /// it doesn't fit), vertically centered in `height` (both logical), drawn
-/// at `scale` physical pixels per logical one. Returns premultiplied
-/// ARGB8888 pixels (little-endian: B, G, R, A) cropped to the text, and
-/// their width in physical pixels (a multiple of `scale`), so callers can
-/// position it. `None` until the fonts have loaded.
+/// at `scale` physical pixels per logical one. `None` until the fonts have
+/// loaded.
 pub fn render_title(
     title: &str,
     color: [f32; 3],
     max_width: i32,
     height: i32,
     scale: i32,
-) -> Option<(Vec<u8>, i32)> {
+) -> Option<Title> {
     let fonts = FONTS.get()?;
     let mut fonts = fonts.lock().ok()?;
     render_with(&mut fonts, title, color, max_width, height, scale)
@@ -98,7 +109,7 @@ fn render_with(
     max_width: i32,
     height: i32,
     scale: i32,
-) -> Option<(Vec<u8>, i32)> {
+) -> Option<Title> {
     // Sizes from a client's window: nothing to draw rather than an overflow.
     let width = max_width.checked_mul(scale).filter(|w| *w > 0)?;
     let height = height.checked_mul(scale).filter(|h| *h > 0)?;
@@ -158,14 +169,21 @@ fn render_with(
         .map(|run| run.line_w)
         .fold(0.0, f32::max);
     // A whole number of logical pixels, so the buffer's logical size is exact.
-    let cropped = ((text_width.ceil() as i32) + 1).clamp(1, width);
+    let natural = (text_width.ceil() as i32) + 1;
+    // Short of the room by more than the pixel: nothing was cut ("…").
+    let whole = natural < width;
+    let cropped = natural.clamp(1, width);
     let cropped = ((cropped + scale - 1) / scale * scale).min(width);
     let pixels = pixels
         .chunks_exact((width * 4) as usize)
         .flat_map(|row| &row[..(cropped * 4) as usize])
         .copied()
         .collect();
-    Some((pixels, cropped))
+    Some(Title {
+        pixels,
+        width: cropped,
+        whole,
+    })
 }
 
 #[cfg(test)]
