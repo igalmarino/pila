@@ -84,20 +84,20 @@ impl Pila {
         ) {
             self.input.mod_tap = None;
         }
+        // A gesture's begin and end; its updates come at the touchpad's rate.
         let gesture = matches!(
             event,
             InputEvent::GestureSwipeBegin { .. }
-                | InputEvent::GestureSwipeUpdate { .. }
                 | InputEvent::GestureSwipeEnd { .. }
                 | InputEvent::GesturePinchBegin { .. }
-                | InputEvent::GesturePinchUpdate { .. }
                 | InputEvent::GesturePinchEnd { .. }
                 | InputEvent::GestureHoldBegin { .. }
                 | InputEvent::GestureHoldEnd { .. }
         );
         // What it redraws (`redraw.rs`): a key or a scroll a client gets is
-        // the client's to show (it commits); a key Pila acts on, a click or a
-        // gesture may change anything; the pointer moving, the outputs it
+        // the client's to show (it commits), as is a gesture's update; a key
+        // Pila acts on, a click, a swipe step Pila acts on or a gesture's
+        // begin or end may change anything; the pointer moving, the outputs it
         // was and is on.
         match event {
             InputEvent::Keyboard { event, .. } => {
@@ -121,7 +121,9 @@ impl Pila {
             // Touchpad gestures (`gestures.rs`).
             InputEvent::GestureSwipeBegin { event, .. } => self.on_gesture_swipe_begin::<I>(event),
             InputEvent::GestureSwipeUpdate { event, .. } => {
-                self.on_gesture_swipe_update::<I>(event)
+                if self.on_gesture_swipe_update::<I>(event) {
+                    self.queue_redraw();
+                }
             }
             InputEvent::GestureSwipeEnd { event, .. } => self.on_gesture_swipe_end::<I>(event),
             InputEvent::GesturePinchBegin { event, .. } => self.on_gesture_pinch_begin::<I>(event),

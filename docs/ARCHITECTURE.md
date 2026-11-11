@@ -238,7 +238,9 @@ Key flows and invariants:
   count that `[gestures]` binds: those are kept whole from begin to end (`Pila::input.swipe`,
   direction fixed after a small move, action after a threshold, window switching stepping
   per further stretch and ending on lift), unless locked or shortcuts are inhibited (a swipe
-  begun before a lock runs nothing once locked).
+  begun before a lock runs nothing once locked). A gesture's begin and end redraw every output;
+  its updates, at the touchpad's rate, only a step Pila acts on (`on_gesture_swipe_update`):
+  a client's are the client's to show.
   Output transforms (rotation) are the `Output`'s: Smithay rotates the rendered frame and
   the `Space` swaps a turned output's logical size, so Pila only sets it (and sizes output
   captures accordingly); clients are told `Normal` and draw upright. Still missing: touch.

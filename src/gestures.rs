@@ -128,10 +128,12 @@ impl Pila {
         );
     }
 
+    /// A swipe's update: Pila's swipe takes a step, or the client gets it.
+    /// Whether Pila took one (its action ran: something to redraw).
     pub(crate) fn on_gesture_swipe_update<I: InputBackend>(
         &mut self,
         event: I::GestureSwipeUpdateEvent,
-    ) {
+    ) -> bool {
         if let Some(swipe) = &mut self.input.swipe {
             let delta = event.delta();
             let fingers = swipe.fingers;
@@ -139,11 +141,12 @@ impl Pila {
                 // The first step(s) of this swipe: one-shot actions run now.
                 let first = new > 0 && swipe.steps == new;
                 self.run_swipe(Gesture { fingers, direction }, new, first);
+                return new > 0;
             }
-            return;
+            return false;
         }
         let Some(pointer) = self.seat.get_pointer() else {
-            return;
+            return false;
         };
         pointer.gesture_swipe_update(
             self,
@@ -152,6 +155,7 @@ impl Pila {
                 delta: event.delta(),
             },
         );
+        false
     }
 
     pub(crate) fn on_gesture_swipe_end<I: InputBackend>(&mut self, event: I::GestureSwipeEndEvent) {

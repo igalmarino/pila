@@ -187,3 +187,27 @@ fn a_gesture_config_rebinds_swipes() {
         window_in(s, "a").unwrap()["minimized"] == true
     });
 }
+
+/// The output's frames drawn and redraws with nothing new, together.
+fn redraws(state: &Value) -> u64 {
+    let output = &state["outputs"][0];
+    output["frames"].as_u64().unwrap() + output["idle"].as_u64().unwrap()
+}
+
+/// A pinch the client gets (zooming a page) is the client's to show: its
+/// updates, a touchpad's rate of them, redraw nothing of Pila's.
+#[test]
+fn a_clients_pinch_updates_redraw_nothing_of_pilas() {
+    let (mut pila, client) = setup();
+    pila.gesture(json!({ "kind": "pinch", "phase": "begin", "fingers": 2 }));
+    let before = redraws(&pila.settle());
+    for _ in 0..10 {
+        pila.gesture(json!({ "kind": "pinch", "phase": "update", "scale": 1.5 }));
+        pila.settle();
+    }
+    let after = redraws(&pila.settle());
+    pila.gesture(json!({ "kind": "pinch", "phase": "end" }));
+    client.wait_logged("pinch", "End");
+    assert!(client.has_logged("pinch", "scale: 1.5"));
+    assert_eq!(after, before, "redrawn for the client's pinch updates");
+}
