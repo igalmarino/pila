@@ -35,6 +35,9 @@ fn moving_the_pointer_on_one_output_doesnt_redraw_another() {
     pila.move_to(1280.0 + 500.0, 400.0);
     client.window("b").size(400, 300).create();
     assert_eq!(pila.wait_window("b")["output"], "B");
+    // Its frame for the configure that activates it, drawn before counting:
+    // a slow client's, coming in late, would count as one for the pointer.
+    client.roundtrip();
     pila.move_to(600.0, 400.0);
     let before = pila.settle();
     for i in 0..40 {
