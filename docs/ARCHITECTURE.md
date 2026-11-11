@@ -251,7 +251,9 @@ Key flows and invariants:
   request for it. `queue_redraw_output`/`request_redraw` ask one output (with `content`:
   `request_redraw_as` and `redraw::Content`, see "Bare metal"), `queue_redraw_rect` the outputs a
   global rectangle overlaps, `queue_redraw_window` those a window's frame, title bar, shadow
-  margin and popups touch (`window_visual_rect`), `queue_redraw_pointer` those of where the
+  margin and popups touch (`window_visual_rect`; no margin for a maximized or fullscreen window,
+  which has no shadow and reaches its output's edges: each of its frames would redraw the
+  outputs next to it), `queue_redraw_pointer` those of where the
   pointer was and is. `queue_redraw` asks every output, for what's global: the config,
   outputs, the lock, workspaces, focus (`focus_changed`: title bars and shadows show it), a
   key Pila acts on, a click, a gesture, animations. Who asks: a commit asks for its surface's

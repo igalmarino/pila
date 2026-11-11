@@ -11,6 +11,9 @@
   frame of Pila's in between: less work for the GPU, and battery (direct scanout, on the main
   GPU's monitors, when the driver takes the app's picture). If such a window flickers or shows
   wrong colors, `direct-scanout = false` in the configuration turns it off; please report it.
+- **A maximized or fullscreen window leaves the monitor next to it alone:** each of its frames
+  made the neighboring monitor look for something to redraw (room was kept for a shadow such a
+  window never has), and a frame of that monitor's own could then show a refresh late.
 - **Monitors on another GPU, to try:** on a laptop with two GPUs, the HDMI or DisplayPort output
   is often wired to the dedicated one, and a dock may have its own; Pila shows nothing there.
   With `other-gpus = true` in the configuration it draws them with the main GPU and copies the

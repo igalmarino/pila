@@ -73,6 +73,41 @@ fn a_clients_frame_redraws_only_the_output_it_shows_on() {
     );
 }
 
+/// A window that fills its output has no shadow, so nothing of it reaches the
+/// output next to it: its frames redraw only its own (found on bare metal: a
+/// fullscreen terminal on one monitor redrew the other at every frame, and
+/// held back that one's own frames).
+#[test]
+fn a_filled_windows_frames_dont_redraw_the_output_next_to_it() {
+    for combo in ["Super+m", "Super+f"] {
+        let mut pila = two_fast_outputs();
+        let client = pila.client();
+        let window = client.window("a").size(400, 300).create();
+        assert_eq!(pila.wait_window("a")["output"], "A");
+        pila.combo(combo);
+        pila.wait("the window to fill A", |s| {
+            let (x, _, w, _) = rect(&window_in(s, "a").unwrap()["geometry"]);
+            (x, w) == (0, 1280)
+        });
+        let before = pila.settle();
+        for _ in 0..10 {
+            client.draw(window, None);
+            client.roundtrip();
+        }
+        let after = pila.wait("A to draw the client's frames", |s| {
+            redraws(s, "A").0 > redraws(&before, "A").0
+        });
+        let after = pila.wait("pila to settle", |s| {
+            s["redraw_pending"] == false && redraws(s, "A").0 >= redraws(&after, "A").0
+        });
+        assert_eq!(
+            redraws(&after, "B"),
+            redraws(&before, "B"),
+            "B was redrawn for the frames of a window filling A ({combo})"
+        );
+    }
+}
+
 #[test]
 fn a_window_across_two_outputs_redraws_both() {
     let mut pila = two_fast_outputs();

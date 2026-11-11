@@ -280,12 +280,20 @@ impl Pila {
 
     /// Everything Pila may draw of a mapped `window`, global: its surfaces
     /// and popups, title bar and shadow (whether it has one or not: a little
-    /// more is redrawn than needed, never less). `None` off the `Space`.
+    /// more is redrawn than needed, never less). A maximized or fullscreen
+    /// window never has a shadow (`scene_window`), and reaches its output's
+    /// edges: with room for one, each of its frames would redraw the outputs
+    /// next to it (a change of that state redraws them all,
+    /// `set_fill_state_on`). `None` off the `Space`.
     pub fn window_visual_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let mut rect = self.space.element_bbox(window)?;
         let loc = self.space.element_location(window)?;
         if let Some(bar) = crate::decoration::title_bar_rect(window, loc) {
             rect = rect.merge(bar);
+        }
+        let (maximized, fullscreen) = crate::state::fill_state(window);
+        if maximized || fullscreen {
+            return Some(rect);
         }
         Some(grown(rect, self.shadow_margin()))
     }
