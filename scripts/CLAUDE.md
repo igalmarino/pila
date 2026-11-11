@@ -9,7 +9,8 @@ frame statistics (no missed refresh, frames shown late included, CPU per frame o
 frames and, on average over all of them, the captures'; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
 and exits 1 on a failure (`scripts/check --judge <log>` judges a log again; `PILA_BIN` runs
-another binary); INFO lines report without judging (how long gamma set the blocking
+another binary; `PILA_CHECK_RUST_LOG` adds `RUST_LOG` directives to the run's own, such as
+`smithay::backend::drm::compositor=trace` for why direct scanout starts and stops); INFO lines report without judging (how long gamma set the blocking
 way took: after a modeset, or a driver without `GAMMA_LUT`; the first frames after outputs were
 set up, which the budget leaves out; the redraws per output that found nothing new, `idle` in
 the frame statistics, at most one per refresh on bare metal; on bare metal, how many frames

@@ -33,6 +33,9 @@
 #
 # PILA_BIN runs another binary than target/release/pila, such as an installed
 # one or Nix's result/bin/pila, for what's run from a checkout anyway.
+# PILA_CHECK_RUST_LOG adds RUST_LOG directives to the run's own, to look into
+# something the run shows, e.g. why direct scanout starts and stops:
+#   PILA_CHECK_RUST_LOG=smithay::backend::drm::compositor=trace scripts/check
 #
 # pila quits by itself when the scenarios are done (about a minute). On a
 # TTY the base is your config (~/.config/pila/config.toml: monitors,
@@ -399,7 +402,7 @@ EOF
     else
         export PILA_CHECK_LOG="$PWD/pila-tty.log"
     fi
-    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug"
+    export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug${PILA_CHECK_RUST_LOG:+,$PILA_CHECK_RUST_LOG}"
 
     echo "Runs Pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
