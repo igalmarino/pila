@@ -978,7 +978,9 @@ Key flows and invariants:
   Bar textures (buttons, title) are per-window `MemoryRenderBuffer`s cached by a key and
   re-rendered only when it changes, one set per buffer scale (`TitleBarBuffers::scaled`, the
   last few used: drawing a window on an output of another scale leaves the others' alone); they can't be shared between windows (element ids must
-  be unique per frame). A title that fit whole is kept for any room it still fits in
+  be unique per frame). A window keeps a few looks of each (`variant`: a button focused,
+  unfocused and hovered, the title focused and unfocused), so focus going back and forth
+  (Mod+Tab) rasterizes nothing again. A title that fit whole is kept for any room it still fits in
   (`TitleTexture::shows`): a resize changes the room every frame, and it would be shaped and
   uploaded again each time. Titles come from `text.rs` (cosmic-text): fonts load on a
   background thread at startup, and until then `render_title` returns `None` and bars draw

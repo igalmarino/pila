@@ -248,10 +248,42 @@ const SCALES_KEPT: usize = 3;
 /// A title bar's rasterized parts at one buffer scale.
 #[derive(Default)]
 struct ScaledParts {
-    minimize: Option<ButtonTexture>,
-    maximize: Option<ButtonTexture>,
-    close: Option<ButtonTexture>,
-    title: Option<TitleTexture>,
+    minimize: Vec<ButtonTexture>,
+    maximize: Vec<ButtonTexture>,
+    close: Vec<ButtonTexture>,
+    title: Vec<TitleTexture>,
+}
+
+/// How many looks of a button a window keeps (`variant`): focused,
+/// unfocused, hovered. Focus going back and forth (Mod+Tab) and the pointer
+/// passing over a button then rasterize nothing again.
+const BUTTON_LOOKS: usize = 3;
+
+/// How many titles a window keeps: focused and unfocused.
+const TITLE_LOOKS: usize = 2;
+
+/// The texture in `slot` that `fits`, else the one `make` makes (if it
+/// can), kept with the last used at the end, at most `keep` of them.
+fn variant<T>(
+    slot: &mut Vec<T>,
+    fits: impl Fn(&T) -> bool,
+    keep: usize,
+    make: impl FnOnce() -> Option<T>,
+) -> Option<&T> {
+    match slot.iter().position(fits) {
+        Some(index) => {
+            let texture = slot.remove(index);
+            slot.push(texture);
+        }
+        None => {
+            let texture = make()?;
+            if slot.len() >= keep {
+                slot.remove(0);
+            }
+            slot.push(texture);
+        }
+    }
+    slot.last()
 }
 
 /// The rendered title and what it was rendered for (text, width, color,
@@ -401,19 +433,17 @@ pub fn title_bar_elements(
     match window_title(window) {
         Some(text) if title_width >= MIN_TITLE_WIDTH && !text.is_empty() => {
             let key = (text, icon_color, buffer_scale);
-            if title
-                .as_ref()
-                .is_none_or(|texture| !texture.shows(&key, title_width))
-            {
-                // None until the fonts have loaded; then the next frame draws it.
-                *title = crate::text::render_title(
+            let fits = |texture: &TitleTexture| texture.shows(&key, title_width);
+            // None until the fonts have loaded; then the next frame draws it.
+            let make = || {
+                let drawn = crate::text::render_title(
                     &key.0,
                     icon_color,
                     title_width,
                     TITLE_BAR_HEIGHT,
                     buffer_scale,
-                )
-                .map(|drawn| TitleTexture {
+                )?;
+                Some(TitleTexture {
                     buffer: MemoryRenderBuffer::from_slice(
                         &drawn.pixels,
                         Fourcc::Argb8888,
@@ -425,16 +455,16 @@ pub fn title_bar_elements(
                     width: drawn.width / buffer_scale,
                     max_width: title_width,
                     whole: drawn.whole,
-                    key,
-                });
-            }
-            if let Some(texture) = title.as_ref() {
+                    key: key.clone(),
+                })
+            };
+            if let Some(texture) = variant(title, fits, TITLE_LOOKS, make) {
                 let x = title_x(rect.loc.x, rect.size.w, texture.width);
                 let loc = Point::from((x, rect.loc.y));
                 elements.extend(upload(renderer, &texture.buffer, loc).map(Into::into));
             }
         }
-        _ => *title = None,
+        _ => title.clear(),
     }
 
     for (slot, icon, part, loc) in [
@@ -460,16 +490,15 @@ pub fn title_bar_elements(
         };
         let (background, color) = button_colors(part);
         let key = (icon, background, color, buffer_scale, corner);
-        if slot.as_ref().is_some_and(|texture| texture.key != key) {
-            *slot = None;
-        }
-        let buffer = &slot
-            .get_or_insert_with(|| ButtonTexture {
+        let make = || {
+            Some(ButtonTexture {
                 key,
                 buffer: button_buffer(icon, background, color, buffer_scale, corner),
             })
-            .buffer;
-        elements.extend(upload(renderer, buffer, loc).map(Into::into));
+        };
+        if let Some(texture) = variant(slot, |texture| texture.key == key, BUTTON_LOOKS, make) {
+            elements.extend(upload(renderer, &texture.buffer, loc).map(Into::into));
+        }
     }
 
     bar.update(
@@ -617,6 +646,37 @@ fn box_sdf(p: (f64, f64), c: (f64, f64), half: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_buttons_looks_are_kept_and_made_again_only_when_gone() {
+        let mut slot: Vec<u32> = Vec::new();
+        let mut made = 0;
+        let mut get = |slot: &mut Vec<u32>, look: u32| {
+            *variant(
+                slot,
+                |t| *t == look,
+                3,
+                || {
+                    made += 1;
+                    Some(look)
+                },
+            )
+            .unwrap()
+        };
+        // Focused, unfocused, focused again (Mod+Tab), hovered: three made.
+        for look in [1, 2, 1, 3, 2, 1] {
+            assert_eq!(get(&mut slot, look), look);
+        }
+        assert_eq!(slot, [3, 2, 1]);
+        // A fourth look drops the one used longest ago.
+        get(&mut slot, 4);
+        assert_eq!(slot, [2, 1, 4]);
+        drop(get);
+        assert_eq!(made, 4);
+        // One that can't be made yet (no fonts) leaves the others.
+        assert!(variant(&mut slot, |t| *t == 5, 3, || None).is_none());
+        assert_eq!(slot, [2, 1, 4]);
+    }
 
     #[test]
     fn a_whole_titles_texture_serves_any_room_it_fits_in() {
