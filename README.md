@@ -10,7 +10,8 @@ swaybg, swaylock, ...).
 Why Pila: Noctalia and Dux Shell usually run on tiling compositors such as niri or Hyprland;
 Pila gives them a classic desktop of overlapping windows, with subtle animations, blur and a
 config applied as you save it. labwc keeps the Openbox look and its XML config, Wayfire is
-built around Compiz-style effects, and COSMIC's floating mode comes with the rest of COSMIC.
+built around Compiz-style effects, and COSMIC's floating mode comes with the rest of COSMIC. More in
+[What sets Pila apart](docs/WHY-PILA.md).
 
 Pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
 The wlroots protocols that panels and shells still need and that have no standard
