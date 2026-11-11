@@ -300,7 +300,8 @@ Key flows and invariants:
   `frame::send_dmabuf_feedback` after each frame, sent when it changes), and the usual ones
   again once it's drawn among other things. Such frames are counted
   apart in the frame statistics (`direct`) and an output starting or stopping them is logged
-  (`direct scanout`, `pila::frames`). Bare metal only: `scripts/check`'s fullscreen scenario
+  (`direct scanout`, `pila::frames`, with the time that frame's render and commit took: the
+  kernel checks the plane's new format and size anew, some milliseconds on some drivers). Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average

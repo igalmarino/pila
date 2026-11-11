@@ -246,6 +246,7 @@ fn draw(
     let mut direct = false;
     let clear = render::clear_color(scene);
     // The elements' states and whether nothing changed, or why it failed.
+    let render_started = std::time::Instant::now();
     let rendered = match &mut lent {
         OutputRenderer::Primary(lent) => {
             let renderer = lent.as_mut();
@@ -300,6 +301,7 @@ fn draw(
         }
     };
     drop(lent);
+    let render_time = render_started.elapsed().saturating_sub(capture_cpu);
     match rendered {
         Ok((states, is_empty)) => {
             frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
@@ -324,14 +326,21 @@ fn draw(
             if !is_empty {
                 let feedback =
                     frame::presentation_feedback(scene, cursor_wl_surface, &output, &states);
+                let queue_started = std::time::Instant::now();
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
+                        // Going to a client's buffer or back is a change of
+                        // the plane's that the kernel checks anew, in the
+                        // test Smithay makes while rendering and in the
+                        // commit: where the time of such a frame goes.
                         if std::mem::replace(&mut surface.direct, direct) != direct {
                             tracing::debug!(
                                 target: "pila::frames",
                                 output = output.name(),
                                 on = direct,
+                                render_ms = render_time.as_secs_f64() * 1000.0,
+                                queue_ms = queue_started.elapsed().as_secs_f64() * 1000.0,
                                 "direct scanout"
                             );
                         }
