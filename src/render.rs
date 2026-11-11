@@ -733,6 +733,34 @@ impl OffscreenWindow {
         })
     }
 
+    /// A texture for the windows of the output at `rect`, cleared: created
+    /// and drawn into once, so that its first use in a frame costs no more
+    /// than any other (`workspace_slide.rs`, `SlidePool`).
+    pub fn for_output(
+        renderer: &mut GlesRenderer,
+        rect: Rectangle<i32, Logical>,
+        scale: Scale<f64>,
+    ) -> Option<Self> {
+        let mut texture = Self::new(renderer, texture_size(rect, scale), scale)?;
+        texture.draw(renderer, &[]).then_some(texture)
+    }
+
+    /// Whether it fits the output at `rect` drawn at `scale`.
+    pub fn fits(&self, rect: Rectangle<i32, Logical>, scale: Scale<f64>) -> bool {
+        self.scale == scale && self.size == texture_size(rect, scale)
+    }
+
+    /// Forget what was drawn: the next `draw` redraws all of it.
+    pub fn reset(&mut self) {
+        self.tracker = OutputDamageTracker::new(self.size, self.scale, Transform::Normal);
+        self.drawn = false;
+    }
+
+    /// What's drawn in it, to show.
+    pub fn buffer(&self) -> &TextureRenderBuffer<GlesTexture> {
+        &self.buffer
+    }
+
     /// Draw `elements` (relative to the texture's top-left) into it.
     fn draw(&mut self, renderer: &mut GlesRenderer, elements: &[PilaRenderElement]) -> bool {
         let age = usize::from(self.drawn);
@@ -1027,9 +1055,10 @@ fn slid_texture(
 }
 
 /// The windows (and ghosts) on the output at `rect`, as they look now,
-/// drawn into a texture (the picture a workspace slide moves away): as a
+/// drawn into `target` (the picture a workspace slide moves away): as a
 /// slide in progress (`slide`) shows them, if one is running there, so a
-/// new one starts from what's on screen.
+/// new one starts from what's on screen. Whether it could be drawn.
+#[allow(clippy::too_many_arguments)]
 pub fn snapshot_windows(
     renderer: &mut GlesRenderer,
     windows: &[SceneWindow],
@@ -1038,13 +1067,13 @@ pub fn snapshot_windows(
     rect: Rectangle<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
-) -> Option<TextureRenderBuffer<GlesTexture>> {
+    target: &mut OffscreenWindow,
+) -> bool {
     let elements = match slide.filter(|slide| slide.output_rect(rect.loc).is_some()) {
         Some(slide) => slide_elements(renderer, windows, ghosts, slide, rect, scale, backdrop),
         None => window_elements(renderer, windows, ghosts, rect.loc, scale, backdrop, None),
     };
-    let mut target = OffscreenWindow::new(renderer, texture_size(rect, scale), scale)?;
-    target.draw(renderer, &elements).then_some(target.buffer)
+    target.draw(renderer, &elements)
 }
 
 /// `elements` drawn into a new texture covering `rect` at `scale`.

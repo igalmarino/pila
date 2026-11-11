@@ -213,3 +213,61 @@ fn locking_drops_running_animations() {
     let state = pila.state();
     assert_eq!(state["animations"]["appearing"], 0);
 }
+
+/// How many of the textures slides draw into are kept, unused.
+fn slide_textures(state: &Value) -> u64 {
+    state["animations"]["slide_textures"].as_u64().unwrap()
+}
+
+/// A slide's textures are as large as its output: made as it starts, they
+/// made its first frame late on bare metal. They're there before any slide,
+/// and come back when it ends.
+#[test]
+fn a_slides_textures_are_ready_before_it_and_kept_after() {
+    let mut pila = TestPila::with_config("[animations]\nenabled = true\nspeed = 4\n");
+    let client = pila.client();
+    client.window("a").create();
+    pila.wait_focus("a");
+    let state = pila.wait("textures made ahead", |s| slide_textures(s) == 2);
+    assert_eq!(state["animations"]["slide"], false);
+
+    pila.combo("Super+2");
+    pila.wait_log("starts what=\"workspace\"");
+    assert_eq!(
+        slide_textures(&pila.state()),
+        0,
+        "the slide didn't take them"
+    );
+    pila.settle();
+    assert_eq!(slide_textures(&pila.state()), 2, "they didn't come back");
+    assert!(
+        !pila.log().contains("slide: a new texture"),
+        "the slide made a texture of its own"
+    );
+
+    // A switch during a slide draws its leaving picture from the two in use:
+    // a third, kept too, and no more however many follow.
+    for keys in ["Super+1", "Super+2", "Super+1", "Super+2"] {
+        pila.combo(keys);
+    }
+    pila.settle();
+    assert_eq!(slide_textures(&pila.state()), 3);
+    assert_eq!(pila.log().matches("slide: a new texture").count(), 1);
+}
+
+#[test]
+fn slide_textures_follow_the_outputs_and_the_setting() {
+    let mut pila = TestPila::with_config("[animations]\nenabled = true\n");
+    pila.wait("textures made ahead", |s| slide_textures(s) == 2);
+    // Another output, of another size: its own two.
+    pila.request(json!({ "cmd": "output_add", "spec": "NEW:800x600@75" }));
+    pila.wait("the new output's", |s| slide_textures(s) == 4);
+    pila.request(json!({ "cmd": "output_remove", "name": "NEW" }));
+    pila.wait("the gone output's dropped", |s| slide_textures(s) == 2);
+    // Not animated, a switch takes none.
+    pila.write_config("[animations]\nenabled = true\nworkspace = false\n");
+    pila.wait("none kept", |s| slide_textures(s) == 0);
+    pila.write_config("workspaces = 1\n[animations]\nenabled = true\n");
+    pila.settle();
+    assert_eq!(slide_textures(&pila.state()), 0);
+}

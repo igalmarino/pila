@@ -326,6 +326,7 @@ impl Pila {
             "animations": {
                 "running": self.animating(),
                 "slide": self.workspace_slide.is_some(),
+                "slide_textures": self.slide_pool.count(),
                 "appearing": appearing,
                 "ghosts": ghosts,
                 "layers": layers_appearing,

@@ -886,7 +886,8 @@ impl Pila {
         }
         self.animations.ghosts.clear();
         self.animations.layer_ghosts.clear();
-        self.workspace_slide = None;
+        let slide = self.workspace_slide.take();
+        self.retire_slide(slide);
     }
 
     // --- Size and place changes ---------------------------------------------

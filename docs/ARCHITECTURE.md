@@ -465,7 +465,12 @@ Key flows and invariants:
   window plainly in front; panels and wallpaper stay put; windows drawn that way are
   paced by `SceneWindow::slid` (`offscreen_output` in `frame.rs`; on no output, by
   their primary output). A switch during a slide takes its leaving picture from what
-  the running slide shows (`snapshot_windows` with the slide). Close and minimize
+  the running slide shows (`snapshot_windows` with the slide). The textures are as large as
+  their outputs, and a new one costs the GPU milliseconds, which made a slide's first frame
+  miss a refresh: they're kept between slides (`SlidePool`, `Pila::slide_pool`), two made
+  ahead per output off any frame (`prepare_slide_textures`, from `after_frames`; none while
+  switches aren't animated; those of outputs gone or changed are dropped), taken by a slide
+  and given back when it ends (`retire_slide`), a third kept after a switch during a slide. Close and minimize
   ghosts belong to the workspace they left (`Ghost::workspace`): a switch carries them
   off in the leaving picture. A size or place
   change (maximize, fullscreen, snap, and back; not refits nor drags) runs

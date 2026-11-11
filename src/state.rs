@@ -165,6 +165,8 @@ pub struct Pila {
     /// (`workspace_slide.rs`).
     pub animations: crate::animation::Animations,
     pub workspace_slide: Option<crate::workspace_slide::WorkspaceSlide>,
+    /// The textures slides draw into, kept between them (`SlidePool`).
+    pub slide_pool: crate::workspace_slide::SlidePool,
     /// Each output's frame statistics, by name (`frame_stats.rs`).
     pub frame_stats: HashMap<String, crate::frame_stats::FrameStats>,
     /// The screen captures' frames (`frame_stats.rs`, `Pila::record_capture`).
@@ -523,6 +525,7 @@ impl Pila {
             blur: Default::default(),
             animations: Default::default(),
             workspace_slide: None,
+            slide_pool: Default::default(),
             frame_stats: HashMap::new(),
             capture_stats: Default::default(),
             space: Space::default(),
@@ -1499,6 +1502,7 @@ impl Pila {
         self.popups.cleanup();
         self.step_animations();
         self.schedule_hidden_frames();
+        self.prepare_slide_textures();
     }
 
     /// Show a compositor-chosen cursor, e.g. during a move/resize grab. The
