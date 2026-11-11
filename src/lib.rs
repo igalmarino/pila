@@ -54,6 +54,7 @@ pub mod screencopy;
 pub mod session_lock;
 pub mod session_management;
 pub mod session_protocol;
+pub mod shake_cursor;
 pub mod snap;
 pub mod stacking;
 pub mod state;

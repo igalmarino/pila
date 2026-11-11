@@ -111,8 +111,9 @@ Key flows and invariants:
   (`check_redraws`): on each render pass and every 50 ms, an output no redraw was asked for
   that has damage anyway is suspect, and Pila panics if no request explains it within 20 ms (a
   request may come later in the same iteration). Not while animating or a lock is pending.
-- **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`);
-  client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer
+- **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`),
+  but while the cursor is magnified (`shake_cursor.rs`) Pila draws them from its own theme
+  and hides the host's; client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer
   leaving the window, so a drawn cursor lingers at the edge. Keys held when the host takes
   focus away (e.g. GNOME's Alt+Tab) never get a release (Smithay's winit backend drops
   winit's synthetic ones), so `WinitEvent::Focus(false)` calls `Pila::release_all_keys`.
@@ -121,10 +122,32 @@ Key flows and invariants:
 - **Cursor** (`cursor.rs`): a client's cursor surface (`wl_pointer.set_cursor`) is drawn at
   `surface_position` (pointer minus hotspot, on top as `Kind::Cursor`) and gets frame callbacks
   like any surface; `handle_commit` moves the hotspot with the buffer's offset on every commit.
-  Named shapes (cursor-shape, Pila's own grab cursors) come from `CursorTheme` on backends that
-  draw them (not nested: the host does): a thread reads the xcursor theme at startup, at
-  buffer scales up to `PRELOADED_SCALES`, and until then the built-in arrow stands in, so no
-  frame reads a file.
+  Named shapes (cursor-shape, Pila's own grab cursors) come from `CursorTheme` (one,
+  `Pila::cursor_theme`, for every backend and capture) where Pila draws them: bare metal always,
+  nested and headless only magnified; `Pila::frame_input` leaves `FrameInput::named_cursor` empty
+  where the host draws it (`Backend::draws_cursor`). A thread reads the xcursor theme at
+  startup, every shape at every nominal size up to `LARGEST_IMAGE` times `XCURSOR_SIZE`, and
+  until then the built-in arrow stands in (one buffer, kept: a new one each frame would be
+  damage), so no frame reads a file. `get` picks the image for a buffer scale, `get_magnified`
+  the smallest at least as large as a magnified cursor shows.
+- **Shake to find** (`shake_cursor.rs`, `[cursor]`): every pointer motion that moves Pila's
+  pointer (`Pila::pointer_motion`, not a locked pointer nor a warp) goes to `ShakeDetector`,
+  which keeps the last second of motion as the points where it turned (a move less than a
+  right angle off the last stretch moves its end instead) and calls it a shake when the way
+  travelled is over 4 times the diagonal of its box and the box is at least 60 px across. A
+  shake starts or continues `Phase::Growing` (1 to `shake-magnification` over 500 ms of
+  shaking, frozen at the last shake: frames come from the motion, which redraws the cursor);
+  a calloop timer `HOLD_MS` after the last shake starts `Phase::Shrinking`, an `Animation`
+  that `step_animations` steps and `animating` counts, on the pointer's output, locked or not.
+  `[animations]` `speed` scales all three, and with animations off growing and shrinking are
+  instant. `Pila::cursor_magnification` is the factor (`None` at rest), taken into
+  `FrameInput::magnification`: `render::pointer_elements` draws a named cursor from
+  `get_magnified` at the theme's size times it and a client's surface through
+  `RescaleRenderElement`, both around the hotspot, which stays at the pointer (hit testing
+  doesn't change). Starting and ending the magnification calls `Backend::cursor_changed`
+  (nested, who draws a named shape changes). A bigger cursor than the cursor plane is
+  composed (Smithay falls back by itself). Turning it off in a reload puts the cursor back at
+  once (`reset_shake_cursor`).
 - **Monitors** (`edid.rs`, `Pila::outputs.monitors` by output name): on a connector connecting,
   `udev/` reads its `EDID` property and `edid::parse` takes make (the PNP code), model
   and serial from the base block; a missing or invalid one leaves "Unknown". They go to

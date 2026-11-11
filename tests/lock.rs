@@ -50,6 +50,22 @@ fn locking_shows_only_the_lock_surface_and_gives_it_the_keyboard() {
 }
 
 #[test]
+fn shaking_the_pointer_grows_the_cursor_on_the_lock_screen_too() {
+    let (mut pila, _apps, _locker, _lock) =
+        locked_with("[cursor]\nshake-to-find = true\n[animations]\nenabled = false\nspeed = 4\n");
+    pila.wait_log("Xwayland ready");
+    pila.move_to(640.0, 400.0);
+    pila.wait_pixel(650.0, 431.0, LOCK_RGBA);
+    pila.shake_pointer(640.0, 400.0);
+    pila.wait("magnified", |s| s["pointer"]["magnification"] == 3.0);
+    // The built-in arrow's white inside, three times as far, over the lock
+    // surface.
+    pila.wait_pixel(650.0, 431.0, [255, 255, 255, 255]);
+    pila.wait("back to its size", |s| s["pointer"]["magnification"] == 1.0);
+    pila.wait_pixel(650.0, 431.0, LOCK_RGBA);
+}
+
+#[test]
 fn bindings_and_workspace_switches_dont_run_while_locked() {
     let (mut pila, apps, _locker, _lock) = locked();
     pila.combo("Super+Shift+q");

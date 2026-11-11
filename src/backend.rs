@@ -11,7 +11,6 @@ use smithay::{
 };
 
 use crate::{
-    cursor::CursorTheme,
     headless::HeadlessData,
     output_management::HeadInfo,
     udev::{PrimaryRenderer, UdevData},
@@ -72,21 +71,6 @@ impl Backend {
         }
     }
 
-    /// The renderer, and the cursor theme where pila draws named cursors
-    /// itself (bare metal), for rendering outside the backend's own loop.
-    pub fn renderer_and_cursor_theme(
-        &mut self,
-    ) -> Option<(RendererRef<'_>, Option<&mut CursorTheme>)> {
-        match self {
-            Backend::Winit(backend) => Some((RendererRef::Own(backend.renderer()), None)),
-            Backend::Udev(data) => {
-                let (renderer, theme) = data.renderer_and_cursor_theme();
-                Some((RendererRef::Primary(renderer?), Some(theme)))
-            }
-            Backend::Headless(data) => Some((RendererRef::Own(&mut data.renderer), None)),
-        }
-    }
-
     /// When a frame of `output` built `now` would show, for commits that ask
     /// to appear no earlier than a given moment (`commit_pacing.rs`). Nested
     /// and headless have no vblank to go by.
@@ -121,22 +105,29 @@ impl Backend {
         }
     }
 
-    /// Whether Pila draws the pointer as `status` shows it (else the host
-    /// does, nested a named shape, or nothing shows).
-    pub fn draws_cursor(&self, status: &CursorImageStatus) -> bool {
+    /// Whether Pila draws the pointer as `status` shows it, `magnified` or
+    /// not (`shake_cursor.rs`); else the host does (nested, a named shape at
+    /// its own size), or nothing shows.
+    pub fn draws_cursor(&self, status: &CursorImageStatus, magnified: bool) -> bool {
         match self {
             Backend::Udev(_) => !matches!(status, CursorImageStatus::Hidden),
-            Backend::Winit(_) | Backend::Headless(_) => {
-                matches!(status, CursorImageStatus::Surface(_))
-            }
+            Backend::Winit(_) | Backend::Headless(_) => match status {
+                CursorImageStatus::Hidden => false,
+                CursorImageStatus::Named(_) => magnified,
+                CursorImageStatus::Surface(_) => true,
+            },
         }
     }
 
-    /// The cursor image changed (a client or a grab set a new one).
-    pub fn cursor_changed(&mut self, status: &CursorImageStatus) {
+    /// The cursor image changed (a client or a grab set a new one), or
+    /// started or stopped being `magnified`.
+    pub fn cursor_changed(&mut self, status: &CursorImageStatus, magnified: bool) {
         match self {
-            // The host draws named shapes; pila draws client surfaces itself.
-            Backend::Winit(backend) => crate::winit::apply_cursor(backend.window(), status),
+            // The host draws named shapes at their own size; pila draws
+            // client surfaces, and magnified named shapes, itself.
+            Backend::Winit(backend) => {
+                crate::winit::apply_cursor(backend.window(), status, magnified)
+            }
             Backend::Udev(data) => data.cursor_changed(status),
             // Nothing to show it on.
             Backend::Headless(_) => {}

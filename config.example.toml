@@ -96,6 +96,12 @@
 # layer = 150                      # launchers, notifications
 # workspace = 250                  # slide sideways
 
+# Shake the pointer to find it: the cursor grows while it's shaken, and
+# shrinks back a moment after. Both read as soon as the file is saved.
+[cursor]
+# shake-to-find = true             # (default) false: never grow it
+# shake-magnification = 3.0        # (default) how much bigger at most: 1.5 to 5
+
 # The keymap, passed to xkbcommon. Unset (or empty), xkbcommon's defaults or
 # the XKB_DEFAULT_* variables. `localectl list-x11-keymap-layouts` (and
 # -variants, -models, -options) lists the names where systemd is installed;

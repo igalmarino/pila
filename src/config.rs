@@ -731,6 +731,8 @@ pub struct AnimationsConfig {
     durations: [u32; 6],
     /// Multiplies every duration (2: twice as slow).
     speed: f64,
+    /// `enabled`: off, everything that would animate changes at once.
+    enabled: bool,
 }
 
 impl Default for AnimationsConfig {
@@ -738,6 +740,7 @@ impl Default for AnimationsConfig {
         Self {
             durations: AnimationKind::ALL.map(AnimationKind::default_duration),
             speed: 1.0,
+            enabled: true,
         }
     }
 }
@@ -748,6 +751,22 @@ impl AnimationsConfig {
         let index = AnimationKind::ALL.iter().position(|k| *k == kind)?;
         let ms = f64::from(self.durations[index]) * self.speed;
         (ms >= 1.0).then(|| std::time::Duration::from_secs_f64(ms / 1000.0))
+    }
+
+    /// `ms` at the configured speed, for a change with no `[animations]` entry
+    /// of its own (the cursor growing, `shake_cursor.rs`); zero with
+    /// animations off.
+    pub fn scaled(&self, ms: u32) -> std::time::Duration {
+        if !self.enabled {
+            return std::time::Duration::ZERO;
+        }
+        self.at_speed(ms)
+    }
+
+    /// `ms` at the configured speed, animations on or off: how long
+    /// something stays before it animates (the cursor stays big a moment).
+    pub fn at_speed(&self, ms: u32) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(f64::from(ms) * self.speed / 1000.0)
     }
 }
 
@@ -815,7 +834,11 @@ impl AnimationsFile {
                 *duration = ms;
             }
         }
-        Ok(AnimationsConfig { durations, speed })
+        Ok(AnimationsConfig {
+            durations,
+            speed,
+            enabled: all_on,
+        })
     }
 }
 
@@ -1087,6 +1110,7 @@ struct ConfigFile {
     shadow: ShadowFile,
     colors: ColorsFile,
     animations: AnimationsFile,
+    cursor: CursorFile,
     #[serde(rename = "window-rule")]
     window_rules: Vec<crate::rules::WindowRuleFile>,
     #[serde(rename = "layer-rule")]
@@ -1217,6 +1241,56 @@ impl ColorsFile {
     }
 }
 
+/// The range of `[cursor] shake-magnification`.
+pub const SHAKE_MAGNIFICATIONS: std::ops::RangeInclusive<f64> = 1.5..=5.0;
+
+/// `[cursor]`, validated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorConfig {
+    /// Shaking the pointer makes the cursor bigger for a moment
+    /// (`shake_cursor.rs`).
+    pub shake_to_find: bool,
+    /// How many times bigger it gets at most.
+    pub shake_magnification: f64,
+}
+
+impl Default for CursorConfig {
+    fn default() -> Self {
+        Self {
+            shake_to_find: true,
+            shake_magnification: 3.0,
+        }
+    }
+}
+
+/// `[cursor]` as written: unset ones keep `CursorConfig`'s defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct CursorFile {
+    shake_to_find: Option<bool>,
+    shake_magnification: Option<f64>,
+}
+
+impl CursorFile {
+    fn validate(self) -> Result<CursorConfig, String> {
+        let defaults = CursorConfig::default();
+        let magnification = self
+            .shake_magnification
+            .unwrap_or(defaults.shake_magnification);
+        if !SHAKE_MAGNIFICATIONS.contains(&magnification) {
+            return Err(format!(
+                "cursor.shake-magnification = {magnification}: must be {} to {}",
+                SHAKE_MAGNIFICATIONS.start(),
+                SHAKE_MAGNIFICATIONS.end()
+            ));
+        }
+        Ok(CursorConfig {
+            shake_to_find: self.shake_to_find.unwrap_or(defaults.shake_to_find),
+            shake_magnification: magnification,
+        })
+    }
+}
+
 /// The largest `[shadow]` `size` and, either way, `offset` (logical pixels).
 const MAX_SHADOW: i32 = 64;
 
@@ -1329,6 +1403,8 @@ pub struct Config {
     pub colors: Colors,
     /// Which animations play and how long they last (`animation.rs`).
     pub animations: AnimationsConfig,
+    /// `[cursor]`: shake to find it.
+    pub cursor: CursorConfig,
     /// `[[window-rule]]` and `[[layer-rule]]`, in order (`rules.rs`).
     pub window_rules: Vec<crate::rules::WindowRule>,
     pub layer_rules: Vec<crate::rules::LayerRule>,
@@ -1457,6 +1533,7 @@ impl Config {
         let shadow = file.shadow.validate()?;
         let colors = file.colors.validate()?;
         let animations = file.animations.validate()?;
+        let cursor = file.cursor.validate()?;
         let window_rules = file
             .window_rules
             .into_iter()
@@ -1553,6 +1630,7 @@ impl Config {
             shadow,
             colors,
             animations,
+            cursor,
             window_rules,
             layer_rules,
         })
@@ -2067,6 +2145,26 @@ mod tests {
         assert!(Config::from_toml("[shadow]\nsize = 65", &no_env).is_err());
         assert!(Config::from_toml("[shadow]\nsize = -1", &no_env).is_err());
         assert!(Config::from_toml("[shadow]\noffset = [0, 65]", &no_env).is_err());
+    }
+
+    #[test]
+    fn shake_to_find_is_on_by_default_and_bounded() {
+        let cursor = Config::from_toml("", &no_env).unwrap().cursor;
+        assert_eq!(cursor, CursorConfig::default());
+        assert!(cursor.shake_to_find);
+        assert_eq!(cursor.shake_magnification, 3.0);
+        let config = Config::from_toml(
+            "[cursor]\nshake-to-find = false\nshake-magnification = 2.0",
+            &no_env,
+        )
+        .unwrap();
+        assert!(!config.cursor.shake_to_find);
+        assert_eq!(config.cursor.shake_magnification, 2.0);
+        for text in ["shake-magnification = 1.0", "shake-magnification = 6.0"] {
+            let error = Config::from_toml(&format!("[cursor]\n{text}"), &no_env).unwrap_err();
+            assert!(error.contains("cursor.shake-magnification"), "{error}");
+        }
+        assert!(Config::from_toml("[cursor]\nshake-to-find = 1", &no_env).is_err());
     }
 
     #[test]

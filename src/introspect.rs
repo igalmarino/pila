@@ -295,6 +295,7 @@ impl Pila {
                 "x": pointer_loc.x,
                 "y": pointer_loc.y,
                 "focus": pointer_focus,
+                "magnification": self.cursor_magnification().unwrap_or(1.0),
                 "grabbed": pointer.as_ref().is_some_and(|p| p.is_grabbed()),
                 "grab": pointer.as_ref().and_then(|p| {
                     p.with_grab(|_, grab| {

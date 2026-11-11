@@ -165,6 +165,10 @@ pub struct Pila {
     /// (`workspace_slide.rs`).
     pub animations: crate::animation::Animations,
     pub workspace_slide: Option<crate::workspace_slide::WorkspaceSlide>,
+    /// The cursor grown by shaking it (`shake_cursor.rs`).
+    pub shake_cursor: crate::shake_cursor::ShakeCursor,
+    /// Named cursor images, for backends that draw them (`cursor.rs`).
+    pub cursor_theme: crate::cursor::CursorTheme,
     /// The textures slides draw into, kept between them (`SlidePool`).
     pub slide_pool: crate::workspace_slide::SlidePool,
     /// Each output's frame statistics, by name (`frame_stats.rs`).
@@ -525,6 +529,8 @@ impl Pila {
             blur: Default::default(),
             animations: Default::default(),
             workspace_slide: None,
+            shake_cursor: Default::default(),
+            cursor_theme: crate::cursor::CursorTheme::load(),
             slide_pool: Default::default(),
             frame_stats: HashMap::new(),
             capture_stats: Default::default(),
@@ -662,14 +668,20 @@ impl Pila {
     /// The scene and the cursor, for a frame or a capture (`render::FrameInput`).
     pub fn frame_input(&self) -> FrameInput {
         let pointer = self.pointer_location();
+        let magnification = self.cursor_magnification();
+        // Only if the backend draws it (nested, while it's magnified).
+        let draws_named = self.backend.as_ref().is_some_and(|backend| {
+            backend.draws_cursor(&self.cursor_status, magnification.is_some())
+        });
         FrameInput {
             scene: self.scene(),
             pointer,
             cursor_surface: crate::cursor::surface_position(&self.cursor_status, pointer),
             named_cursor: match &self.cursor_status {
-                CursorImageStatus::Named(icon) => Some(*icon),
+                CursorImageStatus::Named(icon) if draws_named => Some(*icon),
                 _ => None,
             },
+            magnification,
         }
     }
 

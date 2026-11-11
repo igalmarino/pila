@@ -18,6 +18,7 @@ use smithay::{
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             texture::TextureRenderElement,
+            utils::RescaleRenderElement,
             AsRenderElements, Kind,
         },
         gles::{GlesRenderer, GlesTexture},
@@ -35,7 +36,7 @@ use crate::{
     animation::{self, AnimTextures, SceneGhost, Snapshot, WindowEffect},
     blur::BlurCache,
     config::Colors,
-    cursor::{CursorTheme, NamedCursor},
+    cursor::{CursorTheme, MagnifiedCursor, NamedCursor},
     decoration::{self, TitleBarPart},
     rounded::{
         self, Corners, RoundedSolid, RoundedSurface, Rounding, Shadow, ShadowElement, ShapeDamage,
@@ -54,6 +55,7 @@ smithay::backend::renderer::element::render_elements! {
     RoundedSolid=RoundedSolid,
     ShapeDamage=ShapeDamage,
     Shadow=ShadowElement,
+    Rescaled=RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
 }
 
 impl From<SurfaceElement> for PilaRenderElement {
@@ -1244,10 +1246,13 @@ fn solid_element(
 }
 
 /// Elements for a client-drawn cursor surface whose top-left is at `location`
-/// (from `cursor::surface_position`), relative to the output origin.
+/// (from `cursor::surface_position`), relative to the output origin; with
+/// `magnification`, that many times bigger around its hotspot at `pointer`.
 pub fn cursor_elements(
     renderer: &mut GlesRenderer,
     cursor: Option<&(WlSurface, Point<i32, Logical>)>,
+    pointer: Point<f64, Logical>,
+    magnification: Option<f64>,
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
@@ -1256,7 +1261,24 @@ pub fn cursor_elements(
     };
     let location: Point<i32, Physical> =
         (*location - output_location).to_physical_precise_round(scale);
-    render_elements_from_surface_tree(renderer, surface, location, scale, 1.0, Kind::Cursor)
+    let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+        render_elements_from_surface_tree(renderer, surface, location, scale, 1.0, Kind::Cursor);
+    let Some(factor) = magnification else {
+        return elements
+            .into_iter()
+            .map(PilaRenderElement::Surface)
+            .collect();
+    };
+    // Grown around the hotspot: the rounded pointer, as `location` is.
+    let hotspot = (pointer.to_i32_round() - output_location).to_physical_precise_round(scale);
+    elements
+        .into_iter()
+        .map(|element| {
+            PilaRenderElement::Rescaled(RescaleRenderElement::from_element(
+                element, hotspot, factor,
+            ))
+        })
+        .collect()
 }
 
 /// Elements for a named cursor image (drawn by pila on bare metal, loaded
@@ -1284,6 +1306,35 @@ pub fn named_cursor_elements(
     .unwrap_or_default()
 }
 
+/// Elements for a named cursor image drawn `factor` times the theme's
+/// `size`, with its hotspot at `pointer` (`shake_cursor.rs`).
+pub fn magnified_cursor_elements(
+    renderer: &mut GlesRenderer,
+    cursor: &MagnifiedCursor,
+    size: u32,
+    factor: f64,
+    pointer: Point<f64, Logical>,
+    output_location: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let k = cursor.scale(size, factor);
+    let shown = cursor.size.to_f64().upscale(k).to_i32_round();
+    let location = (pointer - cursor.hotspot.to_f64().upscale(k) - output_location.to_f64())
+        .to_physical(scale);
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        location,
+        &cursor.buffer,
+        None,
+        // The whole image (at buffer scale 1, its pixels are its logical size).
+        Some(Rectangle::from_size(cursor.size.to_f64())),
+        Some(shown),
+        Kind::Cursor,
+    )
+    .map(|element| vec![PilaRenderElement::Memory(element)])
+    .unwrap_or_default()
+}
+
 /// The icon a client gave its drag (`wl_data_device.start_drag`), drawn at
 /// the pointer plus `offset`, which its `wl_surface.offset`s move.
 pub struct DndIcon {
@@ -1299,8 +1350,12 @@ pub struct FrameInput {
     pub pointer: Point<f64, Logical>,
     /// The client cursor surface and its top-left (`cursor::surface_position`).
     pub cursor_surface: Option<(WlSurface, Point<i32, Logical>)>,
-    /// The named cursor, for backends that draw it themselves.
+    /// The named cursor, if the backend draws it (bare metal; nested and
+    /// headless while it's magnified).
     pub named_cursor: Option<CursorIcon>,
+    /// How many times bigger the cursor is drawn (`shake_cursor.rs`);
+    /// `None` at its own size.
+    pub magnification: Option<f64>,
 }
 
 impl FrameInput {
@@ -1310,24 +1365,49 @@ impl FrameInput {
 }
 
 /// The cursor's elements, relative to `origin`: the client's cursor surface,
-/// or the named cursor from `theme` (none without one: nested, the host draws it).
+/// or the named cursor from `theme` (if the backend draws it: see
+/// `FrameInput::named_cursor`), magnified as `FrameInput::magnification` says.
 pub fn pointer_elements(
     renderer: &mut GlesRenderer,
     input: &FrameInput,
-    theme: Option<&mut CursorTheme>,
+    theme: &mut CursorTheme,
     origin: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    let mut elements = cursor_elements(renderer, input.cursor_surface.as_ref(), origin, scale);
-    if let (Some(icon), Some(theme)) = (input.named_cursor, theme) {
-        let image = theme.get(icon, crate::scale::buffer_scale(scale));
-        elements.extend(named_cursor_elements(
-            renderer,
-            &image,
-            input.pointer,
-            origin,
-            scale,
-        ));
+    let mut elements = cursor_elements(
+        renderer,
+        input.cursor_surface.as_ref(),
+        input.pointer,
+        input.magnification,
+        origin,
+        scale,
+    );
+    let Some(icon) = input.named_cursor else {
+        return elements;
+    };
+    match input.magnification {
+        None => {
+            let image = theme.get(icon, crate::scale::buffer_scale(scale));
+            elements.extend(named_cursor_elements(
+                renderer,
+                &image,
+                input.pointer,
+                origin,
+                scale,
+            ));
+        }
+        Some(factor) => {
+            let image = theme.get_magnified(icon, scale.x, factor);
+            elements.extend(magnified_cursor_elements(
+                renderer,
+                &image,
+                theme.size(),
+                factor,
+                input.pointer,
+                origin,
+                scale,
+            ));
+        }
     }
     elements
 }

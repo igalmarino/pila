@@ -806,7 +806,12 @@ fn check_redraws(state: &mut Pila) {
         return;
     }
     let input = state.frame_input();
-    let Pila { backend, blur, .. } = state;
+    let Pila {
+        backend,
+        blur,
+        cursor_theme,
+        ..
+    } = state;
     let Some(Backend::Headless(data)) = backend else {
         return;
     };
@@ -834,7 +839,8 @@ fn check_redraws(state: &mut Pila) {
         let scale = crate::scale::output_scale(&output);
         let mut elements = Vec::new();
         if output_geo.to_f64().contains(input.pointer) {
-            elements = render::pointer_elements(renderer, &input, None, output_geo.loc, scale);
+            elements =
+                render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
         }
         elements.extend(render::output_elements(
             renderer,
@@ -923,7 +929,12 @@ fn render_output(
     let scale = crate::scale::output_scale(&output);
     let pointer_here = output_geo.to_f64().contains(input.pointer);
 
-    let Pila { backend, blur, .. } = state;
+    let Pila {
+        backend,
+        blur,
+        cursor_theme,
+        ..
+    } = state;
     let Some(Backend::Headless(data)) = backend else {
         return false;
     };
@@ -955,10 +966,11 @@ fn render_output(
     }
     let texture = o.texture.as_mut().expect("created above");
 
-    // Named cursors are left out, as nested (the host would draw them).
+    // Named cursors are left out unless magnified, as nested (the host
+    // would draw them).
     let mut elements = Vec::new();
     if pointer_here {
-        elements = render::pointer_elements(renderer, input, None, output_geo.loc, scale);
+        elements = render::pointer_elements(renderer, input, cursor_theme, output_geo.loc, scale);
     }
     elements.extend(render::output_elements(
         renderer,

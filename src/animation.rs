@@ -736,12 +736,22 @@ impl Pila {
     /// After a frame: drop finished animations and keep redrawing while any
     /// remain. Called from `after_frames`.
     pub fn step_animations(&mut self) {
+        // Locked too: it shows over the lock screen as well.
+        let cursor = self.step_shake_cursor();
         if self.is_locked() {
             self.drop_animations();
+            if let Some(output) = cursor {
+                self.redraw_after_frames(Some(vec![output]));
+            }
             return;
         }
         // Where they show, before those done now go: their last frame too.
-        let outputs = self.animation_outputs();
+        let mut outputs = self.animation_outputs();
+        if let (Some(outputs), Some(output)) = (&mut outputs, &cursor) {
+            if !outputs.contains(output) {
+                outputs.push(output.clone());
+            }
+        }
         let now = self.animation_time();
         let before = self.animation_count();
         let animations = &mut self.animations;
@@ -783,28 +793,34 @@ impl Pila {
         let slide_ended = self.end_finished_slide(now);
         let left = self.animation_count() + usize::from(self.workspace_slide.is_some());
         let before = before + usize::from(slide_ended);
-        if left > 0 || left != before {
-            // From an idle callback, with the loop woken so it runs right
-            // away (calloop wouldn't): this runs after the event loop's
-            // dispatch, too late for the winit source to see a redraw
-            // request before the loop sleeps.
-            // Only the outputs they show on, and as what may bring nothing
-            // (`redraw::Content::Maybe`): the next frame is for the next
-            // vblank, not for now. An output with a frame in flight draws it
-            // at its vblank anyway; one whose redraw just found nothing new
-            // (nothing animates there, or an animation is waiting for its
-            // client) waits for it, where asking for it as a change would
-            // redraw it as fast as this runs, every redraw calling this
-            // again. An animation's first frame is asked as a change when
-            // it starts (`queue_redraw`, every output).
-            self.loop_handle.insert_idle(move |state| {
-                let outputs = outputs.unwrap_or_else(|| state.space.outputs().cloned().collect());
-                for output in outputs {
-                    state.request_redraw(&output, false);
-                }
-            });
-            self.wake.ping();
+        if left > 0 || left != before || cursor.is_some() {
+            self.redraw_after_frames(outputs);
         }
+    }
+
+    /// Redraw `outputs` (`None`: every one) for the next frame of something
+    /// animating, from `after_frames`.
+    fn redraw_after_frames(&mut self, outputs: Option<Vec<Output>>) {
+        // From an idle callback, with the loop woken so it runs right
+        // away (calloop wouldn't): this runs after the event loop's
+        // dispatch, too late for the winit source to see a redraw
+        // request before the loop sleeps.
+        // Only the outputs they show on, and as what may bring nothing
+        // (`redraw::Content::Maybe`): the next frame is for the next
+        // vblank, not for now. An output with a frame in flight draws it
+        // at its vblank anyway; one whose redraw just found nothing new
+        // (nothing animates there, or an animation is waiting for its
+        // client) waits for it, where asking for it as a change would
+        // redraw it as fast as this runs, every redraw calling this
+        // again. An animation's first frame is asked as a change when
+        // it starts (`queue_redraw`, every output).
+        self.loop_handle.insert_idle(move |state| {
+            let outputs = outputs.unwrap_or_else(|| state.space.outputs().cloned().collect());
+            for output in outputs {
+                state.request_redraw(&output, false);
+            }
+        });
+        self.wake.ping();
     }
 
     /// The outputs the animations in progress show on, `None` for every one
@@ -871,6 +887,7 @@ impl Pila {
                 .iter()
                 .any(|x| x.progress.as_ref().is_none_or(running))
             || self.sliding(now)
+            || self.shake_cursor.changing(now)
     }
 
     /// Stop every animation (the session locked).

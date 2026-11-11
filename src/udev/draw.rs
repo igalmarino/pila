@@ -181,6 +181,7 @@ fn draw(
         backend,
         blur,
         capture,
+        cursor_theme,
         ..
     } = state;
     let Some(Backend::Udev(data)) = backend else {
@@ -191,7 +192,6 @@ fn draw(
         primary,
         outputs,
         devices,
-        cursor_theme,
         dmabuf_feedback,
         ..
     } = &mut **data;
@@ -221,8 +221,7 @@ fn draw(
 
     let mut elements = Vec::new();
     if pointer_here {
-        elements =
-            render::pointer_elements(renderer, input, Some(cursor_theme), output_geo.loc, scale);
+        elements = render::pointer_elements(renderer, input, cursor_theme, output_geo.loc, scale);
     }
     elements.extend(render::output_elements(
         renderer,

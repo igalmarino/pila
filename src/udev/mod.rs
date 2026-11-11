@@ -87,7 +87,6 @@ pub use secondary::apply_other_gpus;
 use crate::{
     backend::Backend,
     config::{AccelProfile, ClickMethod, InputConfig, OutputConfig, PointerConfig},
-    cursor::CursorTheme,
     frame,
     output_management::{HeadInfo, ModeInfo},
     render::{self, PilaRenderElement},
@@ -229,7 +228,6 @@ pub struct UdevData {
     keyboards: Vec<libinput::Device>,
     /// Touchpads and mice, to re-apply `[input]` when the config changes.
     pointers: Vec<libinput::Device>,
-    cursor_theme: CursorTheme,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
     /// When redraws are asked for (`OutputSurface::request`).
@@ -763,15 +761,6 @@ impl UdevData {
         primary_renderer(&mut self.gpus, &self.primary)
     }
 
-    /// The primary GPU's renderer (`None`, logged, if it can't be lent),
-    /// and the cursor theme.
-    pub fn renderer_and_cursor_theme(&mut self) -> (Option<PrimaryRenderer<'_>>, &mut CursorTheme) {
-        (
-            primary_renderer(&mut self.gpus, &self.primary),
-            &mut self.cursor_theme,
-        )
-    }
-
     pub fn cursor_changed(&mut self, _status: &CursorImageStatus) {
         // Drawn by pila in `render_output`; the redraw is queued by the caller.
     }
@@ -1003,7 +992,6 @@ pub fn init_udev(
         outputs: HashMap::new(),
         redraw_scheduled: false,
         clock: smithay::utils::Clock::new(),
-        cursor_theme: CursorTheme::load(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
     })));

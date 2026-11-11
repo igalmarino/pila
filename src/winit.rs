@@ -161,7 +161,12 @@ fn redraw(
 
     let scale = crate::scale::output_scale(output);
 
-    let Pila { backend, blur, .. } = state;
+    let Pila {
+        backend,
+        blur,
+        cursor_theme,
+        ..
+    } = state;
     let Some(Backend::Winit(backend)) = backend.as_mut() else {
         return false;
     };
@@ -176,9 +181,9 @@ fn redraw(
     // did), and how each element was drawn.
     let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
-            // Nested, the host draws named cursors.
+            // Nested, the host draws named cursors unless they're magnified.
             let mut elements =
-                render::pointer_elements(renderer, &input, None, output_geo.loc, scale);
+                render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
             elements.extend(render::output_elements(
                 renderer,
                 blur,
@@ -262,10 +267,12 @@ fn make_surface_current(backend: &mut WinitGraphicsBackend<GlesRenderer>) -> boo
 }
 
 /// Show the client's requested cursor on the host window. Client-drawn cursor
-/// surfaces are rendered by pila itself (see `cursor`), so the host's is hidden.
-pub fn apply_cursor(window: &dyn WinitWindow, status: &CursorImageStatus) {
+/// surfaces, and named shapes while `magnified` (`shake_cursor.rs`), are
+/// rendered by pila itself (see `cursor`), so the host's is hidden.
+pub fn apply_cursor(window: &dyn WinitWindow, status: &CursorImageStatus, magnified: bool) {
     match status {
         CursorImageStatus::Hidden => window.set_cursor_visible(false),
+        CursorImageStatus::Named(_) if magnified => window.set_cursor_visible(false),
         CursorImageStatus::Named(icon) => {
             window.set_cursor((*icon).into());
             window.set_cursor_visible(true);

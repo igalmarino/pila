@@ -546,12 +546,13 @@ impl Pila {
             backend,
             blur,
             capture,
+            cursor_theme,
             ..
         } = self;
         let Some(backend) = backend.as_mut() else {
             return;
         };
-        let Some((mut renderer, cursor_theme)) = backend.renderer_and_cursor_theme() else {
+        let Some(mut renderer) = backend.renderer() else {
             return;
         };
         let renderer = &mut *renderer;

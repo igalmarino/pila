@@ -230,6 +230,21 @@ keep libinput's defaults for the device.
 `[gestures]` changes them, with any action a key binding can have, for 3, 4 or 5 fingers. Other
 gestures (pinching, finger counts Pila doesn't use) reach the apps.
 
+**Finding the pointer.** Lost it on a large screen, or among several? Shake the mouse (or move a
+finger quickly back and forth on the touchpad): the cursor grows while you shake it, up to three
+times its size, and shrinks back a moment after you stop. Moving it along a line or round a
+circle doesn't count. `[cursor]` sets how big it gets, or turns it off:
+
+```toml
+[cursor]
+shake-magnification = 2.0   # 1.5 to 5
+# shake-to-find = false     # never grow it
+```
+
+The cursor's size is `XCURSOR_SIZE` (24 unless set); Pila draws the grown cursor from the
+theme's larger images, so it stays sharp as far as the theme goes. `[animations]` `speed`
+slows it down too, and with animations off it grows and shrinks at once.
+
 The mouse, touchpad and gesture settings apply from the login screen or a TTY; nested, the
 desktop around Pila handles those devices. The keyboard settings apply either way.
 

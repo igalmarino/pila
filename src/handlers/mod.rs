@@ -53,7 +53,7 @@ impl SeatHandler for Pila {
     // the host draws named shapes; see `Backend::cursor_changed`).
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
         if let Some(backend) = &mut self.backend {
-            backend.cursor_changed(&image);
+            backend.cursor_changed(&image, self.shake_cursor.magnified());
         }
         self.cursor_status = image;
         // Where the pointer is (Pila may draw it there). Smithay calls this

@@ -127,10 +127,9 @@ impl Pila {
         if to == from {
             return;
         }
-        let drawn = self
-            .backend
-            .as_ref()
-            .is_some_and(|backend| backend.draws_cursor(&self.cursor_status));
+        let drawn = self.backend.as_ref().is_some_and(|backend| {
+            backend.draws_cursor(&self.cursor_status, self.shake_cursor.magnified())
+        });
         self.queue_redraw_pointer(from, to, drawn || self.dnd_icon.is_some());
     }
 
@@ -454,6 +453,7 @@ impl Pila {
             },
         );
         pointer.frame(self);
+        self.shake_cursor_motion(location);
 
         if !pointer.is_grabbed() {
             // Over pila's own decorations no client sets the cursor, so pila does.

@@ -171,6 +171,9 @@ impl Pila {
         if outputs_changed {
             self.apply_outputs();
         }
+        if !self.config.cursor.shake_to_find && self.shake_cursor.magnified() {
+            self.reset_shake_cursor();
+        }
         self.queue_redraw();
     }
 

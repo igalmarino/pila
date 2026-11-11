@@ -33,7 +33,8 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Options {
     /// The config file (TOML). `[animations]` defaults to off, so results
     /// don't depend on timing; `[shadow]` to off, so pixels near a window are
-    /// its own; `[keyboard]` to the US layout.
+    /// its own; `[cursor]` to no shake to find, so a test's moves never grow
+    /// the cursor; `[keyboard]` to the US layout.
     pub config: String,
     /// `--headless-outputs`.
     pub outputs: Option<String>,
@@ -71,6 +72,9 @@ fn full_config(config: &str) -> String {
     }
     if !config.contains("[shadow]") {
         text.push_str("\n[shadow]\nenabled = false\n");
+    }
+    if !config.contains("[cursor]") {
+        text.push_str("\n[cursor]\nshake-to-find = false\n");
     }
     if !config.contains("[keyboard]") {
         text.push_str("\n[keyboard]\nlayout = \"us\"\n");
@@ -141,6 +145,8 @@ impl TestPila {
             "PILA_TERMINAL",
             "PILA_LAUNCHER",
             "DBUS_SESSION_BUS_ADDRESS",
+            "XCURSOR_THEME",
+            "XCURSOR_SIZE",
             // Crashes are logged with their backtrace without it.
             "RUST_BACKTRACE",
             "RUST_LIB_BACKTRACE",
@@ -153,6 +159,8 @@ impl TestPila {
             .env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_CONFIG_HOME", dir.join("xdg-config"))
             .env("XDG_STATE_HOME", dir.join("state"))
+            // No cursor theme: named cursors are the built-in arrow.
+            .env("XCURSOR_PATH", dir.join("no-cursors"))
             .env(
                 "RUST_LOG",
                 std::env::var("PILA_TEST_LOG").unwrap_or_else(|_| "debug,smithay=info".into()),
@@ -343,6 +351,18 @@ impl TestPila {
 
     pub fn move_to(&mut self, x: f64, y: f64) {
         self.request(json!({ "cmd": "move", "x": x, "y": y }));
+    }
+
+    /// Shake the pointer: twelve times back and forth, 200 px wide, ending
+    /// at (x, y), as fast as requests go (shake to find, `shake_cursor.rs`).
+    pub fn shake_pointer(&mut self, x: f64, y: f64) {
+        for leg in 0..12 {
+            for i in 0..=10 {
+                let dx = 20.0 * i as f64;
+                let dx = if leg % 2 == 0 { -dx } else { dx - 200.0 };
+                self.move_to(x + dx, y);
+            }
+        }
     }
 
     pub fn move_by(&mut self, dx: f64, dy: f64) {
