@@ -52,6 +52,13 @@ impl SeatHandler for Pila {
     // Stored for the renderer; the backend decides who draws what (nested,
     // the host draws named shapes; see `Backend::cursor_changed`).
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        // The same named or hidden cursor again (some clients set it on
+        // every motion) changes nothing. A surface may come with a new
+        // hotspot, which is in its state, not in `image`.
+        let surface = matches!(image, CursorImageStatus::Surface(_));
+        if !surface && image == self.cursor_status {
+            return;
+        }
         if let Some(backend) = &mut self.backend {
             backend.cursor_changed(&image, self.shake_cursor.magnified());
         }

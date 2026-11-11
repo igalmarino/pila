@@ -305,7 +305,8 @@ Key flows and invariants:
   ping it too. Redraws requested from `after_frames` are held back into an
   idle callback plus the ping (`defer_redraws`; `step_animations` does it by hand): nested, the winit source has already checked for redraw
   requests by then. Smithay calls `cursor_image` with the pointer locked, so its redraw
-  (where the pointer is) goes through an idle callback too.
+  (where the pointer is) goes through an idle callback too; the same named or hidden cursor
+  again (some clients set it on every motion) asks for none (a surface may bring a new hotspot).
 - **Direct scanout** (`udev/draw.rs::frame_flags`; bare metal, `direct-scanout`, on by
   default): a frame that would be one client's buffer and nothing else (a fullscreen video or
   game, a maximized window with no title bar on an output with no bar, a wallpaper alone; the

@@ -342,3 +342,29 @@ fn moving_the_pointer_over_a_window_doesnt_do_all_the_housekeeping_each_time() {
         "{done} of {MOVES} moves did all the housekeeping: {before:?} {after:?}"
     );
 }
+
+/// A client setting the cursor it already has (some do on every motion)
+/// changes nothing to draw: no redraw for it.
+#[test]
+fn setting_the_same_cursor_again_redraws_nothing() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.move_to((x + 200) as f64, (y + 150) as f64);
+    client.wait("pointer enter", |s| s.pointer_name.as_deref() == Some("a"));
+    let serial = client.lock().pointer_enter_serial;
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, None, 0, 0);
+    client.flush();
+    pila.wait("the cursor hidden", |s| s["pointer"]["cursor"] == "hidden");
+    let before = redraws(&pila.settle(), "HEADLESS-1");
+    for _ in 0..5 {
+        pointer.set_cursor(serial, None, 0, 0);
+        client.roundtrip();
+        pila.settle();
+    }
+    let after = redraws(&pila.settle(), "HEADLESS-1");
+    assert_eq!(after, before, "redrawn for the same cursor again");
+}
