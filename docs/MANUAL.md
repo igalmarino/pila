@@ -444,6 +444,12 @@ animations = false
 On monitors that support it, `adaptive-sync = true` in an `[[output]]` section turns on variable
 refresh rate.
 
+A fullscreen game or video that is all a monitor shows, with nothing over it, goes to the screen
+as the app drew it: Pila draws nothing for those frames, which saves GPU work and battery
+(direct scanout; on a TTY, on the main GPU's monitors, when the graphics driver takes the app's
+picture as it is). If a fullscreen window flickers or its colors look wrong,
+`direct-scanout = false` in the configuration turns it off as soon as the file is saved.
+
 ## Window and layer rules
 
 Rules change how particular windows or panels behave. A `[[window-rule]]` matches windows by
@@ -511,6 +517,7 @@ host name and home directory. It sends nothing anywhere; read it before posting 
 | Stuck on a locked screen after the locker crashed | See [Locking the screen and idling](#locking-the-screen-and-idling). |
 | `Mod+D` or tapping Mod does nothing | Set `launcher` to your launcher's command. |
 | Tapping Mod opens the launcher and you don't want it | `"Mod" = "none"` under `[bindings]` (nested, Mod is Alt, so tapping Alt opens it). |
+| A fullscreen window flickers or shows wrong colors | `direct-scanout = false` in the configuration (Pila then draws those frames itself), and report it with `pila-report`'s file. |
 | The screen froze | `Ctrl+Alt+F3` (any free virtual terminal), log in, `pkill pila`; then report it with the log. |
 | Pila crashed (back at the login screen) | Report it with `pila.log.old` (or `pila-report`'s file): its "pila crashed" line and the backtrace after it say where. |
 

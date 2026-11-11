@@ -1083,6 +1083,7 @@ struct ConfigFile {
     workspaces: Option<usize>,
     corner_radius: Option<u32>,
     other_gpus: Option<bool>,
+    direct_scanout: Option<bool>,
     shadow: ShadowFile,
     colors: ColorsFile,
     animations: AnimationsFile,
@@ -1320,6 +1321,10 @@ pub struct Config {
     /// primary and copied over (`udev/secondary.rs`). Off unless asked for:
     /// untried on real hardware.
     pub other_gpus: bool,
+    /// Whether a client's buffer that is all an output shows (a fullscreen
+    /// video or game) goes to the screen as it is, with no frame of Pila's
+    /// own (`udev/draw.rs::frame_flags`). On unless turned off.
+    pub direct_scanout: bool,
     pub shadow: ShadowConfig,
     pub colors: Colors,
     /// Which animations play and how long they last (`animation.rs`).
@@ -1544,6 +1549,7 @@ impl Config {
             workspaces,
             corner_radius,
             other_gpus: file.other_gpus.unwrap_or(false),
+            direct_scanout: file.direct_scanout.unwrap_or(true),
             shadow,
             colors,
             animations,
@@ -2069,6 +2075,14 @@ mod tests {
         let config = Config::from_toml("other-gpus = true", &no_env).unwrap();
         assert!(config.other_gpus);
         assert!(Config::from_toml("other-gpus = 2", &no_env).is_err());
+    }
+
+    #[test]
+    fn direct_scanout_is_on_unless_turned_off() {
+        assert!(Config::from_toml("", &no_env).unwrap().direct_scanout);
+        let config = Config::from_toml("direct-scanout = false", &no_env).unwrap();
+        assert!(!config.direct_scanout);
+        assert!(Config::from_toml("direct-scanout = 0", &no_env).is_err());
     }
 
     #[test]

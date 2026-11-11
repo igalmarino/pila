@@ -233,6 +233,14 @@ impl DmabufHandler for Pila {
             .and_then(|backend| backend.renderer())
             .is_some_and(|mut renderer| renderer.import_dmabuf(&dmabuf, None).is_ok());
         if imported {
+            // Where it was imported: what lets an output of that GPU show it
+            // as it is (`Backend::dmabuf_node`). A client may have said
+            // (`set_sampling_device`).
+            if dmabuf.node().is_none() {
+                if let Some(node) = self.backend.as_ref().and_then(|b| b.dmabuf_node()) {
+                    dmabuf.set_node(node);
+                }
+            }
             let _ = notifier.successful::<Pila>();
         } else {
             notifier.failed();

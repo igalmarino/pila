@@ -61,6 +61,17 @@ impl Backend {
         }
     }
 
+    /// The GPU that clients' dmabufs are imported on, where its outputs can
+    /// show such a buffer as it is (`udev/draw.rs::frame_flags`): bare metal's
+    /// primary. Smithay takes a client's buffer for a plane only if it names
+    /// the device of the output.
+    pub fn dmabuf_node(&self) -> Option<smithay::backend::drm::DrmNode> {
+        match self {
+            Backend::Udev(data) => Some(data.primary_node()),
+            Backend::Winit(_) | Backend::Headless(_) => None,
+        }
+    }
+
     /// The renderer, and the cursor theme where pila draws named cursors
     /// itself (bare metal), for rendering outside the backend's own loop.
     pub fn renderer_and_cursor_theme(

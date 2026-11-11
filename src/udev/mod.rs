@@ -283,6 +283,9 @@ struct OutputSurface {
     /// swapchain and commits the modeset, a cost of setting the output up
     /// that's logged on its own, not counted in the frame budget.
     first_frame: bool,
+    /// The frame last queued was a client's buffer as it is, on the primary
+    /// plane (`draw::frame_flags`); logged when it changes.
+    direct: bool,
     /// After a redraw that had nothing new to show, the next that may bring
     /// nothing either waits until then (`draw::idle_until`, `draw::idle_wait`):
     /// a client committing no new picture (no buffer, or one without damage)
@@ -356,6 +359,11 @@ enum LockFrame {
 }
 
 impl UdevData {
+    /// The primary GPU's render node (`Backend::dmabuf_node`).
+    pub fn primary_node(&self) -> DrmNode {
+        self.primary
+    }
+
     /// Ask every output for a new frame (see the module docs).
     pub fn queue_redraw(&mut self) {
         let now = self.clock.now().into();

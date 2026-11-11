@@ -278,6 +278,23 @@ Key flows and invariants:
   idle callback plus the ping (`defer_redraws`; `step_animations` does it by hand): nested, the winit source has already checked for redraw
   requests by then. Smithay calls `cursor_image` with the pointer locked, so its redraw
   (where the pointer is) goes through an idle callback too.
+- **Direct scanout** (`udev/draw.rs::frame_flags`; bare metal, `direct-scanout`, on by
+  default): a frame that would be one client's buffer and nothing else (a fullscreen video or
+  game, a maximized window with no title bar on an output with no bar, a wallpaper alone; the
+  cursor on its own plane) goes to the screen as that buffer, on the primary plane, and nothing
+  is drawn. Smithay's `DrmCompositor` decides, frame by frame: the last element left once those
+  hidden behind opaque ones are dropped, opaque and covering the output (or anything, on a black
+  clear color: the lock screen's surface), with nothing drawn above it; it tries the buffer on
+  the kernel (an atomic test) and draws the frame if it's refused. It only takes a client's
+  dmabuf that names the output's GPU, which `dmabuf_imported` sets to the primary's
+  (`Backend::dmabuf_node`) unless the client named one; outputs on another GPU never do (their
+  elements have no `underlying_storage` either). The frame flags allow the primary plane,
+  whatever the buffer's format, and the cursor plane; not overlay planes (what they take
+  differs by driver, and they'd be for a window among others, which saves little). A capture
+  of such a frame draws the buffer (Smithay's `blit_frame_result`). Such frames are counted
+  apart in the frame statistics (`direct`) and an output starting or stopping them is logged
+  (`direct scanout`, `pila::frames`). Bare metal only: `scripts/check`'s fullscreen scenario
+  reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average
   and worst, missed refreshes; each frame over half the period on its own); winit and udev
@@ -288,7 +305,9 @@ Key flows and invariants:
   frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
   (no frame queued: a commit with no new picture, the pointer moving with no cursor drawn) is counted
-  apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless); an
+  apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless), and a
+  frame that was a client's buffer as it is in `frames` and apart, `direct`
+  (`record_direct_frame`, udev); an
   output with only those still reports. On bare metal a frame with something new asked for in
   time for a vblank (`frame_stats::IN_TIME`, 4 ms or half a period, before it; with a frame in
   flight, the vblank after the one that really showed it: one shown late doesn't make the next

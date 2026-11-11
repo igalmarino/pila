@@ -50,6 +50,13 @@
 # hardware. Turned on or off as soon as the file is saved.
 # other-gpus = false               # (default)
 
+# A window that is all a monitor shows (a fullscreen video or game, with
+# nothing over it) goes to the screen as its app drew it, and Pila draws
+# nothing: less work for the GPU. On a TTY, on the main GPU's monitors. Turn
+# it off if such a window flickers or shows wrong colors. Read as soon as the
+# file is saved.
+# direct-scanout = true            # (default)
+
 # The shadow under each window, stronger for the focused one. None for a
 # maximized or fullscreen window, or one whose app draws its own (past its
 # geometry, as GTK's do); a window rule's `shadow` can say otherwise, except

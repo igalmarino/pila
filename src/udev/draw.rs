@@ -3,7 +3,10 @@
 use super::*;
 
 use smithay::{
-    backend::renderer::{element::Id, gles::GlesTarget},
+    backend::{
+        drm::compositor::PrimaryPlaneElement,
+        renderer::{element::Id, gles::GlesTarget},
+    },
     utils::{Rectangle, Transform},
 };
 
@@ -48,6 +51,20 @@ pub(super) fn render_output(state: &mut Pila, id: OutputId, at_vblank: bool) {
     let input = state.frame_input();
     let scene_cpu = started.elapsed();
     draw(state, ready, at_vblank, &input, scene_cpu);
+}
+
+/// What a frame may put on a plane of its own instead of drawing it: the
+/// cursor and, with `direct-scanout`, a client's buffer that is all the
+/// output shows (a fullscreen video or game), on the primary plane, whatever
+/// its format. Smithay tries it on the kernel first and draws the frame if
+/// it's refused. Not overlay planes: what they take differs by driver, and
+/// they'd be for a window among others, which saves little.
+fn frame_flags(direct_scanout: bool) -> FrameFlags {
+    if direct_scanout {
+        FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
+    } else {
+        FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT
+    }
 }
 
 /// An output about to be drawn (`prepare`).
@@ -158,6 +175,7 @@ fn draw(
     let pointer_here = output_geo.to_f64().contains(input.pointer);
     let scale = crate::scale::output_scale(&output);
 
+    let flags = frame_flags(state.config.direct_scanout);
     let Pila {
         backend,
         blur,
@@ -222,13 +240,16 @@ fn draw(
     let mut capture_cpu = Duration::ZERO;
     // Rendered, with nothing new to show: no frame (`frame_stats.rs`, idle).
     let mut nothing_new = false;
+    // The frame is a client's buffer as it is, on the primary plane.
+    let mut direct = false;
     let clear = render::clear_color(scene);
     // The elements' states and whether nothing changed, or why it failed.
     let rendered = match &mut lent {
         OutputRenderer::Primary(lent) => {
             let renderer = lent.as_mut();
-            match drm_output.render_frame(renderer, &elements, clear, FrameFlags::DEFAULT) {
+            match drm_output.render_frame(renderer, &elements, clear, flags) {
                 Ok(result) => {
+                    direct = matches!(result.primary_element, PrimaryPlaneElement::Element(_));
                     if !result.is_empty {
                         // Captures of this output take the frame just
                         // composited, blitted, rather than drawing the scene
@@ -271,7 +292,7 @@ fn draw(
                 .map(super::secondary::PrimaryGpuElement)
                 .collect();
             drm_output
-                .render_frame(lent, &elements, clear, FrameFlags::DEFAULT)
+                .render_frame(lent, &elements, clear, flags)
                 .map(|result| (result.states, result.is_empty))
                 .map_err(|err| format!("{err:?}"))
         }
@@ -286,6 +307,14 @@ fn draw(
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
                         surface.frame_pending = true;
+                        if std::mem::replace(&mut surface.direct, direct) != direct {
+                            tracing::debug!(
+                                target: "pila::frames",
+                                output = output.name(),
+                                on = direct,
+                                "direct scanout"
+                            );
+                        }
                         // The first frame after a modeset starts a new grid
                         // of vblanks: nothing to measure it against.
                         surface.queued_request =
@@ -385,6 +414,9 @@ fn draw(
                 "first frame after setting the output up"
             );
         } else {
+            if direct {
+                state.record_direct_frame(&output);
+            }
             state.record_frame(&output, cpu);
         }
     } else if nothing_new {
@@ -630,6 +662,20 @@ fn lock_shown(outputs: impl IntoIterator<Item = (bool, LockFrame)>) -> bool {
 mod tests {
     use super::*;
     use crate::redraw::Content;
+
+    #[test]
+    fn a_clients_buffer_takes_the_primary_plane_only_with_direct_scanout() {
+        let primary =
+            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY;
+        assert!(frame_flags(true).contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
+        assert!(!frame_flags(false).intersects(primary));
+        // Either way the cursor has its plane, and nothing goes on an
+        // overlay plane.
+        for flags in [frame_flags(true), frame_flags(false)] {
+            assert!(flags.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+            assert!(!flags.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
+        }
+    }
 
     #[test]
     fn the_lock_waits_for_every_output_on_to_show_it() {

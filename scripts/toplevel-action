@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Minimize, unminimize, maximize or unmaximize every window, as a taskbar
-would: a minimal
+"""Minimize, unminimize, maximize, unmaximize, make fullscreen or take out of
+fullscreen every window, as a taskbar would: a minimal
 wlr-foreign-toplevel-management client (standard library only), for
 scripted tests such as scripts/check. Run it inside Pila (it uses
 WAYLAND_DISPLAY).
 
-    scripts/toplevel-action min|unmin|max|unmax
+    scripts/toplevel-action min|unmin|max|unmax|full|unfull
 """
 import os
 import socket
@@ -13,7 +13,9 @@ import struct
 import sys
 
 # Requests of zwlr_foreign_toplevel_handle_v1, by opcode.
-OPCODES = {"max": 0, "unmax": 1, "min": 2, "unmin": 3}
+OPCODES = {"max": 0, "unmax": 1, "min": 2, "unmin": 3, "full": 8, "unfull": 9}
+# set_fullscreen names an output, or none: the window's own.
+ARGUMENTS = {"full": struct.pack("<I", 0)}
 if len(sys.argv) != 2 or sys.argv[1] not in OPCODES:
     sys.exit(__doc__)
 action = sys.argv[1]
@@ -81,7 +83,7 @@ for obj, op, body in events():
 
 opcode = OPCODES[action]
 for handle in handles:
-    send(handle, opcode)
+    send(handle, opcode, ARGUMENTS.get(action, b""))
 send(DISPLAY, 0, struct.pack("<I", 6))
 for obj, op, body in events():
     if obj == 6:

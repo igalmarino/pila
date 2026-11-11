@@ -236,6 +236,22 @@ if [ "${1:-}" = "--workload" ]; then
         else
             mark "blur skip (no kitty or foot)"
         fi
+
+        # A fullscreen terminal that never stops writing: on bare metal its
+        # frames can go to the screen as they are (direct scanout).
+        if command -v python3 >/dev/null; then
+            mark "fullscreen begin"
+            run_terminal sh -c 'while :; do date; done' &
+            held=$!
+            sleep 2
+            python3 -I scripts/toplevel-action full >/dev/null
+            sleep 3
+            python3 -I scripts/toplevel-action unfull >/dev/null
+            sleep 1
+            stop "$held"
+            sleep 1
+            mark "fullscreen end"
+        fi
     fi
 
     if command -v fuzzel >/dev/null; then
@@ -556,6 +572,19 @@ if [ -n "$stats" ]; then
     }' <<<"$stats" | while read -r output count cpu rate; do
         info "redraws with nothing new on $output: $count (${rate}/s), ${cpu} ms of CPU in all"
     done
+fi
+
+# Frames that were an app's buffer as it is (direct scanout, bare metal:
+# `direct` in the frame statistics; `udev/draw.rs::frame_flags`), which the
+# fullscreen scenario may bring: it depends on the terminal (an opaque buffer
+# from the GPU) and on what a shell keeps above it. Reported, not judged.
+if [ -n "$stats" ] && grep -q 'backend=Udev' "$log"; then
+    direct=$(sum direct)
+    if [ "$direct" -gt 0 ]; then
+        info "frames shown straight from an app's buffer (direct scanout): $direct of $frames"
+    elif grep -q 'check: fullscreen begin' "$log"; then
+        info "no frame shown straight from an app's buffer (direct scanout), fullscreen terminal included"
+    fi
 fi
 
 # The first frame after an output is set up (swapchain, modeset) is a cost of

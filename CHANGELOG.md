@@ -6,6 +6,11 @@
   monitor as it began, which cost the graphics card several milliseconds and, on a TTY, could make
   the slide's first frame miss a refresh. They're now made ahead and kept (two per monitor, some
   tens of megabytes of graphics memory; none with the slide turned off).
+- **Fullscreen videos and games skip Pila's drawing:** on a TTY, a window that is all a monitor
+  shows (fullscreen, with nothing over it) now goes to the screen as its app drew it, with no
+  frame of Pila's in between: less work for the GPU, and battery (direct scanout, on the main
+  GPU's monitors, when the driver takes the app's picture). If such a window flickers or shows
+  wrong colors, `direct-scanout = false` in the configuration turns it off; please report it.
 - **Monitors on another GPU, to try:** on a laptop with two GPUs, the HDMI or DisplayPort output
   is often wired to the dedicated one, and a dock may have its own; Pila shows nothing there.
   With `other-gpus = true` in the configuration it draws them with the main GPU and copies the

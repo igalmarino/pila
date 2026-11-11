@@ -25,6 +25,11 @@
 //! that just had nothing new waits before the next redraw that may bring
 //! nothing (`udev/draw.rs::idle_wait`), at most one such redraw per refresh.
 //!
+//! On bare metal a frame can be a client's buffer as it is (direct scanout:
+//! a fullscreen video or game that is all the output shows, on the primary
+//! plane; `udev/draw.rs::frame_flags`): nothing is drawn for it. Those are
+//! counted in `frames` and apart, `direct`.
+//!
 //! Screen captures (`capture.rs`, `screencopy.rs`) build their frames on
 //! the event loop too, after the outputs' (`Pila::after_frames`): a frame's
 //! scene, elements and damage while one is waiting, and its copy when the
@@ -51,6 +56,7 @@ pub struct FrameStats {
     cpu_max: Duration,
     missed: u32,
     late: u32,
+    direct: u32,
     idle: u32,
     idle_cpu: Duration,
 }
@@ -67,6 +73,9 @@ pub struct Report {
     /// Frames shown later than due (`late_refreshes`; bare metal), counted
     /// in `missed` too.
     pub late: u32,
+    /// Frames that were a client's buffer as it is (direct scanout; bare
+    /// metal), counted in `frames` too.
+    pub direct: u32,
     /// Redraws that had nothing to show, and their CPU time.
     pub idle: u32,
     pub idle_cpu: Duration,
@@ -112,6 +121,7 @@ impl FrameStats {
             cpu_max: self.cpu_max,
             missed: self.missed,
             late: self.late,
+            direct: self.direct,
             idle: self.idle,
             idle_cpu: self.idle_cpu,
         };
@@ -130,6 +140,11 @@ impl FrameStats {
     /// A frame was shown late (its refreshes go to `missed`).
     pub fn late(&mut self) {
         self.late += 1;
+    }
+
+    /// The frame about to be recorded is a client's buffer as it is.
+    pub fn direct(&mut self) {
+        self.direct += 1;
     }
 }
 
@@ -196,6 +211,7 @@ fn log_report(output: &str, report: &Report) {
         cpu_max_ms = ms(report.cpu_max),
         missed = report.missed,
         late = report.late,
+        direct = report.direct,
         idle = report.idle,
         idle_cpu_ms = ms(report.idle_cpu),
         "frames"
@@ -280,6 +296,12 @@ impl Pila {
         }
     }
 
+    /// The frame of `output` recorded next is a client's buffer as it is, on
+    /// the primary plane (see the module docs).
+    pub fn record_direct_frame(&mut self, output: &Output) {
+        self.frame_stats.entry(output.name()).or_default().direct();
+    }
+
     /// A frame of `output` was shown `count` refreshes late (counted in
     /// `missed` by the caller).
     pub fn record_late(&mut self, output: &Output, count: u32) {
@@ -347,6 +369,20 @@ mod tests {
         let report = stats.take(7000 * MS).expect("an idle redraw");
         assert_eq!((report.frames, report.idle), (0, 1));
         assert_eq!(report.cpu_avg, Duration::ZERO);
+    }
+
+    #[test]
+    fn frames_that_are_a_clients_buffer_are_counted_apart_and_as_frames() {
+        let mut stats = FrameStats::default();
+        stats.record(1000 * MS, MS);
+        stats.direct();
+        stats.record(2000 * MS, MS);
+        stats.direct();
+        let report = stats.record(6000 * MS, MS).expect("due after 5 s");
+        assert_eq!((report.frames, report.direct), (3, 2));
+        // And start over with the report.
+        let report = stats.record(12000 * MS, MS).expect("due after 5 s");
+        assert_eq!((report.frames, report.direct), (1, 0));
     }
 
     #[test]
