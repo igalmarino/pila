@@ -404,6 +404,9 @@ EOF
     fi
     export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug${PILA_CHECK_RUST_LOG:+,$PILA_CHECK_RUST_LOG}"
 
+    if [ -n "${PILA_CHECK_RUST_LOG:-}" ]; then
+        echo "Log filter: $RUST_LOG"
+    fi
     echo "Runs Pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
     workload="$PWD/scripts/check --workload"
