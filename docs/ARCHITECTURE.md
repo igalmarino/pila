@@ -749,8 +749,9 @@ Key flows and invariants:
   client's shadow; a window opaque over its geometry and at full opacity gets none,
   `blur::is_opaque`). Before an output's elements are built, `render::output_elements` (which
   the backends and captures use) calls `BlurCache::prepare`: back to front, windows and then upper layers, so that each
-  backdrop has those behind it, it renders what's behind the region (`render::elements_behind`)
-  into an offscreen texture through a per-region damage tracker, and only when that
+  backdrop has those behind it, it renders what's behind the region (`render::elements_behind`:
+  only the windows and layer surfaces that reach the region; an output's frame likewise leaves
+  out the layer surfaces of other outputs) into an offscreen texture through a per-region damage tracker, and only when that
   changed runs the dual-Kawase passes (`BLUR_PASSES` levels, custom texture shaders,
   `Transform::Normal` throughout, textures with linear filtering and clamped edges). All
   of it covers the region's bounding box; what's outside the region (clients tessellate

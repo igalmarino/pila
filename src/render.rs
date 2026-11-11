@@ -294,14 +294,14 @@ pub fn scene_elements(
     )
 }
 
-/// What's behind a surface of the scene, relative to `origin`. A workspace
-/// slide doesn't move what's behind a window: its backdrop is for where it will
-/// be, and goes with it.
+/// What's behind a surface of the scene, in `area` (global), relative to its
+/// top-left: what isn't there is left out. A workspace slide doesn't move what's
+/// behind a window: its backdrop is for where it will be, and goes with it.
 pub fn elements_behind(
     renderer: &mut GlesRenderer,
     scene: &Scene,
     surface: Behind,
-    origin: Point<i32, Logical>,
+    area: Rectangle<i32, Logical>,
     scale: Scale<f64>,
     backdrop: Backdrop<'_>,
 ) -> Vec<PilaRenderElement> {
@@ -309,11 +309,20 @@ pub fn elements_behind(
         Behind::Layer(index) => Start::Upper(index + 1),
         Behind::Window(index) => Start::Window(index + 1),
     };
-    scene_elements_from(renderer, scene, origin, scale, backdrop, start, None)
+    scene_elements_from(
+        renderer,
+        scene,
+        area.loc,
+        scale,
+        backdrop,
+        start,
+        Some(area),
+    )
 }
 
 /// `scene_elements` from `start`. `visible`: the global area drawn (an
-/// output's), outside which windows are left out (`window_elements`).
+/// output's), outside which windows and layer surfaces are left out
+/// (`window_elements`, `layer_elements`).
 fn scene_elements_from(
     renderer: &mut GlesRenderer,
     scene: &Scene,
@@ -353,11 +362,15 @@ fn scene_elements_from(
                 );
             }
             for entry in scene.upper.iter().skip(first_upper) {
+                if !layer_shows(entry, visible) {
+                    continue;
+                }
                 elements.extend(layer_elements(
                     renderer,
                     std::slice::from_ref(entry),
                     output_location,
                     scale,
+                    None,
                 ));
                 // Right behind the surface (elements go front to back).
                 elements.extend(backdrop(
@@ -431,18 +444,29 @@ fn scene_elements_from(
         &scene.lower,
         output_location,
         scale,
+        visible,
     ));
     elements
 }
 
+/// Whether a layer surface may show in `visible` (global; everywhere if
+/// `None`): one that animates is drawn where its effect puts it.
+fn layer_shows(entry: &SceneLayer, visible: Option<Rectangle<i32, Logical>>) -> bool {
+    entry.effect.is_some()
+        || visible
+            .is_none_or(|area| layer_content_rect(&entry.layer, entry.location).overlaps(area))
+}
+
+/// `visible`: as in `scene_elements_from`.
 fn layer_elements(
     renderer: &mut GlesRenderer,
     layers: &[SceneLayer],
     output_location: Point<i32, Logical>,
     scale: Scale<f64>,
+    visible: Option<Rectangle<i32, Logical>>,
 ) -> Vec<PilaRenderElement> {
     let mut elements = Vec::new();
-    for entry in layers {
+    for entry in layers.iter().filter(|entry| layer_shows(entry, visible)) {
         let plain = |renderer: &mut GlesRenderer, origin: Point<i32, Logical>, scale| {
             single_layer_elements(
                 renderer,

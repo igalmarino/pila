@@ -656,7 +656,7 @@ impl BlurCache {
                 renderer,
                 scene,
                 surface,
-                origin,
+                Rectangle::new(origin, rect.size),
                 scale,
                 &mut |surface, origin, scale, alpha| {
                     cache.element(surface, &key.1, origin, scale, alpha)
