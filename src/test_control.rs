@@ -372,8 +372,11 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
         other => return Err(format!("unknown command {other:?}")),
     };
     // Input asks for its own redraws (`process_input_event`), as do output
-    // changes; reading the state changes nothing.
-    state.housekeeping = true;
+    // changes; reading the state changes nothing. The pointer moving says
+    // itself whether the housekeeping is due.
+    if !matches!(cmd, "move" | "rel") {
+        state.housekeeping = true;
+    }
     Ok(result)
 }
 

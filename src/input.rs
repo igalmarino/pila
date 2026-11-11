@@ -30,6 +30,13 @@ use crate::{
 const BTN_LEFT: u32 = 0x110;
 pub(crate) const BTN_RIGHT: u32 = 0x111;
 
+/// See `Pila::motion_watch`.
+#[derive(PartialEq)]
+struct MotionWatch {
+    keyboard_focus: Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
+    output: Option<smithay::output::Output>,
+}
+
 impl Pila {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>)
     where
@@ -37,7 +44,17 @@ impl Pila {
     {
         self.notify_activity();
         // Whatever the input changed beyond the screen is `after_frames`'.
-        self.housekeeping = true;
+        // The pointer moving changes little of it, and comes up to a thousand
+        // times a second: only if it changes what that looks at
+        // (`MotionWatch`). Moving a window draws a frame, which does it.
+        let motion = matches!(
+            event,
+            InputEvent::PointerMotion { .. } | InputEvent::PointerMotionAbsolute { .. }
+        );
+        let watched = motion.then(|| self.motion_watch());
+        if !motion {
+            self.housekeeping = true;
+        }
         let pointer_from = self.pointer_location();
         // After `power-off-monitors` any input brings them back; a key or a
         // click that does is kept from apps (`on_keyboard`, `pointer_button`).
@@ -116,6 +133,25 @@ impl Pila {
         }
         if gesture {
             self.queue_redraw();
+        }
+        if let Some(watched) = watched {
+            if self.motion_watch() != watched {
+                self.housekeeping = true;
+            }
+        }
+    }
+
+    /// What the pointer moving may change of what `after_frames`' housekeeping
+    /// looks at: the keyboard focus (taskbars, IPC) and the output under the
+    /// pointer (IPC's focused output).
+    fn motion_watch(&self) -> MotionWatch {
+        MotionWatch {
+            keyboard_focus: self.keyboard_focus(),
+            output: self
+                .space
+                .output_under(self.pointer_location())
+                .next()
+                .cloned(),
         }
     }
 

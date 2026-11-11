@@ -787,6 +787,34 @@ fn a_subscriber_gets_only_what_it_asked_for_and_no_moves() {
     );
 }
 
+/// The pointer moving onto another monitor changes which is focused: a
+/// subscriber hears it, though moving within one does nothing else of the
+/// sort (`process_input_event` leaves the housekeeping out then).
+#[test]
+fn a_subscriber_hears_the_pointer_move_to_another_monitor() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        ..Options::default()
+    });
+    pila.move_to(600.0, 400.0);
+    pila.settle();
+    let (mut events, _) = Subscription::new(&pila, Some(&["outputs"]));
+    let focused = |e: &Value, name: &str| {
+        e["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["name"] == name && o["focused"] == true)
+    };
+    let first = events.line().unwrap();
+    assert!(focused(&first, "A"), "{first}");
+    for i in 0..20 {
+        pila.move_by(if i % 2 == 0 { 5.0 } else { -5.0 }, 0.0);
+    }
+    pila.move_to(1280.0 + 500.0, 400.0);
+    events.wait("outputs", "B focused", |e| focused(e, "B"));
+}
+
 #[test]
 fn subscribing_to_something_unknown_says_so() {
     let pila = TestPila::start();

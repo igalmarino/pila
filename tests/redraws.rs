@@ -315,3 +315,27 @@ fn the_event_loops_iterations_and_housekeeping_are_counted() {
         "more housekeeping than iterations: {after:?}"
     );
 }
+
+/// Moving the pointer over a window changes nothing the housekeeping after
+/// an iteration looks at (taskbars, IPC, the `Space`): it's done for the
+/// frames drawn, not for each motion, which a 1000 Hz mouse sends a
+/// thousand times a second.
+#[test]
+fn moving_the_pointer_over_a_window_doesnt_do_all_the_housekeeping_each_time() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    let (x, y, ..) = rect(&pila.wait_window("a")["geometry"]);
+    pila.move_to((x + 200) as f64, (y + 150) as f64);
+    let before = loop_counts(&pila.settle());
+    const MOVES: u64 = 100;
+    for i in 0..MOVES {
+        pila.move_by(if i % 2 == 0 { 2.0 } else { -2.0 }, 0.0);
+    }
+    let after = loop_counts(&pila.settle());
+    let done = after.1 - before.1;
+    assert!(
+        done < MOVES / 2,
+        "{done} of {MOVES} moves did all the housekeeping: {before:?} {after:?}"
+    );
+}

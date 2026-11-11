@@ -289,7 +289,10 @@ Key flows and invariants:
   surface or popup, a layer surface removed, a title, a lock, an output powered on ask for
   theirs. `after_frames`' housekeeping (`space.refresh`, taskbar, IPC events, animations) runs
   after any client dispatch or input (`Pila::housekeeping`) even when no output was drawn: the
-  change may show nowhere (a minimized window's title). Captures run only when an output was
+  change may show nowhere (a minimized window's title). The pointer moving is the exception: it
+  comes up to a thousand times a second and changes little of that, so it asks only when the
+  keyboard focus or the output under the pointer changed (`Pila::motion_watch`); a window it
+  moves draws a frame, which does the rest. Captures run only when an output was
   drawn or `Pila::capture_due` (a commit that shows on no output, a hidden window's that may be
   captured; a capture client asking for a frame), not with every dispatch. State changed outside a client
   dispatch or input (timers, `insert_idle` callbacks) must ask for its redraws. The headless
