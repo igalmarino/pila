@@ -33,6 +33,25 @@ impl Pila {
         (names, active)
     }
 
+    /// Whether the physical keyboard's layouts are still `names`, with
+    /// `active` in use (`keyboard_layouts`, without building them anew).
+    pub fn keyboard_layouts_are(&mut self, names: &[String], active: usize) -> bool {
+        if let Some(saved) = self.saved_layout() {
+            return saved.0 as usize == active && self.input.layout_names == names;
+        }
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return names.is_empty() && active == 0;
+        };
+        keyboard.with_xkb_state(self, |context| {
+            let xkb = context.xkb().locked();
+            xkb.active_layout().0 as usize == active
+                && xkb
+                    .layouts()
+                    .map(|layout| xkb.layout_name(layout))
+                    .eq(names.iter().map(String::as_str))
+        })
+    }
+
     /// Switch the physical keyboard's layout: `next` and `prev` wrap around,
     /// a number past the last does nothing.
     pub fn switch_layout(&mut self, target: LayoutTarget) {

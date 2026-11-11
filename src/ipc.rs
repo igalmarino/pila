@@ -468,6 +468,9 @@ pub struct Subscribers {
     /// Something changed that no frame may follow (the monitors went off):
     /// `after_frames` sends the events anyway (`send_ipc_events_due`).
     due: bool,
+    /// The layouts, and the one in use, the last keyboard event was made
+    /// from (`send_keyboard_events`).
+    keyboard: Option<(Vec<String>, usize)>,
 }
 
 /// As in the config's `[[output]]`.
@@ -531,8 +534,26 @@ impl Pila {
         self.ipc_events.due = true;
     }
 
-    /// The same for the keyboard layouts, every loop iteration.
+    /// The same for the keyboard layouts, every loop iteration: an xkb
+    /// option's keys switch them with nothing to draw. The event is made
+    /// only when they changed since the last one (`keyboard_layouts_are`).
     pub fn send_keyboard_events(&mut self) {
+        let subscribed = self
+            .ipc_events
+            .list
+            .iter()
+            .any(|s| s.kinds.contains(&Kind::Keyboard));
+        if !subscribed {
+            return;
+        }
+        if let Some((names, active)) = self.ipc_events.keyboard.take() {
+            let same = self.keyboard_layouts_are(&names, active);
+            self.ipc_events.keyboard = Some((names, active));
+            if same {
+                return;
+            }
+        }
+        self.ipc_events.keyboard = Some(self.keyboard_layouts());
         self.send_events_of(&[Kind::Keyboard]);
     }
 

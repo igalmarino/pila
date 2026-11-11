@@ -949,7 +949,8 @@ Key flows and invariants:
   (`set_output_power`: with every monitor off nothing is drawn) marks them due
   (`Pila::ipc_events_due`), and `after_frames` sends them even when it draws nothing. The keyboard layouts are checked
   every loop iteration instead (`send_keyboard_events`, before `after_frames` returns early): an
-  xkb option can switch them with nothing to draw. `keyboard_layout.rs` reads them from the
+  xkb option can switch them with nothing to draw. Only against those the last event was made
+  from (`keyboard_layouts_are`, nothing built): the event is made only when they changed. `keyboard_layout.rs` reads them from the
   seat's xkb state and `switch-layout` sets them; while a virtual keyboard's keymap is in place
   it's the physical keyboard's that count, the names cached when that keymap swapped in
   (`InputState::layout_names`) and the layout it comes back to (`saved_layout`), which a switch
