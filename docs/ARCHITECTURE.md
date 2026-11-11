@@ -556,7 +556,9 @@ Key flows and invariants:
   (from/to over a duration on `Pila::clock`, one time per `scene()`). An animating
   window's `SceneWindow::effect` (a layer's `SceneLayer::effect`) makes `render.rs` draw
   it (bar, popups, corners included) into a per-scale texture (`OffscreenWindow` in its
-  `AnimTextures` user data, `animated_element`) and show that transformed; `frame.rs`
+  `AnimTextures` user data, `animated_element`) and show that transformed, only on the outputs
+  the transformed rect reaches (`effect_rect`: another scale's texture would be made and drawn
+  into whole for nothing; `state_json` counts them, `animation_textures`); `frame.rs`
   paces it by `WindowEffect::output`, since it's absent from the output's render states. A closed
   window is a `Ghost`: a snapshot (`render::snapshot_window`) drawn at its old place in
   the stacking order (`Scene::ghosts`) while it fades; its live window is skipped

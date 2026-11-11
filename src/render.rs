@@ -450,11 +450,16 @@ fn scene_elements_from(
 }
 
 /// Whether a layer surface may show in `visible` (global; everywhere if
-/// `None`): one that animates is drawn where its effect puts it.
+/// `None`): one that animates where its effect puts it.
 fn layer_shows(entry: &SceneLayer, visible: Option<Rectangle<i32, Logical>>) -> bool {
-    entry.effect.is_some()
-        || visible
-            .is_none_or(|area| layer_content_rect(&entry.layer, entry.location).overlaps(area))
+    let Some(area) = visible else {
+        return true;
+    };
+    let rect = layer_content_rect(&entry.layer, entry.location);
+    match &entry.effect {
+        Some(effect) => effect_rect(effect, rect).overlaps(area.to_f64()),
+        None => rect.overlaps(area),
+    }
 }
 
 /// `visible`: as in `scene_elements_from`.
@@ -555,8 +560,14 @@ fn window_elements(
     let mut elements = Vec::new();
     for (i, entry) in windows.iter().enumerate() {
         elements.extend(ghosts_before(i));
-        let elsewhere = entry.effect.is_some() || entry.slid.is_some();
-        if !elsewhere && visible.is_some_and(|area| !entry.bounds.overlaps(area)) {
+        // An animating window shows where its effect puts it (drawing it
+        // into a texture for an output it isn't on would be for nothing);
+        // a sliding one wherever the slide is.
+        let shows = |area: Rectangle<i32, Logical>| match &entry.effect {
+            Some(effect) => effect_rect(effect, entry.content_rect()).overlaps(area.to_f64()),
+            None => entry.slid.is_some() || entry.bounds.overlaps(area),
+        };
+        if !visible.is_none_or(shows) {
             continue;
         }
         match &entry.effect {
@@ -871,6 +882,14 @@ fn texture_element(
     ))
 }
 
+/// Where something covering `rect` is drawn while `effect` transforms it.
+fn effect_rect(effect: &WindowEffect, rect: Rectangle<i32, Logical>) -> Rectangle<f64, Logical> {
+    match &effect.frame {
+        Some(frame) => frame.apply(rect.to_f64()),
+        None => effect.transform.apply(rect.to_f64(), effect.center),
+    }
+}
+
 /// Makes something's elements relative to an origin, at a scale.
 type DrawAt<'a> =
     &'a mut dyn FnMut(&mut GlesRenderer, Point<i32, Logical>, Scale<f64>) -> Vec<PilaRenderElement>;
@@ -910,10 +929,7 @@ fn animated_element(
         (target.buffer.clone(), target.size)
     };
     let (buffer, texture_size) = buffer;
-    let dst = match &effect.frame {
-        Some(frame) => frame.apply(rect.to_f64()),
-        None => effect.transform.apply(rect.to_f64(), effect.center),
-    };
+    let dst = effect_rect(effect, rect);
     Some(texture_element(
         &buffer,
         texture_size,

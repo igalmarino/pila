@@ -77,6 +77,11 @@ impl Pila {
             "corner_radius": props.corner_radius,
             "rule_title_bar": props.title_bar,
             "animating": self.window_effect(window, now).is_some(),
+            // Its textures while it animates, one per scale it's drawn at.
+            "animation_textures": window
+                .user_data()
+                .get::<crate::animation::AnimTextures>()
+                .map_or(0, |textures| textures.0.borrow().len()),
             "ghost": self.is_ghost(window),
             "flashing": crate::bell::flash(window, location).is_some(),
         })

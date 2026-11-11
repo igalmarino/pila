@@ -368,3 +368,37 @@ fn setting_the_same_cursor_again_redraws_nothing() {
     let after = redraws(&pila.settle(), "HEADLESS-1");
     assert_eq!(after, before, "redrawn for the same cursor again");
 }
+
+/// A window animating on one output isn't drawn into a texture for another
+/// it isn't on, which another scale would need a texture of its own for
+/// (made, and drawn into whole, in that output's frame).
+#[test]
+fn an_animating_window_isnt_drawn_for_an_output_it_isnt_on() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[[output]]\nname = \"B\"\nscale = 2\n\n[animations]\nenabled = true\nspeed = 4\n"
+            .into(),
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    pila.move_to(600.0, 400.0);
+    client.window("a").size(400, 300).create();
+    let opening = pila.wait("a opening on A", |s| {
+        window_in(s, "a").is_some_and(|w| w["animating"] == true && w["output"] == "A")
+    });
+    // B redrawn while it opens (the pointer moving there).
+    let (frames, idle) = redraws(&opening, "B");
+    let mut i = 0.0;
+    let state = loop {
+        pila.move_to(1280.0 + 100.0 + i, 100.0);
+        i += 1.0;
+        let state = pila.state();
+        let now = redraws(&state, "B");
+        if now.0 + now.1 > frames + idle + 1 {
+            break state;
+        }
+    };
+    let window = window_in(&state, "a").unwrap();
+    assert_eq!(window["animating"], true, "the opening ended too soon");
+    assert_eq!(window["animation_textures"], 1, "{window}");
+}
