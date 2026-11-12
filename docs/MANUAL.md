@@ -13,9 +13,9 @@ touchpad and monitors. The rest of a desktop (a bar, a launcher, notifications, 
 lock screen) comes from separate programs, or from a shell such as Noctalia that has them all.
 
 This manual says how to use Pila and set it up. Every configuration option is described in
-[`config.example.toml`](../config.example.toml) (installed by Pila's packages, usually in
+[`config.example.toml`](https://github.com/igalmarino/pila/blob/main/config.example.toml) (installed by Pila's packages, usually in
 `/usr/share/doc/pila`, and in its source); `man pila` has the command line. Installing Pila is in the
-[README](../README.md#running-pila).
+[README](https://github.com/igalmarino/pila/blob/main/README.md#running-pila).
 
 - [Starting and leaving Pila](#starting-and-leaving-pila)
 - [The Mod key and the default bindings](#the-mod-key-and-the-default-bindings)
@@ -563,7 +563,7 @@ pila msg --json subscribe        # windows, workspaces and monitors as they chan
 
 Scripts should use `--json`: the plain text is for reading and may change. A bar or script that
 follows the windows or workspaces subscribes instead of asking over and over. The full
-description, the socket and the events included, is in [IPC.md](IPC.md).
+description, the socket and the events included, is in [IPC.md](https://github.com/igalmarino/pila/blob/main/docs/IPC.md).
 
 ## Troubleshooting
 

@@ -18,7 +18,7 @@ Why Pila: Noctalia and Dux Shell usually run on tiling compositors such as niri 
 Pila gives them a classic desktop of overlapping windows, with subtle animations, blur and a
 config applied as you save it. labwc keeps the Openbox look and its XML config, Wayfire is
 built around Compiz-style effects, and COSMIC's floating mode comes with the rest of COSMIC. More in
-[What sets Pila apart](docs/WHY-PILA.md).
+[What sets Pila apart](https://github.com/igalmarino/pila/blob/main/docs/WHY-PILA.md).
 
 Pila prefers **standard protocols**: Wayland core and the official `wayland-protocols`.
 The wlroots protocols that panels and shells still need and that have no standard
@@ -28,7 +28,7 @@ replaced when an `ext-` version lands.
 
 ![Pila with a terminal and a Noctalia bar](https://raw.githubusercontent.com/igalmarino/pila/main/docs/screenshot.png)
 
-How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`).
+How to use and set it up is in the [user manual](https://github.com/igalmarino/pila/blob/main/docs/MANUAL.md) (and `man pila`).
 
 ## Status
 
@@ -127,7 +127,7 @@ A short report helps even if everything works:
   bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 - **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
-  action ([docs/IPC.md](docs/IPC.md)).
+  action ([docs/IPC.md](https://github.com/igalmarino/pila/blob/main/docs/IPC.md)).
 
 ## Running Pila
 
@@ -340,7 +340,7 @@ output, which fails.
 ## Configuring Pila
 
 Pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the file
-given with `--config`). [`config.example.toml`](config.example.toml) documents every option
+given with `--config`). [`config.example.toml`](https://github.com/igalmarino/pila/blob/main/config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
 Pila (`autostart`), keyboard layout and repeat, key bindings, touchpad gestures
 (`[gestures]`), touchpad and mouse settings, the cursor (`[cursor]`), each monitor's mode,
@@ -358,7 +358,7 @@ the file, keyboard layout included, without starting Pila: it prints what's wron
 exits with status 1, or 0 if it's valid.
 
 The default key bindings, and how to set up a desktop, monitors, screen sharing, locking and
-games, are in the [user manual](docs/MANUAL.md). Mod is Super on a TTY or login session and Alt
+games, are in the [user manual](https://github.com/igalmarino/pila/blob/main/docs/MANUAL.md). Mod is Super on a TTY or login session and Alt
 nested; Mod+Return opens a terminal and Mod+Shift+E quits.
 
 ## Reporting bugs
@@ -387,7 +387,7 @@ Questions, ideas and "does X work with Pila?" go to
 Pila is developed with AI assistance: [Claude Code](https://claude.com/claude-code) helps
 with programming, testing, writing the docs and the changelog, and translating what I write
 into English. The commits it worked on carry a `Co-Authored-By` trailer, and the
-instructions it works under are public, in [CLAUDE.md](CLAUDE.md).
+instructions it works under are public, in [CLAUDE.md](https://github.com/igalmarino/pila/blob/main/CLAUDE.md).
 
 The AI doesn't make the decisions. The important ones, on technology, architecture,
 security, testing and more, are mine; I'm a software developer with over 30 years of
@@ -400,11 +400,11 @@ and send only what you understand and can answer for.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the development environment (a
+See [CONTRIBUTING.md](https://github.com/igalmarino/pila/blob/main/CONTRIBUTING.md) for conventions and the development environment (a
 dev container in which Pila runs nested on your desktop).
 
 ## License
 
 Pila is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License as published by the Free Software Foundation, either version 3 of
-the License, or (at your option) any later version. See [LICENSE](LICENSE).
+the License, or (at your option) any later version. See [LICENSE](https://github.com/igalmarino/pila/blob/main/LICENSE).
