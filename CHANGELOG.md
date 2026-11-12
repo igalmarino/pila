@@ -14,6 +14,8 @@
   apps setting the cursor they already have no longer redraw the screen, and blurred or animating
   windows are drawn only for the monitors they reach. `RUST_LOG=pila::frames=debug` also reports
   the event loop's own work (`loop`).
+- **A binding with an unknown action names its keys as written** (`binding "Mod+X": unknown
+  action ...`), not as Pila had parsed them; gestures too.
 - **The manual says how to change how Pila looks:** colors, rounded corners, shadows,
   animations, blur and opacity, in a section of their own ("Looks").
 

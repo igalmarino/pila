@@ -1565,10 +1565,10 @@ impl Config {
                 .map(|(k, a)| (k.as_str(), a.as_str())),
         );
         let user = file.bindings.iter().map(|(k, a)| (k.as_str(), a.as_str()));
-        for (combo, action) in defaults.chain(user) {
-            let combo = KeyCombo::parse(combo, mod_key)?;
+        for (written, action) in defaults.chain(user) {
+            let combo = KeyCombo::parse(written, mod_key)?;
             let action =
-                Action::parse(action).map_err(|err| format!("binding {combo:?}: {err}"))?;
+                Action::parse(action).map_err(|err| format!("binding {written:?}: {err}"))?;
             bindings.retain(|(c, _)| *c != combo);
             if let Some(action) = action {
                 bindings.push((combo, action));
@@ -1579,10 +1579,10 @@ impl Config {
         let mut gestures: Vec<(Gesture, Action)> = Vec::new();
         let defaults = DEFAULT_GESTURES.iter().map(|&(g, a)| (g, a));
         let user = file.gestures.iter().map(|(g, a)| (g.as_str(), a.as_str()));
-        for (gesture, action) in defaults.chain(user) {
-            let gesture = Gesture::parse(gesture)?;
+        for (written, action) in defaults.chain(user) {
+            let gesture = Gesture::parse(written)?;
             let action =
-                Action::parse(action).map_err(|err| format!("gesture {gesture:?}: {err}"))?;
+                Action::parse(action).map_err(|err| format!("gesture {written:?}: {err}"))?;
             gestures.retain(|(g, _)| *g != gesture);
             if let Some(action) = action {
                 gestures.push((gesture, action));
@@ -2541,6 +2541,22 @@ mod tests {
         assert!(err.contains("[bindings]"), "{err}");
         let err = Config::from_toml("[keyboard]\nrepeat-rate = \"x\"\n", &no_env).unwrap_err();
         assert!(!err.contains("[bindings]"), "{err}");
+    }
+
+    #[test]
+    fn a_bad_action_names_its_binding_as_written() {
+        // It used to name the parsed key combo, in Rust's debug form.
+        let err = Config::from_toml("[bindings]\n\"Mod+X\" = \"nope\"\n", &no_env).unwrap_err();
+        assert!(
+            err.starts_with("binding \"Mod+X\": unknown action"),
+            "{err}"
+        );
+        let err =
+            Config::from_toml("[gestures]\n\"swipe-3-up\" = \"nope\"\n", &no_env).unwrap_err();
+        assert!(
+            err.starts_with("gesture \"swipe-3-up\": unknown action"),
+            "{err}"
+        );
     }
 
     #[test]
