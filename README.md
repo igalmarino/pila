@@ -391,7 +391,8 @@ The AI doesn't make the decisions. The important ones, on technology, architectu
 security, testing and more, are mine; I'm a software developer with over 30 years of
 experience. I review the code that goes in and I answer for it, and every feature has
 integration tests that CI runs on every push. In other projects, I follow their rules on
-AI.
+AI. More about how that works, and what has gone wrong so far, in
+[How Pila is made](https://github.com/igalmarino/pila/blob/main/docs/HOW-PILA-IS-MADE.md).
 
 Contributions made with AI help are welcome on the same terms: say so in the pull request,
 and send only what you understand and can answer for.

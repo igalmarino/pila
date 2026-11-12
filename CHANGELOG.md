@@ -21,6 +21,9 @@
   app's buffer as it is (direct scanout), how many other monitors had a frame on its way.
 - **A binding with an unknown action names its keys as written** (`binding "Mod+X": unknown
   action ...`), not as Pila had parsed them; gestures too.
+- **How Pila is made:** a page on how the project uses AI assistance, who decides what, how
+  changes are verified and what has gone wrong so far (`docs/HOW-PILA-IS-MADE.md`, linked from
+  the README's "Use of AI").
 - **The manual says how to change how Pila looks:** colors, rounded corners, shadows,
   animations, blur and opacity, in a section of their own ("Looks").
 
