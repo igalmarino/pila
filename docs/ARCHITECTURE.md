@@ -56,7 +56,9 @@ Key flows and invariants:
   Bindings don't run while the focused surface (or its menu's window) holds an active
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted, and sandboxed apps can't make any), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug
-  builds, to the lock).
+  builds, to the lock). Before either check, a key that wakes powered-off monitors does only
+  that, Ctrl+Alt+F<N> (the keymap's `XF86_Switch_VT_<N>`) switches VT (`Action::ChangeVt`,
+  which `run_action` also runs while locked), and an open window menu takes every press.
 - **Virtual keyboards** (`virtual_keyboard.rs`, zwp_virtual_keyboard_v1): Smithay hands
   their events in like a device's, and they are keyboards: keys go through
   `process_input_event` (bindings, `suppressed_keys`, idle activity) with the device's own
@@ -216,9 +218,12 @@ Key flows and invariants:
   same mode again (Smithay doesn't handle the property); otherwise, or if that fails, the
   output is powered off and on. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
-  releases held keys; `ActivateSession` scans the connectors and re-applies the outputs,
-  since a monitor plugged in meanwhile can't come on without DRM master (`enable_output`
-  waits). Libinput devices get keyboard LEDs and the
+  releases held keys; `ActivateSession` takes DRM master, resets each device (`activate(true)`:
+  every connector off, one modeset, since another compositor may have left them on other
+  CRTCs), clears each output's recovery and frame in flight (`first_frame` again), re-applies
+  gamma (`reapply_gamma`), then scans the connectors, opens GPUs added meanwhile
+  (`apply_other_gpus`) and re-applies the outputs, since a monitor plugged in meanwhile can't
+  come on without DRM master (`enable_output` waits). Libinput devices get keyboard LEDs and the
   `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a touchpad is a device
   that can tap) when added; relative motion goes through the same constraint path as
   nested (`pointer_motion`) and is clamped to the outputs. A removed output goes through
@@ -249,8 +254,9 @@ Key flows and invariants:
   once per pass and shared by the outputs drawn in it, `udev/draw.rs::render_all` and
   `headless.rs`'s, after each one's commit timers applied, its cost counted in the first
   output's frame; and once for the captures and screencopies of an `after_frames`). An
-  output's elements leave out the windows that don't touch it (`SceneWindow::bounds`, from
-  `window_visual_rect`; not while one animates or slides, drawn elsewhere than it is), builds elements with
+  output's elements leave out the windows and layer surfaces that don't touch it
+  (`SceneWindow::bounds`, from `window_visual_rect`; an animating one by where its effect draws
+  it, `effect_rect`; a sliding one never), builds elements with
   `render.rs` (backend-neutral, but on `GlesRenderer`: `PilaRenderElement` is concrete,
   since Pila's custom shaders need `GlesFrame`), and renders them: nested and headless
   through the damage tracker's `render_output` directly, bare metal through its `DrmOutput`
@@ -265,11 +271,14 @@ Key flows and invariants:
   from its capture instead: see "Screen capture"); frame callback times and
   feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
   iteration, however many outputs were drawn, `Pila::after_frames` (`state.rs`, from
-  `main.rs`'s `event_loop.run` callback, a flush after it) saves sessions and sends keyboard
-  layout events, then, when an output was drawn or clients or input were handled: applies the
-  commits fifo unblocked, captures and screencopies (only when an output was drawn or
-  `capture_due`; see "Redraws are on demand, per output"), `space.refresh()`, taskbar updates,
-  IPC events, idle inhibitors, `popups.cleanup()`, animations and hidden surfaces' frames. Buffer age (for partial repaints) needs the window's EGL
+  `main.rs`'s `event_loop.run` callback, a flush after it) tells the idle notifier of the
+  iteration's input (once: each call re-arms every timer), saves sessions and sends keyboard
+  layout events, then, when an output was drawn, `Pila::housekeeping` is set or a capture is
+  due: applies the commits fifo unblocked, captures and screencopies (only when an output was
+  drawn or `capture_due`; see "Redraws are on demand, per output"), `space.refresh()`, taskbar
+  updates, IPC events, idle inhibitors, `popups.cleanup()`, animations, hidden surfaces' frames
+  and slide textures (`prepare_slide_textures`); else only the IPC events already due
+  (`send_ipc_events_due`). Buffer age (for partial repaints) needs the window's EGL
   surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
   and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
@@ -281,7 +290,8 @@ Key flows and invariants:
   outputs next to it), `queue_redraw_pointer` those of where the
   pointer was and is. `queue_redraw` asks every output, for what's global: the config,
   outputs, the lock, workspaces, focus (`focus_changed`: title bars and shadows show it), a
-  key Pila acts on, a click, a gesture, animations. Who asks: a commit asks for its surface's
+  key Pila acts on, a click, a gesture's begin and end, an animation starting (its steps ask
+  only for the outputs it shows on, `animation_outputs`). Who asks: a commit asks for its surface's
   outputs before and after it (`redraw_committed`; `surface_outputs` resolves a subsurface,
   popup, window, layer, lock, cursor or drag-icon surface, and an unknown one asks every
   output); every change to the `Space`'s windows goes through `map_window`/`unmap_window`/
@@ -336,7 +346,9 @@ Key flows and invariants:
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average
   and worst, missed refreshes; each frame over half the period on its own); winit and udev
   also call `record_missed` with the refreshes missed. Bare metal counts them from the DRM sequence of
-  the vblanks that showed frames while an animation runs (`missed_refreshes`); nested
+  the vblanks that showed frames while an animation runs and the output has a frame on its
+  way (`missed_refreshes`, `back_to_back`: an output resting while another animates misses
+  nothing); nested
   estimates them from gaps over 1.5 periods. Screen captures are recorded apart
   (`record_capture`, a `captures` line), the blit into them subtracted from the output's
   frame. The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
@@ -449,7 +461,8 @@ Key flows and invariants:
   `Pila::windows.focus_history` (most recent first) unless a Mod+Tab is in progress (`Pila::windows.switch`,
   a snapshot of that order). `cycle-focus`/`cycle-focus-back` step through the snapshot;
   the switch ends (`end_switch`, which records the choice) when Ctrl/Alt/Super are all
-  released (checked after every key in `on_keyboard`), on a click, and in
+  released (checked after every key in `on_keyboard`), on a click, when a switching swipe
+  lifts, on a workspace switch or move, on an activation from IPC or a taskbar, and in
   `release_all_keys`. Unmapped windows are dropped with `forget_window`. Whenever the focus has
   to go somewhere else (the focused window closed, unmapped, minimized or left the workspace, a
   launcher that held the keyboard went away, the session unlocked) it goes through
@@ -466,7 +479,7 @@ Key flows and invariants:
   `Space` holds only the active workspace's windows, those on all workspaces (`stacking.rs`) and
   X11 override-redirect ones;
   the others' are parked in `Workspaces::parked` (back to front, workspace and location in
-  user data, X11 ones suspended). Minimized windows remember their workspace too, so
+  user data, X11 ones marked hidden: `_NET_WM_STATE_HIDDEN`). Minimized windows remember their workspace too, so
   "off the `Space`" means `off_space_windows()` (parked + minimized): lookups by surface,
   X11 surface or identifier and taskbar listeners chain it, and destroyed windows are
   dropped from both (`forget_off_space`); both keep location and workspace in the same
@@ -478,7 +491,8 @@ Key flows and invariants:
   (taskbar, xdg-activation) switches first (`reveal_workspace_of`). ext-workspace
   (`ext_workspace.rs`, on the `wayland-protocols` bindings): one group with every
   output, workspaces "1".."N", only `activate`, applied on `commit`; diffed by
-  `refresh_workspaces` (after a switch, a count change, from `refresh_output_heads` and
+  `refresh_workspaces` (after a switch, a count change, a window's urgency (`set_urgent`;
+  `Urgent` is a workspace state), from `refresh_output_heads` and
   on a client's `wl_output` bind via `OutputHandler::output_bound`).
 - **Layer shell** (`layers.rs`, `handlers/layer_shell.rs`): layer surfaces live in each
   output's `LayerMap`, not the `Space`. Front to back: Overlay, Top, windows, Bottom,
@@ -534,8 +548,9 @@ Key flows and invariants:
   and given back when it ends (`retire_slide`), a third kept after a switch during a slide. Close and minimize
   ghosts belong to the workspace they left (`Ghost::workspace`): a switch carries them
   off in the leaving picture. A size or place
-  change (maximize, fullscreen, snap, and back; not refits nor drags) runs
-  `animate_geometry` first (from `set_fill_state_on`, `snap_window`, `unsnap_window`;
+  change (maximize, fullscreen, snap, and back, a move to another output; not refits nor
+  drags) runs `animate_geometry` first (from `set_fill_state_on`, `snap_window`,
+  `unsnap_window`, `move_snapped_to`, `move_focused_to_output`;
   not while a window opens, nor inside `without_geometry_animation`, which
   `begin_move` uses): a `Resizing` keeps a snapshot and the old frame; until the
   client commits a new size (`geometry_committed` from the commit handler, by
@@ -796,13 +811,16 @@ Key flows and invariants:
   its soft limit of open files to the hard one at startup (`state::raise_file_limit`: a
   descriptor or more per client, shm pool, dma-buf and fence), and `session_env`'s `pre_exec`
   gives what it starts the limit it was started with, since programs using `select()` break
-  past 1024 (Xwayland, started by Smithay, keeps the raised one). The
+  past 1024 (Xwayland, started by Smithay, keeps the raised one), and clears the signal mask
+  Pila's signal source leaves blocked (a mask survives exec: children would ignore `kill` and
+  Ctrl+C); their stdin is null and their stdout goes to Pila's log. The
   signal source is created first thing in `main`, before any thread, so no thread can
   take the signal instead.
-- **Activation** (`handlers/xdg_activation.rs`, xdg-activation): a token is issued only
-  for a serial newer than the keyboard focus's enter to the client holding it, or newer
+- **Activation** (`handlers/xdg_activation.rs`, xdg-activation): a token that activates
+  is issued only for a serial newer than the keyboard focus's enter to the client holding it, or newer
   than the pointer focus's enter to the client under the pointer (a clicked notification or
-  panel, which take no keyboard; niri accepts either serial from any client). Tokens
+  panel, which take no keyboard; niri accepts either serial from any client); one with no
+  serial is issued too, but only marks its window urgent (`UrgentOnlyToken`, see "Urgency"). Tokens
   are single-use and expire after `TOKEN_TIMEOUT`. A request switches to the window's
   workspace (`reveal_workspace_of`), shows it if minimized and focuses it if it's mapped;
   while locked it does nothing (a token from before the lock), but an urgency token still marks.
@@ -824,7 +842,8 @@ Key flows and invariants:
   that don't use it open centered.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
-  commit and closed in `toplevel_destroyed`.
+  commit (X11: `property_notify`) and closed in `forget_window` (a toplevel destroyed, an X11
+  window unmapped, Xwayland gone).
 - **Session lock** (`session_lock.rs`, ext-session-lock): guaranteed where input reaches
   clients, not by each path. While `is_locked()`, `scene()` holds only lock surfaces (on
   black); `Pila::under` gives only `Under::Lock` (and so `surface_under`); and the
@@ -933,7 +952,8 @@ Key flows and invariants:
   active one; `move-to-workspace` removes the mark. Neither is saved with a session.
 - **Between outputs** (`stacking.rs`): `move_focused_to_output` keeps the window's place relative
   to the usable area (`fit_in_area`), fills the new output if it was filled, or takes the same
-  side (`move_snapped_to`), and translates where it goes back to. `focus_output` moves the pointer
+  side (`move_snapped_to`), and translates where it goes back to; the move animates
+  (`animate_geometry`, see "Animations"). `focus_output` moves the pointer
   to the output's middle through `warp_pointer` (not if a client holds it) and focuses the top window
   there. Outputs go by position, around the end.
 - **Show desktop** (`Pila::show_desktop`, `minimize.rs`): minimizes the workspace's windows without
