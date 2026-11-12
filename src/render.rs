@@ -14,7 +14,7 @@ use smithay::{
         damage::OutputDamageTracker,
         element::texture::TextureRenderBuffer,
         element::{
-            memory::MemoryRenderBufferRenderElement,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             texture::TextureRenderElement,
@@ -829,24 +829,56 @@ impl OffscreenWindow {
     }
 }
 
-/// Do once, at startup, what the first animation would otherwise pay for
-/// inside a frame (performance pillar): compile the rounded-corner shaders
-/// and create and draw into an offscreen texture.
+/// Do once, at startup, what the first window and the first animation would
+/// otherwise pay for inside a frame (performance pillar): compile the
+/// rounded-corner and blur shaders, create an offscreen texture and draw into
+/// it what a window is made of: a solid, a rounded one and a texture uploaded
+/// from memory (a title, a button), blended. The driver builds what a kind of
+/// draw needs the first time it's made, not when its shader is compiled: left
+/// to the first window, that more than doubled its first frame.
 pub fn warm_up(renderer: &mut GlesRenderer) {
+    const SIZE: i32 = 64;
     let start = std::time::Instant::now();
     let _ = rounded::Shaders::get(renderer);
     let _ = crate::blur::Shaders::get(renderer);
     let scale = Scale::from(1.0);
-    if let Some(mut target) = OffscreenWindow::new(renderer, (1, 1).into(), scale) {
-        let buffer = SolidColorBuffer::new((1, 1), [0.0, 0.0, 0.0, 1.0]);
-        let element = PilaRenderElement::Solid(SolidColorRenderElement::from_buffer(
+    if let Some(mut target) = OffscreenWindow::new(renderer, (SIZE, SIZE).into(), scale) {
+        let buffer = SolidColorBuffer::new((SIZE, SIZE), [0.0, 0.0, 0.0, 1.0]);
+        // Front to back.
+        let mut elements = Vec::with_capacity(3);
+        let pixels = [0x80u8; 16 * 16 * 4];
+        let memory = MemoryRenderBuffer::from_slice(
+            &pixels,
+            Fourcc::Argb8888,
+            (16, 16),
+            1,
+            Transform::Normal,
+            None,
+        );
+        elements.extend(
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                (8.0, 8.0),
+                &memory,
+                Some(0.5),
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .ok()
+            .map(PilaRenderElement::Memory),
+        );
+        let origin = Point::from((0, 0));
+        elements.push(solid_element(
+            renderer,
             &buffer,
-            (0, 0),
+            origin,
+            Some(8.0),
+            0.5,
             scale,
-            1.0,
-            Kind::Unspecified,
         ));
-        target.draw(renderer, &[element]);
+        elements.push(solid_element(renderer, &buffer, origin, None, 1.0, scale));
+        target.draw(renderer, &elements);
     }
     tracing::debug!(elapsed = ?start.elapsed(), "renderer warmed up");
 }

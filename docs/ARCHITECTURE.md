@@ -85,8 +85,11 @@ Key flows and invariants:
   imports, `queue_redraw`/`queue_redraw_output`, `draws_cursor`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
   hard-codes a keyboard and pointer for all. Each renderer, when created, goes through
-  `render::warm_up` (the rounded-corner and blur shaders, a draw into an offscreen texture),
-  so the first frame that needs them doesn't pay for it.
+  `render::warm_up` (the rounded-corner and blur shaders, and a draw into an offscreen texture of
+  what a window is made of: a solid, a rounded one, a texture uploaded from memory, blended),
+  so the first frame that needs them doesn't pay for it: a driver builds what a kind of draw needs
+  when it's first made, not when its shader is compiled, which more than doubled the first frame
+  of the first window opened.
 - **Panics** (`sync.rs`, `main::log_panics`): past startup a panic ends the session, so the code has no
   `unwrap`/`expect` that rests on more than a local, stated invariant: mutexes go through
   `sync::Locked::locked` (a poisoned one only follows a panic that already ended Pila), user

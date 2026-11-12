@@ -14,6 +14,10 @@
   apps setting the cursor they already have no longer redraw the screen, and blurred or animating
   windows are drawn only for the monitors they reach. `RUST_LOG=pila::frames=debug` also reports
   the event loop's own work (`loop`).
+- **The first window opened is no slower to draw than the next ones:** the GPU driver's one-time
+  setup for drawing a window (rounded corners, title bar textures) happened in its first frame,
+  which took more than twice as long as later ones (2.6 ms against 1.3 ms on an AMD laptop); Pila
+  now does it at startup.
 - **A binding with an unknown action names its keys as written** (`binding "Mod+X": unknown
   action ...`), not as Pila had parsed them; gestures too.
 - **The manual says how to change how Pila looks:** colors, rounded corners, shadows,

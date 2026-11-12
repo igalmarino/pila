@@ -188,7 +188,7 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
   inserted outside an event source come with a `Pila::wake` ping (see "Architecture");
   one-time costs are paid at startup, not in the
   first frame that needs them (`render::warm_up` when a renderer is created: shaders,
-  an offscreen texture; `text::init` shapes and rasterizes common characters on its
+  an offscreen texture, a draw of each kind a window needs; `text::init` shapes and rasterizes common characters on its
   thread before publishing the fonts; a workspace slide's output-sized textures are made
   ahead and kept, `workspace_slide.rs`).
 
