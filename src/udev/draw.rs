@@ -195,6 +195,14 @@ fn draw(
         dmabuf_feedback,
         ..
     } = &mut **data;
+    // The device's other outputs with a commit on its way: a commit that
+    // changes a plane's format may wait in the kernel for theirs (seen on
+    // amdgpu leaving direct scanout: the `direct scanout` log below says how
+    // many).
+    let others_pending = outputs
+        .iter()
+        .filter(|(other, surface)| **other != id && other.node == id.node && surface.frame_pending)
+        .count();
     // Checked above; the commits applied since (`signal_commit_timers`)
     // can't take an output away, but nothing is lost by not counting on it.
     let Some(surface) = outputs.get_mut(&id) else {
@@ -340,6 +348,7 @@ fn draw(
                                 on = direct,
                                 render_ms = render_time.as_secs_f64() * 1000.0,
                                 queue_ms = queue_started.elapsed().as_secs_f64() * 1000.0,
+                                others_pending,
                                 "direct scanout"
                             );
                         }

@@ -342,8 +342,11 @@ Key flows and invariants:
   `frame::send_dmabuf_feedback` after each frame, sent when it changes), and the usual ones
   again once it's drawn among other things. Such frames are counted
   apart in the frame statistics (`direct`) and an output starting or stopping them is logged
-  (`direct scanout`, `pila::frames`, with the time that frame's render and commit took: the
-  kernel checks the plane's new format and size anew, some milliseconds on some drivers). Bare metal only: `scripts/check`'s fullscreen scenario
+  (`direct scanout`, `pila::frames`, with the time that frame's render and commit took and
+  `others_pending`, the device's other outputs with a commit on its way: the kernel checks the
+  plane's new format and size anew, and on amdgpu a commit that changes the plane's format waited
+  for another monitor's flip, up to one of its refresh periods with the event loop held; measured
+  leaving direct scanout, 11 to 14 ms with one pending, 0.3 ms with none). Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average

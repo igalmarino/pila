@@ -17,7 +17,8 @@
 - **The first window opened is no slower to draw than the next ones:** the GPU driver's one-time
   setup for drawing a window (rounded corners, title bar textures) happened in its first frame,
   which took more than twice as long as later ones (2.6 ms against 1.3 ms on an AMD laptop); Pila
-  now does it at startup.
+  now does it at startup. `pila::frames` also logs, when a monitor starts or stops showing an
+  app's buffer as it is (direct scanout), how many other monitors had a frame on its way.
 - **A binding with an unknown action names its keys as written** (`binding "Mod+X": unknown
   action ...`), not as Pila had parsed them; gestures too.
 - **The manual says how to change how Pila looks:** colors, rounded corners, shadows,
