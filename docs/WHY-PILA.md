@@ -55,7 +55,8 @@ nothing changed.
 - **Direct scanout:** on the DRM backend, a frame that is a single client buffer (a fullscreen
   game or video, an unobscured surface covering the output) goes on the primary plane with
   nothing composited. Such surfaces get per-surface dmabuf feedback with a scanout tranche of the
-  plane's formats, so the client allocates buffers the plane accepts.
+  plane's formats, so the client allocates buffers the plane accepts. On by default, on the
+  primary GPU's outputs; `direct-scanout = false` turns it off.
 - **Measured, not assumed:** `RUST_LOG=pila::frames=debug` logs, per output every 5 s, frame
   count, mean and worst CPU time, missed refreshes, idle redraws and direct-scanout frames.
   On bare metal, missed refreshes are counted from the DRM vblank sequence, and each late
@@ -84,8 +85,8 @@ nothing changed.
 
 - **ext-image-copy-capture** (implemented in Pila on the `wayland-protocols` bindings, output
   and toplevel sources) and wlr-screencopy for older clients such as xdg-desktop-portal-wlr.
-- **No second composite on bare metal:** an output capture is a GPU blit of the frame the DRM
-  compositor just composited for that output, with the session's damage over the same
+- **No second composite on bare metal:** on the primary GPU's outputs, an output capture is a
+  GPU blit of the frame the DRM compositor just composited for that output, with the session's damage over the same
   elements.
 - **Zero copy, asynchronous:** frames are rendered straight into the client's dmabuf, only when
   the session's damage tracker sees a change; completion is signaled from a native fence fd on
@@ -189,7 +190,8 @@ manager, restarted if it dies, with selections bridged both ways.
 No assumptions about distro, init system or display manager: logind, elogind or seatd for the
 session; optional tools (`systemd-cat`, `logger`, `dbus-run-session`, a per-user bus) are
 detected, and the install paths are configurable. Packages for Arch (AUR), Debian, Ubuntu,
-Fedora and Nix; CI builds on all of them, with the oldest supported Rust (`rust-version`).
+Fedora and Nix; CI builds on each of them, and apart with the oldest supported Rust
+(`rust-version`).
 
 ## Desktop details
 
