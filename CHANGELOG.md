@@ -6,6 +6,16 @@
   and the manual (`docs/logo/`). It's also the session's icon: `scripts/install` and the
   packages install it as `pila` in the hicolor theme, and the session entry names it
   (`Icon=pila`), for login screens that show one.
+- **Less CPU while you use the mouse, resize or switch windows:** a high-rate mouse (1000 Hz)
+  made Pila redo its housekeeping (taskbars, IPC events, idle timers) for every event; it now
+  does it once per loop iteration, or when the pointer changes focus or monitor. Resizing a
+  window no longer redraws its title's text in every frame, and switching focus back and forth
+  (Mod+Tab) draws no title bar again. Touchpad gestures an app handles itself (pinch to zoom) and
+  apps setting the cursor they already have no longer redraw the screen, and blurred or animating
+  windows are drawn only for the monitors they reach. `RUST_LOG=pila::frames=debug` also reports
+  the event loop's own work (`loop`).
+- **The manual says how to change how Pila looks:** colors, rounded corners, shadows,
+  animations, blur and opacity, in a section of their own ("Looks").
 
 ## 0.5.1 (2026-11-11)
 
