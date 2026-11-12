@@ -21,9 +21,11 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   protocols are hidden here too; on GNOME a hard link to the session's socket); the compositor
   creates its own socket in `$XDG_RUNTIME_DIR` and clients launched from it connect there.
 - The user drives the container from the host with `scripts/dev` (`up`, `shell`, `claude`,
-  `cargo ...`, `rebuild` after a Dockerfile change; see CONTRIBUTING.md); any `scripts/dev` command run from a session makes
-  its Wayland socket again. Logging out and back in leaves `/run/host-wayland/` empty until
-  then, and nested runs fail with `EventLoopCreation`.
+  `cargo ...`, `rebuild` after a Dockerfile change; see CONTRIBUTING.md); any `scripts/dev`
+  command run from a session makes its Wayland socket again. Logging out and back in leaves
+  `/run/host-wayland/` empty until then, and nested runs fail with `EventLoopCreation`. The
+  sandboxed socket is `scripts/sandbox-socket` (a wp-security-context client, standard-library
+  Python), which `tests/surface_protocols.rs` also uses.
 - The DRM/KMS + libinput backend (`--backend udev`, `udev/`) cannot be tested in this
   container (no seat, no TTY); there it exits with "could not start a session". It needs
   the host, from a TTY. Write that code, but ask the user to test it.
@@ -34,21 +36,22 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 ## Commands
 
 - Lint: `cargo clippy --all-targets -- -D warnings`
-- CI (`.github/workflows/ci.yml`, every push to `main` and every PR) also runs `cargo fmt --check`, builds with
-  `--locked`, does a staged install and runs `shellcheck --severity=warning
-  --external-sources` on the scripts: run that after editing one. `compat.yml` (`rust-version`,
-  Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when dependencies or packaging change, weekly
-  and by hand before a release. `packages.yml` builds the `.deb` and `.rpm` of a release.
-  `aur.yml` publishes `packaging/aur/pila-git` to the AUR once the user approves it (the
-  `aur` environment). `vkms.yml` (by hand, an experiment) runs the udev backend on the kernel's
-  virtual KMS driver in the runner's VM: frames, a gamma change, a monitor plugged in and out,
-  a second device as a second GPU (its monitor drawn on the first and copied, the device removed
-  and added again).
-  `fuzz.yml` (by hand) runs the fuzz targets in `fuzz/` for a few minutes each.
+- CI (`.github/workflows/ci.yml`, every push to `main` and every PR) also runs
+  `cargo fmt --check`, builds with `--locked`, does a staged install and runs
+  `shellcheck --severity=warning --external-sources` on the scripts: run that after editing
+  one. `compat.yml` (`rust-version`, Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when
+  dependencies or packaging change, weekly and by hand before a release. `packages.yml`
+  builds the `.deb` and `.rpm` of a release. `aur.yml` publishes `packaging/aur/pila-git` to
+  the AUR once the user approves it (the `aur` environment). `vkms.yml` (by hand, an
+  experiment) runs the udev backend on the kernel's virtual KMS driver in the runner's VM:
+  frames, a gamma change, a monitor plugged in and out, a second device as a second GPU (its
+  monitor drawn on the first and copied, the device removed and added again). `fuzz.yml`
+  (by hand) runs the fuzz targets in `fuzz/` for a few minutes each.
 - Test: `cargo test`; single test: `cargo test <name_substring>`. Every feature gets
   integration tests (`tests/*.rs`; how they work is in `tests/CLAUDE.md`) and a new test
   goes into `tests/FEATURES.md`; only bare-metal paths (`udev/`), real frame times
-  (`scripts/check`) and looks stay with the user.
+  (`scripts/check`) and looks stay with the user. `scripts/coverage [--html]` reports line
+  coverage per file, a guide to what the tests miss.
 - Fixing a bug: first write a test that reproduces it and see it fail, then fix it; the test
   stays in the suite to verify the fix and keep the bug from coming back. If a bug can't be
   tested automatically (bare metal, looks), say so and why.
@@ -73,20 +76,23 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   `pila-check.log`) is for you: run it before asking the user to check anything; the user
   runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. What it
   checks and when a feature adds a scenario: `scripts/CLAUDE.md`.
-- Desktop shells: `scripts/shells [noctalia|dms]` walks Noctalia's and Dux Shell's IPC through
-  every feature that depends on Pila, on a sealed-off headless Pila (`scripts/CLAUDE.md`): after
-  changing a protocol a shell uses, after a Smithay bump and before a release.
+- Desktop shells: `scripts/shells [noctalia|dms]` walks Noctalia's and Dux Shell's IPC
+  through every feature that depends on Pila, on a sealed-off headless Pila
+  (`scripts/CLAUDE.md`): after changing a protocol a shell uses, after a Smithay bump and
+  before a release.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`
   and `grim` in a loop from a script run with `cargo run -- -c`.
 - The login session (the user, on the host): `scripts/install` builds the release binary
   (with the host's cargo if there is one, else `--container`; `--no-build`) and installs it
-  with `scripts/report` (as `pila-report`), the man page, `resources/session/` (the `pila-session` wrapper and the `wayland-sessions` entry,
-  whose `@BINDIR@` it fills in) and the portal configs; `scripts/uninstall` removes them.
-  Paths come from `scripts/install-paths` (`PREFIX`, `BINDIR`, `DATADIR`, `SYSCONFDIR`,
-  `DESTDIR`), sourced by both. Its log is in the journal (`journalctl -t pila -b`) and in `~/.local/state/pila/pila.log`,
-  mounted here read-only as `/run/host-pila/pila.log` (previous run: `pila.log.old`).
+  with `scripts/report` (as `pila-report`), the man page, `resources/session/` (the
+  `pila-session` wrapper and the `wayland-sessions` entry, whose `@BINDIR@` it fills in) and
+  the portal configs; `scripts/uninstall` removes them. Paths come from
+  `scripts/install-paths` (`PREFIX`, `BINDIR`, `DATADIR`, `SYSCONFDIR`, `DESTDIR`), sourced
+  by both. Its log is in the journal (`journalctl -t pila -b`) and in
+  `~/.local/state/pila/pila.log`, mounted here read-only as `/run/host-pila/pila.log`
+  (previous run: `pila.log.old`).
   Taking a change into the session means logging out and back in, which ends this
   Claude session; the user does it.
 - Arch package: `packaging/aur/pila-git`. Keep `depends` in its `PKGBUILD` in step with the
@@ -95,15 +101,17 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 - Debian/Fedora packages: `packaging/nfpm.yaml`, built by `packages.yml` from a staged
   `scripts/install`. A directory added to `install_files` and a newly linked library go there
   too (`contents`, `depends`).
-- Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file added
-  to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix job builds it and
-  starts Pila from it. `flake.lock` pins nixpkgs; a dependency on a new system library goes in
-  `package.nix`'s `buildInputs` too.
+- Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file
+  added to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix
+  job builds it and starts Pila from it. `flake.lock` pins nixpkgs; a dependency on a new
+  system library goes in `package.nix`'s `buildInputs` too.
 - TTY runs (the user, on the host): `scripts/tty [config]` runs the release build
   (`--debug` for the debug one) by hand on a spare VT, under `dbus-run-session`, while the
   login session keeps running; read `pila-tty.log` and the previous run's
   `pila-tty.log.old` in the repo root afterwards. The user's own config lives outside the
   repo (`~/.config/pila`); keep `config.example.toml` valid (a test parses it).
+  `scripts/layer-namespaces [config]` runs the same way and lists the namespaces of the layer
+  surfaces the user's tools open, for writing `[[layer-rule]]` sections.
 - This container is connected to the user's Pila session, so `cargo run` opens a nested
   window inside it. Changes that need a Pila restart are tested by the user.
 - Git: small commits straight to `main`, after the user has checked anything visual or
@@ -121,14 +129,14 @@ crate, packages, paths, environment variables and anything users type.
 ## Distro policy
 
 Pila must not assume a distro, init system or display manager. This machine is Arch with
-systemd and Noctalia's greeter, but the code and the host-side scripts (`scripts/`, `resources/session/`)
-must also work elsewhere (Debian, Fedora, Void, Alpine, ...), including without systemd
-(elogind or seatd, no per-user D-Bus bus, no journal): check for optional tools
-(`systemd-cat`, `logger`, `dbus-run-session`) and degrade, use `/usr/bin/env bash`, and keep
-install paths configurable. Name packages generically in messages ("package dbus"), not
-with one distro's package manager. `rust-version` in `Cargo.toml` is the oldest Rust that
-builds Pila; raise it when a dependency or the code needs a newer one. The dev container
-itself is Arch, and its packages are named as Arch's.
+systemd and Noctalia's greeter, but the code and the host-side scripts (`scripts/`,
+`resources/session/`) must also work elsewhere (Debian, Fedora, Void, Alpine, ...),
+including without systemd (elogind or seatd, no per-user D-Bus bus, no journal): check for
+optional tools (`systemd-cat`, `logger`, `dbus-run-session`) and degrade, use
+`/usr/bin/env bash`, and keep install paths configurable. Name packages generically in
+messages ("package dbus"), not with one distro's package manager. `rust-version` in
+`Cargo.toml` is the oldest Rust that builds Pila; raise it when a dependency or the code
+needs a newer one. The dev container itself is Arch, and its packages are named as Arch's.
 
 ## Performance pillar
 
@@ -144,20 +152,21 @@ mean redrawing when nothing changed. How fast clients draw is up to them.
 - **Measure it:** `RUST_LOG=pila::frames=debug` (`frame_stats.rs`) logs per output,
   every 5 s, frames, average and worst CPU time and missed refreshes, plus every frame
   over half the period, and apart the redraws that found nothing new to show (`idle`, with
-  their summed CPU time; `scripts/check` reports them per output) and, on bare metal, the frames
-  that were a client's buffer as it is (`direct`: direct scanout, nothing drawn). Missed refreshes are vblanks with no new frame while an
-  animation runs and, on bare metal, a frame asked for in time but shown a vblank late,
-  animation or not (`late`): exact on bare metal (the DRM sequence of the vblanks that showed
-  frames) and an estimate nested (gaps over 1.5 periods; the host decides when frames
-  show); `pila::frames=trace` logs every frame. The first frame after an output is set up
-  (connected, powered on, a new mode, back from another VT: swapchain and modeset) is a cost of
-  setting it up, logged on its own and not counted. Screen captures, which build frames of their
-  own after the outputs', are logged apart (`captures`), held to the same budget (`scripts/check`
-  streams one, as a screen share does: `scripts/capture-stream`). The event loop's own work after each
-  iteration (`after_frames`: taskbars, IPC, the `Space`), paced by events rather than frames, is
-  logged apart too (`loop`). Any change that touches rendering, input
-  or the event loop is checked with it (release build) before it's committed; bare-metal
-  numbers come from the user with `scripts/check` (see Commands).
+  their summed CPU time; `scripts/check` reports them per output) and, on bare metal, the
+  frames that were a client's buffer as it is (`direct`: direct scanout, nothing drawn).
+  Missed refreshes are vblanks with no new frame while an animation runs and, on bare metal,
+  a frame asked for in time but shown a vblank late, animation or not (`late`): exact on bare
+  metal (the DRM sequence of the vblanks that showed frames) and an estimate nested (gaps
+  over 1.5 periods; the host decides when frames show); `pila::frames=trace` logs every
+  frame. The first frame after an output is set up (connected, powered on, a new mode, back
+  from another VT: swapchain and modeset) is a cost of setting it up, logged on its own and
+  not counted. Screen captures, which build frames of their own after the outputs', are
+  logged apart (`captures`), held to the same budget (`scripts/check` streams one, as a
+  screen share does: `scripts/capture-stream`). The event loop's own work after each
+  iteration (`after_frames`: taskbars, IPC, the `Space`), paced by events rather than
+  frames, is logged apart too (`loop`). Any change that touches rendering, input or the
+  event loop is checked with it (release build) before it's committed; bare-metal numbers
+  come from the user with `scripts/check` (see Commands).
 - **Rules:** nothing blocking on the event loop (I/O, D-Bus, font loading go to threads
   or run in the background, like `text.rs` and `export_environment`); work proportional
   to damage; expensive paths (offscreen textures, blur, captures) only while they're
@@ -203,14 +212,13 @@ Pila's own config/IPC.
 
 Privileged protocols are hidden from sandboxed apps: a client that connected through
 wp-security-context (Flatpak) fails `state::is_privileged` (`ClientState::security_context`;
-Xwayland counts as privileged). Smithay globals take it as their filter (those Smithay gives none,
-keyboard-shortcuts-inhibit and ext-idle-notify, are made again hidden with
-`state::hide_from_sandboxes`), Pila's own as
-`GlobalDispatch::can_view`. It covers layer-shell, session lock, ext-data-control,
-virtual-keyboard, ext-foreign-toplevel-list, screen capture (both protocols), toplevel
-management, gamma, output management and power, ext-workspace, keyboard-shortcuts-inhibit,
-ext-idle-notify, and security-context itself. A new
-global that exposes or controls other clients, input or outputs must get it too.
+Xwayland counts as privileged). Smithay globals take it as their filter (those Smithay
+gives none, keyboard-shortcuts-inhibit and ext-idle-notify, are made again hidden with
+`state::hide_from_sandboxes`), Pila's own as `GlobalDispatch::can_view`. It covers
+layer-shell, session lock, ext-data-control, virtual-keyboard, ext-foreign-toplevel-list,
+screen capture (both protocols), toplevel management, gamma, output management and power,
+ext-workspace, keyboard-shortcuts-inhibit, ext-idle-notify, and security-context itself. A
+new global that exposes or controls other clients, input or outputs must get it too.
 
 ## Architecture
 
@@ -222,7 +230,9 @@ every backend.
 **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes every flow and invariant, a
 section per subsystem. Read a subsystem's section before changing it** (they start with
 its name and module: grep for them). A change to a flow or invariant updates its section
-in the same commit, and a new feature adds one.
+in the same commit, and a new feature adds one. A rename updates the docs and comments
+that name the old path too: `docs_names::the_docs_name_only_code_that_exists` fails on a
+file or `module::item` that's gone.
 
 What breaks silently anywhere in the code, whichever subsystem you're in:
 
@@ -255,8 +265,8 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
 - **Pending vs committed:** layout uses the pending decoration mode (`layout_offset`),
   drawing and hit testing the committed one (`has_title_bar`); `fill_state` reads the
   pending xdg state.
-- **Stacking:** a new way to raise a window must end in `Pila::keep_on_top` (`stacking.rs`), or
-  always-on-top windows end up below it.
+- **Stacking:** a new way to raise a window must end in `Pila::keep_on_top`
+  (`stacking.rs`), or always-on-top windows end up below it.
 - **Grabs:** `Pila::set_cursor` must be called after `set_grab` (`Focus::Clear` resets the
   cursor).
 - **Backends:** code outside them uses `Backend`'s methods rather than matching on it.
