@@ -23,9 +23,8 @@
     <circle cx="63" cy="58" r="2.6" fill="#dfe1e5"/>
     <circle cx="54" cy="58" r="2.6" fill="#dfe1e5"/>
   </g>
-  <g fill="none" stroke="#dfe1e5" stroke-width="9" stroke-linecap="round">
-    <path d="M160,56.5 V118"/>
-    <circle cx="177.5" cy="74" r="17.5"/>
+  <g fill="none" stroke="#dfe1e5" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160,91.5 V28 H178 a17,17 0 0 1 0,34 H171"/>
     <path d="M220,56.5 V91.5"/>
     <path d="M244,28 V91.5"/>
     <circle cx="286" cy="74" r="17.5"/>
