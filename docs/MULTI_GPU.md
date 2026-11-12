@@ -1,14 +1,15 @@
 # Plan: more than one GPU
 
-A plan being carried out: steps 1 and 2 below are done, untried on a machine with two GPUs. It
+A plan being carried out: steps 1 and 2 below are done (step 2 behind `other-gpus = true`, off by
+default), step 3 on the primary's outputs; untried on a machine with two GPUs. It
 moves Pila from one GPU (`udev/`: the seat's primary, which renders and scans out) to Smithay's
 `GpuManager` and `MultiRenderer`, so monitors on a second GPU (a dock on a discrete card, a
 hybrid laptop's HDMI port wired to the dGPU) light up. Read with `docs/ARCHITECTURE.md` ("Bare metal",
 "Render loop", "Screen capture", "Blur", "Rounded corners", "Shadows").
 
-## Where Pila is
+## Where Pila was (before step 1)
 
-- `GlesRenderer` is named 96 times in 12 files: `render.rs` (38), `rounded.rs` (14),
+- `GlesRenderer` was named 96 times in 12 files: `render.rs` (38), `rounded.rs` (14),
   `capture.rs` (11), `blur.rs` (9), `winit.rs` (5), `udev/mod.rs`, `headless.rs` and
   `backend.rs` (4 each), `decoration.rs` (3), `window_menu.rs` (2), `udev/outputs.rs` and
   `udev/draw.rs` (1 each).
@@ -81,12 +82,13 @@ Each step keeps the suite green and `scripts/check --nested` at the same numbers
    node and the CRTC), which gamma, output power, recovery and the vblank handler
    (`frame_finish`) take. Then open every GPU of the seat, a `GpuDevice` for each, its
    connectors scanned like the primary's (`scan_connectors`). (Done: `udev/secondary.rs`, behind
-   `other-gpus = true`, off by default until someone with two GPUs has tried it. The copy's CPU
-   time counts in its output's frame, not apart.)
+   `other-gpus = true`, off by default until someone with two GPUs has tried it, and applied
+   again on a reload: `apply_other_gpus` opens or drops the other GPUs. The copy's CPU time
+   counts in its output's frame, not apart.)
    `UdevEvent::Added/Removed` for devices plug them in and out (their outputs as monitors
    unplugged). VT switches pause and resume every device. An output on a secondary device draws
    with `GpuManager::renderer(&primary, &its device, format)` and `PrimaryGpuElement`s; the
-   copy is logged apart in the frame statistics. Tried in CI with two vkms devices
+   copy isn't logged apart in the frame statistics yet (see "Risks"). Tried in CI with two vkms devices
    (`vkms.yml`): device handling and outputs on the second one, not real copies between GPUs.
 3. **What clients are told.** Per-surface dmabuf feedback (Smithay's `DmabufFeedbackBuilder`
    with a scanout tranche for the output's device) lets a fullscreen client allocate buffers a
