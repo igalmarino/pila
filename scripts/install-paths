@@ -23,6 +23,7 @@ install_files=(
     "scripts/report:$BINDIR/pila-report:755"
     "docs/pila.1:$DATADIR/man/man1/pila.1:644"
     "resources/session/pila.desktop:$DATADIR/wayland-sessions/pila.desktop:644"
+    "resources/icons/pila.svg:$DATADIR/icons/hicolor/scalable/apps/pila.svg:644"
     "resources/xdg/xdg-desktop-portal/pila-portals.conf:$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf:644"
     "resources/xdg/xdg-desktop-portal-wlr/pila:$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila:644"
 )

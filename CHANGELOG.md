@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **A logo:** three stacked windows in Pila's default title-bar colors, at the top of the README
+  and the manual (`docs/logo/`). It's also the session's icon: `scripts/install` and the
+  packages install it as `pila` in the hicolor theme, and the session entry names it
+  (`Icon=pila`), for login screens that show one.
+
 ## 0.5.1 (2026-11-11)
 
 - **Shake the mouse to find the pointer:** as on KDE Plasma, shaking the pointer quickly back and

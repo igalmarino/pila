@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Install pila as a login session, on any distro and with any display manager
 # that reads wayland-sessions (GDM, SDDM, LightDM, greetd front ends, ...):
-# the release binary, the session wrapper, the session entry and the portal
-# configs for screen sharing. Run it from your desktop session; sudo asks once
-# if the targets aren't writable. Afterwards log out and pick "pila" in the
-# login screen's session menu. After changing pila: run it again, then log out
-# and back in.
+# the release binary, the session wrapper, the session entry and its icon, and
+# the portal configs for screen sharing. Run it from your desktop session; sudo
+# asks once if the targets aren't writable. Afterwards log out and pick "pila"
+# in the login screen's session menu. After changing pila: run it again, then
+# log out and back in.
 #
 #   scripts/install              build the release binary, then install
 #   scripts/install --container  build it in the dev container (scripts/dev)

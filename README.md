@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/pila-logo-dark.svg">
+    <img src="docs/logo/pila-logo.svg" alt="Pila" width="320">
+  </picture>
+</p>
+
 # Pila
 
 [![CI](https://github.com/igalmarino/pila/actions/workflows/ci.yml/badge.svg)](https://github.com/igalmarino/pila/actions/workflows/ci.yml)

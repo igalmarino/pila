@@ -19,6 +19,8 @@ contents:
       mode: 0755
   - src: stage/usr/share/wayland-sessions/*
     dst: /usr/share/wayland-sessions/
+  - src: stage/usr/share/icons/hicolor/scalable/apps/*
+    dst: /usr/share/icons/hicolor/scalable/apps/
   - src: stage/usr/share/man/man1/*
     dst: /usr/share/man/man1/
   - src: stage/usr/share/doc/pila/*

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <!-- GitHub's social preview (Settings > General > Social preview), uploaded as
+       a PNG: rsvg-convert docs/logo/social-preview.svg -o social-preview.png -->
+  <rect width="1280" height="640" fill="#1f2126"/>
+  <g transform="translate(240 120) scale(2.5)">
+  <g id="back">
+    <rect x="47.5" y="13" width="72" height="58" rx="9" fill="#000" fill-opacity="0.28"/>
+    <rect x="46" y="10" width="72" height="58" rx="9" fill="#4a4d55"/>
+    <path d="M46,26 V19 a9,9 0 0 1 9,-9 H109 a9,9 0 0 1 9,9 V26 Z" fill="#2f3136"/>
+    <rect x="46.75" y="10.75" width="70.5" height="56.5" rx="8.25" fill="none" stroke="#6b6f78" stroke-width="1.5"/>
+  </g>
+  <g id="middle">
+    <rect x="29.5" y="33" width="72" height="58" rx="9" fill="#000" fill-opacity="0.28"/>
+    <rect x="28" y="30" width="72" height="58" rx="9" fill="#80838a"/>
+    <path d="M28,46 V39 a9,9 0 0 1 9,-9 H91 a9,9 0 0 1 9,9 V46 Z" fill="#3f4249"/>
+    <rect x="28.75" y="30.75" width="70.5" height="56.5" rx="8.25" fill="none" stroke="#6b6f78" stroke-width="1.5"/>
+  </g>
+  <g id="front">
+    <rect x="11.5" y="53" width="72" height="58" rx="9" fill="#000" fill-opacity="0.28"/>
+    <rect x="10" y="50" width="72" height="58" rx="9" fill="#dfe1e5"/>
+    <path d="M10,66 V59 a9,9 0 0 1 9,-9 H73 a9,9 0 0 1 9,9 V66 Z" fill="#4477cc"/>
+    <circle cx="72" cy="58" r="2.6" fill="#dfe1e5"/>
+    <circle cx="63" cy="58" r="2.6" fill="#dfe1e5"/>
+    <circle cx="54" cy="58" r="2.6" fill="#dfe1e5"/>
+  </g>
+  <g fill="none" stroke="#dfe1e5" stroke-width="9" stroke-linecap="round">
+    <path d="M160,56.5 V118"/>
+    <circle cx="177.5" cy="74" r="17.5"/>
+    <path d="M220,56.5 V91.5"/>
+    <path d="M244,28 V91.5"/>
+    <circle cx="286" cy="74" r="17.5"/>
+    <path d="M303.5,56.5 V91.5"/>
+  </g>
+  <circle cx="220" cy="37" r="5.5" fill="#4477cc"/>
+  </g>
+  <text x="640" y="500" text-anchor="middle" fill="#9a9ea6" font-family="Inter, 'Adwaita Sans', 'DejaVu Sans', sans-serif" font-size="40">A stacking Wayland compositor</text>
+</svg>

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="logo/pila-logo-dark.svg">
+    <img src="logo/pila-logo.svg" alt="Pila" width="320">
+  </picture>
+</p>
+
 # Pila user manual
 
 Pila is a stacking Wayland compositor: windows overlap and you move them around, as on most

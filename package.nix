@@ -87,6 +87,7 @@ rustPlatform.buildRustPackage {
     install -Dm644 resources/session/pila.desktop $out/share/wayland-sessions/pila.desktop
     substituteInPlace $out/share/wayland-sessions/pila.desktop \
       --replace-fail '@BINDIR@' "$out/bin"
+    install -Dm644 resources/icons/pila.svg $out/share/icons/hicolor/scalable/apps/pila.svg
     install -Dm644 resources/xdg/xdg-desktop-portal/pila-portals.conf \
       -t $out/share/xdg-desktop-portal
     install -Dm644 resources/xdg/xdg-desktop-portal-wlr/pila \
