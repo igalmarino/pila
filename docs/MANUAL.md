@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="logo/pila-logo-dark.svg">
-    <img src="logo/pila-logo.svg" alt="Pila" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/igalmarino/pila/main/docs/logo/pila-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/igalmarino/pila/main/docs/logo/pila-logo.svg" alt="Pila" width="420">
   </picture>
 </p>
 
@@ -248,9 +248,11 @@ shake-magnification = 2.0   # 1.5 to 5
 # shake-to-find = false     # never grow it
 ```
 
-The cursor's size is `XCURSOR_SIZE` (24 unless set); Pila draws the grown cursor from the
-theme's larger images, so it stays sharp as far as the theme goes. `[animations]` `speed`
-slows it down too, and with animations off it grows and shrinks at once.
+The cursor's theme and size are `XCURSOR_THEME` and `XCURSOR_SIZE` (24 unless set); nested, the
+desktop around Pila draws apps' named cursors at its own size, and those two set only the grown
+one. Pila draws the grown cursor from the theme's larger images, so it stays sharp as far as the
+theme goes. `[animations]` `speed` slows it down too, and with animations off it grows and shrinks
+at once.
 
 The mouse, touchpad and gesture settings apply from the login screen or a TTY; nested, the
 desktop around Pila handles those devices. The keyboard settings apply either way.
@@ -426,7 +428,7 @@ a nested Pila doesn't have it.
 
 Lock screens that use ext-session-lock work: `swaylock`, or your shell's own (Noctalia has one).
 While the screen is locked, only the lock screen gets the keyboard and the mouse, and Pila's
-bindings don't run.
+bindings don't run; `Ctrl+Alt+F1` to `F12` still switch virtual terminals.
 
 To lock and turn the screens off after a while without input, use `swayidle` (or your shell's
 idle settings):

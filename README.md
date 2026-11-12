@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/pila-logo-dark.svg">
-    <img src="docs/logo/pila-logo.svg" alt="Pila" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/igalmarino/pila/main/docs/logo/pila-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/igalmarino/pila/main/docs/logo/pila-logo.svg" alt="Pila" width="420">
   </picture>
 </p>
 
@@ -26,7 +26,7 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-![Pila with a terminal and a Noctalia bar](docs/screenshot.png)
+![Pila with a terminal and a Noctalia bar](https://raw.githubusercontent.com/igalmarino/pila/main/docs/screenshot.png)
 
 How to use and set it up is in the [user manual](docs/MANUAL.md) (and `man pila`).
 
@@ -92,7 +92,8 @@ A short report helps even if everything works:
   maximize and fullscreen; snapping to screen halves and quarters by keyboard or by dragging to
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
-  between monitors; switching by recent use (Mod+Tab, Alt+Tab); workspaces spanning all monitors (Mod+1..N,
+  between monitors; switching by recent use (Mod+Tab, Alt+Tab); tapping Mod alone opens the
+  launcher; workspaces spanning all monitors (Mod+1..N,
   four-finger swipes); a window menu on the title bar (right click); windows asking for
   attention marked with an amber title bar; a shadow under each window (`[shadow]`); optional
   rounded corners (`corner-radius`); your own colors (`[colors]`).
@@ -102,13 +103,14 @@ A short report helps even if everything works:
   position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius,
   opacity, blur and shadow per app; blur and animations per panel or launcher.
 - **Monitors:** several at once, hotplugged, each with its own mode, position, rotation,
-  (fractional) scale and adaptive sync.
+  (fractional) scale and adaptive sync; a fullscreen app's frames sent to the screen as it drew
+  them (direct scanout, `direct-scanout`).
 - **Apps get their windows back:** place, size, maximized or fullscreen, for apps that ask
   (xdg-session-management), even after Pila restarts.
 - **X11 apps** through Xwayland, with the clipboard shared both ways.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
-  (ext-data-control), screenshots (grim, screencopy) and screen sharing
+  (ext-data-control), screenshots (grim; ext-image-copy-capture and wlr-screencopy) and screen sharing
   (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
   settings (output power and management), blur behind panels and windows (background-effect),
@@ -121,7 +123,8 @@ A short report helps even if everything works:
 - **Input:** keyboard layout and repeat, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
-  pointer lock and confinement for games, any key bindable (media keys included).
+  pointer lock and confinement for games, shaking the pointer to find it (`[cursor]`), any key
+  bindable (media keys included).
 - **Configuration** in one TOML file, applied live when saved.
 - **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
   action ([docs/IPC.md](docs/IPC.md)).
@@ -339,9 +342,11 @@ output, which fails.
 Pila reads `~/.config/pila/config.toml` (or `$XDG_CONFIG_HOME/pila/config.toml`, or the file
 given with `--config`). [`config.example.toml`](config.example.toml) documents every option
 and the default key bindings: the modifier key, terminal and launcher, programs to start with
-Pila (`autostart`), keyboard layout and repeat, key bindings, touchpad and mouse settings,
-each monitor's mode, scale, rotation, position and adaptive sync, the number of workspaces,
-rounded corners, shadows (`[shadow]`), colors (`[colors]`), animations (`[animations]`) and
+Pila (`autostart`), keyboard layout and repeat, key bindings, touchpad gestures
+(`[gestures]`), touchpad and mouse settings, the cursor (`[cursor]`), each monitor's mode,
+scale, rotation, position and adaptive sync, monitors on other GPUs (`other-gpus`), direct
+scanout (`direct-scanout`), the number of workspaces, rounded corners, shadows (`[shadow]`),
+colors (`[colors]`), animations (`[animations]`) and
 per-app rules (`[[window-rule]]`, `[[layer-rule]]`). A missing file means the defaults; an invalid one is
 reported in the log and in a notification, and Pila starts with the defaults. `PILA_MOD`, `PILA_TERMINAL` and
 `PILA_LAUNCHER` override the file; `pila --help` lists the options.

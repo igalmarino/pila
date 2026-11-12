@@ -279,7 +279,8 @@
 # app-id = "firefox"
 # title = "*Picture-in-Picture*"
 # animations = { open = false }
-# size = [480, 270]                # logical pixels; the app may round it
+# size = [480, 270]                # logical pixels, 1 to 16384 each; the app
+#                                  # may round it
 # position = [20, 20]              # top-left (title bar included) from the
 #                                  # top-left of the output's free area
 #

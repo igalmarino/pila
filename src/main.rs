@@ -41,8 +41,9 @@ Environment (overrides the config file):
                  konsole, gnome-terminal, xterm)
   PILA_LAUNCHER  Command for Mod+D and tapping Mod alone (unset: both do
                  nothing)
-  XCURSOR_THEME  Cursor theme on a TTY (default: default)
-  XCURSOR_SIZE   Cursor size on a TTY (default: 24)
+  XCURSOR_THEME  Cursor theme (default: default; nested, only the one grown
+                 by shaking it)
+  XCURSOR_SIZE   Cursor size (default: 24; nested, likewise)
   XKB_DEFAULT_LAYOUT, _VARIANT, _OPTIONS
                  Keymap when the config's [keyboard] leaves it empty
   RUST_LOG       Log filter (default: info); pila::frames=debug logs frame
