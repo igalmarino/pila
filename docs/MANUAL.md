@@ -20,6 +20,7 @@ This manual says how to use Pila and set it up. Every configuration option is de
 - [Starting and leaving Pila](#starting-and-leaving-pila)
 - [The Mod key and the default bindings](#the-mod-key-and-the-default-bindings)
 - [Windows](#windows)
+- [Looks](#looks)
 - [Workspaces](#workspaces)
 - [Monitors](#monitors)
 - [Keyboard, mouse and touchpad](#keyboard-mouse-and-touchpad)
@@ -143,6 +144,54 @@ first, as it would for unsaved work.
 their windows' place, size and maximized or fullscreen state back when they open them again,
 even after Pila restarts. Pila keeps that in `~/.local/state/pila/sessions.json`; a nested Pila,
 or a second one started next to your session, keeps it in memory only.
+
+## Looks
+
+What Pila draws itself, the title bars, shadows, corners and animations, is set in the
+configuration file and changes as soon as the file is saved.
+
+**Title bars and colors.** `[colors]` sets Pila's title bars: the focused window's (`bar`), the
+others' (`bar-inactive`) and one asking for attention (`bar-urgent`); the title and buttons on
+them (`icon`, `icon-inactive`); a button under the pointer (`hover`, `hover-icon`, and
+`close-hover`, `close-hover-icon` for the close button). `background` is what shows behind the
+windows without a wallpaper, and `snap-preview` the area a dragged window would snap to (it may
+be translucent: `#rrggbbaa`). Apps that draw their own title bar keep their own colors.
+
+**Rounded corners.** `corner-radius` rounds every window's corners: 0 (square, the default) to
+64 logical pixels, at most half the window's shorter side and, with Pila's title bar, the bar's
+height (28). Maximized and fullscreen windows stay square. A window rule sets it per app.
+
+**Shadows.** Each window casts a shadow, darker under the focused one. Maximized and fullscreen
+windows have none, and neither do those whose app draws its own (GTK apps do). `[shadow]` sets
+how far it reaches (`size`, 0 to 64), its `offset` and its colors (`color`, `inactive-color`,
+as `#rrggbbaa`); `enabled = false` turns it off. A window rule's `shadow` turns it on or off per
+app.
+
+**Animations.** Windows opening, closing, minimizing and maximizing (snapping and fullscreen
+too), launchers and notifications, and workspace switches animate briefly. `[animations]`
+changes them:
+
+```toml
+[animations]
+speed = 2.0             # everything twice as slow (0.25 to 4)
+window-close = false    # no closing animation
+workspace = 150         # the workspace slide in 150 ms (1 to 1000)
+# enabled = false       # no animations at all
+```
+
+A rule turns them off for an app (`animations = false`, or one kind: `animations = { open =
+false }`) or for a panel or launcher. Shells that animate their own panels need that: see
+[Building your desktop](#building-your-desktop).
+
+**Blur and transparency.** An app can ask for what's behind part of it to be blurred
+(ext-background-effect; some terminals and shells' panels do), and Pila blurs it. A rule with
+`blur = true` blurs behind a whole window (its title bar included) or panel that doesn't ask,
+and `blur = false` refuses an app's request. Panels are blurred above the windows (the top and
+overlay layers), not below them. A window rule's `opacity` (0.1 to 1) makes a whole window
+translucent. Rules are in [Window and layer rules](#window-and-layer-rules).
+
+**The bell.** An app ringing the system bell (xdg-system-bell) makes its window flash briefly;
+Pila plays no sound.
 
 ## Workspaces
 
