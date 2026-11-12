@@ -38,9 +38,10 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - CI (`.github/workflows/ci.yml`, every push to `main` and every PR) also runs
   `cargo fmt --check`, builds with `--locked`, does a staged install and runs
-  `shellcheck --severity=warning --external-sources` on the scripts: run that after editing
-  one. `compat.yml` (`rust-version`, Debian, Ubuntu, Fedora, Nix, `cargo audit`) runs when
-  dependencies or packaging change, weekly and by hand before a release. `packages.yml`
+  `shellcheck --severity=warning --external-sources` on the scripts (and parses the Python
+  ones): run that after editing one. `compat.yml` (`rust-version`, Debian, Ubuntu, Fedora, Nix,
+  `cargo audit`) runs when dependencies, the Nix files, `scripts/install`(`-paths`) or
+  `resources/` change (not `packaging/`), weekly and by hand before a release. `packages.yml`
   builds the `.deb` and `.rpm` of a release. `aur.yml` publishes `packaging/aur/pila-git` to
   the AUR once the user approves it (the `aur` environment). `vkms.yml` (by hand, an
   experiment) runs the udev backend on the kernel's virtual KMS driver in the runner's VM.
@@ -68,8 +69,10 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   Desktop tools for layer-shell and friends: `swaybg` (Background), `waybar` (Top, exclusive
   zone), `fuzzel` (Overlay, exclusive keyboard; `PILA_LAUNCHER=fuzzel`), `mako` +
   `notify-send` (notifications), `swaylock` (session lock), `wl-copy`/`wl-paste`
-  (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture). X11 (via
-  Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
+  (ext-data-control), `grim` + `slurp` (screenshots: ext-image-copy-capture), `wtype`
+  (virtual keyboard), `wlr-randr` (output management), `wlopm` (output power), `wlsunset`
+  (gamma); `kitty` (the default terminal); `noctalia` and `dux-shell` (`scripts/shells`). X11
+  (via Xwayland): `xterm`, `xeyes`, `xdpyinfo`.
 - Bare-metal smoke and performance run: `scripts/check --nested` (release build, log in
   `pila-check.log`) is for you: run it before asking the user to check anything; the user
   runs plain `scripts/check` from a TTY (log in `pila-tty.log`) for bare metal. What it
@@ -98,7 +101,9 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   the `release` skill.
 - Debian/Fedora packages: `packaging/nfpm.yaml`, built by `packages.yml` from a staged
   `scripts/install`. A directory added to `install_files` and a newly linked library go there
-  too (`contents`, `depends`).
+  too (`contents`, `depends`). The docs in `share/doc/pila` aren't in `install_files`: one
+  added for the packages goes in the `PKGBUILD`'s `package()`, `packages.yml`'s Package step
+  and `package.nix`'s `postInstall`.
 - Nix package: `flake.nix` and `package.nix` (the same files as `scripts/install`: a file
   added to `install_files` is added there too). No Nix in this container: `compat.yml`'s Nix
   job builds it and starts Pila from it. `flake.lock` pins nixpkgs; a dependency on a new

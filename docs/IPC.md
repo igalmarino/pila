@@ -29,8 +29,8 @@ arguments, 3 if it can't talk to Pila.
 ## The socket
 
 A Unix stream socket, for the same user only (mode 0600). Programs Pila starts have its path in
-`PILA_SOCKET`, and a login session exports it to the D-Bus session bus and systemd's user manager
-too, for programs started as services; otherwise it's
+`PILA_SOCKET`, and a login session exports it to the D-Bus session bus (and to systemd's user
+manager, where that's the bus) too, for programs started as services; otherwise it's
 `$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
 
 Each request is one line of JSON and gets one line of JSON back, in order. A connection can be

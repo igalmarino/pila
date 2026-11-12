@@ -39,7 +39,8 @@ What breaks silently:
   closes the connection fails and wayland-backend then never reads the protocol error waiting
   in the socket.
 
-`docs_names::the_docs_name_only_code_that_exists` fails when a doc or a comment names a file,
+`docs_names::the_docs_name_only_code_that_exists` fails when `docs/ARCHITECTURE.md`,
+`docs/MULTI_GPU.md`, a `CLAUDE.md`, `CONTRIBUTING.md` or a comment in `src/` names a file,
 or a path into Pila's code (`module::item`, `Type::method`), that's gone: rename it there too.
 
 `scripts/coverage [--html]` reports line coverage per file (instrumented build in

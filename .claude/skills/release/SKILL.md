@@ -38,7 +38,9 @@ Nix flake (`flake.nix`) takes its version from `Cargo.toml` and needs nothing.
 `packaging/aur/pila-git` holds the `PKGBUILD` and `.SRCINFO`; test with `makepkg -f` there.
 
 - Its `package()` runs `scripts/install --no-build` with `PREFIX=/usr DESTDIR=`, so files added
-  to `install_files` need no change there.
+  to `install_files` need no change there. The docs in `share/doc/pila` are installed apart:
+  one added for the packages goes in `package()`, `packages.yml`'s Package step and
+  `package.nix`'s `postInstall`.
 - Keep `depends` in step with the libraries Pila links (`readelf -d`) and README's package
   table.
 - Regenerate `.SRCINFO` (`makepkg --printsrcinfo`) after editing the `PKGBUILD`.

@@ -15,7 +15,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | Feature | Tests |
 |---|---|
 | Headless backend, control socket, state dump; clients disconnected for a protocol error are logged; a crash is logged with its backtrace | `smoke::headless_pila_starts_with_one_output`, `smoke::a_window_maps_focused_and_is_drawn`, `smoke::bindings_run_from_injected_keys`, `smoke::quit_binding_exits`, `src/headless.rs::output_specs_parse`, `smoke::a_client_killed_by_a_protocol_error_is_logged`, `smoke::a_crash_is_logged_with_its_backtrace` |
-| The docs name only code that exists (files, and paths into Pila's modules and types, in `docs/`, the `CLAUDE.md`s, `CONTRIBUTING.md` and `src/`'s comments) | `docs_names::the_docs_name_only_code_that_exists` |
+| The docs name only code that exists (files, and paths into Pila's modules and types, in `docs/ARCHITECTURE.md`, `docs/MULTI_GPU.md`, the `CLAUDE.md`s, `CONTRIBUTING.md` and `src/`'s comments) | `docs_names::the_docs_name_only_code_that_exists` |
 
 ## Command line and configuration
 

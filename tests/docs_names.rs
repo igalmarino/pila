@@ -1,9 +1,9 @@
-//! The docs name only code that exists: in `docs/`, the `CLAUDE.md`s,
-//! `CONTRIBUTING.md` and the comments in `src/`, every file (`foo.rs`) and
-//! every path into Pila's code (`module::item`, `Type::method`,
-//! `udev/draw.rs::idle_until`) in backticks. Names of other projects (Smithay's,
-//! a protocol's) aren't checked: only paths that start at one of Pila's modules
-//! or types.
+//! The docs name only code that exists: in `docs/ARCHITECTURE.md`,
+//! `docs/MULTI_GPU.md`, the `CLAUDE.md`s, `CONTRIBUTING.md` and the comments
+//! in `src/`, every file (`foo.rs`) and every path into Pila's code
+//! (`module::item`, `Type::method`, `udev/draw.rs::idle_until`) in backticks.
+//! Names of other projects (Smithay's, a protocol's) aren't checked: only
+//! paths that start at one of Pila's modules or types.
 
 use std::{
     collections::HashSet,

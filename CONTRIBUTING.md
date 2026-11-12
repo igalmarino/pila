@@ -17,7 +17,8 @@ too; see [Use of AI](README.md#use-of-ai) for the terms.
   (elogind or seatd), on any distro, with configurable install paths.
 - Before sending a change: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and
   `cargo test` (CI runs them too, plus `shellcheck` on the scripts; builds on Debian, Ubuntu
-  and Fedora run when dependencies or packaging change, and weekly). Every feature gets integration tests (`tests/*.rs`, on a
+  and Fedora run when dependencies, the Nix files, `scripts/install` or `resources/` change,
+  and weekly). Every feature gets integration tests (`tests/*.rs`, on a
   headless Pila; a new test goes into `tests/FEATURES.md`), and unit tests cover pure
   logic. What those can't reach is tried by hand: how things look nested (`cargo run`),
   and the DRM/KMS backend on a TTY (`scripts/tty`). `scripts/check` is a smoke and
@@ -78,7 +79,8 @@ container. (The author's host is Arch, with Pila as its only desktop.)
   `/run/host-pila` so Claude can read it
 - Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
   `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
-  against (`fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`, `slurp`)
+  against (`kitty`, `fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`,
+  `slurp`, `wtype`, `wlr-randr`, `wlopm`, `wlsunset`, Noctalia and Dux Shell)
 - Claude Code (native install) with auth and history persisted across rebuilds
 
 The container follows the session it's entered from: entered from a Pila session
