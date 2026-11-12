@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="logo/pila-logo-dark.svg">
-    <img src="logo/pila-logo.svg" alt="Pila" width="320">
+    <img src="logo/pila-logo.svg" alt="Pila" width="420">
   </picture>
 </p>
 
