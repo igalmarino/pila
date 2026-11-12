@@ -1,0 +1,192 @@
+# Every key Pila's config takes, in every form it takes, as users may have written them.
+# tests/compat.rs checks that Pila still reads it, and that it names every key Pila knows.
+#
+# Add to it when Pila gets a key, a value form or an action; never take anything out or
+# change it: a line that stops working here is a user's config that stops working. Renaming
+# something keeps the old name working (see CONTRIBUTING.md, "Compatibility").
+
+mod = "super"
+terminal = "kitty"
+launcher = "fuzzel"
+autostart = ["swaybg -c '#202020'", "waybar"]
+workspaces = 4
+corner-radius = 8
+other-gpus = false
+direct-scanout = true
+
+[shadow]
+enabled = true
+size = 24
+offset = [0, 6]
+color = "#00000066"
+inactive-color = "#000000"
+
+[colors]
+bar = "#2f3136"
+bar-inactive = "#26272b"
+bar-urgent = "#8a5712"
+icon = "#dfe1e5"
+icon-inactive = "#80838a"
+hover = "#3f4249"
+hover-icon = "#f2f3f5"
+close-hover = "#c42b1c"
+close-hover-icon = "#ffffff"
+background = "#1f2126"
+snap-preview = "#4477cc4d"
+
+[animations]
+enabled = true
+speed = 1.5
+window-open = 200
+window-close = false
+minimize = true
+maximize = 220
+layer = 150
+workspace = 250
+
+[cursor]
+shake-to-find = true
+shake-magnification = 2.5
+
+[keyboard]
+layout = "us,de"
+variant = ",nodeadkeys"
+model = "pc105"
+options = "grp:alt_shift_toggle,caps:escape"
+repeat-delay = 200
+repeat-rate = 25
+
+[input.touchpad]
+tap = true
+natural-scroll = true
+accel-speed = 0.3
+accel-profile = "adaptive"
+disable-while-typing = true
+click-method = "clickfinger"
+middle-emulation = false
+
+[input.mouse]
+natural-scroll = false
+accel-speed = -0.5
+accel-profile = "flat"
+middle-emulation = true
+# Taken here too, as the touchpad's (a mouse has no use for them).
+tap = false
+disable-while-typing = false
+click-method = "button-areas"
+
+[bindings]
+# Every action, and every way of writing a key combo.
+"Mod" = "launcher"
+"Super+Return" = "terminal"
+"Logo+D" = "launcher"
+"Win+Q" = "close"
+"Alt+Tab" = "cycle-focus"
+"Alt+Shift+Tab" = "cycle-focus-back"
+"Mod+N" = "minimize"
+"Mod+M" = "maximize"
+"Mod+F" = "fullscreen"
+"Mod+Left" = "snap-left"
+"Mod+Right" = "snap-right"
+"Mod+Shift+Left" = "snap-top-left"
+"Mod+Shift+Right" = "snap-top-right"
+"Mod+Ctrl+Left" = "snap-bottom-left"
+"Mod+Ctrl+Right" = "snap-bottom-right"
+"Mod+Down" = "restore"
+"Mod+Alt+Left" = "move-left"
+"Mod+Alt+Right" = "move-right"
+"Mod+Alt+Up" = "move-up"
+"Mod+Alt+Down" = "move-down"
+"Control+Alt+Right" = "grow-width"
+"Control+Alt+Left" = "shrink-width"
+"Control+Alt+Down" = "grow-height"
+"Control+Alt+Up" = "shrink-height"
+"Mod+C" = "center"
+"Mod+T" = "toggle-always-on-top"
+"Mod+P" = "toggle-all-workspaces"
+"Mod+H" = "show-desktop"
+"Mod+F11" = "power-off-monitors"
+"Mod+F12" = "power-on-monitors"
+"Mod+Shift+E" = "quit"
+"Mod+Shift+Return" = "spawn kitty -e htop"
+"XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"Mod+O" = "focus-output next"
+"Mod+Alt+O" = "focus-output prev"
+"Mod+Ctrl+O" = "focus-output-next"
+"Mod+Shift+O" = "move-to-output next"
+"Mod+Shift+Alt+O" = "move-to-output prev"
+"Mod+Shift+Ctrl+O" = "move-to-output-prev"
+"Mod+3" = "workspace 3"
+"Mod+Page_Down" = "workspace next"
+"Mod+Page_Up" = "workspace-prev"
+"Mod+Shift+3" = "move-to-workspace 3"
+"Mod+Shift+Page_Down" = "move-to-workspace-next"
+"Mod+Shift+Page_Up" = "move-to-workspace prev"
+"Mod+Space" = "switch-layout next"
+"Mod+Shift+Space" = "switch-layout prev"
+"Mod+Ctrl+1" = "switch-layout 1"
+"Mod+J" = "none"
+
+[gestures]
+"swipe-3-left" = "cycle-focus"
+"swipe-3-down" = "minimize"
+"swipe-4-up" = "snap-left"
+"swipe-5-right" = "workspace-prev"
+"swipe-3-up" = "none"
+
+[[output]]
+name = "eDP-1"
+scale = 1.25
+
+[[output]]
+name = "DP-1"
+mode = "2560x1440@143.9"
+position = [1536, 0]
+transform = "90"
+adaptive-sync = true
+enabled = true
+
+[[output]]
+name = "Some Maker Some Model 12345"
+mode = "1920x1080"
+transform = "flipped-180"
+enabled = false
+
+[[window-rule]]
+app-id = "steam_app_*"
+animations = false
+
+[[window-rule]]
+app-id = "firefox"
+title = "*Picture-in-Picture*"
+animations = { open = false, close = true, minimize = false, maximize = false }
+size = [480, 270]
+position = [20, 20]
+
+[[window-rule]]
+app-id = "kitty"
+tag = "scratch"
+title-bar = false
+corner-radius = 12
+opacity = 0.95
+blur = true
+shadow = false
+
+[[window-rule]]
+app-id = "thunderbird"
+open-on-workspace = 3
+open-maximized = true
+always-on-top = true
+all-workspaces = true
+
+[[window-rule]]
+title = "Video"
+open-fullscreen = true
+
+[[layer-rule]]
+namespace = "noctalia-*"
+animations = false
+
+[[layer-rule]]
+namespace = "waybar"
+blur = true

@@ -32,6 +32,22 @@ too; see [Use of AI](README.md#use-of-ai) for the terms.
   `src/main.rs` in step with new settings, bindings and flags (tests check the bindings and
   flags).
 
+## Compatibility
+
+Users' config files and the programs that talk to `pila msg` must keep working across
+versions:
+
+- **Adding** a config key, a value form, an action or an IPC field is free. A new key or
+  action also goes into `tests/fixtures/every-key.toml` (`tests/compat.rs` fails until it's
+  there).
+- **Renaming** keeps the old name working: a serde `alias`, or a second spelling in
+  `Action::parse`; the changelog says what the new name is.
+- **Removing** or changing what something means is a breaking change: only when nothing
+  else works, under its own heading in the changelog with how to update the config, and, for
+  `pila msg`, by raising `protocol` (`docs/IPC.md`, "What's guaranteed").
+- `tests/fixtures/every-key.toml` and the field lists in `tests/compat.rs` only grow: a line
+  taken out there is a config or a script that stops working.
+
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the architecture: the state struct, the backends, the
 render loop, and how each protocol and feature is wired.
 

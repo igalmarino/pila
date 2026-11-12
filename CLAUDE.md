@@ -283,6 +283,9 @@ What breaks silently anywhere in the code, whichever subsystem you're in:
   and the man page `docs/pila.1` (tests check that both list every default binding, and the
   man page every flag and variable of `USAGE`). A feature users see gets its place in the
   manual.
+  Config keys, actions and `pila msg` fields are only added to: a rename keeps the old name
+  (serde `alias`), and `tests/fixtures/every-key.toml` and `tests/compat.rs`' field lists
+  only grow (CONTRIBUTING.md, "Compatibility").
 
 ## Reference code
 
