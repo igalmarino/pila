@@ -26,8 +26,6 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-![Pila with a terminal and a Noctalia bar](https://raw.githubusercontent.com/igalmarino/pila/main/docs/screenshot.png)
-
 How to use and set it up is in the [user manual](https://github.com/igalmarino/pila/blob/main/docs/MANUAL.md) (and `man pila`).
 
 ## Status
