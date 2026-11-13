@@ -351,6 +351,8 @@ fn setting_the_same_cursor_again_redraws_nothing() {
     let client = pila.client();
     client.window("a").size(400, 300).create();
     pila.wait_focus("a");
+    // Its frame for the configure that activates it, in before counting.
+    client.roundtrip();
     let (x, y, ..) = rect(&pila.window("a")["geometry"]);
     pila.move_to((x + 200) as f64, (y + 150) as f64);
     client.wait("pointer enter", |s| s.pointer_name.as_deref() == Some("a"));

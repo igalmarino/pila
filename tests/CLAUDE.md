@@ -9,7 +9,8 @@ Integration tests (`tests/*.rs`, harness in `tests/common/`) run a headless Pila
 - `TestPila` starts it with a config (animations, shadows and shake to find off and the US
   layout unless the test sets `[animations]`, `[shadow]`, `[cursor]` or `[keyboard]`), without
   the session's display, keymap, cursor theme (named cursors are the built-in arrow), `PILA_*`
-  or D-Bus variables, in a private runtime, config and state directory; it injects
+  or D-Bus variables, in a private runtime, config and state directory, and returns once the
+  fonts are loaded (they end with a redraw of every output, which a count must not see); it injects
   input and reads the state through its control socket, and waits for conditions by polling
   (`wait`, `wait_window`, `settle`), never with a fixed sleep for something to happen; a check
   that something doesn't happen uses `stays`.

@@ -217,7 +217,7 @@ impl TestPila {
         control
             .set_read_timeout(Some(Duration::from_secs(30)))
             .unwrap();
-        TestPila {
+        let mut pila = TestPila {
             child,
             crash_expected: false,
             dir,
@@ -225,7 +225,11 @@ impl TestPila {
             log_path,
             display,
             control: BufReader::new(control),
-        }
+        };
+        // The fonts load in the background and end with a redraw of every
+        // output: under load it came in the middle of tests counting them.
+        pila.wait_fonts();
+        pila
     }
 
     /// Send a request; panics if pila refuses it.
@@ -456,6 +460,24 @@ impl TestPila {
 
     pub fn log_tail(&self) -> String {
         tail(&self.log(), 80)
+    }
+
+    /// Wait until the fonts are loaded and the redraw of every output they
+    /// end with is asked for (`main.rs`), or there are none (as in CI): a
+    /// test counting redraws must not count that one. `start_with` does.
+    #[track_caller]
+    fn wait_fonts(&mut self) {
+        // The loop runs first (its answer may take a while: Xwayland's
+        // socket search under load), then the fonts' ping is handled at once.
+        self.state();
+        let started = Instant::now();
+        while !["fonts in place: redrawing every output", "no fonts found"]
+            .iter()
+            .any(|line| self.log().contains(line))
+        {
+            assert!(started.elapsed() < TIMEOUT, "the fonts never loaded");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     /// Wait until the log has a line containing `text`.
