@@ -359,7 +359,8 @@ Key flows and invariants:
   kernel's atomic debugging showed the reset ("Disabling/Enabling DRM plane") at both switches and
   at Smithay's test of the client's buffer; the buffers themselves had the same format, modifier,
   tiling metadata, size and alpha (the log's `client` and `swapchain` are the buffers' formats, not
-  the framebuffers'). Bare metal only: `scripts/check`'s fullscreen scenario
+  the framebuffers'). With the opaque swapchain the same switch takes 0.06 ms with
+  `others_pending=1` (two monitors, Renoir). Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average

@@ -99,11 +99,11 @@ runs a release build through real programs (terminals, xterm, a launcher, screen
 share, blur, a fullscreen app, Noctalia) and fails on a missed refresh or a blown budget.
 Changes to rendering, input or the event loop go through it before they're committed.
 
-Last bare-metal run, 2026-11-12, on an AMD Renoir laptop on mains power with an external
-monitor: 23 five-second windows over both outputs, 0.24 to 1.0 ms of CPU per frame on average,
-no missed or late refresh in 1,880 frames. The slowest frame took 11.7 ms, when a fullscreen
-terminal left direct scanout. It still made its vblank, but that delay is a known problem
-(see "Late frames on my laptop" below).
+Last bare-metal run, 2026-11-13, on an AMD Renoir laptop on mains power with an external
+monitor: 23 five-second windows over both outputs, 0.18 to 1.24 ms of CPU per frame on average,
+no missed or late refresh in 1,869 frames, and the slowest frame took 5.3 ms. Leaving direct
+scanout, which took 11.7 ms the day before, now takes 0.06 ms (see "Late frames on my laptop"
+below).
 
 ### Real hardware
 
@@ -193,14 +193,18 @@ wrong. The traces showed three different things:
   and the frame takes 1.4 ms.
 - When a fullscreen app leaves direct scanout, the kernel waits for the other monitor's pending
   frame before applying the change: 11 to 14 ms with Pila's event loop blocked, against 0.3 ms
-  with a single monitor. This one is measured and documented, and still open.
+  with a single monitor. Smithay puts a client's buffer on the primary plane as opaque
+  (XRGB8888), while Pila's own frames were ARGB8888, so every switch changed the framebuffer's
+  format. amdgpu treats that as a plane reset and takes a global lock that waits for every
+  monitor's pending flip. Pila's frames are XRGB8888 now. With both monitors the switch takes
+  0.06 ms.
 - The single-monitor run was on battery, because the monitor's cable also charges the laptop.
   Everything cost about twice as much, and the most expensive frame (opening a window) no longer
   fit in its margin. That's not a bug in Pila, but it does mean the 4 ms budget is a mains-power
   number.
 
-The run after the fix was clean. One clean run proves little, and two of those three causes are
-still there.
+The first two are fixed, and the third is a condition of the measurement rather than a cause.
+The run after both fixes, with both monitors, was clean (see the numbers above).
 
 Where a check was possible, each of these fixes added one, so the same mistake fails the suite
 next time. The late frames are the exception: that's timing on real hardware, and only
