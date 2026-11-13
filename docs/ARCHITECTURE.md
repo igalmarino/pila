@@ -347,11 +347,15 @@ Key flows and invariants:
   of the client's buffer and of the swapchain (`OutputSurface::client_format`, `swapchain_format`).
   On amdgpu (Renoir, DCN 2.1) a commit that switches the plane between the two waited for another
   monitor's flip, up to one of its refresh periods with the event loop held (measured leaving
-  direct scanout, 11 to 14 ms with one pending, 0.3 ms with none): the driver resets a plane whose
-  framebuffer changes format, modifier or tiling metadata, and a reset waits for every CRTC's flip
-  (`amdgpu_dm_atomic_check`). Format and modifier were the same both ways (ARGB8888, the same
-  DCC modifier), which most likely leaves the tiling metadata each process's Mesa sets on its buffer, out of
-  Pila's reach. Bare metal only: `scripts/check`'s fullscreen scenario
+  direct scanout, 11 to 14 ms with one pending, 0.3 ms with none). The kernel's atomic debugging
+  shows why: both switches, plain non-blocking flips, reset the plane ("Disabling/Enabling DRM
+  plane"), and a reset waits for every CRTC's flip (`amdgpu_dm_atomic_check`,
+  `do_aquire_global_lock`); so does Smithay's test of a client's buffer, made with
+  `ALLOW_MODESET`, which on DCN older than 3.2 resets the plane by itself. The driver resets a plane
+  whose framebuffer changes size, format, modifier or tiling metadata (`should_reset_plane`): size,
+  format and modifier were the same both ways (1920x1080, ARGB8888, the same DCC modifier), which
+  leaves the tiling metadata each process's Mesa sets on its buffer (not shown by the kernel).
+  Nothing Pila sets avoids it: a driver limitation, left alone. Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average
