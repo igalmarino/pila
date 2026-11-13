@@ -109,9 +109,9 @@ below).
 
 The DRM/KMS backend can't run in the container, so I run `scripts/check` on a spare TTY of my
 laptop. Pila has been my only desktop since 2026-11-03. I log into it from the greeter and
-develop it from inside. Testers have reported it working on Intel GPUs, Debian with SDDM, NixOS
-and LightDM. The README lists what nobody has tried yet: NVIDIA, systems without systemd,
-monitors on a second GPU.
+develop it from inside. Testers have reported it working on Intel GPUs, Debian with SDDM, NixOS,
+LightDM and one NVIDIA card (a GTX 1060). The README lists what nobody has tried yet: newer
+NVIDIA cards, systems without systemd, monitors on a second GPU.
 
 ### Shells
 

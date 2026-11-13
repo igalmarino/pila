@@ -35,8 +35,8 @@ How to use and set it up is in the [user manual](https://github.com/igalmarino/p
 Pila is **alpha**: usable day to day (its author runs it as their only desktop and
 develops it from inside itself), but developed on one machine: an AMD laptop (Mesa, `amdgpu`)
 with an external monitor, on Arch Linux with Noctalia's greeter. Testers report it working on Intel integrated
-GPUs, on Debian with SDDM, on NixOS and from LightDM in an Arch virtual machine. NVIDIA hasn't
-been tried. Other GPUs, distros and setups
+GPUs, on Debian with SDDM, on NixOS, from LightDM in an Arch virtual machine, and on one
+NVIDIA card (a GTX 1060 with the proprietary driver, on NixOS). Other GPUs, distros and setups
 are exactly what testing is needed for: please [report](#reporting-bugs) what works and what
 doesn't.
 
@@ -63,7 +63,8 @@ Reports are what moves this along: see below.
 The biggest unknown is how Pila behaves away from its author's laptop. Most useful right
 now, in this order:
 
-- **NVIDIA**, which has never been tried, and **Intel** or other AMD GPUs. On a laptop with two
+- **NVIDIA**, newer cards especially (only a GTX 1060 has tried it so far), and **Intel** or
+  other AMD GPUs. On a laptop with two
   GPUs, Pila draws with the seat's primary one, often the integrated one, and with `other-gpus = true`
   in the configuration shows the monitors on the other through it, which has never been tried:
   `pila-report` says which GPU is which;
