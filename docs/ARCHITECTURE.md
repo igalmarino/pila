@@ -344,18 +344,17 @@ Key flows and invariants:
   apart in the frame statistics (`direct`) and an output starting or stopping them is logged
   (`direct scanout`, `pila::frames`, with the time that frame's render and commit took and
   `others_pending`, the device's other outputs with a commit on its way, and the format and modifier
-  of the client's buffer and of the swapchain (`OutputSurface::client_format`, `swapchain_format`).
-  On amdgpu (Renoir, DCN 2.1) a commit that switches the plane between the two waited for another
-  monitor's flip, up to one of its refresh periods with the event loop held (measured leaving
-  direct scanout, 11 to 14 ms with one pending, 0.3 ms with none). The kernel's atomic debugging
-  shows why: both switches, plain non-blocking flips, reset the plane ("Disabling/Enabling DRM
-  plane"), and a reset waits for every CRTC's flip (`amdgpu_dm_atomic_check`,
-  `do_aquire_global_lock`); so does Smithay's test of a client's buffer, made with
-  `ALLOW_MODESET`, which on DCN older than 3.2 resets the plane by itself. The driver resets a plane
-  whose framebuffer changes size, format, modifier or tiling metadata (`should_reset_plane`): size,
-  format and modifier were the same both ways (1920x1080, ARGB8888, the same DCC modifier), which
-  leaves the tiling metadata each process's Mesa sets on its buffer (not shown by the kernel).
-  Nothing Pila sets avoids it: a driver limitation, left alone. Bare metal only: `scripts/check`'s fullscreen scenario
+  of the client's buffer and of the swapchain (`OutputSurface::client_format`, `swapchain_format`)).
+  The swapchain is opaque (`COLOR_FORMATS`: XRGB8888 first) because Smithay adds a client's buffer
+  shown on the primary plane as the opaque variant of its format (ARGB8888 as XRGB8888): with an
+  ARGB8888 swapchain the plane's framebuffer changed format at every switch between the two, and
+  amdgpu (`should_reset_plane`) resets a plane whose framebuffer changes format, and a reset waits
+  for every CRTC's flip (`amdgpu_dm_atomic_check`, `do_aquire_global_lock`): 11 to 14 ms with the
+  event loop held on Renoir, leaving direct scanout with another monitor's flip pending. The
+  kernel's atomic debugging showed the reset ("Disabling/Enabling DRM plane") at both switches and
+  at Smithay's test of the client's buffer; the buffers themselves had the same format, modifier,
+  tiling metadata, size and alpha (the log's `client` and `swapchain` are the buffers' formats, not
+  the framebuffers'). Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average

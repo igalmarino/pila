@@ -93,12 +93,18 @@ use crate::{
     Pila,
 };
 
-/// 8-bit formats only: widely supported, and what clients expect.
+/// 8-bit formats only: widely supported, and what clients expect. Opaque
+/// ones first: the primary plane is the bottom one, so the frame's alpha is
+/// never used, and Smithay adds a client's buffer shown there as it is
+/// (direct scanout) as the opaque variant of its format. A swapchain with
+/// alpha would change the plane's format at every switch between the two,
+/// which amdgpu answers with a plane reset that waits for every monitor's
+/// flip (11 to 14 ms with the event loop held, measured on Renoir).
 const COLOR_FORMATS: [Fourcc; 4] = [
-    Fourcc::Argb8888,
-    Fourcc::Abgr8888,
     Fourcc::Xrgb8888,
     Fourcc::Xbgr8888,
+    Fourcc::Argb8888,
+    Fourcc::Abgr8888,
 ];
 
 type PilaDrmOutput = DrmOutput<
@@ -1019,6 +1025,17 @@ pub fn init_udev(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_swapchain_is_opaque_like_a_clients_buffer_on_the_primary_plane() {
+        // Smithay adds a client's buffer shown on the primary plane as the
+        // opaque variant of its format (ARGB8888 as XRGB8888): a swapchain
+        // with alpha would change the plane's format at every switch, which
+        // amdgpu answers with a plane reset that waits for every monitor.
+        use smithay::backend::allocator::format::has_alpha;
+        assert!(!has_alpha(COLOR_FORMATS[0]), "{:?}", COLOR_FORMATS[0]);
+        assert!(!has_alpha(COLOR_FORMATS[1]), "{:?}", COLOR_FORMATS[1]);
+    }
 
     #[test]
     fn a_connector_name_another_gpu_has_gets_a_number() {

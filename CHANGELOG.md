@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A fullscreen app no longer stalls Pila as it starts or stops being shown as it is** (direct
+  scanout) on AMD laptops with a second monitor: Pila's own frames were ARGB8888 and an app's buffer
+  went to the screen as XRGB8888, and amdgpu answers that change of format by waiting for every
+  monitor's next refresh, up to 14 ms with nothing else handled. Pila now draws its frames as
+  XRGB8888 too.
+
 ## 0.5.2 (2026-11-12)
 
 - **For testers: `pila-check` comes with Pila:** the packages, Nix's build and `scripts/install`
