@@ -22,8 +22,8 @@
 #
 # Needs: noctalia, kitty, vim, gtk4-demo and gtk4-print-editor (package
 # gtk4-demos on some distros), grim, wtype, notify-send (package libnotify),
-# python3, dbus-run-session (package dbus), and ffmpeg but for --shots. Uses
-# target/release/pila, or PILA_BIN.
+# python3, dbus-run-session (package dbus), and ffmpeg and libwebp but for
+# --shots. Uses target/release/pila, or PILA_BIN.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

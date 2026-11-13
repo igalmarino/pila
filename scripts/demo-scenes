@@ -512,6 +512,114 @@ def caption_filters(items, height):
     return filters
 
 
+WEBP_WIDTH = 1280
+WEBP_FPS = 30
+
+
+def encode_webp(frames, width, height, path):
+    """An animated WebP of the raw BGRA frames read from `frames`, through
+    libwebp's own animation encoder rather than ffmpeg's libwebp_anim.
+
+    That encoder leaves out the 8x8 blocks of a frame that differ from the
+    previous frame by less than a tolerance taken from `quality` (6 levels at
+    70), and libwebp 1.6 compares source frames rather than what was last
+    drawn there, so slow changes (a caption fading, a window moving under a
+    translucent one) never reach the picture and blocks of earlier frames
+    stay on it. So `quality` is 100 (a tolerance of 1) and the compression is
+    set apart, by a target PSNR, which ffmpeg doesn't offer (nor sharp YUV)."""
+    import ctypes
+    import ctypes.util
+
+    def load(name, soname):
+        try:
+            return ctypes.CDLL(ctypes.util.find_library(name) or soname)
+        except OSError:
+            fail(f"{soname} not found (package libwebp)")
+    webp = load("webp", "libwebp.so.7")
+    mux = load("webpmux", "libwebpmux.so.3")
+
+    class Config(ctypes.Structure):  # WebPConfig, encode.h
+        _fields_ = [("lossless", ctypes.c_int), ("quality", ctypes.c_float),
+                    ("method", ctypes.c_int), ("image_hint", ctypes.c_int),
+                    ("target_size", ctypes.c_int), ("target_PSNR", ctypes.c_float)] + [
+            (name, ctypes.c_int) for name in (
+                "segments", "sns_strength", "filter_strength", "filter_sharpness",
+                "filter_type", "autofilter", "alpha_compression", "alpha_filtering",
+                "alpha_quality", "pass_", "show_compressed", "preprocessing", "partitions",
+                "partition_limit", "emulate_jpeg_size", "thread_level", "low_memory",
+                "near_lossless", "exact", "use_delta_palette", "use_sharp_yuv", "qmin",
+                "qmax")]
+
+    class Options(ctypes.Structure):  # WebPAnimEncoderOptions, mux.h
+        _fields_ = [("bgcolor", ctypes.c_uint32), ("loop_count", ctypes.c_int),
+                    ("minimize_size", ctypes.c_int), ("kmin", ctypes.c_int),
+                    ("kmax", ctypes.c_int), ("allow_mixed", ctypes.c_int),
+                    ("verbose", ctypes.c_int), ("padding", ctypes.c_uint32 * 4)]
+
+    class Data(ctypes.Structure):  # WebPData, mux_types.h
+        _fields_ = [("bytes", ctypes.c_void_p), ("size", ctypes.c_size_t)]
+
+    # WebPPicture is only used through its first fields (use_argb, colorspace,
+    # width, height): the rest is libwebp's, in a buffer larger than it.
+    class Picture(ctypes.Structure):
+        _fields_ = [("use_argb", ctypes.c_int), ("colorspace", ctypes.c_int),
+                    ("width", ctypes.c_int), ("height", ctypes.c_int),
+                    ("rest", ctypes.c_uint8 * 1024)]
+
+    encoder_abi, mux_abi = 0x0210, 0x0109  # WEBP_ENCODER_ABI_VERSION, WEBP_MUX_ABI_VERSION
+    config = Config()
+    options = Options()
+    picture = Picture()
+    if not (webp.WebPConfigInitInternal(ctypes.byref(config), 0, ctypes.c_float(75), encoder_abi)
+            and mux.WebPAnimEncoderOptionsInitInternal(ctypes.byref(options), mux_abi)
+            and webp.WebPPictureInitInternal(ctypes.byref(picture), encoder_abi)):
+        fail("this libwebp is too old or too new for scripts/demo-scenes")
+    config.quality = 100
+    config.target_PSNR = 40
+    config.pass_ = 3
+    config.method = 4
+    # Sharper colored text on dark (4:2:0 chroma): +1.6 dB here, for 7% more.
+    config.use_sharp_yuv = 1
+    options.loop_count = 0
+    picture.use_argb = 1
+    picture.width, picture.height = width, height
+    mux.WebPAnimEncoderNewInternal.restype = ctypes.c_void_p
+    mux.WebPAnimEncoderGetError.restype = ctypes.c_char_p
+    encoder = ctypes.c_void_p(mux.WebPAnimEncoderNewInternal(width, height,
+                                                             ctypes.byref(options), mux_abi))
+    if not encoder or not webp.WebPPictureAlloc(ctypes.byref(picture)):
+        fail("libwebp couldn't start an animation")
+
+    def check(ok, what):
+        if not ok:
+            error = mux.WebPAnimEncoderGetError(encoder).decode(errors="replace")
+            fail(f"libwebp failed {what}: {error}")
+
+    size = width * height * 4
+    count = 0
+    try:
+        while True:
+            frame = frames.read(size)
+            if len(frame) < size:
+                break
+            check(webp.WebPPictureImportBGRA(ctypes.byref(picture), frame, width * 4),
+                  "importing a frame")
+            check(mux.WebPAnimEncoderAdd(encoder, ctypes.byref(picture),
+                                         round(count * 1000 / WEBP_FPS), ctypes.byref(config)),
+                  "encoding a frame")
+            count += 1
+        check(mux.WebPAnimEncoderAdd(encoder, None, round(count * 1000 / WEBP_FPS), None),
+              "ending the animation")
+        data = Data()
+        check(mux.WebPAnimEncoderAssemble(encoder, ctypes.byref(data)), "assembling")
+        with open(path, "wb") as f:
+            f.write(ctypes.string_at(data.bytes, data.size))
+        webp.WebPFree(ctypes.c_void_p(data.bytes))
+    finally:
+        webp.WebPPictureFree(ctypes.byref(picture))
+        mux.WebPAnimEncoderDelete(encoder)
+
+
 def encode(out_dir):
     master = os.path.join(WORK, "master.mkv")
     with open(os.path.join(WORK, "captions.json")) as f:
@@ -552,10 +660,15 @@ def encode(out_dir):
     # and loops, as a video there doesn't. 30 fps: some browsers slow down
     # images whose frames last 16 ms.
     animated = os.path.join(out_dir, "docs", "demo.webp")
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master, "-filter_complex",
-                    ";".join(graph + [joined + "fps=30,scale=1280:-2:flags=lanczos[out]"]),
-                    "-map", "[out]", "-c:v", "libwebp_anim", "-lossless", "0", "-quality", "70",
-                    "-compression_level", "4", "-loop", "0", "-an", animated], check=True)
+    ffmpeg = subprocess.Popen(
+        ["ffmpeg", "-loglevel", "error", "-i", master, "-filter_complex",
+         ";".join(graph + [joined + f"fps={WEBP_FPS},scale={WEBP_WIDTH}:-2:flags=lanczos,"
+                           "format=bgra[out]"]),
+         "-map", "[out]", "-f", "rawvideo", "-an", "-"], stdout=subprocess.PIPE)
+    webp_height = round(height * WEBP_WIDTH / width / 2) * 2
+    encode_webp(ffmpeg.stdout, WEBP_WIDTH, webp_height, animated)
+    if ffmpeg.wait() != 0:
+        fail("ffmpeg failed making the WebP's frames")
     for path in (full, small, animated):
         print(f"{path}: {os.path.getsize(path) / 1e6:.1f} MB")
     # GitHub shows the README's images through its proxy, which refuses

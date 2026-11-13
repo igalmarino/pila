@@ -71,8 +71,12 @@ each frame in the tick of its presentation time, ticks with nothing new repeated
 `pila-demo/master.mkv`, and ffmpeg captions it into `pila-demo.mp4` (every scene, 1080p60),
 `pila-demo-short.mp4` (the scenes marked short, 720p, under 10 MB) and the README's
 `docs/demo.webp`: the short one as an animated WebP (1280 px, 30 fps), because GitHub's README
-shows a video still, with controls, never playing by itself or looping. It's committed (keep it
-under 5 MB, GitHub's image proxy refuses more; the script warns); the mp4 files aren't, they're
+shows a video still, with controls, never playing by itself or looping. The WebP comes from
+libwebp's animation encoder through `ctypes` (`encode_webp`), not ffmpeg's `libwebp_anim`:
+libwebp 1.6 skips blocks that changed less than a tolerance taken from `quality` since the
+previous *source* frame, so slow fades left stale blocks on the picture; `quality` stays 100 and
+a target PSNR sets the compression (with sharp YUV, for colored text). It's committed (keep it under 5 MB, GitHub's image proxy
+refuses more; the script warns); the mp4 files aren't, they're
 uploaded as GitHub attachments, which stay private until published content (release notes)
 links them: check a link logged out. `--shots` records nothing and takes a
 screenshot per scene (`pila-demo/shots/`), the quick way to check scenes; `--encode` encodes the
