@@ -115,7 +115,12 @@ Key flows and invariants:
   test harness) each output has a second damage tracker that follows what's drawn
   (`check_redraws`): on each render pass and every 50 ms, an output no redraw was asked for
   that has damage anyway is suspect, and Pila panics if no request explains it within 20 ms (a
-  request may come later in the same iteration). Not while animating or a lock is pending.
+  request may come later in the same iteration). Not while animating or a lock is pending, while
+  an animation whose time is up is still held (`Pila::animations_held`: `step_animations` hasn't
+  asked for its last frame yet), nor while an idle callback of `defer_redraws` or
+  `redraw_after_frames` hasn't run (`Pila::deferred_redraw_idles`): those redraws are asked for,
+  not yet queued. The state counts both too: such an animation as `running`, such a redraw as
+  `redraw_pending`, so a test's `settle` doesn't stop before them.
 - **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`),
   but while the cursor is magnified (`shake_cursor.rs`) Pila draws them from its own theme
   and hides the host's; client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer

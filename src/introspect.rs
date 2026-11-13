@@ -330,7 +330,7 @@ impl Pila {
             "lock_pending": self.lock_pending(),
             "snap_preview": self.snap_preview.map(rect),
             "animations": {
-                "running": self.animating(),
+                "running": self.animating() || self.animations_held(),
                 "slide": self.workspace_slide.is_some(),
                 "slide_textures": self.slide_pool.count(),
                 "appearing": appearing,
@@ -339,7 +339,10 @@ impl Pila {
                 "layer_ghosts": layer_ghosts,
                 "resizing": resizing,
             },
-            "redraw_pending": headless.is_some_and(|d| crate::headless::redraw_pending(d)),
+            // A redraw asked for from `after_frames` is queued by an idle
+            // callback (`defer_redraws`): pending until it runs.
+            "redraw_pending": self.deferred_redraw_idles > 0
+                || headless.is_some_and(|d| crate::headless::redraw_pending(d)),
             "blur": {
                 "allocated": self.blur.stats().0,
                 "blurred": self.blur.stats().1,

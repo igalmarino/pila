@@ -254,7 +254,9 @@ impl Pila {
             outer.extend(asked);
             return;
         }
+        self.deferred_redraw_idles += 1;
         self.loop_handle.insert_idle(move |state| {
+            state.deferred_redraw_idles = state.deferred_redraw_idles.saturating_sub(1);
             for request in asked {
                 match request {
                     Deferred::All => state.queue_redraw(),

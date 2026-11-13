@@ -814,7 +814,9 @@ impl Pila {
         // redraw it as fast as this runs, every redraw calling this
         // again. An animation's first frame is asked as a change when
         // it starts (`queue_redraw`, every output).
+        self.deferred_redraw_idles += 1;
         self.loop_handle.insert_idle(move |state| {
+            state.deferred_redraw_idles = state.deferred_redraw_idles.saturating_sub(1);
             let outputs = outputs.unwrap_or_else(|| state.space.outputs().cloned().collect());
             for output in outputs {
                 state.request_redraw(&output, false);
@@ -861,6 +863,14 @@ impl Pila {
             }
         }
         Some(outputs)
+    }
+
+    /// Whether an animation or slide is still held, though its time may be
+    /// up: `step_animations` hasn't ended it yet, nor asked for its last
+    /// frame. The tests' state counts it as running, and their redraw check
+    /// waits for that frame.
+    pub fn animations_held(&self) -> bool {
+        self.animation_count() > 0 || self.workspace_slide.is_some()
     }
 
     /// How many animations are in progress.

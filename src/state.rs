@@ -143,6 +143,11 @@ pub struct Pila {
     pub capture_due: bool,
     /// Redraws held back by `defer_redraws` (`redraw.rs`), while it runs.
     pub deferred_redraws: Option<Vec<crate::redraw::Deferred>>,
+    /// The idle callbacks `defer_redraws` and `redraw_after_frames` inserted
+    /// that haven't run yet:
+    /// redraws asked for and not yet queued, which the tests' state
+    /// (`redraw_pending`) and redraw check count as asked.
+    pub deferred_redraw_idles: usize,
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
@@ -527,6 +532,7 @@ impl Pila {
             input_activity: false,
             capture_due: false,
             deferred_redraws: None,
+            deferred_redraw_idles: 0,
             hidden_frame_timer: false,
             commit_pacing: Default::default(),
             toplevel_management: Default::default(),

@@ -791,7 +791,14 @@ fn check_redraws(state: &mut Pila) {
     let Some(Backend::Headless(data)) = &state.backend else {
         return;
     };
-    if !data.check_redraws || state.lock_pending() || state.animating() {
+    // Redraws asked for and still on their way (`defer_redraws`) explain
+    // what they'll draw.
+    if !data.check_redraws
+        || state.lock_pending()
+        || state.animating()
+        || state.animations_held()
+        || state.deferred_redraw_idles > 0
+    {
         return;
     }
     let now = Instant::now();
