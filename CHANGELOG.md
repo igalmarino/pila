@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 (2026-11-12)
 
 - **For testers: `pila-check` comes with Pila:** the packages, Nix's build and `scripts/install`
   install `scripts/check` as `pila-check` (its helpers in `share/pila/check`), so a test run on
