@@ -4,8 +4,12 @@ use super::*;
 
 use smithay::{
     backend::{
+        allocator::Buffer as _,
         drm::compositor::PrimaryPlaneElement,
-        renderer::{element::Id, gles::GlesTarget},
+        renderer::{
+            element::{Id, RenderElement as _, UnderlyingStorage},
+            gles::GlesTarget,
+        },
     },
     utils::{Rectangle, Transform},
 };
@@ -64,6 +68,17 @@ fn frame_flags(direct_scanout: bool) -> FrameFlags {
         FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
     } else {
         FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT
+    }
+}
+
+/// The format and modifier of the client's dmabuf `element` shows, if it
+/// shows one (logged when direct scanout starts or stops).
+fn dmabuf_format(element: &PilaRenderElement, renderer: &mut GlesRenderer) -> Option<Format> {
+    match element.underlying_storage(renderer)? {
+        UnderlyingStorage::Wayland(buffer) => smithay::wayland::dmabuf::get_dmabuf(buffer)
+            .ok()
+            .map(|dmabuf| dmabuf.format()),
+        UnderlyingStorage::Memory(_) => None,
     }
 }
 
@@ -196,9 +211,9 @@ fn draw(
         ..
     } = &mut **data;
     // The device's other outputs with a commit on its way: a commit that
-    // changes a plane's format may wait in the kernel for theirs (seen on
-    // amdgpu leaving direct scanout: the `direct scanout` log below says how
-    // many).
+    // switches the primary plane between the swapchain and a client's buffer
+    // may wait in the kernel for theirs (seen on amdgpu leaving direct
+    // scanout: the `direct scanout` log below says how many).
     let others_pending = outputs
         .iter()
         .filter(|(other, surface)| **other != id && other.node == id.node && surface.frame_pending)
@@ -260,6 +275,16 @@ fn draw(
             match drm_output.render_frame(renderer, &elements, clear, flags) {
                 Ok(result) => {
                     direct = matches!(result.primary_element, PrimaryPlaneElement::Element(_));
+                    match &result.primary_element {
+                        PrimaryPlaneElement::Swapchain(element) => {
+                            surface.swapchain_format = Some(element.buffer().format());
+                        }
+                        // Looked up only when the plane changes to it.
+                        PrimaryPlaneElement::Element(element) if !surface.direct => {
+                            surface.client_format = dmabuf_format(element, renderer);
+                        }
+                        PrimaryPlaneElement::Element(_) => {}
+                    }
                     if !result.is_empty {
                         // Captures of this output take the frame just
                         // composited, blitted, rather than drawing the scene
@@ -349,6 +374,8 @@ fn draw(
                                 render_ms = render_time.as_secs_f64() * 1000.0,
                                 queue_ms = queue_started.elapsed().as_secs_f64() * 1000.0,
                                 others_pending,
+                                client = ?surface.client_format,
+                                swapchain = ?surface.swapchain_format,
                                 "direct scanout"
                             );
                         }

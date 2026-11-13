@@ -343,10 +343,15 @@ Key flows and invariants:
   again once it's drawn among other things. Such frames are counted
   apart in the frame statistics (`direct`) and an output starting or stopping them is logged
   (`direct scanout`, `pila::frames`, with the time that frame's render and commit took and
-  `others_pending`, the device's other outputs with a commit on its way: the kernel checks the
-  plane's new format and size anew, and on amdgpu a commit that changes the plane's format waited
-  for another monitor's flip, up to one of its refresh periods with the event loop held; measured
-  leaving direct scanout, 11 to 14 ms with one pending, 0.3 ms with none). Bare metal only: `scripts/check`'s fullscreen scenario
+  `others_pending`, the device's other outputs with a commit on its way, and the format and modifier
+  of the client's buffer and of the swapchain (`OutputSurface::client_format`, `swapchain_format`).
+  On amdgpu (Renoir, DCN 2.1) a commit that switches the plane between the two waited for another
+  monitor's flip, up to one of its refresh periods with the event loop held (measured leaving
+  direct scanout, 11 to 14 ms with one pending, 0.3 ms with none): the driver resets a plane whose
+  framebuffer changes format, modifier or tiling metadata, and a reset waits for every CRTC's flip
+  (`amdgpu_dm_atomic_check`). Format and modifier were the same both ways (ARGB8888, the same
+  DCC modifier), which most likely leaves the tiling metadata each process's Mesa sets on its buffer, out of
+  Pila's reach. Bare metal only: `scripts/check`'s fullscreen scenario
   reports the count on a TTY.
 - **Frame statistics** (`frame_stats.rs`, `RUST_LOG=pila::frames=debug`): every backend calls
   `Pila::record_frame` with a frame's CPU time (logged per output every 5 s: frames, average

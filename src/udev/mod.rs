@@ -23,7 +23,7 @@ use smithay::{
         allocator::{
             format::FormatSet,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-            Fourcc,
+            Format, Fourcc,
         },
         drm::VrrSupport,
         drm::{
@@ -294,6 +294,12 @@ struct OutputSurface {
     /// The frame last queued was a client's buffer as it is, on the primary
     /// plane (`draw::frame_flags`); logged when it changes.
     direct: bool,
+    /// The format and modifier of the swapchain's last buffer and of the
+    /// client's buffer last shown as it is, logged with `direct`: a change of
+    /// either on the primary plane makes some drivers (amdgpu) wait for the
+    /// device's other outputs' flips.
+    swapchain_format: Option<Format>,
+    client_format: Option<Format>,
     /// What a surface this output shows as it is, or could, is told about
     /// dmabufs: the formats its primary plane takes first (`scanout_feedback`).
     /// Only for an output on the primary GPU, with a CRTC.
