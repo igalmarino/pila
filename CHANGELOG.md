@@ -7,6 +7,10 @@
   went to the screen as XRGB8888, and amdgpu answers that change of format by waiting for every
   monitor's next refresh, up to 14 ms with nothing else handled. Pila now draws its frames as
   XRGB8888 too.
+- **For testers: `pila-check` works on more systems:** it quits by itself when Pila runs under
+  another name (Nix's package runs it as `.pila-wrapped`, so it waited to be quit by hand), and
+  its capture stream works with a Python that lacks `os.memfd_create`. Both were found on an
+  NVIDIA GTX 1060 under NixOS, where everything else passed.
 
 ## 0.5.2 (2026-11-12)
 

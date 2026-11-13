@@ -946,3 +946,47 @@ fn screencopy_of_an_unplugged_output_fails() {
     client.flush();
     client.wait_logged("copy", "Failed");
 }
+
+/// `scripts/capture-stream` (`pila-check`'s screen share client) without
+/// `os.memfd_create`, as with a Python built without it (found on NixOS:
+/// the stream scenario failed): its buffers go in an unlinked file instead.
+#[test]
+fn the_stream_client_works_without_memfd_create() {
+    let python = std::process::Command::new("python3")
+        .arg("--version")
+        .output();
+    if !python.is_ok_and(|output| output.status.success()) {
+        eprintln!("no python3: skipped");
+        return;
+    }
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(200, 150).create();
+    pila.wait_window("a");
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/capture-stream");
+    let child = std::process::Command::new("python3")
+        .arg("-I")
+        .arg("-c")
+        .arg(format!(
+            "import os, sys; del os.memfd_create; sys.argv = ['capture-stream', '1']; \
+             exec(compile(open({script:?}).read(), 'capture-stream', 'exec'))"
+        ))
+        .env("XDG_RUNTIME_DIR", &pila.dir)
+        .env("WAYLAND_DISPLAY", &pila.display)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Frames come as the screen changes: the window draws while it runs.
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_millis(1200) {
+        client.draw(window, None);
+        client.roundtrip();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let out = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(stdout.contains("failed 0"), "{stdout}{stderr}");
+}

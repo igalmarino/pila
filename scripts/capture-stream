@@ -12,6 +12,7 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 import time
 
 if len(sys.argv) != 2:
@@ -132,7 +133,13 @@ if None in (width, height, shm_format):
 
 stride = width * 4
 size = stride * height
-fd = os.memfd_create("pila-capture-stream")
+# Some Python builds lack os.memfd_create (one on NixOS did): an unlinked
+# file in the runtime directory serves as well.
+if hasattr(os, "memfd_create"):
+    fd = os.memfd_create("pila-capture-stream")
+else:
+    fd, path = tempfile.mkstemp(prefix="pila-capture-stream-", dir=os.environ.get("XDG_RUNTIME_DIR"))
+    os.unlink(path)
 os.ftruncate(fd, size)
 POOL, BUFFER = new_id(), new_id()
 send(bound["wl_shm"], 0, struct.pack("<Ii", POOL, size), fds=[fd])  # create_pool

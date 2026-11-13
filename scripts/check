@@ -78,14 +78,17 @@ if [ "${1:-}" = "--workload" ]; then
     mark() { echo "check: $*"; }
 
     # Quit pila (SIGTERM quits cleanly): the nearest pila among this
-    # script's ancestors, never another one (the login session's).
+    # script's ancestors, never another one (the login session's). Nix's
+    # package runs it as .pila-wrapped, behind a wrapper script.
     quit_pila() {
         local pid=$PPID
         while [ "$pid" -gt 1 ]; do
-            if [ "$(ps -o comm= -p "$pid")" = pila ]; then
-                kill -TERM "$pid"
-                return
-            fi
+            case "$(ps -o comm= -p "$pid")" in
+                pila | .pila-wrapped)
+                    kill -TERM "$pid"
+                    return
+                    ;;
+            esac
             pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
         done
         mark "Pila not found among the ancestors; quit it with Mod+Shift+E"

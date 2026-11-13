@@ -34,6 +34,7 @@ exercise, the user checks by hand) or only eyes can judge it. Known bugs are tes
 | A missing EGL library is a clear error, not a crash | `cli::a_missing_egl_library_is_an_error_not_a_crash` |
 | `scripts/check` and `scripts/tty`: any binary (`PILA_BIN`), unknown options refused, stale builds, judging a log | `cli::scripts_check_runs_the_binary_it_is_given`, `cli::scripts_check_and_tty_say_when_the_given_binary_is_missing`, `cli::scripts_check_refuses_a_build_older_than_the_sources`, `cli::scripts_check_refuses_an_option_it_doesnt_know`, `cli::scripts_check_finds_the_monitors_in_a_bare_metal_log`, `cli::scripts_check_gives_a_verdict_on_a_log_that_stops_early`; on a TTY, the user |
 | `scripts/check` installed as `pila-check`: the pila next to it, its helpers in `share/pila/check`, its log in the state directory, `--help` | `cli::pila_check_runs_from_its_install_with_the_pila_next_to_it`, `cli::pila_check_judges_a_log_says_how_to_use_it_and_needs_its_helpers`; its bare-metal run (no `scripts/tty`), the user |
+| `pila-check`'s stream client (`scripts/capture-stream`) with a Python lacking `os.memfd_create`; its quit when Pila runs as Nix's `.pila-wrapped` | `capture::the_stream_client_works_without_memfd_create`; the quit by hand (`scripts/check --nested` with `PILA_BIN` named `.pila-wrapped`): a test would run the whole workload |
 | udev backend fails cleanly without a seat | `cli::the_udev_backend_without_a_seat_fails_cleanly` |
 
 ## Keybindings
