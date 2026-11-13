@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# The README's screenshot (docs/screenshot.png): a headless Pila with its
+# default looks and one 1920x1080 output, Noctalia's bar on a plain gradient
+# (not its own wallpaper), GTK Demo drawing its own title bar, and two kitty
+# windows with Pila's: a sample config, and a translucent one with blur
+# behind it showing `pila msg`. Window rules place them, overlapping.
+#
+#   scripts/screenshot          writes docs/screenshot.png
+#
+# Sealed off like scripts/shells (a temporary HOME and runtime directory, a
+# private D-Bus session bus): nothing of yours shows or changes. Redo it when
+# the looks or the bar change, and look at it before committing it.
+#
+# Needs: noctalia, kitty, gtk4-demo (package gtk4-demos on some distros),
+# grim, python3, dbus-run-session (package dbus). Uses target/release/pila,
+# or PILA_BIN.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# --- Inside pila (started with -c): the scene --------------------------------
+
+if [ "${1:-}" = "--workload" ]; then
+    work=$2
+    pila=$3
+    noctalia >"$work/noctalia.log" 2>&1 &
+    for _ in $(seq 1 100); do
+        noctalia msg status >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+    noctalia msg wallpaper-set "$work/wallpaper.png" >/dev/null
+    sleep 2
+
+    GTK_THEME=Adwaita:dark gtk4-demo >/dev/null 2>&1 &
+    sleep 2
+    colors=(--override background=#1e2030 --override foreground=#c8d3f5
+        --override cursor=#c8d3f5 --override font_size=11.5
+        --override remember_window_size=no --override confirm_os_window_close=0)
+    kitty --class pila-config --title "config.toml" "${colors[@]}" \
+        sh -c "printf '\$ cat ~/.config/pila/config.toml\n'; cat '$work/config-sample.toml'; exec sleep 600" &
+    sleep 2
+    kitty --class pila-glass --title "pila msg" "${colors[@]}" \
+        --override background_opacity=0.6 \
+        sh -c "printf '\$ pila --version\n'; '$pila' --version; printf '\n\$ pila msg outputs\n'; '$pila' msg outputs; printf '\n\$ pila msg workspaces\n'; '$pila' msg workspaces; exec sleep 600" &
+    sleep 5
+    grim "$work/screenshot.png"
+    "$pila" msg action quit
+    exit 0
+fi
+
+# --- Outside: set the scene up, run it ---------------------------------------
+
+for tool in noctalia kitty gtk4-demo grim python3 dbus-run-session; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "scripts/screenshot: $tool not found" >&2
+        exit 1
+    fi
+done
+bin="${PILA_BIN:-target/release/pila}"
+if [ ! -x "$bin" ]; then
+    echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
+    exit 1
+fi
+bin=$(realpath "$bin")
+script=$(realpath "$0")
+
+sealed=$(mktemp -d)
+trap 'chmod -R u+w "${sealed:?}" 2>/dev/null || true; rm -rf "${sealed:?}"' EXIT
+work="$sealed/work"
+mkdir -p "$sealed/home" "$sealed/run" "$work"
+chmod 700 "$sealed/run"
+# Noctalia's first-run dialog is skipped once this marker exists.
+for dir in .config .local/state .cache; do
+    mkdir -p "$sealed/home/$dir/noctalia"
+    touch "$sealed/home/$dir/noctalia/.setup-complete"
+done
+
+# A quiet dark gradient, standard library only.
+python3 -I - "$work/wallpaper.png" <<'EOF'
+import math, struct, sys, zlib
+W, H = 1920, 1080
+rows = []
+for y in range(H):
+    row = bytearray([0])
+    for x in range(W):
+        t = (x / W) * 0.6 + (y / H) * 0.4
+        glow = math.exp(-(((x - W * 0.72) / (W * 0.45)) ** 2 + ((y - H * 0.3) / (H * 0.55)) ** 2))
+        row += bytes((int(18 + 22 * t + 30 * glow), int(22 + 26 * t + 34 * glow), int(34 + 40 * t + 52 * glow)))
+    rows.append(bytes(row))
+def chunk(kind, data):
+    body = kind + data
+    return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+with open(sys.argv[1], "wb") as out:
+    out.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+              + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
+EOF
+
+cat >"$work/config-sample.toml" <<'EOF'
+mod = "super"
+terminal = "kitty"
+launcher = "noctalia msg panel-toggle launcher"
+autostart = ["noctalia"]
+workspaces = 4
+
+[input.touchpad]
+tap = true
+natural-scroll = true
+
+[[output]]
+name = "eDP-1"
+scale = 1.25
+
+[[window-rule]]
+app-id = "kitty"
+opacity = 0.95
+blur = true
+EOF
+
+# Pila's own: default looks, the windows placed by rules.
+cat >"$sealed/config.toml" <<'EOF'
+mod = "super"
+
+[[window-rule]]
+app-id = "org.gtk.Demo4"
+position = [90, 96]
+
+[[window-rule]]
+app-id = "pila-config"
+position = [1040, 560]
+size = [720, 440]
+
+[[window-rule]]
+app-id = "pila-glass"
+position = [640, 210]
+size = [640, 320]
+blur = true
+EOF
+
+echo "Setting the scene up on a headless Pila (about 20 seconds)..."
+env -u WAYLAND_DISPLAY -u DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u PILA_SOCKET \
+    -u XDG_SESSION_DESKTOP -u DESKTOP_SESSION \
+    HOME="$sealed/home" XDG_RUNTIME_DIR="$sealed/run" \
+    XDG_CONFIG_HOME="$sealed/home/.config" XDG_STATE_HOME="$sealed/home/.local/state" \
+    XDG_CACHE_HOME="$sealed/home/.cache" XDG_DATA_HOME="$sealed/home/.local/share" \
+    RUST_LOG=info \
+    timeout 120 dbus-run-session -- "$bin" --backend headless \
+    --headless-outputs "eDP-1:1920x1080@60" \
+    --config "$sealed/config.toml" -c "$script --workload $work $bin" \
+    >"$work/pila.log" 2>&1 || true
+
+if [ ! -s "$work/screenshot.png" ]; then
+    echo "No screenshot was taken; Pila's log ends with:" >&2
+    tail -20 "$work/pila.log" >&2
+    exit 1
+fi
+cp "$work/screenshot.png" docs/screenshot.png
+echo "Wrote docs/screenshot.png: look at it before committing it."

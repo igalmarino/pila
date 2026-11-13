@@ -49,3 +49,12 @@ session it's run from. Run it after changing a protocol a shell uses, after a Sm
 before a release; a new shell feature that depends on Pila gets a step. Pitfalls: Quickshell's
 IPC exits 0 on a bad call (`step` reads the answer), window bindings act on the window with the
 keyboard (wait for a closing panel to give it back), and a shell animates its own panels away.
+
+# scripts/screenshot
+
+`scripts/screenshot` makes the README's `docs/screenshot.png` on a sealed headless Pila (as
+`scripts/shells`), with its default looks: Noctalia's bar on a generated gradient (its first-run
+dialog skipped by its `.setup-complete` marker), GTK Demo with its own title bar, and two kitty
+windows placed by window rules, one translucent with blur over GTK Demo. Redo it when the looks
+or the shells change, and look at it before committing it: no personal data (a sample config,
+no prompt with a user or host name).
