@@ -45,7 +45,11 @@ rustPlatform.buildRustPackage {
       ./docs/MANUAL.md
       ./docs/pila.1
       ./resources
+      ./scripts/capture-stream
+      ./scripts/check
       ./scripts/report
+      ./scripts/toplevel-action
+      ./scripts/workspace-action
       ./src
     ];
   };
@@ -84,6 +88,10 @@ rustPlatform.buildRustPackage {
   postInstall = ''
     install -Dm755 resources/session/pila-session $out/bin/pila-session
     install -Dm755 scripts/report $out/bin/pila-report
+    # pila-check finds its helpers in share/pila/check next to its bin.
+    install -Dm755 scripts/check $out/bin/pila-check
+    install -Dm644 scripts/toplevel-action scripts/workspace-action scripts/capture-stream \
+      -t $out/share/pila/check
     install -Dm644 resources/session/pila.desktop $out/share/wayland-sessions/pila.desktop
     substituteInPlace $out/share/wayland-sessions/pila.desktop \
       --replace-fail '@BINDIR@' "$out/bin"

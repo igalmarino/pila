@@ -15,12 +15,19 @@ BINDIR="${BINDIR:-$PREFIX/bin}"
 DATADIR="${DATADIR:-$PREFIX/share}"
 SYSCONFDIR="${SYSCONFDIR:-/etc}"
 DESTDIR="${DESTDIR:-}"
+# pila-check's helpers, where it looks for them: share/pila/check next to the
+# directory it's in.
+CHECKDIR="$(dirname "$BINDIR")/share/pila/check"
 
 # source in the repository : installed path (before DESTDIR) : mode
 install_files=(
     "target/release/pila:$BINDIR/pila:755"
     "resources/session/pila-session:$BINDIR/pila-session:755"
     "scripts/report:$BINDIR/pila-report:755"
+    "scripts/check:$BINDIR/pila-check:755"
+    "scripts/toplevel-action:$CHECKDIR/toplevel-action:644"
+    "scripts/workspace-action:$CHECKDIR/workspace-action:644"
+    "scripts/capture-stream:$CHECKDIR/capture-stream:644"
     "docs/pila.1:$DATADIR/man/man1/pila.1:644"
     "resources/session/pila.desktop:$DATADIR/wayland-sessions/pila.desktop:644"
     "resources/icons/pila.svg:$DATADIR/icons/hicolor/scalable/apps/pila.svg:644"
@@ -30,6 +37,8 @@ install_files=(
 
 # Directories that may be left empty by an uninstall.
 install_dirs=(
+    "$CHECKDIR"
+    "$(dirname "$CHECKDIR")"
     "$DATADIR/wayland-sessions"
     "$SYSCONFDIR/xdg/xdg-desktop-portal"
     "$SYSCONFDIR/xdg/xdg-desktop-portal-wlr"

@@ -116,6 +116,7 @@ jobs:
       - name: The package says which commit it is
         run: ./result/bin/pila --version | tee /dev/stderr | grep -F "$(git rev-parse --short=7 HEAD)"
       - run: ./result/bin/pila-report --help
+      - run: ./result/bin/pila-check --help && test -f result/share/pila/check/capture-stream
       - run: nix develop --command cargo --version
       # EGL's drivers, which a NixOS system provides, come from Mesa here. If
       # it starts, it's still running when its time is up.

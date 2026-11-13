@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **For testers: `pila-check` comes with Pila:** the packages, Nix's build and `scripts/install`
+  install `scripts/check` as `pila-check` (its helpers in `share/pila/check`), so a test run on
+  your hardware needs no checkout: run `pila-check` from a TTY, and its log is in
+  `~/.local/state/pila`. `pila-check --help` says how to use it.
 - **A logo:** three stacked windows in Pila's default title-bar colors, at the top of the README
   and the manual (`docs/logo/`). It's also the session's icon: `scripts/install` and the
   packages install it as `pila` in the hicolor theme, and the session entry names it

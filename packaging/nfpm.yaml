@@ -17,6 +17,8 @@ contents:
     dst: /usr/bin/
     file_info:
       mode: 0755
+  - src: stage/usr/share/pila/check/*
+    dst: /usr/share/pila/check/
   - src: stage/usr/share/wayland-sessions/*
     dst: /usr/share/wayland-sessions/
   - src: stage/usr/share/icons/hicolor/scalable/apps/*

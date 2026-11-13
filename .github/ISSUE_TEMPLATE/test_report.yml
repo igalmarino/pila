@@ -30,7 +30,7 @@ body:
     id: started
     attributes:
       label: How Pila was started
-      description: "A nested run doesn't test your GPU's real path (DRM/KMS). For a GPU report, run `scripts/check` on a TTY too."
+      description: "A nested run doesn't test your GPU's real path (DRM/KMS). For a GPU report, run `pila-check` (`scripts/check` in a checkout) on a TTY too."
       multiple: true
       options:
         - Nested, in another desktop
@@ -72,6 +72,6 @@ body:
   - type: textarea
     id: check
     attributes:
-      label: scripts/check output
+      label: pila-check output
       description: The PASS and FAIL lines, if you ran it on a TTY.
       render: text

@@ -87,7 +87,8 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   and `grim` in a loop from a script run with `cargo run -- -c`.
 - The login session (the user, on the host): `scripts/install` builds the release binary
   (with the host's cargo if there is one, else `--container`; `--no-build`) and installs it
-  with `scripts/report` (as `pila-report`), the man page, `resources/session/` (the
+  with `scripts/report` (as `pila-report`), `scripts/check` (as `pila-check`, its helpers in
+  `share/pila/check`), the man page, `resources/session/` (the
   `pila-session` wrapper and the `wayland-sessions` entry, whose `@BINDIR@` it fills in), the
   icon (`resources/icons/pila.svg`, also the logo's mark: `docs/logo/`) and the portal configs; `scripts/uninstall` removes them. Paths come from
   `scripts/install-paths` (`PREFIX`, `BINDIR`, `DATADIR`, `SYSCONFDIR`, `DESTDIR`), sourced

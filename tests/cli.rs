@@ -497,6 +497,121 @@ fn scripts_check_gives_a_verdict_on_a_log_that_stops_early() {
     assert_eq!(out.status.code(), Some(1), "{stdout}");
 }
 
+/// scripts/check installed as `pila-check` with its helpers, laid out under
+/// `root` as scripts/install (and the packages made from it) lays them out with
+/// `PREFIX=/usr`, next to a fake `pila` that writes its arguments to `ran` and
+/// a scenario's last line to its log. Returns `root`.
+fn installed_check(name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("pila-installed-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(
+            r#"set -e; source scripts/install-paths
+            for entry in "${install_files[@]}"; do
+                IFS=: read -r source target mode <<<"$entry"
+                [ "$source" = target/release/pila ] && continue
+                install -D -m "$mode" "$source" "$DESTDIR$target"
+            done"#,
+        )
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("DESTDIR", &root)
+        .env("PREFIX", "/usr")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let fake = root.join("usr/bin/pila");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\necho \"$@\" > {}\necho 'check: done' >&2\n",
+            root.join("ran").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_until_executable(&fake);
+    // That ran it once.
+    let _ = std::fs::remove_file(root.join("ran"));
+    std::fs::create_dir_all(root.join("home/state")).unwrap();
+    std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+    root
+}
+
+/// Run the `pila-check` of an `installed_check` from `root/elsewhere`, as a
+/// tester whose home is `root/home` (through bash: see `copied_script`).
+fn run_installed_check(root: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new("bash")
+        .arg(root.join("usr/bin/pila-check"))
+        .args(args)
+        .current_dir(root.join("elsewhere"))
+        .env("HOME", root.join("home"))
+        .env("XDG_STATE_HOME", root.join("home/state"))
+        .env("XDG_CONFIG_HOME", root.join("home"))
+        .env_remove("PILA_BIN")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn pila_check_runs_from_its_install_with_the_pila_next_to_it() {
+    let root = installed_check("run");
+    for helper in ["toplevel-action", "workspace-action", "capture-stream"] {
+        let path = root.join("usr/share/pila/check").join(helper);
+        assert!(path.is_file(), "{} isn't installed", path.display());
+    }
+    let out = run_installed_check(&root, &["--nested"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let args = std::fs::read_to_string(root.join("ran"))
+        .unwrap_or_else(|_| panic!("it didn't run the pila next to it: {stdout}{stderr}"));
+    assert!(args.contains("--config"), "{args}");
+    // The scenarios are its own, run by the installed script.
+    let workload = format!("{} --workload", root.join("usr/bin/pila-check").display());
+    assert!(args.contains(&workload), "{args}");
+    // The log goes with Pila's own logs, not where it was run from (a
+    // tester's home, or anywhere else).
+    let log = root.join("home/state/pila/pila-check.log");
+    let text = std::fs::read_to_string(&log).expect("no log in the state directory");
+    assert!(text.contains("check: done"), "{text}");
+    assert!(stdout.contains(&log.display().to_string()), "{stdout}");
+    let left: Vec<_> = std::fs::read_dir(root.join("elsewhere")).unwrap().collect();
+    assert!(left.is_empty(), "it left files where it was run: {left:?}");
+}
+
+#[test]
+fn pila_check_judges_a_log_says_how_to_use_it_and_needs_its_helpers() {
+    let root = installed_check("judge");
+    std::fs::write(
+        root.join("elsewhere/early.log"),
+        "INFO pila: starting pila backend=Winit\n",
+    )
+    .unwrap();
+    // A log named from where it's run.
+    let out = run_installed_check(&root, &["--judge", "early.log"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("FAIL  the scenarios finished"), "{stdout}");
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
+
+    let out = run_installed_check(&root, &["--help"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout.contains("usage: pila-check"), "{stdout}");
+    assert!(stdout.contains("--nested"), "{stdout}");
+
+    std::fs::remove_dir_all(root.join("usr/share/pila/check")).unwrap();
+    let out = run_installed_check(&root, &["--nested"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("share/pila/check"), "{stderr}");
+    assert!(
+        !root.join("ran").exists(),
+        "it ran pila without its helpers"
+    );
+}
+
 /// A copy of `pila-session` next to a fake pila running `body`, with no real
 /// system log: (the session script, the directory it logs to).
 fn session_copy(name: &str, body: &str) -> (Command, std::path::PathBuf) {

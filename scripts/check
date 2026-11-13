@@ -31,8 +31,14 @@
 #   scripts/check [...] <config.toml>
 #                               start from that config (see below)
 #
-# PILA_BIN runs another binary than target/release/pila, such as an installed
-# one or Nix's result/bin/pila, for what's run from a checkout anyway.
+# Installed (scripts/install and the packages) it's pila-check: it runs the
+# pila next to it, without scripts/tty, finds its helpers (toplevel-action,
+# workspace-action, capture-stream) in share/pila/check next to its bin
+# directory, and logs to ~/.local/state/pila (XDG_STATE_HOME), so a tester
+# needs no checkout.
+#
+# PILA_BIN runs another binary than target/release/pila (installed: the pila
+# next to it), such as Nix's result/bin/pila.
 # PILA_CHECK_RUST_LOG adds RUST_LOG directives to the run's own, to look into
 # something the run shows, e.g. why direct scanout starts and stops:
 #   PILA_CHECK_RUST_LOG=smithay::backend::drm::compositor=trace scripts/check
@@ -47,7 +53,22 @@
 # (launcher), grim (capture), noctalia and notify-send or gdbus (Noctalia).
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# In a checkout (scripts/check) or installed (pila-check): see above.
+self="$(readlink -f "$0")"
+here="$(dirname "$self")"
+if [ "$(basename "$here")" = scripts ]; then
+    installed=false
+    name=scripts/check
+    helpers="$here"
+    cd "$here/.."
+    # Logs and the capture's picture go in the project root.
+    out="$PWD"
+else
+    installed=true
+    name=pila-check
+    helpers="$(dirname "$here")/share/pila/check"
+    out="${XDG_STATE_HOME:-$HOME/.local/state}/pila"
+fi
 
 # --- Inside pila (started with -c): the scenarios ----------------------------
 
@@ -129,7 +150,7 @@ if [ "${1:-}" = "--workload" ]; then
             run_terminal sleep 4 &
             held=$!
             sleep 2
-            shot="$PWD/pila-check.png"
+            shot="$out/pila-check.png"
             rm -f "$shot"
             if grim "$shot" 2>&1 && [ -s "$shot" ]; then
                 mark "capture ok"
@@ -151,7 +172,7 @@ if [ "${1:-}" = "--workload" ]; then
             run_terminal sh -c 'while :; do date +%T.%N; sleep 0.016; done' &
             ticker=$!
             sleep 2
-            if got=$(python3 -I scripts/capture-stream 4 2>&1); then
+            if got=$(python3 -I "$helpers/capture-stream" 4 2>&1); then
                 mark "stream ok: $got"
             else
                 mark "stream failed: $got"
@@ -176,14 +197,14 @@ if [ "${1:-}" = "--workload" ]; then
             held=$!
             sleep 2
             for _ in 1 2; do
-                python3 -I scripts/toplevel-action min >/dev/null
+                python3 -I "$helpers/toplevel-action" min >/dev/null
                 sleep 1
-                python3 -I scripts/toplevel-action unmin >/dev/null
+                python3 -I "$helpers/toplevel-action" unmin >/dev/null
                 sleep 1
             done
-            python3 -I scripts/toplevel-action max >/dev/null
+            python3 -I "$helpers/toplevel-action" max >/dev/null
             sleep 1
-            python3 -I scripts/toplevel-action unmax >/dev/null
+            python3 -I "$helpers/toplevel-action" unmax >/dev/null
             sleep 1
             stop "$held"
             sleep 1
@@ -193,15 +214,15 @@ if [ "${1:-}" = "--workload" ]; then
             run_terminal sleep 8 &
             held=$!
             sleep 2
-            python3 -I scripts/workspace-action 2 >/dev/null
+            python3 -I "$helpers/workspace-action" 2 >/dev/null
             sleep 1
-            python3 -I scripts/workspace-action 1 >/dev/null
+            python3 -I "$helpers/workspace-action" 1 >/dev/null
             sleep 1
             # Twice in a row: the second slide starts from the first's frame.
-            python3 -I scripts/workspace-action 2 >/dev/null
-            python3 -I scripts/workspace-action 3 >/dev/null
+            python3 -I "$helpers/workspace-action" 2 >/dev/null
+            python3 -I "$helpers/workspace-action" 3 >/dev/null
             sleep 1
-            python3 -I scripts/workspace-action 1 >/dev/null
+            python3 -I "$helpers/workspace-action" 1 >/dev/null
             sleep 1
             stop "$held"
             sleep 1
@@ -227,9 +248,9 @@ if [ "${1:-}" = "--workload" ]; then
             held=$!
             sleep 3
             if command -v python3 >/dev/null; then
-                python3 -I scripts/workspace-action 2 >/dev/null
+                python3 -I "$helpers/workspace-action" 2 >/dev/null
                 sleep 1
-                python3 -I scripts/workspace-action 1 >/dev/null
+                python3 -I "$helpers/workspace-action" 1 >/dev/null
                 sleep 1
             fi
             sleep 1
@@ -247,9 +268,9 @@ if [ "${1:-}" = "--workload" ]; then
             run_terminal sh -c 'while :; do date; done' &
             held=$!
             sleep 2
-            python3 -I scripts/toplevel-action full >/dev/null
+            python3 -I "$helpers/toplevel-action" full >/dev/null
             sleep 3
-            python3 -I scripts/toplevel-action unfull >/dev/null
+            python3 -I "$helpers/toplevel-action" unfull >/dev/null
             sleep 1
             stop "$held"
             sleep 1
@@ -318,10 +339,35 @@ fi
 
 # --- Outside: start pila, then judge its log ---------------------------------
 
+usage="usage: $name [--nested | --vrr] [<config.toml>], $name --judge <log>"
+case "${1:-}" in
+    -h | --help)
+        cat <<EOF
+usage: $name [--nested | --vrr] [<config.toml>]
+       $name --judge <log>
+
+Runs Pila for about a minute with scripted scenarios (windows, minimize,
+workspaces, captures, blur, fullscreen) and judges its log: PASS or FAIL per
+check, with frame times. Nothing to do but wait; it quits by itself.
+
+  (no option)  on bare metal: run it from a TTY (Ctrl+Alt+F3, log in), not
+               from a graphical session, which can keep running on its VT;
+               the base config is yours, without animations and rules
+  --nested     in a window of the current session
+  --vrr        on bare metal, with adaptive sync asked of every monitor
+  --judge      judge an existing log again
+  <config>     start from that config instead of yours
+
+Its log: $out/pila-tty.log (bare metal) or pila-check.log (--nested).
+EOF
+        exit 0
+        ;;
+esac
+
 judge_only=false
 if [ "${1:-}" = "--judge" ]; then
     judge_only=true
-    log=${2:?usage: scripts/check --judge <log>}
+    log=${2:?$usage}
 fi
 nested=false
 if [ "${1:-}" = "--nested" ]; then
@@ -341,10 +387,34 @@ if ! $judge_only; then
     base_config=${1:-}
     case "$base_config" in
         -*)
-            echo "scripts/check: no option $base_config; usage: scripts/check [--nested | --vrr] [<config.toml>], scripts/check --judge <log>" >&2
+            echo "$name: no option $base_config; $usage" >&2
             exit 2
             ;;
     esac
+    if [ ! -d "$helpers" ]; then
+        echo "$name: its helper scripts aren't in $helpers; reinstall Pila" >&2
+        exit 1
+    fi
+    if $installed; then
+        bin="${PILA_BIN:-$here/pila}"
+        if [ ! -x "$bin" ]; then
+            echo "$bin not found; reinstall Pila, or set PILA_BIN" >&2
+            exit 1
+        fi
+        if ! $nested; then
+            # scripts/tty's checks, for a tester without a checkout.
+            if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
+                echo "This looks like a graphical session; run $name from a TTY (e.g. Ctrl+Alt+F3)," >&2
+                echo "or $name --nested for a run in a window." >&2
+                exit 1
+            fi
+            if ! command -v dbus-run-session >/dev/null; then
+                echo "dbus-run-session not found (package dbus, or dbus-daemon on some distros)" >&2
+                exit 1
+            fi
+        fi
+        mkdir -p "$out"
+    fi
 
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
@@ -395,13 +465,13 @@ if ! $judge_only; then
     blur = true
 EOF
     export PILA_CHECK_CONFIG="$config"
-    # Where pila's log goes, for the workload to read (absolute: the
-    # workload runs elsewhere).
+    # Where pila's log goes (absolute: the workload runs elsewhere).
     if $nested; then
-        export PILA_CHECK_LOG="$PWD/pila-check.log"
+        log="$out/pila-check.log"
     else
-        export PILA_CHECK_LOG="$PWD/pila-tty.log"
+        log="$out/pila-tty.log"
     fi
+    export PILA_CHECK_LOG="$log"
     export RUST_LOG="info,pila::frames=debug,pila::animation=debug,pila::rules=debug,pila::blur=debug${PILA_CHECK_RUST_LOG:+,$PILA_CHECK_RUST_LOG}"
 
     if [ -n "${PILA_CHECK_RUST_LOG:-}" ]; then
@@ -409,26 +479,31 @@ EOF
     fi
     echo "Runs Pila with scripted scenarios for about a minute; it quits by itself."
     echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
-    workload="$PWD/scripts/check --workload"
+    workload="$(printf '%q' "$self") --workload"
     if $nested; then
-        bin="${PILA_BIN:-target/release/pila}"
-        if [ ! -x "$bin" ]; then
-            echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
-            exit 1
-        fi
-        # A build older than the sources would test old code without saying
-        # so. A binary given by hand isn't this checkout's.
-        if [ -z "${PILA_BIN:-}" ]; then
-            newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null || true)"
-            if [ -n "$newer" ]; then
-                echo "$bin is older than the sources (e.g. $newer); rebuild it: cargo build --release" >&2
+        if ! $installed; then
+            bin="${PILA_BIN:-target/release/pila}"
+            if [ ! -x "$bin" ]; then
+                echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
                 exit 1
             fi
+            # A build older than the sources would test old code without
+            # saying so. A binary given by hand isn't this checkout's.
+            if [ -z "${PILA_BIN:-}" ]; then
+                newer="$(find src build.rs Cargo.toml Cargo.lock -newer "$bin" -type f -print -quit 2>/dev/null || true)"
+                if [ -n "$newer" ]; then
+                    echo "$bin is older than the sources (e.g. $newer); rebuild it: cargo build --release" >&2
+                    exit 1
+                fi
+            fi
         fi
-        log=pila-check.log
         timeout 300 "$bin" --config "$config" -c "$workload" 2>"$log" || true
+    elif $installed; then
+        # As scripts/tty runs it: its own D-Bus session bus, the last log kept.
+        [ -f "$log" ] && mv -f "$log" "$log.old"
+        echo "Starting $bin; log in $log."
+        dbus-run-session -- "$bin" --backend udev --config "$config" -c "$workload" 2>"$log" || true
     else
-        log=pila-tty.log
         scripts/tty "$config" -- -c "$workload" || true
     fi
 fi

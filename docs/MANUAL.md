@@ -576,6 +576,13 @@ systemd also in the journal: `journalctl -t pila -b`. `RUST_LOG=debug` makes it 
 configuration is valid, the end of the log) into `pila-report.txt`, without your user name,
 host name and home directory. It sends nothing anywhere; read it before posting it.
 
+**`pila-check`** tests Pila on your hardware: run from a TTY (Ctrl+Alt+F3, log in) while your
+session keeps running on its own, it starts Pila with your monitors, keyboard and input
+settings, runs real programs through windows, workspaces, captures, blur and fullscreen for
+about a minute, quits by itself and prints PASS or FAIL per check, with frame times. Its log is
+`~/.local/state/pila/pila-tty.log`. `pila-check --nested` does the same in a window of your
+session, and `pila-check --help` lists the rest.
+
 | Problem | What to do |
 |---|---|
 | The Pila session doesn't start | Pick another session at the login screen and read the log. `pila --check-config` rules out the configuration. |

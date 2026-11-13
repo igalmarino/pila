@@ -75,11 +75,11 @@ A short report helps even if everything works:
 
 1. [Try it nested first](#try-it-nested-first): it changes nothing on your system.
    [Getting out](#getting-out) says how to leave a real session.
-2. For your real hardware, from a built checkout (`cargo build --release`), run `scripts/check`
-   on a spare TTY, which leaves your session running. It starts real programs for about a
-   minute, quits by itself and prints PASS or FAIL per check, with frame times. Its log is
-   `pila-tty.log`. For a package or Nix's build, a checkout still has the script:
-   `PILA_BIN=/usr/bin/pila scripts/check`.
+2. For your real hardware, run `pila-check` on a spare TTY (Ctrl+Alt+F3, log in), which leaves
+   your session running. It starts real programs (`kitty` or `foot`; `python3`, `grim`, `xterm`
+   and `fuzzel` for more scenarios) for about a minute, quits by itself and prints PASS or FAIL
+   per check, with frame times. Its log is `~/.local/state/pila/pila-tty.log`. It comes with
+   the packages, Nix's build and `scripts/install`; in a checkout it's `scripts/check`.
 3. Send a [test report](https://github.com/igalmarino/pila/issues/new?template=test_report.yml)
    with what you tried and what worked, or a [bug report](#reporting-bugs) for what didn't.
 
@@ -258,7 +258,8 @@ scripts/install                # builds the release binary and installs it
 PREFIX=/usr scripts/install    # for display managers that only read /usr/share
 ```
 
-This installs the binary, a session wrapper and `pila-report` in `$PREFIX/bin`, the man page,
+This installs the binary, a session wrapper, `pila-report` and `pila-check` in `$PREFIX/bin`
+(`pila-check`'s helpers in `$PREFIX/share/pila/check`), the man page,
 a `pila` entry in `$PREFIX/share/wayland-sessions` for the display manager, and the portal
 configs for screen sharing in `$SYSCONFDIR/xdg`. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
 to `/etc`; `DESTDIR` stages the files for a distro package (see `scripts/install-paths`).

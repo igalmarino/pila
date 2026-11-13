@@ -114,6 +114,8 @@ jobs:
         run: |
           pila --version
           pila-report --help >/dev/null
+          pila-check --help >/dev/null
+          test -f /usr/share/pila/check/capture-stream
           test -x /usr/bin/pila-session
           grep -F 'Exec=/usr/bin/pila-session' /usr/share/wayland-sessions/pila.desktop
           test -f /etc/xdg/xdg-desktop-portal/pila-portals.conf
