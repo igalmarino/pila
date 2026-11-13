@@ -218,8 +218,12 @@ fn an_output_without_a_lock_surface_shows_black() {
     });
     let locker = pila.client();
     let lock = locker.lock_session();
-    locker.lock_surface(&lock, "A", LOCK_COLOR);
+    let surf = locker.lock_surface(&lock, "A", LOCK_COLOR);
+    locker.wait_surface_configured(surf);
     locker.wait_logged("lock", "Locked");
+    // Its buffer, committed on the configure, in before reading pixels: the
+    // lock may be confirmed with A still black (CI found it under load).
+    locker.roundtrip();
     pila.settle();
     assert_eq!(pila.pixel(10.0, 10.0), LOCK_RGBA);
     assert_eq!(pila.pixel(1300.0, 10.0), [0, 0, 0, 255]);
