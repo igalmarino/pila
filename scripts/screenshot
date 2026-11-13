@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The README's screenshot (docs/screenshot.png): a headless Pila with its
+# Pila's screenshot (docs/screenshot.png, for listings and posts; the README
+# shows the animated docs/demo.webp): a headless Pila with its
 # default looks and one 1920x1080 output, Noctalia's bar on a plain gradient
 # (not its own wallpaper), GTK Demo drawing its own title bar, and two kitty
 # windows with Pila's: a sample config, and a translucent one with blur

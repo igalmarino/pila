@@ -26,9 +26,9 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-https://github.com/user-attachments/assets/49ed5376-c2f9-4ade-95cd-66395da9818e
+[![Pila in 35 seconds, with Noctalia's bar: windows opening and snapping to halves and quarters, blur behind a translucent terminal, workspaces, and the configuration applied as it's saved](https://raw.githubusercontent.com/igalmarino/pila/main/docs/demo.webp)](https://github.com/user-attachments/assets/56237607-6358-4036-8c08-86ec819a6840)
 
-![Pila with Noctalia's bar, GTK Demo drawing its own title bar, and two kitty windows with Pila's, one translucent with blur behind it](https://raw.githubusercontent.com/igalmarino/pila/main/docs/screenshot.png)
+Every scene, in a longer video: [Pila in about a minute](https://github.com/user-attachments/assets/56237607-6358-4036-8c08-86ec819a6840).
 
 How to use and set it up is in the [user manual](https://github.com/igalmarino/pila/blob/main/docs/MANUAL.md) (and `man pila`).
 

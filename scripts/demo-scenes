@@ -16,8 +16,9 @@ of each scene instead, in WORK/shots/, to check the scenes quickly. It quits
 Pila at the end.
 
 `encode` makes the videos from WORK/master.mkv and the captions:
-OUT_DIR/pila-demo.mp4 (every scene) and OUT_DIR/pila-demo-short.mp4 (the
-scenes marked short, for the README).
+OUT_DIR/pila-demo.mp4 (every scene), OUT_DIR/pila-demo-short.mp4 (the scenes
+marked short) and OUT_DIR/docs/demo.webp (the short one as an animated
+image, for the README: it plays by itself and loops).
 """
 import json
 import os
@@ -536,18 +537,31 @@ def encode(out_dir):
         graph.append(f"[0:v]trim=start={c['start']:.3f}:end={c['end']:.3f},setpts=PTS-STARTPTS,"
                      + ",".join(caption_filters([shifted], height)) + f"[v{i}]")
         parts.append(f"[v{i}]")
-    graph.append("".join(parts) + f"concat=n={len(parts)}:v=1:a=0,scale=1280:-2,"
-                 "format=yuv420p[out]")
+    joined = "".join(parts) + f"concat=n={len(parts)}:v=1:a=0,"
+
     small = os.path.join(out_dir, "pila-demo-short.mp4")
     for crf in (24, 28, 32):
-        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master,
-                        "-filter_complex", ";".join(graph), "-map", "[out]",
-                        "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master, "-filter_complex",
+                        ";".join(graph + [joined + "scale=1280:-2,format=yuv420p[out]"]),
+                        "-map", "[out]", "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
                         "-movflags", "+faststart", "-an", small], check=True)
         if os.path.getsize(small) < 10_000_000:
             break
-    for path in (full, small):
+
+    # The README's: the short one as an animated WebP, which plays by itself
+    # and loops, as a video there doesn't. 30 fps: some browsers slow down
+    # images whose frames last 16 ms.
+    animated = os.path.join(out_dir, "docs", "demo.webp")
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master, "-filter_complex",
+                    ";".join(graph + [joined + "fps=30,scale=1280:-2:flags=lanczos[out]"]),
+                    "-map", "[out]", "-c:v", "libwebp_anim", "-lossless", "0", "-quality", "70",
+                    "-compression_level", "4", "-loop", "0", "-an", animated], check=True)
+    for path in (full, small, animated):
         print(f"{path}: {os.path.getsize(path) / 1e6:.1f} MB")
+    # GitHub shows the README's images through its proxy, which refuses
+    # anything over 5 MB.
+    if os.path.getsize(animated) > 5_000_000:
+        print(f"{animated} is over 5 MB: GitHub won't show it", file=sys.stderr)
 
 
 if len(sys.argv) < 3 or sys.argv[1] not in ("play", "encode"):

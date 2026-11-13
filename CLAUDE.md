@@ -81,11 +81,13 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   through every feature that depends on Pila, on a sealed-off headless Pila
   (`scripts/CLAUDE.md`): after changing a protocol a shell uses, after a Smithay bump and
   before a release.
-- README screenshot: `scripts/screenshot` remakes `docs/screenshot.png` on a sealed headless
-  Pila (default looks, Noctalia, sample windows); show it to the user before committing it.
+- Screenshot: `scripts/screenshot` remakes `docs/screenshot.png` (a still for listings) on a
+  sealed headless Pila (default looks, Noctalia, sample windows); show it to the user before
+  committing it.
 - Demo video: `scripts/demo-video` records captioned scenes on a sealed headless Pila into
-  `pila-demo.mp4` and `pila-demo-short.mp4` (not committed; `--shots` to check the scenes
-  quickly; `scripts/CLAUDE.md`); show them to the user before they're published.
+  `pila-demo.mp4`, `pila-demo-short.mp4` (not committed) and the README's animated
+  `docs/demo.webp` (`--shots` to check the scenes quickly; `scripts/CLAUDE.md`); show them to
+  the user before they're committed or published.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`

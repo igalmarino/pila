@@ -8,8 +8,9 @@
 # captioned by ffmpeg.
 #
 #   scripts/demo-video           records, then writes pila-demo.mp4 (every
-#                                scene, 1080p60) and pila-demo-short.mp4
-#                                (the main ones, 720p, under 10 MB: the README)
+#                                scene, 1080p60), pila-demo-short.mp4 (the
+#                                main ones, 720p, under 10 MB) and the README's
+#                                docs/demo.webp (the short one, animated)
 #   scripts/demo-video --shots   records nothing: a screenshot at the end of
 #                                each scene, in pila-demo/shots/ (quick)
 #   scripts/demo-video --encode  encodes the last recording again
