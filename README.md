@@ -26,7 +26,7 @@ replacement yet (layer shell, screencopy, foreign toplevel management, gamma con
 output management and power management, virtual keyboard) are supported too, each to be
 replaced when an `ext-` version lands.
 
-[![Pila in 35 seconds, with Noctalia's bar: windows opening and snapping to halves and quarters, blur behind a translucent terminal, workspaces, and the configuration applied as it's saved](https://raw.githubusercontent.com/igalmarino/pila/main/docs/demo.webp)](https://github.com/user-attachments/assets/56237607-6358-4036-8c08-86ec819a6840)
+![Pila in 35 seconds, with Noctalia's bar: windows opening and snapping to halves and quarters, blur behind a translucent terminal, workspaces, and the configuration applied as it's saved](https://raw.githubusercontent.com/igalmarino/pila/main/docs/demo.webp)
 
 Every scene, in a longer video: [Pila in about a minute](https://github.com/user-attachments/assets/56237607-6358-4036-8c08-86ec819a6840).
 
