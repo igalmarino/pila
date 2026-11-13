@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""Record the first output as raw video at a constant frame rate, for
+scripts/demo-video: a minimal ext-image-copy-capture client (standard library
+only, shm buffers, the pointer painted in) whose frames go to OUT (a file, or
+- for stdout, such as a pipe to ffmpeg) as packed 32-bit pixels, one picture
+per tick of FPS. Pila draws on demand, so each captured frame lands in the
+tick its presentation time falls in and the ticks with nothing new repeat
+the last one. Run it inside Pila (it uses WAYLAND_DISPLAY); it stops on
+SIGTERM or SIGINT, filling in the ticks up to then.
+
+    scripts/demo-record OUT INFO [FPS]
+
+INFO receives, as soon as the first frame is in, a JSON object: the size,
+ffmpeg's name for the pixel format, the rate and `t0`, the CLOCK_MONOTONIC
+time of tick 0 (Python's time.monotonic()), to place captions. At the end it
+prints to stderr how many frames came, how many ticks were repeats, and the
+gaps of two or three ticks between frames: during an animation, refreshes
+the recording missed (an idle screen makes longer gaps, which aren't).
+"""
+import json
+import mmap
+import os
+import queue
+import signal
+import socket
+import struct
+import sys
+import tempfile
+import threading
+import time
+
+if len(sys.argv) not in (3, 4):
+    sys.exit(__doc__)
+out_path, info_path = sys.argv[1], sys.argv[2]
+try:
+    fps = float(sys.argv[3]) if len(sys.argv) == 4 else 60.0
+except ValueError:
+    sys.exit(__doc__)
+
+path = os.path.join(os.environ["XDG_RUNTIME_DIR"], os.environ["WAYLAND_DISPLAY"])
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(path)
+next_id = 2
+
+
+def new_id():
+    global next_id
+    next_id += 1
+    return next_id
+
+
+def send(obj, opcode, payload=b"", fds=()):
+    message = struct.pack("<II", obj, ((8 + len(payload)) << 16) | opcode) + payload
+    if fds:
+        socket.send_fds(sock, [message], list(fds))
+    else:
+        sock.sendall(message)
+
+
+def string(s):
+    data = s.encode() + b"\0"
+    pad = (4 - len(data) % 4) % 4
+    return struct.pack("<I", len(data)) + data + b"\0" * pad
+
+
+buf = b""
+stopping = False
+
+
+def events(deadline=None):
+    """The events the compositor sends, as (object, opcode, body), until
+    `deadline` (a time.monotonic() value) if one is given, or a stop."""
+    global buf
+    while True:
+        while len(buf) >= 8:
+            obj, word = struct.unpack("<II", buf[:8])
+            size, opcode = word >> 16, word & 0xFFFF
+            if len(buf) < size:
+                break
+            body, buf = buf[8:size], buf[size:]
+            yield obj, opcode, body
+        if stopping:
+            return
+        timeout = 0.2
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            timeout = min(timeout, left)
+        sock.settimeout(timeout)
+        try:
+            data = sock.recv(1 << 16)
+        except socket.timeout:
+            continue
+        except InterruptedError:
+            continue
+        if not data:
+            sys.exit("demo-record: the compositor closed the connection")
+        buf += data
+
+
+def stop(*_):
+    global stopping
+    stopping = True
+
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+
+DISPLAY, REGISTRY = 1, 2
+send(DISPLAY, 1, struct.pack("<I", REGISTRY))  # get_registry
+wanted = {
+    "wl_shm": 1,
+    "wl_output": 1,
+    "ext_output_image_capture_source_manager_v1": 1,
+    "ext_image_copy_capture_manager_v1": 1,
+}
+globals_found = {}
+callback = new_id()
+send(DISPLAY, 0, struct.pack("<I", callback))  # sync
+for obj, op, body in events(time.monotonic() + 5):
+    if obj == REGISTRY and op == 0:  # global
+        name, length = struct.unpack("<II", body[:8])
+        iface = body[8:8 + length - 1].decode()
+        if iface in wanted and iface not in globals_found:
+            globals_found[iface] = name
+    if obj == callback:
+        break
+missing = [iface for iface in wanted if iface not in globals_found]
+if missing:
+    sys.exit("demo-record: missing " + ", ".join(missing))
+bound = {}
+for iface, version in wanted.items():
+    bound[iface] = new_id()
+    send(REGISTRY, 0, struct.pack("<I", globals_found[iface]) + string(iface)
+         + struct.pack("<II", version, bound[iface]))  # bind
+
+SOURCE, SESSION = new_id(), new_id()
+send(bound["ext_output_image_capture_source_manager_v1"], 0,
+     struct.pack("<II", SOURCE, bound["wl_output"]))  # create_source
+PAINT_CURSORS = 1
+send(bound["ext_image_copy_capture_manager_v1"], 0,
+     struct.pack("<III", SESSION, SOURCE, PAINT_CURSORS))  # create_session
+width = height = None
+formats = []
+for obj, op, body in events(time.monotonic() + 5):
+    if obj == SESSION and op == 0:  # buffer_size
+        width, height = struct.unpack("<II", body[:8])
+    elif obj == SESSION and op == 1:  # shm_format
+        formats.append(struct.unpack("<I", body[:4])[0])
+    elif obj == SESSION and op == 4:  # done
+        break
+    elif obj == SESSION and op == 5:  # stopped
+        sys.exit("demo-record: the capture session stopped")
+# wl_shm's formats, little-endian in memory: XRGB8888 is B, G, R, X.
+XRGB8888, ARGB8888 = 1, 0
+PIX_FMT = {XRGB8888: "bgr0", ARGB8888: "bgra"}
+shm_format = next((f for f in (XRGB8888, ARGB8888) if f in formats), None)
+if width is None or shm_format is None:
+    sys.exit(f"demo-record: no usable buffer (size {width}x{height}, formats {formats})")
+
+stride = width * 4
+size = stride * height
+# Enough buffers (0.6 s at 60 fps) that the writer may fall behind a burst,
+# such as the encoder starting or apps starting next to it.
+POOL_SIZE = 36
+fd = os.memfd_create("pila-demo-record")
+os.ftruncate(fd, size * POOL_SIZE)
+pool_map = mmap.mmap(fd, size * POOL_SIZE)
+POOL = new_id()
+send(bound["wl_shm"], 0, struct.pack("<Ii", POOL, size * POOL_SIZE), fds=[fd])  # create_pool
+os.close(fd)
+buffers = []
+for i in range(POOL_SIZE):
+    buffer = new_id()
+    send(POOL, 0, struct.pack("<IiiiiI", buffer, i * size, width, height, stride, shm_format))
+    buffers.append(buffer)
+views = [memoryview(pool_map)[i * size:(i + 1) * size] for i in range(POOL_SIZE)]
+
+out_fd = sys.stdout.fileno() if out_path == "-" else os.open(
+    out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+
+
+def write_all(view):
+    while view:
+        written = os.write(out_fd, view)
+        view = view[written:]
+
+
+# The writer thread: (buffer index, times) pairs, each written that many
+# times; None ends it. Indexes come back on `free` once written.
+writes = queue.Queue()
+free = queue.Queue()
+for i in range(POOL_SIZE):
+    free.put(i)
+
+
+def writer():
+    while True:
+        item = writes.get()
+        if item is None:
+            return
+        index, times = item
+        for _ in range(times):
+            write_all(views[index])
+        free.put(index)
+
+
+writer_thread = threading.Thread(target=writer, daemon=True)
+writer_thread.start()
+
+period = 1.0 / fps
+t0 = None
+# The frame waiting to be written (its buffer and tick): it's written once
+# the next one shows how many ticks it lasts.
+pending = None
+frames = repeats = replaced = waited = 0
+gaps = {}
+# When the writer held capturing up (seconds into the video).
+waits = []
+
+
+def place(index, tick):
+    """Hand a new frame in: the pending one lasts until `tick`."""
+    global pending, repeats, replaced
+    if pending is not None:
+        old_index, old_tick = pending
+        if tick == old_tick:
+            # Frames come in bursts (a capture of its own right after an
+            # output's frame, then a pause; and presentation times are an
+            # estimate, nested or headless): two in one tick take two ticks,
+            # one ahead at most, so the video keeps time.
+            tick += 1
+        elif tick < old_tick:
+            # Already a tick ahead: the later frame wins.
+            free.put(old_index)
+            replaced += 1
+            pending = (index, old_tick)
+            return
+        gap = tick - old_tick
+        if gap > 1:
+            gaps[gap] = gaps.get(gap, 0) + 1
+        repeats += gap - 1
+        writes.put((old_index, gap))
+    pending = (index, tick)
+
+
+while not stopping:
+    try:
+        index = free.get(timeout=0.2)
+    except queue.Empty:
+        waited += 1
+        waits.append(time.monotonic() - t0 if t0 is not None else 0.0)
+        continue
+    frame = new_id()
+    send(SESSION, 0, struct.pack("<I", frame))  # create_frame
+    send(frame, 1, struct.pack("<I", buffers[index]))  # attach_buffer
+    send(frame, 2, struct.pack("<iiii", 0, 0, width, height))  # damage_buffer
+    send(frame, 3)  # capture
+    shown_at = None
+    outcome = None
+    for obj, op, body in events():
+        if obj == frame and op == 2:  # presentation_time
+            hi, lo, nanos = struct.unpack("<III", body[:12])
+            shown_at = ((hi << 32) | lo) + nanos / 1e9
+        elif obj == frame and op == 3:  # ready
+            outcome = "ready"
+            break
+        elif obj == frame and op == 4:  # failed
+            outcome = "failed"
+            break
+        elif obj == SESSION and op == 5:  # stopped
+            stopping = True
+            break
+    send(frame, 0)  # destroy
+    if outcome != "ready":
+        free.put(index)
+        if outcome == "failed":
+            print("demo-record: a frame failed", file=sys.stderr)
+        continue
+    if shown_at is None:
+        shown_at = time.monotonic()
+    frames += 1
+    if t0 is None:
+        t0 = shown_at
+        with open(info_path, "w") as info:
+            json.dump({"width": width, "height": height, "pix_fmt": PIX_FMT[shm_format],
+                       "fps": fps, "t0": t0}, info)
+            info.write("\n")
+    place(index, round((shown_at - t0) / period))
+
+# The last frame lasts until now.
+if pending is not None:
+    index, tick = pending
+    end = max(tick + 1, round((time.monotonic() - t0) / period))
+    repeats += end - tick - 1
+    writes.put((index, end - tick))
+writes.put(None)
+writer_thread.join()
+if out_fd != sys.stdout.fileno():
+    os.close(out_fd)
+short = {gap: n for gap, n in sorted(gaps.items()) if gap <= 3}
+print(f"demo-record: {frames} frames, {repeats} repeated ticks, {replaced} replaced, "
+      f"{waited} waits for the writer{' at ' + ', '.join(f'{w:.1f} s' for w in waits) if waits else ''}, short gaps {short or 'none'}, "
+      f"size {width}x{height} {PIX_FMT[shm_format]} at {fps:g} fps", file=sys.stderr)
+sys.exit(0 if frames else 1)

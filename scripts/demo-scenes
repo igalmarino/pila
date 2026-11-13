@@ -1,0 +1,567 @@
+#!/usr/bin/env python3
+"""The demo video's scenes, for scripts/demo-video (standard library only).
+
+    scripts/demo-scenes play WORK (--record | --shots)
+    scripts/demo-scenes encode WORK OUT_DIR
+
+`play` runs inside the sealed headless Pila that scripts/demo-video starts:
+it sets the desktop up (Noctalia on WORK/wallpaper.png), then plays each
+scene with real input, the pointer and Pila's bindings through the headless
+backend's control socket and text through wtype (virtual keyboard), waiting
+on Pila's state for what must happen and pausing for what must be seen.
+Each scene's caption and time go to WORK/captions.json. --record records the
+first output meanwhile (scripts/demo-record into ffmpeg: WORK/master.mkv,
+lossless); --shots records nothing and takes a screenshot (grim) at the end
+of each scene instead, in WORK/shots/, to check the scenes quickly. It quits
+Pila at the end.
+
+`encode` makes the videos from WORK/master.mkv and the captions:
+OUT_DIR/pila-demo.mp4 (every scene) and OUT_DIR/pila-demo-short.mp4 (the
+scenes marked short, for the README).
+"""
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+FPS = 60
+# Pila's title bar and its buttons (decoration.rs), in logical pixels.
+TITLE_BAR = 28
+BUTTON = 36
+# Where the repository lives, for the last caption.
+URL = "github.com/igalmarino/pila"
+
+
+def fail(message):
+    sys.exit(f"demo-scenes: {message}")
+
+
+# --- Pila's control socket ---------------------------------------------------
+
+class Control:
+    def __init__(self):
+        path = os.path.join(os.environ["XDG_RUNTIME_DIR"], os.environ["WAYLAND_DISPLAY"] + ".control")
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.connect(path)
+        self.buf = b""
+
+    def __call__(self, cmd, **fields):
+        fields["cmd"] = cmd
+        self.sock.sendall(json.dumps(fields).encode() + b"\n")
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1 << 20)
+            if not chunk:
+                fail("Pila closed its control socket")
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        answer = json.loads(line)
+        if not answer.get("ok"):
+            fail(f"{cmd}: {answer.get('error')}")
+        return answer
+
+
+ctl = None
+
+
+def state():
+    return ctl("state")
+
+
+def wait(what, check, timeout=10.0):
+    """Wait until `check(state)` gives something true, and return it."""
+    end = time.monotonic() + timeout
+    while True:
+        s = state()
+        found = check(s)
+        if found:
+            return found
+        if time.monotonic() > end:
+            windows = [(w["app_id"], w["title"], w["workspace"]) for w in s["windows"]]
+            layers = [(l["namespace"], l["layer"]) for l in s["layers"]]
+            fail(f"timed out waiting for {what}; windows {windows}, layers {layers}, "
+                 f"keyboard focus {s['keyboard_focus']}")
+        time.sleep(0.03)
+
+
+def find(s, name):
+    """A window by app id, or the start of its title."""
+    for w in s["windows"]:
+        if w["app_id"] == name or (w["title"] or "").startswith(name):
+            return w
+    return None
+
+
+def window(name):
+    w = find(state(), name)
+    if w is None:
+        fail(f"no window {name}")
+    return w
+
+
+def settled(name, **wanted):
+    """Wait for a window to be shown, done animating, with these fields."""
+    def check(s):
+        w = find(s, name)
+        if w is None or w["animating"] or not w["mapped"]:
+            return None
+        return w if all(w.get(k) == v for k, v in wanted.items()) else None
+    return wait(f"{name} with {wanted or 'nothing running'}", check)
+
+
+def pause(seconds):
+    time.sleep(seconds)
+
+
+# --- Input -------------------------------------------------------------------
+
+def pointer():
+    p = state()["pointer"]
+    return p["x"], p["y"]
+
+
+def ease(t):
+    return t * t * (3 - 2 * t)
+
+
+def glide(x, y, duration=0.6):
+    """Move the pointer to (x, y) as a hand would: smoothly, 120 steps a
+    second."""
+    x0, y0 = pointer()
+    steps = max(1, round(duration * 120))
+    start = time.monotonic()
+    for i in range(1, steps + 1):
+        t = i / steps
+        left = start + duration * t - time.monotonic()
+        if left > 0:
+            time.sleep(left)
+        ctl("move", x=x0 + (x - x0) * ease(t), y=y0 + (y - y0) * ease(t))
+
+
+def button(state_, which="left"):
+    ctl("button", button=which, state=state_)
+
+
+def click(x, y, which="left", duration=0.5):
+    glide(x, y, duration)
+    pause(0.12)
+    button("click", which)
+
+
+def drag(start, *stops, duration=0.9, hold=0.3):
+    """Press at `start`, glide through `stops` and let go."""
+    glide(*start, 0.5)
+    pause(0.15)
+    button("press")
+    pause(0.1)
+    for stop in stops:
+        glide(*stop, duration)
+    pause(hold)
+    button("release")
+
+
+def key(name, state_="tap"):
+    ctl("key", key=name, state=state_)
+
+
+def combo(keys):
+    ctl("combo", keys=keys)
+
+
+def typed(*parts, delay=90):
+    """Type through wtype (the virtual keyboard): text, or <Key> for a key
+    such as <Return>. One wtype each: keys mixed with text in one call can
+    come before the text."""
+    for part in parts:
+        if part.startswith("<") and part.endswith(">") and len(part) > 2:
+            args = ["-k", part[1:-1]]
+        else:
+            args = ["-d", str(delay), part]
+        subprocess.run(["wtype", *args], check=True)
+        pause(0.08)
+
+
+def title_bar(w, from_right=170):
+    """A point on a window's title bar, left of its buttons."""
+    g = w["geometry"]
+    return g["x"] + g["w"] - from_right, g["y"] - TITLE_BAR / 2
+
+
+def title_button(w, n):
+    """The center of a title bar button: 1 close, 2 maximize, 3 minimize."""
+    g = w["geometry"]
+    return g["x"] + g["w"] - BUTTON * n + BUTTON / 2, g["y"] - TITLE_BAR / 2
+
+
+def reloaded():
+    """Fail if the config just saved isn't one Pila loads (it says so in a
+    notification, as it does when it loads one)."""
+    path = os.path.expanduser("~/.config/pila/config.toml")
+    check = subprocess.run(["pila", "--check-config", "--config", path],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if check.returncode:
+        fail(f"the edited config doesn't load: {check.stdout.strip()}")
+
+
+def spawn(command, **extra):
+    env = dict(os.environ, **extra)
+    return subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
+
+
+# --- Scenes ------------------------------------------------------------------
+
+captions = []
+
+
+class Scene:
+    """A scene: its caption shows while it plays; `short` puts it in the
+    short video too."""
+    count = 0
+
+    def __init__(self, name, caption, short=False):
+        self.name, self.caption, self.short = name, caption, short
+
+    def __enter__(self):
+        Scene.count += 1
+        self.start = time.monotonic()
+        print(f"demo-scenes: {self.name}", file=sys.stderr)
+        return self
+
+    def __exit__(self, kind, *_):
+        if kind is not None:
+            return False
+        captions.append({"name": self.name, "caption": self.caption, "short": self.short,
+                         "start": self.start, "end": time.monotonic()})
+        if SHOTS:
+            subprocess.run(["grim", os.path.join(WORK, "shots", f"{Scene.count:02}-{self.name}.png")],
+                           check=True)
+        return False
+
+
+KITTY = ["kitty", "--override", "background=#1e2030", "--override", "foreground=#c8d3f5",
+         "--override", "cursor=#c8d3f5", "--override", "font_size=11",
+         "--override", "remember_window_size=no", "--override", "confirm_os_window_close=0"]
+# The translucent terminal shows Pila's workspaces as they change.
+GLASS = r"""
+prev=
+while :; do
+    now=$(pila msg outputs; echo; pila msg workspaces)
+    if [ "$now" != "$prev" ]; then
+        printf '\033[H\033[2J$ pila msg outputs\n%s\n' "$(pila msg outputs)"
+        printf '\n$ pila msg workspaces\n%s' "$(pila msg workspaces)"
+        prev=$now
+    fi
+    sleep 0.2
+done
+"""
+
+
+def scenes():
+    with Scene("open", "Pila: a stacking Wayland compositor", short=True):
+        pause(1.0)
+        spawn(["gtk4-demo"])
+        settled("GTK Demo")
+        pause(0.6)
+        spawn(KITTY + ["--class", "pila-config", "--title", "config.toml", "sh", "-c",
+                       "cd ~/.config/pila && exec vim -u NONE -N --cmd 'set shortmess+=IF' "
+                       "-c 'syntax on' -c 'set laststatus=0 noshowmode' config.toml"])
+        settled("pila-config")
+        pause(0.6)
+        spawn(KITTY + ["--class", "pila-glass", "--title", "pila msg",
+                       "--override", "background_opacity=0.55", "sh", "-c", GLASS])
+        settled("pila-glass")
+        pause(1.5)
+
+    with Scene("float", "Windows float and overlap"):
+        cfg = window("pila-config")
+        x, y = title_bar(cfg)
+        drag((x, y), (x - 90, y - 70), duration=1.0)
+        settled("pila-config", focused=True)
+        pause(0.6)
+        gtk = window("GTK Demo")
+        click(gtk["geometry"]["x"] + 210, gtk["geometry"]["y"] + 22)
+        wait("GTK Demo in front", lambda s: find(s, "GTK Demo")["focused"])
+        pause(0.8)
+        cfg = window("pila-config")
+        g = cfg["geometry"]
+        corner = (g["x"] + g["w"] + 3, g["y"] + g["h"] + 3)
+        drag(corner, (corner[0] - 130, corner[1] - 70), (corner[0] + 40, corner[1] + 10),
+             duration=0.8)
+        pause(0.8)
+
+    with Scene("snap", "Snap to halves and quarters by dragging", short=True):
+        gtk = window("GTK Demo")
+        drag((gtk["geometry"]["x"] + 210, gtk["geometry"]["y"] + 22), (1, 380),
+             duration=1.0, hold=0.7)
+        settled("GTK Demo", snapped="left")
+        pause(0.7)
+        cfg = window("pila-config")
+        drag(title_bar(cfg), (1278, 60), duration=1.0, hold=0.7)
+        settled("pila-config", snapped="top-right")
+        pause(1.2)
+        # Dragged away, it gets its size back.
+        drag(title_bar(window("pila-config")), (880, 350), duration=0.9, hold=0.2)
+        settled("pila-config", snapped=None)
+        pause(0.6)
+
+    with Scene("maximize", "Maximize and minimize"):
+        glass = window("pila-glass")
+        click(*title_button(glass, 2))
+        settled("pila-glass", maximized=True)
+        pause(0.9)
+        click(*title_button(window("pila-glass"), 2), duration=0.3)
+        settled("pila-glass", maximized=False)
+        pause(0.7)
+        click(*title_button(window("pila-glass"), 3), duration=0.4)
+        wait("pila-glass minimized", lambda s: find(s, "pila-glass")["minimized"]
+             and not find(s, "pila-glass")["animating"])
+        pause(0.8)
+
+    with Scene("switch", "Mod+Tab: back through recently used windows"):
+        key("Super_L", "press")
+        pause(0.2)
+        for _ in range(4):
+            key("Tab")
+            pause(0.8)
+            switch = state()["switch"]
+            if switch and switch["order"][switch["index"]] == "pila-glass":
+                break
+        pause(0.5)
+        key("Super_L", "release")
+        settled("pila-glass", minimized=False, focused=True)
+        pause(1.2)
+
+    with Scene("blur", "Blur behind translucent windows", short=True):
+        x, y = title_bar(window("pila-glass"))
+        drag((x, y), (x - 300, y + 120), (x - 120, y + 40), duration=1.4, hold=0.2)
+        pause(1.0)
+
+    with Scene("launcher", "Tap Mod for the launcher"):
+        key("Super_L")
+        wait("the launcher", lambda s: s["keyboard_focus_layer"])
+        pause(0.6)
+        typed("print", delay=130)
+        pause(0.6)
+        typed("<Return>")
+        settled("GTK Print Editor", focused=True)
+        pause(0.4)
+        typed("Opened from the launcher.", delay=55)
+        pause(1.0)
+
+    with Scene("workspaces", "Workspaces", short=True):
+        combo("Super+Shift+Page_Down")
+        wait("the editor on workspace 2", lambda s: find(s, "GTK Print Editor")["workspace"] == 2)
+        pause(1.0)
+        combo("Super+Page_Down")
+        wait("workspace 2", lambda s: s["workspace"] == 2)
+        pause(1.4)
+        combo("Super+Page_Up")
+        wait("workspace 1", lambda s: s["workspace"] == 1)
+        pause(1.0)
+
+    with Scene("config", "The configuration applies as you save it", short=True):
+        cfg = window("pila-config")
+        g = cfg["geometry"]
+        click(g["x"] + g["w"] / 2, g["y"] + g["h"] / 2)
+        settled("pila-config", focused=True)
+        pause(0.4)
+        typed("/radius", "<Return>", "$", "s", "12", "<Escape>")
+        pause(0.4)
+        typed(":w", "<Return>")
+        reloaded()
+        pause(1.0)
+        typed("/bar =", "<Return>", "f#", "l", "cw", "4a5288", "<Escape>")
+        pause(0.4)
+        typed(":w", "<Return>")
+        reloaded()
+        pause(1.2)
+
+    with Scene("shake", "Shake the pointer to find it"):
+        glide(820, 300, 0.6)
+        pause(0.3)
+        for i in range(28):
+            ctl("rel", dx=-140 if i % 2 else 140, dy=0)
+            pause(0.035)
+        wait("a bigger cursor", lambda s: s["pointer"]["magnification"] > 1.5, timeout=2)
+        pause(1.8)
+
+    with Scene("on-top", "Keep a window above the others"):
+        glass = window("pila-glass")
+        click(*title_bar(glass), which="right")
+        menu = wait("the window menu", lambda s: s["window_menu"])
+        index = menu["items"].index(next(i for i in menu["items"] if "top" in i.lower()))
+        g = menu["geometry"]
+        item_h = g["h"] / len(menu["items"])
+        pause(0.4)
+        click(g["x"] + g["w"] / 2, g["y"] + item_h * (index + 0.5), duration=0.4)
+        wait("pila-glass on top", lambda s: find(s, "pila-glass")["always_on_top"])
+        pause(0.5)
+        gtk = window("GTK Demo")
+        click(gtk["geometry"]["x"] + 210, gtk["geometry"]["y"] + 22)
+        wait("GTK Demo focused", lambda s: find(s, "GTK Demo")["focused"])
+        pause(1.2)
+
+    with Scene("notify", "Your shell's bar, launcher and notifications"):
+        subprocess.run(["notify-send", "-a", "cargo", "Build finished",
+                        "target/release/pila is ready"], check=True)
+        pause(3.0)
+        # It goes before the next scene, which shows the desktop alone.
+        wait("the notification to go", lambda s: not any(
+            "notification" in l["namespace"] for l in s["layers"]), timeout=10)
+
+    with Scene("end", URL, short=True):
+        combo("Super+h")
+        wait("the desktop", lambda s: all(w["minimized"] and not w["animating"]
+                                          for w in s["windows"]
+                                          if w["workspace"] == s["workspace"]))
+        pause(3.0)
+
+
+# --- Recording -----------------------------------------------------------------
+
+def start_recording():
+    s = state()
+    mode = s["outputs"][0]["mode"]
+    master = os.path.join(WORK, "master.mkv")
+    info = os.path.join(WORK, "record.json")
+    recorder = subprocess.Popen([os.path.join(HERE, "demo-record"), "-", info, str(FPS)],
+                                stdout=subprocess.PIPE,
+                                stderr=open(os.path.join(WORK, "record.log"), "w"))
+    encoder = subprocess.Popen(
+        ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "bgr0",
+         "-video_size", f"{mode['w']}x{mode['h']}", "-framerate", str(FPS), "-i", "-",
+         "-c:v", "libx264rgb", "-preset", "ultrafast", "-qp", "0", master],
+        stdin=recorder.stdout)
+    recorder.stdout.close()
+    wait("the first recorded frame", lambda _: os.path.exists(info), timeout=5)
+    return recorder, encoder
+
+
+def stop_recording(recorder, encoder):
+    recorder.send_signal(signal.SIGTERM)
+    recorder.wait(timeout=30)
+    encoder.wait(timeout=120)
+    with open(os.path.join(WORK, "record.json")) as f:
+        info = json.load(f)
+    if info["pix_fmt"] != "bgr0":
+        fail(f"recorded {info['pix_fmt']}, encoded as bgr0")
+    if recorder.returncode or encoder.returncode:
+        fail("the recording failed: see record.log")
+    return info
+
+
+def play(record):
+    global ctl
+    ctl = Control()
+    # Apps write what they like where they start (Print Editor its settings).
+    os.chdir(os.path.expanduser("~"))
+    spawn(["noctalia"])
+    end = time.monotonic() + 20
+    while subprocess.run(["noctalia", "msg", "status"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL).returncode:
+        if time.monotonic() > end:
+            fail("Noctalia didn't start")
+        time.sleep(0.2)
+    subprocess.run(["noctalia", "msg", "wallpaper-set", os.path.join(WORK, "wallpaper.png")],
+                   stdout=subprocess.DEVNULL, check=True)
+    wait("Noctalia's bar", lambda s: any(l["layer"] == "top" for l in s["layers"]), timeout=20)
+    # The wallpaper fades in.
+    pause(2.5)
+    ctl("move", x=900, y=520)
+    recording = start_recording() if record else None
+    try:
+        scenes()
+    finally:
+        info = stop_recording(*recording) if recording else {"t0": 0}
+        for c in captions:
+            c["start"] -= info["t0"]
+            c["end"] -= info["t0"]
+        with open(os.path.join(WORK, "captions.json"), "w") as f:
+            json.dump(captions, f, indent=1)
+        subprocess.run(["pila", "msg", "action", "quit"])
+    print("demo-scenes: done", file=sys.stderr)
+
+
+# --- Encoding ------------------------------------------------------------------
+
+FONT = "DejaVu Sans"
+
+
+def caption_filters(items, height):
+    """drawtext filters showing each caption for its time, faded in and out."""
+    filters = []
+    size = round(height * 0.034)
+    for c in items:
+        a, b = c["start"] + 0.15, c["end"] - 0.05
+        fade = 0.25
+        alpha = (f"if(lt(t,{a + fade:.3f}),(t-{a:.3f})/{fade},"
+                 f"if(gt(t,{b - fade:.3f}),({b:.3f}-t)/{fade},1))")
+        text = c["caption"].replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
+        filters.append(
+            f"drawtext=font='{FONT}':text='{text}':fontsize={size}:fontcolor=white"
+            f":box=1:boxcolor=black@0.55:boxborderw={size // 2}"
+            f":x=(w-text_w)/2:y=h-text_h-{round(height * 0.07)}"
+            f":alpha='{alpha}':enable='between(t,{a:.3f},{b:.3f})'")
+    return filters
+
+
+def encode(out_dir):
+    master = os.path.join(WORK, "master.mkv")
+    with open(os.path.join(WORK, "captions.json")) as f:
+        items = json.load(f)
+    with open(os.path.join(WORK, "record.json")) as f:
+        info = json.load(f)
+    width, height = info["width"], info["height"]
+    length = items[-1]["end"]
+
+    full = os.path.join(out_dir, "pila-demo.mp4")
+    chain = caption_filters(items, height) + [
+        "fade=in:st=0:d=0.5", f"fade=out:st={length - 0.6:.3f}:d=0.6", "format=yuv420p"]
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master, "-t", f"{length:.3f}",
+                    "-vf", ",".join(chain), "-c:v", "libx264", "-preset", "slow", "-crf", "18",
+                    "-movflags", "+faststart", "-an", full], check=True)
+
+    # The short one: the scenes marked short, each with its caption, joined.
+    short = [c for c in items if c["short"]]
+    parts = []
+    graph = []
+    for i, c in enumerate(short):
+        shifted = dict(c, start=0.0, end=c["end"] - c["start"])
+        graph.append(f"[0:v]trim=start={c['start']:.3f}:end={c['end']:.3f},setpts=PTS-STARTPTS,"
+                     + ",".join(caption_filters([shifted], height)) + f"[v{i}]")
+        parts.append(f"[v{i}]")
+    graph.append("".join(parts) + f"concat=n={len(parts)}:v=1:a=0,scale=1280:-2,"
+                 "format=yuv420p[out]")
+    small = os.path.join(out_dir, "pila-demo-short.mp4")
+    for crf in (24, 28, 32):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", master,
+                        "-filter_complex", ";".join(graph), "-map", "[out]",
+                        "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+                        "-movflags", "+faststart", "-an", small], check=True)
+        if os.path.getsize(small) < 10_000_000:
+            break
+    for path in (full, small):
+        print(f"{path}: {os.path.getsize(path) / 1e6:.1f} MB")
+
+
+if len(sys.argv) < 3 or sys.argv[1] not in ("play", "encode"):
+    sys.exit(__doc__)
+WORK = sys.argv[2]
+if sys.argv[1] == "play":
+    if len(sys.argv) != 4 or sys.argv[3] not in ("--record", "--shots"):
+        sys.exit(__doc__)
+    SHOTS = sys.argv[3] == "--shots"
+    if not SHOTS and not shutil.which("ffmpeg"):
+        fail("ffmpeg not found")
+    os.makedirs(os.path.join(WORK, "shots"), exist_ok=True)
+    play(record=not SHOTS)
+else:
+    if len(sys.argv) != 4:
+        sys.exit(__doc__)
+    encode(sys.argv[3])

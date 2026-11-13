@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# A demo video of Pila: a sealed headless Pila (one 1920x1080 output at
+# scale 1.5, its default looks, Noctalia's bar on a generated gradient)
+# where scripts/demo-scenes plays scenes with real input (windows opening,
+# moved, resized, snapped, maximized, minimized, Mod+Tab, blur, the
+# launcher, workspaces, the config applied as it's saved, shake to find,
+# always on top, a notification), recorded by scripts/demo-record and
+# captioned by ffmpeg.
+#
+#   scripts/demo-video           records, then writes pila-demo.mp4 (every
+#                                scene, 1080p60) and pila-demo-short.mp4
+#                                (the main ones, 720p, under 10 MB: the README)
+#   scripts/demo-video --shots   records nothing: a screenshot at the end of
+#                                each scene, in pila-demo/shots/ (quick)
+#   scripts/demo-video --encode  encodes the last recording again
+#
+# What it records is kept in pila-demo/ (master.mkv, lossless; captions.json;
+# the logs). Sealed off like scripts/screenshot: a temporary HOME and runtime
+# directory, a private D-Bus session bus, UTC (the bar's clock); nothing of
+# yours shows or changes. Watch it before publishing it.
+#
+# Needs: noctalia, kitty, vim, gtk4-demo and gtk4-print-editor (package
+# gtk4-demos on some distros), grim, wtype, notify-send (package libnotify),
+# python3, dbus-run-session (package dbus), and ffmpeg but for --shots. Uses
+# target/release/pila, or PILA_BIN.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+here=$(pwd)
+out="$here/pila-demo"
+
+mode=record
+case "${1:-}" in
+    "") ;;
+    --shots) mode=shots ;;
+    --encode) mode=encode ;;
+    *) echo "usage: scripts/demo-video [--shots | --encode]" >&2; exit 1 ;;
+esac
+
+if [ "$mode" = encode ]; then
+    if [ ! -s "$out/master.mkv" ]; then
+        echo "No recording in $out: run scripts/demo-video first" >&2
+        exit 1
+    fi
+    exec scripts/demo-scenes encode "$out" "$here"
+fi
+
+tools=(noctalia kitty vim gtk4-demo gtk4-print-editor grim wtype notify-send python3 dbus-run-session)
+[ "$mode" = record ] && tools+=(ffmpeg)
+for tool in "${tools[@]}"; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "scripts/demo-video: $tool not found" >&2
+        exit 1
+    fi
+done
+bin="${PILA_BIN:-target/release/pila}"
+if [ ! -x "$bin" ]; then
+    echo "$bin not found; build it first: cargo build --release, or set PILA_BIN" >&2
+    exit 1
+fi
+bin=$(realpath "$bin")
+
+sealed=$(mktemp -d)
+trap 'chmod -R u+w "${sealed:?}" 2>/dev/null || true; rm -rf "${sealed:?}"' EXIT
+home="$sealed/home"
+mkdir -p "$home/.config/pila" "$sealed/run" "$sealed/bin"
+chmod 700 "$sealed/run"
+# `pila msg` in the terminals runs this Pila.
+ln -s "$bin" "$sealed/bin/pila"
+# Noctalia's first-run dialog is skipped once this marker exists.
+for dir in .config .local/state .cache; do
+    mkdir -p "$home/$dir/noctalia"
+    touch "$home/$dir/noctalia/.setup-complete"
+done
+rm -rf "$out"
+mkdir -p "$out"
+
+# The same quiet dark gradient as scripts/screenshot.
+sed -n '/^python3 -I - "\$work\/wallpaper.png" <<.EOF.$/,/^EOF$/p' scripts/screenshot \
+    | sed '1d;$d' | python3 -I - "$out/wallpaper.png"
+
+# Pila's config, which a scene edits in vim: what it changes comes first.
+cat >"$home/.config/pila/config.toml" <<'EOF'
+# Pila applies this file as soon as it's saved.
+mod = "super"
+terminal = "kitty"
+launcher = "noctalia msg panel-toggle launcher"
+corner-radius = 0
+
+[colors]
+bar = "#2f3136"
+
+[[output]]
+name = "eDP-1"
+scale = 1.5
+
+# Noctalia animates its own panels.
+[[layer-rule]]
+namespace = "noctalia-*"
+animations = false
+
+[[window-rule]]
+title = "GTK Demo"
+position = [40, 24]
+size = [760, 540]
+
+[[window-rule]]
+title = "GTK Print Editor*"
+position = [380, 60]
+size = [600, 400]
+
+[[window-rule]]
+app-id = "pila-config"
+position = [690, 290]
+size = [540, 340]
+
+[[window-rule]]
+app-id = "pila-glass"
+position = [430, 100]
+size = [460, 220]
+blur = true
+EOF
+
+echo "Playing the scenes on a headless Pila (about a minute and a half)..."
+status=0
+env -u WAYLAND_DISPLAY -u DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u PILA_SOCKET \
+    -u XDG_SESSION_DESKTOP -u DESKTOP_SESSION \
+    HOME="$home" XDG_RUNTIME_DIR="$sealed/run" TZ=UTC PATH="$sealed/bin:$PATH" GTK_THEME=Adwaita:dark \
+    XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+    XDG_CACHE_HOME="$home/.cache" XDG_DATA_HOME="$home/.local/share" \
+    RUST_LOG=info,pila::frames=debug \
+    timeout 300 dbus-run-session -- "$bin" --backend headless \
+    --headless-outputs "eDP-1:1920x1080@60=Pila/Demo" \
+    -c "$here/scripts/demo-scenes play $out --$mode >$out/scenes.log 2>&1" \
+    >"$out/pila.log" 2>&1 || status=$?
+
+if ! grep -qx "demo-scenes: done" "$out/scenes.log"; then
+    echo "The scenes didn't finish (Pila's status $status); their log ends with:" >&2
+    tail -20 "$out/scenes.log" >&2
+    exit 1
+fi
+if grep -q "panicked" "$out/pila.log"; then
+    echo "Pila panicked: see $out/pila.log" >&2
+    exit 1
+fi
+grep "pila::frames: frames" "$out/pila.log" | grep -v "missed=0 " | sed 's/^/missed refreshes: /' || true
+
+if [ "$mode" = shots ]; then
+    echo "Screenshots in $out/shots: look at them."
+    exit 0
+fi
+cat "$out/record.log"
+scripts/demo-scenes encode "$out" "$here"
+echo "Watch them before publishing them."

@@ -9,3 +9,7 @@
 /pila-shells/
 # What scripts/report writes
 /pila-report.txt
+# What scripts/demo-video writes
+/pila-demo/
+/pila-demo.mp4
+/pila-demo-short.mp4

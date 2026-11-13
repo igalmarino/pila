@@ -58,3 +58,20 @@ dialog skipped by its `.setup-complete` marker), GTK Demo with its own title bar
 windows placed by window rules, one translucent with blur over GTK Demo. Redo it when the looks
 or the shells change, and look at it before committing it: no personal data (a sample config,
 no prompt with a user or host name).
+
+# scripts/demo-video
+
+`scripts/demo-video` makes a demo video on a sealed headless Pila (as `scripts/screenshot`: one
+1920x1080 output at scale 1.5, default looks, Noctalia's bar, UTC): `scripts/demo-scenes` plays
+captioned scenes with real input (pointer and Pila's bindings through the control socket, text
+through `wtype`), waiting on Pila's state, never on fixed sleeps for something to happen;
+`scripts/demo-record` records the output at a constant 60 fps (an ext-image-copy-capture client:
+each frame in the tick of its presentation time, ticks with nothing new repeated) into a lossless
+`pila-demo/master.mkv`, and ffmpeg captions it into `pila-demo.mp4` (every scene, 1080p60) and
+`pila-demo-short.mp4` (the scenes marked short, 720p, under 10 MB, for the README; GitHub plays a
+video inline only when uploaded through its web editor). `--shots` records nothing and takes a
+screenshot per scene (`pila-demo/shots/`), the quick way to check scenes; `--encode` encodes the
+last recording again. It fails when a scene's wait times out, a saved config doesn't load or Pila
+panics, and lists missed refreshes from `pila::frames`. Redo it when the looks, the shells or
+the scenes change, and watch it before publishing it: no personal data. A scene that needs a
+new kind of input or wait gets a helper in `demo-scenes`, not a sleep.

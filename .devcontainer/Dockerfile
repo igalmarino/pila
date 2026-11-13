@@ -23,6 +23,7 @@ ENV TZ="${TZ}" \
 #   - Wayland test clients to run inside your compositor
 #   - a machine id: without one D-Bus can't start a session bus, and notify-send
 #     (scripts/check's Noctalia scenario) fails
+#   - ffmpeg: scripts/demo-video encodes the demo video
 RUN pacman -Syu --noconfirm --needed \
         git openssh github-cli less vim nano jq ripgrep fd unzip \
         rustup clang mold pkgconf gdb shellcheck cargo-audit \
@@ -31,7 +32,7 @@ RUN pacman -Syu --noconfirm --needed \
         foot kitty weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
         fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
-        grim slurp wtype wlopm wlsunset noctalia quickshell dux-shell \
+        grim slurp wtype wlopm wlsunset noctalia quickshell dux-shell ffmpeg \
     && rm -rf /var/cache/pacman/pkg/* \
     && dbus-uuidgen --ensure=/etc/machine-id
 

@@ -83,6 +83,9 @@ and cosmic-comp do: 0.7.0, the last release, is from June 2025).
   before a release.
 - README screenshot: `scripts/screenshot` remakes `docs/screenshot.png` on a sealed headless
   Pila (default looks, Noctalia, sample windows); show it to the user before committing it.
+- Demo video: `scripts/demo-video` records captioned scenes on a sealed headless Pila into
+  `pila-demo.mp4` and `pila-demo-short.mp4` (not committed; `--shots` to check the scenes
+  quickly; `scripts/CLAUDE.md`); show them to the user before they're published.
 - Debugging: `WAYLAND_DEBUG=1` on a client for protocol traces, `RUST_LOG=debug` for the
   compositor, `RUST_LOG=pila::frames=debug` for frame times and missed refreshes (see
   "Performance pillar"). To watch an animation frame by frame: `[animations] speed = 4`

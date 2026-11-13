@@ -55,10 +55,11 @@ jobs:
           shellcheck --severity=warning --external-sources \
             scripts/check scripts/coverage scripts/dev scripts/install scripts/layer-namespaces \
             scripts/link-wayland scripts/report scripts/screenshot scripts/shells scripts/tty \
+            scripts/demo-video \
             scripts/uninstall resources/session/pila-session \
             .devcontainer/post-start.sh
       - name: Python scripts
         run: |
           python3 -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' \
             scripts/sandbox-socket scripts/toplevel-action scripts/workspace-action \
-            scripts/capture-stream
+            scripts/capture-stream scripts/demo-record scripts/demo-scenes
