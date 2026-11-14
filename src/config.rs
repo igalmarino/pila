@@ -8,7 +8,8 @@
 //! which tests check list every one; the actions are `NAMED_ACTIONS` and
 //! `ACTIONS_WITH_ARGUMENT`, which `config.example.toml` lists (checked too).
 //! The mouse bindings: Mod+left drag moves a window, Mod+right drag resizes it
-//! from the nearest corner.
+//! from the nearest corner. A binding's key may also be a mouse wheel's notch
+//! (`WheelScrollDown`, ...: `Trigger::Wheel`, run by `input.rs`).
 //!
 //! `[bindings]` in the config adds to or replaces the keyboard bindings above
 //! (`"Mod+Shift+Return" = "spawn kitty -e htop"`, `"Mod+J" = "none"`); the
@@ -85,6 +86,10 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("Mod+Page_Up", "workspace-prev"),
     ("Mod+Shift+Page_Down", "move-to-workspace-next"),
     ("Mod+Shift+Page_Up", "move-to-workspace-prev"),
+    ("Mod+WheelScrollDown", "workspace-next"),
+    ("Mod+WheelScrollUp", "workspace-prev"),
+    ("Mod+Shift+WheelScrollDown", "move-to-workspace-next"),
+    ("Mod+Shift+WheelScrollUp", "move-to-workspace-prev"),
     ("Mod+Shift+Q", "close"),
     ("Mod+Shift+E", "quit"),
 ];
@@ -216,13 +221,43 @@ pub fn tap_sym(sym: Keysym) -> Option<Keysym> {
     }
 }
 
-/// A key combination, e.g. `Mod+Shift+Q`, or a modifier tapped alone
-/// (`Mod`: its own modifier and `tap_sym`).
+/// A key combination, e.g. `Mod+Shift+Q`, a modifier tapped alone (`Mod`:
+/// its own modifier and `tap_sym`), or modifiers with a mouse wheel step
+/// (`Mod+WheelScrollDown`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyCombo {
     pub mods: Mods,
+    pub trigger: Trigger,
+}
+
+/// What completes a binding's modifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
     /// The unshifted (latin) keysym, lowercase for letters.
-    pub sym: Keysym,
+    Key(Keysym),
+    /// A step of a mouse wheel (`input.rs::wheel_bindings`).
+    Wheel(WheelDirection),
+}
+
+/// Which way a wheel step goes, as bindings name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WheelDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl WheelDirection {
+    fn parse(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "wheelscrollup" => Some(Self::Up),
+            "wheelscrolldown" => Some(Self::Down),
+            "wheelscrollleft" => Some(Self::Left),
+            "wheelscrollright" => Some(Self::Right),
+            _ => None,
+        }
+    }
 }
 
 impl KeyCombo {
@@ -244,7 +279,10 @@ impl KeyCombo {
                     ModKey::Super => Keysym::Super_L,
                     ModKey::Ctrl => Keysym::Control_L,
                 };
-                return Ok(KeyCombo { mods, sym });
+                return Ok(KeyCombo {
+                    mods,
+                    trigger: Trigger::Key(sym),
+                });
             }
         }
         let mut mods = Mods::default();
@@ -258,13 +296,22 @@ impl KeyCombo {
                 _ => return Err(format!("unknown modifier {part:?} in {text:?}")),
             }
         }
+        if let Some(direction) = WheelDirection::parse(key) {
+            return Ok(KeyCombo {
+                mods,
+                trigger: Trigger::Wheel(direction),
+            });
+        }
         // Case-insensitive lookup returns the lowercase keysym for letters,
         // matching the unshifted sym the keyboard filter compares against.
         let sym = xkb::keysym_from_name(key, xkb::KEYSYM_CASE_INSENSITIVE);
         if sym.raw() == 0 {
             return Err(format!("unknown key {key:?} in {text:?}"));
         }
-        Ok(KeyCombo { mods, sym })
+        Ok(KeyCombo {
+            mods,
+            trigger: Trigger::Key(sym),
+        })
     }
 }
 
@@ -1689,7 +1736,16 @@ impl Config {
         }
         self.bound(KeyCombo {
             mods: mods.into(),
-            sym,
+            trigger: Trigger::Key(sym),
+        })
+    }
+
+    /// The action bound to a wheel step that way with exactly the pressed
+    /// modifiers.
+    pub fn wheel_action(&self, direction: WheelDirection, mods: &ModifiersState) -> Option<Action> {
+        self.bound(KeyCombo {
+            mods: mods.into(),
+            trigger: Trigger::Wheel(direction),
         })
     }
 
@@ -1698,7 +1754,7 @@ impl Config {
     pub fn tap_action(&self, sym: Keysym, mods: &ModifiersState) -> Option<Action> {
         self.bound(KeyCombo {
             mods: mods.into(),
-            sym: tap_sym(sym)?,
+            trigger: Trigger::Key(tap_sym(sym)?),
         })
     }
 

@@ -96,7 +96,7 @@ A short report helps even if everything works:
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
   between monitors; switching by recent use (Mod+Tab, Alt+Tab); tapping Mod alone opens the
-  launcher; workspaces spanning all monitors (Mod+1..N,
+  launcher; workspaces spanning all monitors (Mod+1..N, Mod and the mouse wheel,
   four-finger swipes); a window menu on the title bar (right click); windows asking for
   attention marked with an amber title bar; a shadow under each window (`[shadow]`); optional
   rounded corners (`corner-radius`); your own colors (`[colors]`).
@@ -127,7 +127,7 @@ A short report helps even if everything works:
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
   pointer lock and confinement for games, shaking the pointer to find it (`[cursor]`), any key
-  bindable (media keys included).
+  bindable (media keys included), and the mouse wheel with modifiers.
 - **Configuration** in one TOML file, applied live when saved.
 - **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
   action ([docs/IPC.md](https://github.com/igalmarino/pila/blob/main/docs/IPC.md)).

@@ -125,6 +125,8 @@ click-method = "button-areas"
 "Mod+Space" = "switch-layout next"
 "Mod+Shift+Space" = "switch-layout prev"
 "Mod+Ctrl+1" = "switch-layout 1"
+"Mod+WheelScrollRight" = "focus-output next"
+"super+shift+wheelscrollleft" = "none"
 "Mod+J" = "none"
 
 [gestures]

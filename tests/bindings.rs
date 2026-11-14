@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::client::states;
+use common::client::{states, Ev};
 use common::*;
 
 // Evdev key codes, as clients get them.
@@ -676,4 +676,60 @@ fn the_screenshot_bindings_run_grim() {
     assert!(log.contains("slurp\n"), "{log}");
     assert!(log.contains("grim -g 10,20 30x40 -\n"), "{log}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Wheel steps are bound like keys: other modifiers and directions, and
+/// "none" gives a default back to the apps. A touchpad's scrolling is never
+/// a wheel step.
+#[test]
+fn wheel_bindings_are_configurable() {
+    let (mut pila, client, _, (x, y, ..)) = one_window(
+        r#"
+[bindings]
+"Ctrl+WheelScrollRight" = "maximize"
+"Mod+WheelScrollDown" = "none"
+"#,
+    );
+    pila.move_to((x + 50) as f64, (y + 50) as f64);
+    client.wait("pointer enter", |s| s.pointer_name.is_some());
+
+    pila.key_press("Control_L");
+    pila.scroll("wheel", 1.0, 0.0);
+    pila.key_release("Control_L");
+    pila.wait("maximized", |s| {
+        window_in(s, "a").unwrap()["maximized"] == true
+    });
+
+    // Unbound: the window gets the notch, and the workspace stays.
+    pila.key_press("Super_L");
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.key_release("Super_L");
+    client.wait("the notch", |s| {
+        s.events.iter().any(|e| {
+            matches!(
+                e,
+                Ev::AxisV120 {
+                    horizontal: false,
+                    value: 120
+                }
+            )
+        })
+    });
+    // A touchpad with Mod: scrolling too, up included.
+    pila.key_press("Super_L");
+    pila.scroll("finger", 0.0, -20.0);
+    pila.key_release("Super_L");
+    client.wait("the touchpad scroll", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Axis { horizontal: false, value } if *value == -20.0))
+    });
+    assert_eq!(pila.state()["workspace"], 1);
+    assert!(!client.events().iter().any(|e| matches!(
+        e,
+        Ev::AxisV120 {
+            horizontal: true,
+            ..
+        }
+    )));
 }

@@ -19,7 +19,7 @@ use smithay::{
 };
 
 use crate::{
-    config::Action,
+    config::{Action, WheelDirection},
     decoration::{Decoration, TitleBarPart},
     grabs::resize_grab::ResizeEdge,
     pointer_constraints::Constraint,
@@ -725,8 +725,20 @@ impl Pila {
                 .amount(axis)
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
-        let horizontal = amount(Axis::Horizontal);
-        let vertical = amount(Axis::Vertical);
+        let [bound_horizontal, bound_vertical] = self.wheel_bindings::<I>(&event);
+        let horizontal = if bound_horizontal {
+            0.0
+        } else {
+            amount(Axis::Horizontal)
+        };
+        let vertical = if bound_vertical {
+            0.0
+        } else {
+            amount(Axis::Vertical)
+        };
+        if (bound_horizontal || bound_vertical) && horizontal == 0.0 && vertical == 0.0 {
+            return;
+        }
 
         let mut frame = AxisFrame::new(event.time()).source(source);
         if horizontal != 0.0 {
@@ -755,5 +767,61 @@ impl Pila {
         };
         pointer.axis(self, frame);
         pointer.frame(self);
+    }
+
+    /// A mouse wheel's steps bound with the held modifiers
+    /// (`Config::wheel_action`): each notch (`value120` 120, summed for
+    /// wheels that send parts of one) runs the action once. Returns which
+    /// axes (horizontal, vertical) were bound, which the client doesn't get.
+    /// The same filters as the keyboard's bindings: not while locked, while
+    /// the window menu is open or shortcuts are inhibited.
+    fn wheel_bindings<I: InputBackend>(&mut self, event: &I::PointerAxisEvent) -> [bool; 2] {
+        let mut bound = [false; 2];
+        if !matches!(event.source(), AxisSource::Wheel | AxisSource::WheelTilt)
+            || self.is_locked()
+            || self.window_menu.is_some()
+            || self.shortcuts_inhibited()
+        {
+            self.input.wheel_v120 = [0.0; 2];
+            return bound;
+        }
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return bound;
+        };
+        let mods = keyboard.modifier_state();
+        let axes = [
+            (
+                Axis::Horizontal,
+                WheelDirection::Left,
+                WheelDirection::Right,
+            ),
+            (Axis::Vertical, WheelDirection::Up, WheelDirection::Down),
+        ];
+        let mut actions = Vec::new();
+        for (i, (axis, back, forward)) in axes.into_iter().enumerate() {
+            let Some(v120) = event.amount_v120(axis).filter(|v| *v != 0.0) else {
+                continue;
+            };
+            let direction = if v120 > 0.0 { forward } else { back };
+            let Some(action) = self.config.wheel_action(direction, &mods) else {
+                self.input.wheel_v120[i] = 0.0;
+                continue;
+            };
+            bound[i] = true;
+            let sum = &mut self.input.wheel_v120[i];
+            // Turning the other way starts over.
+            if *sum * v120 < 0.0 {
+                *sum = 0.0;
+            }
+            *sum += v120;
+            while sum.abs() >= 120.0 {
+                *sum -= 120.0f64.copysign(*sum);
+                actions.push(action.clone());
+            }
+        }
+        for action in actions {
+            self.run_action(action, SERIAL_COUNTER.next_serial());
+        }
+        bound
     }
 }

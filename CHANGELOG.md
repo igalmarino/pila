@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Mod and the mouse wheel switch workspaces:** a notch down goes to the next workspace, up to
+  the previous one, and with Shift too the focused window goes there (as `Mod+Page_Down` and
+  `Mod+Page_Up`). Any binding can now use a wheel notch as its key: `WheelScrollUp`,
+  `WheelScrollDown`, `WheelScrollLeft`, `WheelScrollRight`, e.g.
+  `"Mod+WheelScrollRight" = "focus-output next"`; `"Mod+WheelScrollDown" = "none"` gives the defaults
+  back to the apps.
 - **A click on the title bar of a maximized, fullscreen or snapped window leaves it as it is:**
   the press alone brought it back to its old size, as dragging it does. Now the pointer has to
   move a few pixels first; the same goes for a Mod+click anywhere in the window.

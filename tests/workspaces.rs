@@ -2,6 +2,7 @@
 
 mod common;
 
+use common::client::Ev;
 use common::*;
 
 fn visible(state: &Value) -> Vec<String> {
@@ -93,6 +94,84 @@ fn mod_shift_page_keys_move_the_window() {
     pila.combo("Super+Shift+Page_Up");
     pila.wait("a on 1", |s| window_in(s, "a").unwrap()["workspace"] == 1);
     assert_eq!(pila.state()["workspace"], 2);
+}
+
+/// Mod with a mouse wheel notch: down is the next workspace, up the
+/// previous; the window under the pointer never sees those notches.
+#[test]
+fn mod_wheel_steps_through_workspaces_and_the_window_doesnt_see_it() {
+    let mut pila = TestPila::with_config("workspaces = 3\n");
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    pila.move_to((x + 100) as f64, (y + 100) as f64);
+    client.wait("pointer enter", |s| s.pointer_name.as_deref() == Some("a"));
+
+    pila.key_press("Super_L");
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.wait("2", |s| s["workspace"] == 2);
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.wait("3", |s| s["workspace"] == 3);
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.stays("still on 3", std::time::Duration::from_millis(100), |s| {
+        s["workspace"] == 3
+    });
+    pila.scroll("wheel", 0.0, -2.0);
+    pila.wait("1, two notches up", |s| s["workspace"] == 1);
+    pila.key_release("Super_L");
+    client.roundtrip();
+    let scrolled = |e: &Ev| matches!(e, Ev::Axis { .. } | Ev::AxisV120 { .. });
+    assert!(
+        !client.events().iter().any(scrolled),
+        "{:?}",
+        client.events()
+    );
+
+    // Without Mod the wheel scrolls the window, and the workspace stays.
+    pila.scroll("wheel", 0.0, 1.0);
+    client.wait("a wheel notch", |s| s.events.iter().any(scrolled));
+    assert_eq!(pila.state()["workspace"], 1);
+}
+
+/// A high-resolution wheel sends parts of a notch: a whole one switches
+/// once; turning back starts over.
+#[test]
+fn a_high_resolution_wheel_switches_once_a_notch() {
+    let mut pila = TestPila::start();
+    pila.key_press("Super_L");
+    pila.scroll("wheel", 0.0, 0.5);
+    pila.stays(
+        "half a notch: still on 1",
+        std::time::Duration::from_millis(100),
+        |s| s["workspace"] == 1,
+    );
+    pila.scroll("wheel", 0.0, 0.5);
+    pila.wait("a whole notch: 2", |s| s["workspace"] == 2);
+    pila.scroll("wheel", 0.0, 0.75);
+    pila.scroll("wheel", 0.0, -0.5);
+    pila.scroll("wheel", 0.0, 0.5);
+    pila.stays(
+        "the way back started over: still on 2",
+        std::time::Duration::from_millis(100),
+        |s| s["workspace"] == 2,
+    );
+    pila.key_release("Super_L");
+}
+
+#[test]
+fn mod_shift_wheel_moves_the_focused_window() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").create();
+    pila.wait_focus("a");
+    pila.key_press("Super_L");
+    pila.key_press("Shift_L");
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.wait("a on 2", |s| window_in(s, "a").unwrap()["workspace"] == 2);
+    pila.key_release("Shift_L");
+    pila.key_release("Super_L");
+    assert_eq!(pila.state()["workspace"], 1);
 }
 
 #[test]

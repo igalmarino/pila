@@ -52,7 +52,12 @@ Key flows and invariants:
   lock and inhibitor filters) and runs it after the release was forwarded to the client,
   which saw the press like any modifier's. Scrolling
   (`on_pointer_axis`) goes to the surface under the pointer: a wheel step as `value120` 120
-  plus 15 px, a touchpad's pixels, with a stop when the fingers lift.
+  plus 15 px, a touchpad's pixels, with a stop when the fingers lift. Before that, a mouse
+  wheel's steps with the held modifiers may be a binding (`Trigger::Wheel`,
+  `wheel_bindings`): each notch (`value120` summed in `InputState::wheel_v120`, for
+  high-resolution wheels; turning back starts over) runs it once, and a bound axis isn't
+  sent to the client; the keyboard's filters apply (locked, window menu open, shortcuts
+  inhibited: the scroll is the client's).
   Bindings don't run while the focused surface (or its menu's window) holds an active
   keyboard-shortcuts inhibitor (`shortcuts_inhibited`; all requests are granted, and sandboxed apps can't make any), or
   while the session is locked; Quit is the exception to the inhibitor (and, in debug

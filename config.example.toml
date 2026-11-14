@@ -136,9 +136,11 @@
 [bindings]
 # Key bindings: add new ones, replace defaults, or remove them with "none".
 # Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
-# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...). A modifier
-# alone ("Mod", "Super", "Alt", "Ctrl") is a tap: it runs when the key is
-# released with no other key, click, scroll or gesture since it was pressed.
+# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...), or a mouse
+# wheel's notch: WheelScrollUp, WheelScrollDown, WheelScrollLeft,
+# WheelScrollRight (once a notch; the app under the pointer doesn't get it). A
+# modifier alone ("Mod", "Super", "Alt", "Ctrl") is a tap: it runs when the key
+# is released with no other key, click, scroll or gesture since it was pressed.
 # Commands get PILA_OUTPUT, the name of the screen under the pointer (e.g.
 # "spawn grim -o \"$PILA_OUTPUT\" ~/shot.png" captures just that screen).
 # Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
@@ -194,6 +196,9 @@
 #   "Mod+Page_Down" = "workspace-next"   "Mod+Page_Up" = "workspace-prev"
 #   "Mod+Shift+Page_Down" = "move-to-workspace-next"
 #   "Mod+Shift+Page_Up"   = "move-to-workspace-prev"
+#   "Mod+WheelScrollDown" = "workspace-next"   "Mod+WheelScrollUp" = "workspace-prev"
+#   "Mod+Shift+WheelScrollDown" = "move-to-workspace-next"
+#   "Mod+Shift+WheelScrollUp"   = "move-to-workspace-prev"
 #   "Mod+Shift+Q" = "close"
 #   "Mod+Shift+E" = "quit"
 #

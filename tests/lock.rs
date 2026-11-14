@@ -67,10 +67,19 @@ fn shaking_the_pointer_grows_the_cursor_on_the_lock_screen_too() {
 
 #[test]
 fn bindings_and_workspace_switches_dont_run_while_locked() {
-    let (mut pila, apps, _locker, _lock) = locked();
+    let (mut pila, apps, locker, _lock) = locked();
     pila.combo("Super+Shift+q");
     pila.combo("Super+2");
     pila.combo("Super+m");
+    // Mod+wheel too, and the notch goes to the lock screen.
+    pila.key_press("Super_L");
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.key_release("Super_L");
+    locker.wait("the notch", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, common::client::Ev::AxisV120 { value: 120, .. }))
+    });
     apps.roundtrip();
     let state = pila.settle();
     assert_eq!(state["workspace"], 1);

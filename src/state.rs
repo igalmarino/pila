@@ -277,6 +277,9 @@ pub struct InputState {
     /// The action of a tap just released, run after the release reached
     /// the client.
     pub tap_action: Option<crate::config::Action>,
+    /// Mouse wheel bindings: the `value120` scrolled toward a notch on each
+    /// axis (horizontal, vertical), for wheels that send parts of one.
+    pub wheel_v120: [f64; 2],
 }
 
 /// A modifier key held alone: its keycode, keysym and the modifiers its
