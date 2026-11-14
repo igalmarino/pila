@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.4 (2026-11-14)
 
 - **Mod and the mouse wheel switch workspaces:** a notch down goes to the next workspace, up to
   the previous one, and with Shift too the focused window goes there (as `Mod+Page_Down` and
