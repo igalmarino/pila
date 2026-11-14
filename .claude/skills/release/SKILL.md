@@ -11,7 +11,10 @@ and the tag and the release are made on GitHub with `gh`, which is logged in.
 0. Checks on what's about to be released, which don't run on every push:
    `gh workflow run compat.yml` and `scripts/shells` (Noctalia, Dux Shell), and wait for both
    to pass. Bare-metal numbers come from the user's `scripts/check` on a TTY.
-1. A commit `Release X` with `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`. The user pushes it;
+1. A commit `Release X` with `CHANGELOG.md`, `Cargo.toml`, `Cargo.lock` and `fuzz/Cargo.lock`
+   (its own lockfile records Pila's version: `cargo metadata --format-version 1 --manifest-path
+   fuzz/Cargo.toml >/dev/null` refreshes only that line, where `cargo update -p pila` moves other
+   crates too). The user pushes it;
    check it's on GitHub (`gh api repos/igalmarino/pila/commits/main --jq .sha`).
 2. An annotated tag `vX` on it, message `pila X`, made through the API (`<sha>` is the
    `Release X` commit):
