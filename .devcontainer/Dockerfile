@@ -24,6 +24,8 @@ ENV TZ="${TZ}" \
 #   - a machine id: without one D-Bus can't start a session bus, and notify-send
 #     (scripts/check's Noctalia scenario) fails
 #   - ffmpeg: scripts/demo-video encodes the demo video
+#   - what building Noctalia from source takes beyond its package's runtime
+#     dependencies (its BUILDING.md), for work on its Pila backend
 RUN pacman -Syu --noconfirm --needed \
         git openssh github-cli less vim nano jq ripgrep fd unzip \
         rustup clang mold pkgconf gdb shellcheck cargo-audit \
@@ -33,6 +35,7 @@ RUN pacman -Syu --noconfirm --needed \
         fuzzel waybar swaybg mako libnotify swaylock wl-clipboard wlr-randr \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
         grim slurp wtype wlopm wlsunset noctalia quickshell dux-shell ffmpeg \
+        meson just wireplumber nlohmann-json stb \
     && rm -rf /var/cache/pacman/pkg/* \
     && dbus-uuidgen --ensure=/etc/machine-id
 
