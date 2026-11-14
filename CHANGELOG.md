@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 (2026-11-13)
 
 - **A fullscreen app no longer stalls Pila as it starts or stops being shown as it is** (direct
   scanout) on AMD laptops with a second monitor: Pila's own frames were ARGB8888 and an app's buffer
