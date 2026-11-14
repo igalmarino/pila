@@ -572,7 +572,7 @@ Key flows and invariants:
   drags) runs `animate_geometry` first (from `set_fill_state_on`, `snap_window`,
   `unsnap_window`, `move_snapped_to`, `move_focused_to_output`;
   not while a window opens, nor inside `without_geometry_animation`, which
-  `begin_move` uses): a `Resizing` keeps a snapshot and the old frame; until the
+  `restore_for_drag` uses): a `Resizing` keeps a snapshot and the old frame; until the
   client commits a new size (`geometry_committed` from the commit handler, by
   `committed_size`: an X11 window's buffer, since X applies a configure at once; or
   `RESIZE_WAIT`) the live window is hidden (alpha 0) and the snapshot stands at the old
@@ -931,7 +931,9 @@ Key flows and invariants:
   `forget_snap`, and maximizing keeps the pre-snap rect as the restore geometry.
   `MoveSurfaceGrab` previews the edge snap target (`Pila::snap_preview`, a solid element
   drawn just above the windows) and applies it on release; dragging a snapped or filled
-  window first restores its old size under the cursor (`begin_move`). Keyboard
+  window first restores its old size under the cursor, once the pointer has moved
+  `RESTORE_DISTANCE` (`restore_for_drag`; a click on its title bar or a Mod+click isn't a
+  drag and leaves it as it is). Keyboard
   move/resize/center go through `apply_rect`, which also configures X11 windows.
   `Side` also names the four quarters (`snap-top-left`, ... or a drag near a corner:
   `edge_target`); a quarter is tiled only on the edges it touches.

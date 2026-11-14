@@ -1383,39 +1383,12 @@ impl Pila {
             return;
         }
 
-        // Dragging a maximized/fullscreen window restores it under the cursor.
+        // A maximized, fullscreen or snapped window stays as it is until the
+        // pointer has really moved (a click on its title bar isn't a drag):
+        // then the grab restores it under the cursor (`restore_for_drag`).
         let (maximized, fullscreen) = fill_state(&window);
-        if maximized || fullscreen {
-            let width = restore_geometry(&window)
-                .map(|r| r.size.w)
-                .unwrap_or(window.geometry().size.w);
-            // It follows the pointer at once, no animation in the way.
-            self.without_geometry_animation(|state| state.set_fill_state(&window, false, false));
-            // Keep the grab point on the title bar if pila draws one,
-            // otherwise near the top of the client's own.
-            let y_offset = if decoration::is_ssd(&window) {
-                -decoration::TITLE_BAR_HEIGHT / 2
-            } else {
-                CASCADE_STEP / 2
-            };
-            let loc = Point::from((
-                start_data.location.x as i32 - width / 2,
-                start_data.location.y as i32 - y_offset,
-            ));
-            self.map_window(window.clone(), loc, true);
-            self.keep_transients_above(&window);
-            self.x11_window_moved(&window);
-        } else if crate::snap::snapped_side(&window).is_some() {
-            // Same for a snapped window: back to its old size under the cursor.
-            let width = self
-                .window_rect(&window)
-                .map(|r| r.size.w)
-                .unwrap_or(window.geometry().size.w);
-            let before_w = crate::snap::snapped_before_width(&window).unwrap_or(width);
-            let x = start_data.location.x as i32 - before_w / 2;
-            let y = self.space.element_location(&window).map_or(0, |l| l.y);
-            self.unsnap_window(&window, Some((x, y).into()));
-        }
+        let restore_on_drag =
+            maximized || fullscreen || crate::snap::snapped_side(&window).is_some();
 
         let Some(initial_window_location) = self.space.element_location(&window) else {
             return;
@@ -1426,10 +1399,44 @@ impl Pila {
             initial_window_location,
             snap: None,
             moved: false,
+            restore_on_drag,
         };
         pointer.set_grab(self, grab, serial, Focus::Clear);
         // After set_grab: clearing the focus resets the cursor to the default.
         self.set_cursor(CursorImageStatus::Named(CursorIcon::Grabbing));
+    }
+
+    /// A move grab of a maximized, fullscreen or snapped window, once the
+    /// pointer has moved: back to its old size under the cursor, at `at`.
+    pub fn restore_for_drag(&mut self, window: &Window, at: Point<f64, Logical>) {
+        let (maximized, fullscreen) = fill_state(window);
+        if maximized || fullscreen {
+            let width = restore_geometry(window)
+                .map(|r| r.size.w)
+                .unwrap_or(window.geometry().size.w);
+            // It follows the pointer at once, no animation in the way.
+            self.without_geometry_animation(|state| state.set_fill_state(window, false, false));
+            // Keep the grab point on the title bar if pila draws one,
+            // otherwise near the top of the client's own.
+            let y_offset = if decoration::is_ssd(window) {
+                -decoration::TITLE_BAR_HEIGHT / 2
+            } else {
+                CASCADE_STEP / 2
+            };
+            let loc = Point::from((at.x as i32 - width / 2, at.y as i32 - y_offset));
+            self.map_window(window.clone(), loc, true);
+            self.keep_transients_above(window);
+            self.x11_window_moved(window);
+        } else if crate::snap::snapped_side(window).is_some() {
+            let width = self
+                .window_rect(window)
+                .map(|r| r.size.w)
+                .unwrap_or(window.geometry().size.w);
+            let before_w = crate::snap::snapped_before_width(window).unwrap_or(width);
+            let x = at.x as i32 - before_w / 2;
+            let y = self.space.element_location(window).map_or(0, |l| l.y);
+            self.unsnap_window(window, Some((x, y).into()));
+        }
     }
 
     pub fn begin_resize(

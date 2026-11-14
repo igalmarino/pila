@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **A click on the title bar of a maximized, fullscreen or snapped window leaves it as it is:**
+  the press alone brought it back to its old size, as dragging it does. Now the pointer has to
+  move a few pixels first; the same goes for a Mod+click anywhere in the window.
+
 ## 0.5.3 (2026-11-13)
 
 - **A fullscreen app no longer stalls Pila as it starts or stops being shown as it is** (direct

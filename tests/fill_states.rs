@@ -5,6 +5,7 @@ mod common;
 
 use common::client::states;
 use common::*;
+use std::time::Duration;
 
 const BAR: i64 = 28;
 
@@ -205,4 +206,59 @@ fn toplevel_bounds_are_the_usable_area() {
     client.wait("bounds", |s| s.windows[a.0].bounds.is_some());
     let bounds = client.with_window(a, |w| w.bounds).unwrap();
     assert!(bounds.0 <= 1280 && bounds.1 <= 800, "{bounds:?}");
+}
+
+/// A click on a snapped or maximized window's title bar, without moving,
+/// leaves it where it is: only a drag brings it back to its old size.
+#[test]
+fn a_click_on_the_title_bar_of_a_filled_window_doesnt_restore_it() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+
+    pila.combo("Super+Left");
+    let snapped = pila.wait("snapped", |s| {
+        let a = window_in(s, "a").unwrap();
+        a["snapped"] == "left" && a["geometry"]["w"] == 640
+    });
+    let (x, y, w, h) = rect(&window_in(&snapped, "a").unwrap()["geometry"]);
+    pila.click_at((x + w / 2) as f64, (y - BAR / 2) as f64);
+    pila.stays(
+        "snapped after a click on its title bar",
+        Duration::from_millis(300),
+        |s| {
+            let a = window_in(s, "a").unwrap();
+            a["snapped"] == "left" && rect(&a["geometry"]) == (x, y, w, h)
+        },
+    );
+
+    pila.combo("Super+m");
+    let maximized = pila.wait("maximized", |s| {
+        let a = window_in(s, "a").unwrap();
+        a["maximized"] == true && a["geometry"]["w"] == 1280
+    });
+    let (x, y, w, h) = rect(&window_in(&maximized, "a").unwrap()["geometry"]);
+    pila.click_at((x + w / 2) as f64, (y - BAR / 2) as f64);
+    pila.stays(
+        "maximized after a click on its title bar",
+        Duration::from_millis(300),
+        |s| {
+            let a = window_in(s, "a").unwrap();
+            a["maximized"] == true && rect(&a["geometry"]) == (x, y, w, h)
+        },
+    );
+
+    // Mod + a click anywhere in it: the same.
+    pila.key_press("Super_L");
+    pila.click_at((x + w / 2) as f64, (y + h / 2) as f64);
+    pila.key_release("Super_L");
+    pila.stays(
+        "maximized after a Mod+click in it",
+        Duration::from_millis(300),
+        |s| {
+            let a = window_in(s, "a").unwrap();
+            a["maximized"] == true && rect(&a["geometry"]) == (x, y, w, h)
+        },
+    );
 }

@@ -26,7 +26,15 @@ pub struct MoveSurfaceGrab {
     /// modifier or title bar drag reaches the grab after it's installed; only
     /// a press after some motion means a release was lost.
     pub moved: bool,
+    /// The window is maximized, fullscreen or snapped: it's restored (and
+    /// starts following the pointer) only once the pointer has moved
+    /// `RESTORE_DISTANCE` from where the grab started.
+    pub restore_on_drag: bool,
 }
+
+/// How far the pointer moves before a drag restores a filled or snapped
+/// window, in logical pixels: less is a click.
+const RESTORE_DISTANCE: f64 = 8.0;
 
 impl PointerGrab<Pila> for MoveSurfaceGrab {
     fn motion(
@@ -45,6 +53,22 @@ impl PointerGrab<Pila> for MoveSurfaceGrab {
             return;
         }
         self.moved = true;
+
+        if self.restore_on_drag {
+            let delta = event.location - self.start_data.location;
+            if delta.x.hypot(delta.y) < RESTORE_DISTANCE {
+                return;
+            }
+            self.restore_on_drag = false;
+            data.restore_for_drag(&self.window, event.location);
+            let Some(location) = data.space.element_location(&self.window) else {
+                handle.unset_grab(self, data, event.serial, event.time, true);
+                return;
+            };
+            // The drag goes on from here.
+            self.initial_window_location = location;
+            self.start_data.location = event.location;
+        }
 
         let delta = event.location - self.start_data.location;
         let new_location = self.initial_window_location.to_f64() + delta;
