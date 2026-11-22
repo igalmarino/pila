@@ -74,9 +74,15 @@ pub struct ScreenCasts {
 }
 
 impl ScreenCasts {
-    /// Whether a cast is streaming: captures' offscreen textures are kept.
+    /// Whether a cast is streaming: frames go out.
     pub fn streaming(&self) -> bool {
         self.casts.iter().any(|cast| cast.streaming)
+    }
+
+    /// Whether there's a cast, streaming or not yet: captures' offscreen
+    /// textures are kept (one is made with the cast, `start_cast`).
+    pub fn active(&self) -> bool {
+        !self.casts.is_empty()
     }
 }
 
@@ -249,6 +255,10 @@ impl Pila {
             }
         };
         let (stream, listener) = stream;
+        // The first frame's texture now, while the app links to the stream.
+        if let Some(mut renderer) = self.backend.as_mut().and_then(|b| b.renderer()) {
+            self.capture.prepare_read_back(&mut renderer, size);
+        }
         info!(
             session,
             output = output.name(),
@@ -412,12 +422,15 @@ impl Pila {
         self.disconnect_pipewire_if_idle();
     }
 
-    /// With no cast left, PipeWire's connection goes: it's made again at
-    /// the next.
+    /// With no cast left, PipeWire's connection goes (it's made again at
+    /// the next), and the offscreen textures if no capture keeps them.
     fn disconnect_pipewire_if_idle(&mut self) {
         if !self.screencast.casts.is_empty() {
             return;
         }
+        // Its texture goes now, not at the next frame drawn (a still
+        // screen has none).
+        self.capture.trim_textures(false);
         if let Some(pipewire) = self.screencast.pipewire.take() {
             self.loop_handle.remove(pipewire.source);
             debug!("portal: disconnected from PipeWire");

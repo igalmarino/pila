@@ -1908,7 +1908,7 @@ impl Pila {
             self.process_screencopies(&mut input);
             self.process_screencasts(&mut input);
             self.update_share_previews(&mut input);
-            self.capture.trim_textures(self.screencast.streaming());
+            self.capture.trim_textures(self.screencast.active());
             captures = started.elapsed();
         }
         // The space knows which outputs each window is on only after its

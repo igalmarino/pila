@@ -1038,6 +1038,53 @@ impl ReadBack<'_> {
 }
 
 impl Captures {
+    /// Make the offscreen texture a `size` read-back draws into, and draw
+    /// into it once, ahead of the first one: what that first frame would
+    /// otherwise pay for (a portal share's, made when its stream is, before
+    /// an app links to it). Kept like the others (`trim_textures`).
+    pub(crate) fn prepare_read_back(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        size: Size<i32, Physical>,
+    ) {
+        if size.w <= 0
+            || size.h <= 0
+            || self
+                .shm_textures
+                .iter()
+                .any(|t| t.size() == (size.w, size.h).into())
+        {
+            return;
+        }
+        let texture = Offscreen::<GlesTexture>::create_buffer(
+            renderer,
+            Fourcc::Abgr8888,
+            (size.w, size.h).into(),
+        );
+        let mut texture = match texture {
+            Ok(texture) => texture,
+            Err(err) => {
+                debug!(?err, "capture: no texture to prepare");
+                return;
+            }
+        };
+        let cleared = renderer.bind(&mut texture).map(|mut target| {
+            let mut tracker = OutputDamageTracker::new(size, 1.0, Transform::Normal);
+            let elements: [PilaRenderElement; 0] = [];
+            tracker
+                .render_output(renderer, &mut target, 0, &elements, TRANSPARENT)
+                .is_ok()
+        });
+        if !matches!(cleared, Ok(true)) {
+            debug!("capture: can't prepare a texture");
+            return;
+        }
+        self.shm_textures.push(texture);
+        if self.shm_textures.len() > MAX_SHM_TEXTURES {
+            self.shm_textures.remove(0);
+        }
+    }
+
     /// Draw `source` offscreen and hand its pixels, in `wanted`'s byte
     /// order (`Argb8888` or `Abgr8888`), to `write`: once the GPU is done,
     /// off the event loop's back where a fence says when

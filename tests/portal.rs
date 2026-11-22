@@ -204,6 +204,23 @@ fn the_pointer_shows_as_the_app_asks() {
 }
 
 #[test]
+fn a_share_is_ready_to_draw_before_its_first_frame() {
+    let (mut pila, bus, _pipewire) = start();
+    pila.settle();
+    assert_eq!(pila.state()["capture"]["textures"], 0);
+    let mut portal = Portal::connect(&bus.address);
+    // Answered, and no app linked to it yet: its first frame's texture is
+    // made already, not in that frame (a one-time cost paid ahead).
+    share(&mut pila, &mut portal, "ready");
+    pila.settle();
+    assert_eq!(pila.state()["capture"]["textures"], 1, "made ahead");
+    portal.close("ready");
+    pila.wait("the texture gone with the share", |s| {
+        s["capture"]["textures"] == 0
+    });
+}
+
+#[test]
 fn a_still_screen_sends_no_more_frames() {
     let (mut pila, bus, pipewire) = start();
     let mut portal = Portal::connect(&bus.address);
