@@ -1136,7 +1136,9 @@ Key flows and invariants:
 - **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id) and shows every output, left to right, as a live preview,
-  the one under the pointer selected. Modal: every key goes to it (`input.rs`, before the window
+  the one under the pointer selected. It's drawn as Pila's other panels are: the windows'
+  corners, the selected tile on a block of the accent (the switcher's), buttons rounded as the
+  cheatsheet's keys. Modal: every key goes to it (`input.rs`, before the window
   menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,
   and every output is dimmed under it (`share_picker::elements`, in front of everything of
   Pila's in `render::output_elements`; never while locked). Arrows/Tab select, Enter/Share

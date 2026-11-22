@@ -63,7 +63,8 @@ const ROW_GAP: i32 = 24;
 const COLUMNS: usize = 3;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
-const SELECTED_BORDER: i32 = 2;
+/// The buttons' corners: the cheatsheet's keys'.
+const KEY_RADIUS: i32 = crate::shortcuts_view::CAP_RADIUS;
 /// The footer: the buttons, and the room above it.
 const FOOTER_GAP: i32 = 32;
 const BUTTON_HEIGHT: i32 = 36;
@@ -79,8 +80,6 @@ const MIN_WIDTH: i32 =
 const BORDER: i32 = 1;
 /// Every output under it.
 const DIM: [f32; 4] = [0.0, 0.0, 0.0, 0.45];
-/// The selected tile's fill: the accent over the panel, this much of it.
-const SELECTED_FILL: f32 = 0.35;
 /// A hint's keycap slot, before its text, and where each hint starts.
 const HINT_KEYS: i32 = 60;
 const HINT_TEXT: i32 = 70;
@@ -740,8 +739,14 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
 }
 
 /// One of the panel's solids: its name (its buffer's key), where it is,
-/// its color, and whether it has the windows' corners.
-type PanelSolid = (&'static str, Rectangle<i32, Logical>, [f32; 4], bool);
+/// its color, and its corners' radius and which are rounded (`None`:
+/// square).
+type PanelSolid = (
+    &'static str,
+    Rectangle<i32, Logical>,
+    [f32; 4],
+    Option<(f64, crate::rounded::Corners)>,
+);
 
 /// The picker's elements for the output `output_name`, front to back,
 /// relative to `origin`: the panel on its output, and the dim on every one.
@@ -818,38 +823,41 @@ pub fn elements(
 
     let accent = crate::switcher_view::opaque(colors.snap_preview);
     let [pr, pg, pb, _] = crate::switcher_view::opaque(colors.bar_inactive);
-    let mix = |a: f32, b: f32| a + (b - a) * SELECTED_FILL;
-    let selected_fill = [
-        mix(pr, accent[0]),
-        mix(pg, accent[1]),
-        mix(pb, accent[2]),
-        1.0,
-    ];
     let [hr, hg, hb] = colors.hover;
     let hover = [hr, hg, hb, 1.0];
+    let key_fill = crate::switcher_view::opaque(colors.bar);
     let panel_color = [pr, pg, pb, 1.0];
     let border = Rectangle::new(
         layout.panel.loc - Point::from((BORDER, BORDER)),
         layout.panel.size + Size::from((2 * BORDER, 2 * BORDER)),
     );
+    let inset = |rect: Rectangle<i32, Logical>, by: i32| {
+        Rectangle::new(
+            rect.loc + Point::from((by, by)),
+            rect.size - Size::from((2 * by, 2 * by)),
+        )
+    };
+    // The buttons as the cheatsheet's keys: rounded, Cancel with their
+    // edge and fill, Share in the accent.
+    let key = Some((f64::from(KEY_RADIUS), crate::rounded::Corners::All));
+    let key_inner = Some((f64::from(KEY_RADIUS - 1), crate::rounded::Corners::All));
     let mut solids: Vec<PanelSolid> = Vec::new();
+    // The selected tile on a block of the accent, as the switcher's.
     if let Some(tile) = layout.tiles.get(view.selected) {
-        let outer = selected_rect(*tile);
-        let inner = Rectangle::new(
-            outer.loc + Point::from((SELECTED_BORDER, SELECTED_BORDER)),
-            outer.size - Size::from((2 * SELECTED_BORDER, 2 * SELECTED_BORDER)),
-        );
-        solids.push(("selected", inner, selected_fill, false));
-        solids.push(("selected-border", outer, accent, false));
+        solids.push(("selected", selected_rect(*tile), accent, None));
     }
-    solids.push(("share", layout.share, accent, false));
-    solids.push(("cancel", layout.cancel, hover, false));
-    solids.push(("panel", layout.panel, panel_color, true));
-    solids.push(("border", border, hover, true));
-    let shaders = view
+    solids.push(("share", layout.share, accent, key));
+    solids.push(("cancel", inset(layout.cancel, 1), key_fill, key_inner));
+    solids.push(("cancel-edge", layout.cancel, hover, key));
+    // The panel with the windows' corners, as Pila's other panels.
+    let panel_corners = view.rounding;
+    let border_corners = view
         .rounding
-        .and_then(|_| crate::rounded::Shaders::get(renderer));
-    for (name, rect, color, rounded) in solids {
+        .map(|(radius, corners)| (radius + f64::from(BORDER), corners));
+    solids.push(("panel", layout.panel, panel_color, panel_corners));
+    solids.push(("border", border, hover, border_corners));
+    let shaders = crate::rounded::Shaders::get(renderer);
+    for (name, rect, color, rounding) in solids {
         let buffer = buffers
             .solids
             .entry(name)
@@ -862,25 +870,12 @@ pub fn elements(
             1.0,
             Kind::Unspecified,
         );
-        let grow = if name == "border" {
-            f64::from(BORDER)
-        } else {
-            0.0
-        };
-        elements.push(
-            match (rounded.then_some(view.rounding).flatten(), &shaders) {
-                (Some((radius, corners)), Some(shaders)) => {
-                    PilaRenderElement::RoundedSolid(crate::rounded::RoundedSolid::new(
-                        element,
-                        shaders,
-                        radius + grow,
-                        corners,
-                        scale,
-                    ))
-                }
-                _ => PilaRenderElement::Solid(element),
-            },
-        );
+        elements.push(match (rounding, &shaders) {
+            (Some((radius, corners)), Some(shaders)) => PilaRenderElement::RoundedSolid(
+                crate::rounded::RoundedSolid::new(element, shaders, radius, corners, scale),
+            ),
+            _ => PilaRenderElement::Solid(element),
+        });
     }
     elements.push(dim);
     elements

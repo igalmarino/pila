@@ -321,6 +321,37 @@ fn a_share_follows_its_output_turned_or_scaled() {
 }
 
 #[test]
+fn the_picker_looks_like_pilas_other_panels() {
+    // The accent, opaque: `[colors] snap-preview` ("#4477cc4d") as the
+    // switcher's selected tile has it.
+    const ACCENT: [u8; 4] = [0x44, 0x77, 0xcc, 255];
+    let (mut pila, bus, _pipewire) = start_with("HEADLESS-1:1280x720");
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("look", "org.example.Browser", 1);
+    let picker = wait_picker(&mut pila);
+    pila.settle();
+    // The selected tile on a block of the accent, as the switcher's.
+    let (tx, ty, _, th) = rect(&picker["tiles"][0]);
+    assert_eq!(
+        pila.pixel((tx - 3) as f64, (ty + th / 2) as f64),
+        ACCENT,
+        "the selection's margin"
+    );
+    // The buttons with rounded corners, as the cheatsheet's keys.
+    for button in ["share", "cancel"] {
+        let (x, y, w, h) = rect(&picker[button]);
+        let middle = pila.pixel((x + w / 2) as f64, (y + h - 2) as f64);
+        assert_ne!(
+            pila.pixel(x as f64, y as f64),
+            middle,
+            "{button}'s corner: square"
+        );
+    }
+    pila.key("Escape");
+    started.answer();
+}
+
+#[test]
 fn a_still_screen_sends_no_more_frames() {
     let (mut pila, bus, pipewire) = start();
     let mut portal = Portal::connect(&bus.address);

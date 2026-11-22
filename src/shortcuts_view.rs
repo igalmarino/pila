@@ -42,7 +42,7 @@ const BORDER: i32 = 1;
 const FIT_MARGIN: i32 = 32;
 /// A keycap's height, its rounding and its padding around the label.
 const CAP_HEIGHT: i32 = 22;
-const CAP_RADIUS: i32 = 4;
+pub(crate) const CAP_RADIUS: i32 = 4;
 const CAP_PADDING: i32 = 7;
 /// Between keycaps, where a "+" goes.
 const CAP_GAP: i32 = 18;
