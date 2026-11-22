@@ -50,6 +50,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Desktop notifications over D-Bus (`notifications.rs`), on a thread of
 # their own: pure Rust, so no notify-send and no new system library.
 zbus = "6"
+# Screen sharing through the portal Pila serves (`screencast.rs`): its
+# streams are PipeWire nodes. Links libpipewire-0.3 (package pipewire).
+pipewire = "0.10"
 
 # Smithay's main branch, as niri and cosmic-comp use it: fixes reach pila
 # without waiting for a release (0.7.0 is from June 2025). Move `rev` forward

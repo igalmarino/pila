@@ -233,6 +233,13 @@ impl Backend {
         matches!(self, Backend::Udev(_))
     }
 
+    /// Whether Pila serves the desktop portal on the session bus
+    /// (`portal.rs`): as the session, or headless (tests give it a bus of
+    /// their own). Nested, the host's portal shares the host's screen.
+    pub fn serves_portal(&self) -> bool {
+        matches!(self, Backend::Udev(_) | Backend::Headless(_))
+    }
+
     /// Re-apply `[input]` to the connected devices. Nested, the host owns them.
     pub fn apply_input_config(&mut self, input: &crate::config::InputConfig) {
         if let Backend::Udev(data) = self {

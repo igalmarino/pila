@@ -173,6 +173,8 @@ pub struct Pila {
     pub commit_pacing: crate::commit_pacing::CommitPacing,
     /// Screen capture: ext-image-copy-capture and wlr-screencopy.
     pub capture: crate::capture::Captures,
+    /// Screen sharing through the portal Pila serves (`screencast.rs`).
+    pub screencast: crate::screencast::ScreenCasts,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -571,6 +573,7 @@ impl Pila {
             windows: Windows::default(),
             input: InputState::default(),
             capture: Default::default(),
+            screencast: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -1891,7 +1894,8 @@ impl Pila {
             let mut input = None;
             self.process_captures(&mut input);
             self.process_screencopies(&mut input);
-            self.capture.trim_textures();
+            self.process_screencasts(&mut input);
+            self.capture.trim_textures(self.screencast.streaming());
             captures = started.elapsed();
         }
         // The space knows which outputs each window is on only after its
@@ -2056,6 +2060,7 @@ impl Pila {
     /// reserved already (`reserve_xwayland`), so X11 apps among them work.
     pub fn start_session(&mut self, commands: Vec<String>) {
         self.pending_startup = commands;
+        self.start_portal();
         if !self.export_environment() {
             self.run_pending_startup();
         }

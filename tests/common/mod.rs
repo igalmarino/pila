@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod notifications;
+pub mod pipewire;
 pub mod protocols;
 pub mod session_protocol;
 

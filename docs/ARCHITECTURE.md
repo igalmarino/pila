@@ -1086,6 +1086,26 @@ Key flows and invariants:
   `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy
   already waiting when its output goes (`fail_screencopies_of`), or one asked afterwards, at
   once (its output has no frame of its own to come, and no other output's is asked).
+- **Portal screen sharing** (`portal.rs`, `screencast.rs`; prototype, branch only): Pila serves
+  xdg-desktop-portal's ScreenCast backend itself, as `org.freedesktop.impl.portal.desktop.pila`
+  on the session bus (`Pila::start_portal`, at startup, when `Backend::serves_portal`: bare metal,
+  or headless with a bus a test gives it; nested, the host's portal shares the host's screen).
+  The bus is served from zbus's thread: `CreateSession` and `SelectSources` answer there, and
+  `Start` sends a `portal::Request` to the event loop and waits off it for its `portal::Reply`
+  (dropped unsent, `Start` fails). The event loop connects to PipeWire at the first cast (its
+  loop's fd a calloop source, iterated without waiting: `dispatch_pipewire`; callbacks only
+  queue `CastEvent`s, handled after) and makes a driver stream per session, offering BGRx of the
+  output's size at a variable rate up to its refresh; `Start` is answered once the node has an
+  id. Stand-in for the picker: the output under the pointer. Frames are made from
+  `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
+  output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it
+  offscreen and read it back (`Captures::read_back`, shared with shm captures), written into
+  the buffer and queued once the GPU is done (`Pila::when_copied`); with no buffer free the
+  tracker starts over, so the next change sends a whole frame. A buffer generation
+  (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
+  ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
+  PipeWire's connection; the app is told (`portal::end_session`: `Closed`), and with no cast
+  left the connection goes.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

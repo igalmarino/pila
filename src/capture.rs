@@ -55,7 +55,7 @@ use smithay::{
             buffer_type,
             damage::OutputDamageTracker,
             element::AsRenderElements,
-            gles::{GlesMapping, GlesRenderer, GlesTarget, GlesTexture},
+            gles::{GlesRenderer, GlesTarget, GlesTexture},
             sync::SyncPoint,
             Bind, BufferType, ExportMem, Offscreen, Texture, TextureMapping,
         },
@@ -209,9 +209,11 @@ const MAX_SHM_TEXTURES: usize = 4;
 
 impl Captures {
     /// Drop the offscreen textures when no capture may want them: no
-    /// session, no screencopy waiting, no screencopy client keeping damage.
-    pub fn trim_textures(&mut self) {
-        if self.sessions.is_empty()
+    /// session, no screencopy waiting, no screencopy client keeping damage,
+    /// no portal share `streaming`.
+    pub fn trim_textures(&mut self, streaming: bool) {
+        if !streaming
+            && self.sessions.is_empty()
             && self.screencopies.is_empty()
             && self.screencopy_trackers.is_empty()
         {
@@ -957,14 +959,121 @@ fn copy_to_shm(
     .ok()
     .flatten()
     .ok_or(CopyError::Constraints)?;
-    // The client's byte order (ARGB is B, G, R, A in memory), read back
-    // directly where GL can; otherwise read RGBA and swap per pixel.
+    // The client's byte order (ARGB is B, G, R, A in memory).
     let wanted = match format {
         wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => Fourcc::Argb8888,
         wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => Fourcc::Abgr8888,
         _ => return Err(CopyError::Constraints),
     };
+    let buffer = buffer.clone();
+    read_back(
+        renderer,
+        textures,
+        size,
+        scale,
+        source,
+        wanted,
+        move |pixels| {
+            with_buffer_contents_mut(&buffer, |ptr, len, data| {
+                // SAFETY: the pool stays mapped, `len` bytes long, for the
+                // duration of this closure; `write_into` checks the range.
+                let dst = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+                pixels.write_into(dst, data.offset as usize, data.stride as usize)
+            })
+            .map_err(|_| CopyError::Constraints)?
+        },
+    )
+}
 
+/// Pixels read back from an offscreen texture (`read_back`), in the byte
+/// order asked for once written.
+pub(crate) struct ReadBack<'a> {
+    pixels: &'a [u8],
+    width: usize,
+    height: usize,
+    /// glReadPixels returns rows bottom-up: an offscreen texture drawn with
+    /// `Transform::Normal` reads back upside down unless the mapping says
+    /// it's already flipped.
+    bottom_up: bool,
+    /// Read as RGBA where GL couldn't read the order asked for.
+    swap_rb: bool,
+}
+
+impl ReadBack<'_> {
+    /// Write the pixels into `dst`, top row first at `offset`, rows
+    /// `stride` bytes apart.
+    pub(crate) fn write_into(
+        &self,
+        dst: &mut [u8],
+        offset: usize,
+        stride: usize,
+    ) -> Result<(), CopyError> {
+        let (row, h) = (self.width * 4, self.height);
+        if h == 0 {
+            return Ok(());
+        }
+        if stride < row || offset + stride * (h - 1) + row > dst.len() {
+            return Err(CopyError::Constraints);
+        }
+        for y in 0..h {
+            let src_y = if self.bottom_up { h - 1 - y } else { y };
+            let src = &self.pixels[src_y * row..][..row];
+            let start = offset + y * stride;
+            let out = &mut dst[start..start + row];
+            if self.swap_rb {
+                for (o, s) in out
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(src.as_chunks::<4>().0)
+                {
+                    *o = [s[2], s[1], s[0], s[3]];
+                }
+            } else {
+                out.copy_from_slice(src);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Captures {
+    /// Draw `source` offscreen and hand its pixels, in `wanted`'s byte
+    /// order (`Argb8888` or `Abgr8888`), to `write`: once the GPU is done,
+    /// off the event loop's back where a fence says when
+    /// (`Pila::when_copied`). Reuses the offscreen textures of shm copies.
+    pub(crate) fn read_back(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+        source: Source<'_>,
+        wanted: Fourcc,
+        write: impl FnOnce(&ReadBack<'_>) -> Result<(), CopyError> + 'static,
+    ) -> Result<Copied, CopyError> {
+        read_back(
+            renderer,
+            &mut self.shm_textures,
+            size,
+            scale,
+            source,
+            wanted,
+            write,
+        )
+    }
+}
+
+/// `Captures::read_back`, on its textures.
+fn read_back(
+    renderer: &mut GlesRenderer,
+    textures: &mut Vec<GlesTexture>,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    source: Source<'_>,
+    wanted: Fourcc,
+    write: impl FnOnce(&ReadBack<'_>) -> Result<(), CopyError> + 'static,
+) -> Result<Copied, CopyError> {
+    let (w, h) = (size.w, size.h);
     // One of this size from an earlier copy, or a new one.
     let mut texture = match textures.iter().position(|t| t.size() == (w, h).into()) {
         Some(i) => textures.remove(i),
@@ -976,6 +1085,8 @@ fn copy_to_shm(
     // need to wait for it.
     let _ = draw(renderer, &mut target, size, scale, source)?;
     let region = Rectangle::from_size((w, h).into());
+    // Read back directly in the order wanted where GL can; otherwise read
+    // RGBA and swap per pixel.
     let (mapping, swap_rb) = match renderer.copy_framebuffer(&target, region, wanted) {
         Ok(mapping) => (mapping, false),
         Err(_) => (
@@ -1004,68 +1115,30 @@ fn copy_to_shm(
         .ok()
         .flatten()
         .and_then(|fence| fence.export().ok());
-    let buffer = buffer.clone();
-    let write =
-        move |renderer: &mut GlesRenderer| write_shm(renderer, &mapping, &buffer, (w, h), swap_rb);
+    let finish = move |renderer: &mut GlesRenderer| {
+        let bottom_up = !mapping.flipped();
+        let pixels = renderer
+            .map_texture(&mapping)
+            .map_err(|e| render_error(&e))?;
+        let (width, height) = (w as usize, h as usize);
+        if pixels.len() < width * 4 * height {
+            return Err(CopyError::Render("short read-back".into()));
+        }
+        write(&ReadBack {
+            pixels,
+            width,
+            height,
+            bottom_up,
+            swap_rb,
+        })
+    };
     match fence {
         Some(fence) => Ok(Copied::InFlight {
             fence,
-            finish: Box::new(write),
+            finish: Box::new(finish),
         }),
-        None => write(renderer).map(|()| Copied::Done),
+        None => finish(renderer).map(|()| Copied::Done),
     }
-}
-
-/// Write the read-back pixels of `mapping` into the shm `buffer` of `size`,
-/// swapping red and blue if asked.
-fn write_shm(
-    renderer: &mut GlesRenderer,
-    mapping: &GlesMapping,
-    buffer: &WlBuffer,
-    (w, h): (i32, i32),
-    swap_rb: bool,
-) -> Result<(), CopyError> {
-    // glReadPixels returns rows bottom-up: an offscreen texture drawn with
-    // `Transform::Normal` reads back upside down unless the mapping says
-    // it's already flipped.
-    let bottom_up = !mapping.flipped();
-    let pixels = renderer
-        .map_texture(mapping)
-        .map_err(|e| render_error(&e))?;
-
-    let row = (w * 4) as usize;
-    if pixels.len() < row * h as usize {
-        return Err(CopyError::Render("short read-back".into()));
-    }
-    with_buffer_contents_mut(buffer, |ptr, len, data| {
-        let end = data.offset as usize + data.stride as usize * (h as usize - 1) + row;
-        if end > len {
-            return Err(CopyError::Constraints);
-        }
-        // SAFETY: the range was checked against the pool's length above;
-        // the pool stays mapped for the duration of this closure.
-        let dst = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-        for y in 0..h as usize {
-            let src_y = if bottom_up { h as usize - 1 - y } else { y };
-            let src = &pixels[src_y * row..][..row];
-            let start = data.offset as usize + y * data.stride as usize;
-            let out = &mut dst[start..start + row];
-            if swap_rb {
-                for (o, s) in out
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(src.as_chunks::<4>().0)
-                {
-                    *o = [s[2], s[1], s[0], s[3]];
-                }
-            } else {
-                out.copy_from_slice(src);
-            }
-        }
-        Ok(())
-    })
-    .map_err(|_| CopyError::Constraints)?
 }
 
 // --- Globals ---------------------------------------------------------------
