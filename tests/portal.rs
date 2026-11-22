@@ -221,6 +221,32 @@ fn a_share_is_ready_to_draw_before_its_first_frame() {
 }
 
 #[test]
+fn an_app_that_takes_dmabufs_gets_the_frames_drawn_into_them() {
+    let (mut pila, bus, pipewire) = start();
+    if pila.state()["capture"]["dmabuf"] != true {
+        eprintln!("no GPU to draw into dma-bufs: skipped");
+        return;
+    }
+    let client = pila.client();
+    let window = client.window("shared").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "shared");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let node = share(&mut pila, &mut portal, "dmabufs");
+    let consumer = pipewire.consume_dmabufs(node);
+    let frame = consumer.wait_frame("the first", |_| true);
+    assert!(frame.dmabuf, "a dma-buf");
+    assert_eq!((frame.width, frame.height), (640, 480));
+    assert_eq!(frame.rgba(x, y), rgba(BLUE), "the window drawn into it");
+    // And the next, of a change.
+    client.with_window(window, |w| w.color = GREEN);
+    client.draw(window, None);
+    consumer.wait_frame("with the window's new color", |f| {
+        f.dmabuf && f.rgba(x, y) == rgba(GREEN)
+    });
+}
+
+#[test]
 fn a_still_screen_sends_no_more_frames() {
     let (mut pila, bus, pipewire) = start();
     let mut portal = Portal::connect(&bus.address);

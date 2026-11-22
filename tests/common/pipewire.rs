@@ -69,10 +69,19 @@ impl Daemon {
     /// Link a consumer to `node` and hand its frames to the returned
     /// receiver, until it's dropped.
     pub fn consume(&self, node: u32) -> Consumer {
+        self.consume_as(node, false)
+    }
+
+    /// `consume`, taking dma-bufs: linear ones, which it can map to read.
+    pub fn consume_dmabufs(&self, node: u32) -> Consumer {
+        self.consume_as(node, true)
+    }
+
+    fn consume_as(&self, node: u32, dmabufs: bool) -> Consumer {
         let socket = self.socket();
         let (frames, receiver) = mpsc::channel();
         let (stop_sender, stop) = pw::channel::channel::<()>();
-        let thread = std::thread::spawn(move || consume(&socket, node, frames, stop));
+        let thread = std::thread::spawn(move || consume(&socket, node, frames, stop, dmabufs));
         Consumer {
             frames: receiver,
             stop: Some(stop_sender),
@@ -99,6 +108,8 @@ pub struct Frame {
     pub stride: usize,
     pub data: Vec<u8>,
     pub cursor: Option<CursorMeta>,
+    /// It came in a dma-buf (mapped to read it).
+    pub dmabuf: bool,
 }
 
 /// A buffer's cursor metadata.
@@ -164,7 +175,13 @@ impl Drop for Consumer {
     }
 }
 
-fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::channel::Receiver<()>) {
+fn consume(
+    socket: &str,
+    node: u32,
+    frames: mpsc::Sender<Frame>,
+    stop: pw::channel::Receiver<()>,
+    dmabufs: bool,
+) {
     pw::init();
     let main_loop = pw::main_loop::MainLoopRc::new(None).unwrap();
     let context = pw::context::ContextRc::new(&main_loop, None).unwrap();
@@ -236,10 +253,18 @@ fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::chann
             let _ = parsed.borrow_mut().parse(param);
             // Room for the cursor's metadata, as browsers ask for it
             // (libwebrtc: a 64 to 384 px square image).
-            let bytes = cursor_meta_param();
-            if let Some(pod) = spa::pod::Pod::from_bytes(&bytes) {
-                let _ = stream.update_params(&mut [pod]);
+            let mut params = vec![cursor_meta_param()];
+            // The buffers it takes, as libwebrtc says it: dma-bufs too.
+            if dmabufs {
+                params.push(buffer_types_param(
+                    1 << spa::sys::SPA_DATA_DmaBuf | 1 << spa::sys::SPA_DATA_MemFd,
+                ));
             }
+            let mut pods: Vec<&spa::pod::Pod> = params
+                .iter()
+                .filter_map(|bytes| spa::pod::Pod::from_bytes(bytes))
+                .collect();
+            let _ = stream.update_params(&mut pods);
         })
         .process(move |stream, _| {
             // SAFETY: the stream is alive; the buffer is ours until queued.
@@ -259,8 +284,9 @@ fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::chann
         .register()
         .unwrap();
 
-    // Any raw video: what the node offers is fixed.
-    let object = spa::pod::object!(
+    // Any raw video: what the node offers is fixed. Taking dma-bufs: linear
+    // ones, for the app to pick from (as libwebrtc offers its modifiers).
+    let mut object = spa::pod::object!(
         spa::utils::SpaTypes::ObjectParamFormat,
         spa::param::ParamType::EnumFormat,
         spa::pod::property!(
@@ -274,6 +300,22 @@ fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::chann
             spa::param::format::MediaSubtype::Raw
         ),
     );
+    if dmabufs {
+        const LINEAR: i64 = 0;
+        object.properties.push(spa::pod::Property {
+            key: spa::param::format::FormatProperties::VideoModifier.as_raw(),
+            flags: spa::pod::PropertyFlags::from_bits_retain(
+                spa::sys::SPA_POD_PROP_FLAG_MANDATORY | spa::sys::SPA_POD_PROP_FLAG_DONT_FIXATE,
+            ),
+            value: spa::pod::Value::Choice(spa::pod::ChoiceValue::Long(spa::utils::Choice(
+                spa::utils::ChoiceFlags::empty(),
+                spa::utils::ChoiceEnum::Enum {
+                    default: LINEAR,
+                    alternatives: vec![LINEAR],
+                },
+            ))),
+        });
+    }
     let bytes = spa::pod::serialize::PodSerializer::serialize(
         std::io::Cursor::new(Vec::new()),
         &spa::pod::Value::Object(object),
@@ -286,7 +328,12 @@ fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::chann
         .connect(
             spa::utils::Direction::Input,
             None,
-            pw::stream::StreamFlags::MAP_BUFFERS,
+            // Shared memory mapped by PipeWire; dma-bufs by `read_buffer`.
+            if dmabufs {
+                pw::stream::StreamFlags::empty()
+            } else {
+                pw::stream::StreamFlags::MAP_BUFFERS
+            },
             &mut params,
         )
         .unwrap();
@@ -395,6 +442,33 @@ fn cursor_meta_param() -> Vec<u8> {
     .into_inner()
 }
 
+/// The `Buffers` a consumer asks for: of the data types in `types`.
+fn buffer_types_param(types: i32) -> Vec<u8> {
+    use spa::pod::{ChoiceValue, Object, Property, Value};
+    use spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+    let object = Object {
+        type_: spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+        id: spa::param::ParamType::Buffers.as_raw(),
+        properties: vec![Property::new(
+            spa::sys::SPA_PARAM_BUFFERS_dataType,
+            Value::Choice(ChoiceValue::Int(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Flags {
+                    default: types,
+                    flags: vec![],
+                },
+            ))),
+        )],
+    };
+    spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
+}
+
 /// What a dequeued `buffer` holds: its picture (if any) and its cursor
 /// metadata (if any).
 ///
@@ -411,7 +485,31 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
         let data = &*(*spa_buffer).datas;
         let chunk = &*data.chunk;
         let size = (chunk.size as usize).min(data.maxsize as usize);
-        let pixels = if size == 0 || data.data.is_null() {
+        let dmabuf = data.type_ == spa::sys::SPA_DATA_DmaBuf;
+        let corrupted = chunk.flags & spa::sys::SPA_CHUNK_FLAG_CORRUPTED as i32 != 0;
+        let pixels = if size == 0 || corrupted {
+            Vec::new()
+        } else if dmabuf {
+            // Linear: its rows as they are, from the chunk's offset.
+            let len = chunk.offset as usize + size;
+            let map = libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                data.fd as i32,
+                0,
+            );
+            if map == libc::MAP_FAILED {
+                Vec::new()
+            } else {
+                let bytes =
+                    std::slice::from_raw_parts(map.cast::<u8>().add(chunk.offset as usize), size)
+                        .to_vec();
+                libc::munmap(map, len);
+                bytes
+            }
+        } else if data.data.is_null() {
             Vec::new()
         } else {
             std::slice::from_raw_parts(data.data.cast::<u8>(), size).to_vec()
@@ -447,6 +545,7 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
             stride: chunk.stride as usize,
             data: pixels,
             cursor,
+            dmabuf,
         })
     }
 }

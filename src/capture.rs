@@ -49,7 +49,7 @@ use std::{
 
 use smithay::{
     backend::{
-        allocator::{Buffer as _, Fourcc},
+        allocator::{dmabuf::Dmabuf, Buffer as _, Fourcc},
         egl::fence::EGLFence,
         renderer::{
             buffer_type,
@@ -134,6 +134,20 @@ pub struct DmabufTarget {
 }
 
 impl DmabufTarget {
+    /// The renderer's DRM device.
+    pub(crate) fn device(&self) -> u64 {
+        self.device
+    }
+
+    /// The modifiers of `code` the renderer can draw into.
+    pub(crate) fn modifiers(&self, code: Fourcc) -> Vec<u64> {
+        self.formats
+            .iter()
+            .find(|(c, _)| *c == code)
+            .map(|(_, modifiers)| modifiers.clone())
+            .unwrap_or_default()
+    }
+
     pub fn new(device: u64, renderer: &GlesRenderer) -> Self {
         let render_formats = renderer.egl_context().dmabuf_render_formats();
         let formats = DMABUF_FORMATS
@@ -913,6 +927,27 @@ fn render_error(err: &dyn std::fmt::Debug) -> CopyError {
     CopyError::Render(render::error_text(err))
 }
 
+/// Draw `source` into `dmabuf`, all of it, top row first: done once the
+/// GPU is (`Copied::InFlight`'s fence), else waited for.
+pub(crate) fn render_into_dmabuf(
+    renderer: &mut GlesRenderer,
+    dmabuf: &mut Dmabuf,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    source: Source<'_>,
+) -> Result<Copied, CopyError> {
+    let mut target = renderer.bind(dmabuf).map_err(|e| render_error(&e))?;
+    let sync = draw(renderer, &mut target, size, scale, source)?;
+    if let Some(fence) = sync.export() {
+        return Ok(Copied::InFlight {
+            fence,
+            finish: Box::new(|_| Ok(())),
+        });
+    }
+    sync.wait().map_err(|e| render_error(&e))?;
+    Ok(Copied::Done)
+}
+
 /// Draw `source` into the client's dma-buf: no copy through the CPU.
 fn render_to_dmabuf(
     renderer: &mut GlesRenderer,
@@ -932,18 +967,9 @@ fn render_to_dmabuf(
     {
         return Err(CopyError::Constraints);
     }
-    let mut target = renderer.bind(&mut dmabuf).map_err(|e| render_error(&e))?;
-    // Drawn like a DRM output's buffer: top row first, so `Normal`.
-    let sync = draw(renderer, &mut target, size, scale, source)?;
-    // The client reads it as soon as it gets `ready`: once the GPU is done.
-    if let Some(fence) = sync.export() {
-        return Ok(Copied::InFlight {
-            fence,
-            finish: Box::new(|_| Ok(())),
-        });
-    }
-    sync.wait().map_err(|e| render_error(&e))?;
-    Ok(Copied::Done)
+    // Drawn like a DRM output's buffer: top row first, so `Normal`. The
+    // client reads it as soon as it gets `ready`: once the GPU is done.
+    render_into_dmabuf(renderer, &mut dmabuf, size, scale, source)
 }
 
 /// Draw `source` offscreen and copy the pixels into the shm `buffer`.

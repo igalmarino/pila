@@ -55,6 +55,7 @@ pub mod rounded;
 pub mod rules;
 pub mod scale;
 pub mod screencast;
+pub mod screencast_buffers;
 pub mod screencopy;
 pub mod sd_notify;
 pub mod session_bus;

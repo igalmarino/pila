@@ -396,7 +396,10 @@ impl Pila {
                 "blurred": self.blur.stats().1,
                 "entries": self.blur.stats().2,
             },
-            "capture": { "textures": self.capture.texture_count() },
+            "capture": {
+                "textures": self.capture.texture_count(),
+                "dmabuf": self.capture.dmabuf.as_ref().is_some_and(|t| t.offers()),
+            },
             // When a window or layer surface last appeared or a window drew
             // at a new size, in monotonic microseconds (`Pila::start_settling`).
             "settling_us": self.settling_since.map(|at| at.as_micros() as u64),

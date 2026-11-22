@@ -52,6 +52,7 @@ use crate::{
     portal::{self, CursorMode, Refused, Reply, Request},
     render::{self, PilaRenderElement},
     scale::output_scale,
+    screencast_buffers::{Allocator, Buffers, Kind, Memory},
     Pila,
 };
 
@@ -107,6 +108,9 @@ struct PipeWire {
     /// What the callbacks saw, by cast id (`Pila::dispatch_pipewire`).
     events: Rc<RefCell<Vec<(u64, CastEvent)>>>,
     source: RegistrationToken,
+    /// Dma-bufs for the streams, on the renderer's device; `None`: shared
+    /// memory only.
+    allocator: Rc<RefCell<Option<Allocator>>>,
 }
 
 /// What a callback saw.
@@ -129,6 +133,8 @@ struct Cast {
     /// The cursor metadata last sent (`CursorMode::Metadata`): where, and
     /// which image.
     cursor_sent: Option<CursorFrame>,
+    /// The stream's buffers, allocated by Pila (`screencast_buffers.rs`).
+    memory: Rc<RefCell<Buffers>>,
     /// What the stream was offered: the output's size and scale then.
     size: Size<i32, Physical>,
     scale: Scale<f64>,
@@ -247,7 +253,8 @@ impl Pila {
         };
         let id = self.screencast.next_id;
         self.screencast.next_id += 1;
-        let stream = match new_stream(pipewire, id, size, fps, cursor) {
+        let memory: Rc<RefCell<Buffers>> = Rc::default();
+        let stream = match new_stream(pipewire, id, size, fps, cursor, memory.clone()) {
             Ok(stream) => stream,
             Err(err) => {
                 warn!(err, "portal: can't make a stream");
@@ -272,6 +279,7 @@ impl Pila {
             output: output.downgrade(),
             cursor,
             cursor_sent: None,
+            memory,
             size,
             scale,
             _listener: listener,
@@ -294,6 +302,13 @@ impl Pila {
             return Ok(());
         }
         let started = Instant::now();
+        // Dma-bufs where the renderer can draw into them.
+        let allocator = self.capture.dmabuf.as_ref().and_then(|target| {
+            Allocator::open(
+                target.device(),
+                target.modifiers(crate::screencast_buffers::FOURCC),
+            )
+        });
         pw::init();
         let main_loop = pw::main_loop::MainLoopRc::new(None).map_err(|e| e.to_string())?;
         let context = pw::context::ContextRc::new(&main_loop, None).map_err(|e| e.to_string())?;
@@ -335,6 +350,7 @@ impl Pila {
             main_loop,
             events,
             source,
+            allocator: Rc::new(RefCell::new(allocator)),
         });
         info!(elapsed = ?started.elapsed(), "portal: connected to PipeWire");
         Ok(())
@@ -568,21 +584,33 @@ impl Pila {
             elements: &elements,
             clear,
         };
-        let copied = capture.read_back(
-            renderer,
-            size,
-            scale,
-            source,
-            Fourcc::Argb8888,
-            move |pixels| {
-                if buffers.get() != generation {
-                    return Ok(());
-                }
-                // SAFETY: the buffer is still the stream's (same
-                // generation) and dequeued, so ours to write.
-                unsafe { fill(buffer, pixels, w, h) }
-            },
-        );
+        let dmabuf = match cast.memory.borrow().get(buffer) {
+            Some(Memory::Dmabuf(dmabuf)) => Some(dmabuf.clone()),
+            _ => None,
+        };
+        // A dma-buf is drawn into, no copy through the CPU; shared memory is
+        // read back into.
+        let drawn_into = dmabuf.is_some();
+        let copied = match dmabuf {
+            Some(mut dmabuf) => {
+                crate::capture::render_into_dmabuf(renderer, &mut dmabuf, size, scale, source)
+            }
+            None => capture.read_back(
+                renderer,
+                size,
+                scale,
+                source,
+                Fourcc::Argb8888,
+                move |pixels| {
+                    if buffers.get() != generation {
+                        return Ok(());
+                    }
+                    // SAFETY: the buffer is still the stream's (same
+                    // generation) and dequeued, so ours to write.
+                    unsafe { fill(buffer, pixels, w, h) }
+                },
+            ),
+        };
         let stream = cast.stream.clone();
         let buffers = cast.buffers.clone();
         let queue = move |filled: bool| {
@@ -592,6 +620,9 @@ impl Pila {
             if !filled {
                 // SAFETY: as above.
                 unsafe { mark_empty(buffer) };
+            } else if drawn_into {
+                // SAFETY: as above.
+                unsafe { mark_whole(buffer, h) };
             }
             // SAFETY: dequeued from this stream, whose buffers are the same.
             unsafe { stream.queue_raw_buffer(buffer) };
@@ -799,14 +830,47 @@ unsafe fn write_cursor_meta(buffer: *mut pw::sys::pw_buffer, frame: &CursorFrame
 unsafe fn mark_cursor_only(buffer: *mut pw::sys::pw_buffer) {
     // SAFETY: per this function's contract.
     unsafe {
-        let spa_buffer = (*buffer).buffer;
-        if spa_buffer.is_null() || (*spa_buffer).n_datas == 0 {
-            return;
-        }
-        if let Some(chunk) = (*(*spa_buffer).datas).chunk.as_mut() {
+        for chunk in chunks(buffer) {
+            // Empty, and corrupted for apps that would read a dma-buf
+            // anyway (libwebrtc drops shared memory that's empty, any
+            // buffer marked corrupted: after taking the pointer from it).
             chunk.size = 0;
+            chunk.flags = spa::sys::SPA_CHUNK_FLAG_CORRUPTED as i32;
+        }
+    }
+}
+
+/// Mark a dequeued dma-buf `buffer` of `height` rows as holding a whole
+/// frame: each plane's chunk its rows (after a pointer-only buffer emptied
+/// them).
+///
+/// SAFETY: as `fill`'s.
+unsafe fn mark_whole(buffer: *mut pw::sys::pw_buffer, height: i32) {
+    // SAFETY: per this function's contract.
+    unsafe {
+        for chunk in chunks(buffer) {
+            chunk.size = chunk.stride.max(0) as u32 * height.max(0) as u32;
             chunk.flags = 0;
         }
+    }
+}
+
+/// The chunks of a dequeued `buffer`'s datas.
+///
+/// SAFETY: as `fill`'s; the chunks are used before the buffer is queued.
+unsafe fn chunks<'a>(
+    buffer: *mut pw::sys::pw_buffer,
+) -> impl Iterator<Item = &'a mut spa::sys::spa_chunk> {
+    // SAFETY: per this function's contract.
+    unsafe {
+        let spa_buffer = (*buffer).buffer;
+        let datas: &mut [spa::sys::spa_data] =
+            if spa_buffer.is_null() || (*spa_buffer).datas.is_null() {
+                &mut []
+            } else {
+                std::slice::from_raw_parts_mut((*spa_buffer).datas, (*spa_buffer).n_datas as usize)
+            };
+        datas.iter_mut().filter_map(|data| data.chunk.as_mut())
     }
 }
 
@@ -872,6 +936,7 @@ fn new_stream(
     size: Size<i32, Physical>,
     fps: u32,
     cursor: CursorMode,
+    memory: Rc<RefCell<Buffers>>,
 ) -> Result<(StreamRc, StreamListener<()>), String> {
     let core = pipewire.core.clone();
     let stream = StreamRc::new(
@@ -889,6 +954,10 @@ fn new_stream(
     let events = pipewire.events.clone();
     let state_events = events.clone();
     let format_events = events.clone();
+    let allocator = pipewire.allocator.clone();
+    let format_allocator = allocator.clone();
+    let format_memory = memory.clone();
+    let add_memory = memory.clone();
     let listener = stream
         .add_local_listener_with_user_data(())
         .state_changed(move |_, _, _, new| {
@@ -906,8 +975,51 @@ fn new_stream(
             if info.parse(param).is_err() {
                 return;
             }
-            let size = info.size();
-            let Some(bytes) = buffers_param(size.width, size.height) else {
+            let (width, height) = (info.size().width, info.size().height);
+            let kind = match crate::screencast_buffers::format_modifiers(param) {
+                None => Kind::Shm,
+                // Several the app takes: one fixed, offered alone (with
+                // shared memory still), and negotiated again.
+                Some((false, candidates)) => {
+                    let picked = format_allocator
+                        .borrow_mut()
+                        .as_mut()
+                        .and_then(|a| a.pick_modifier((width, height), &candidates));
+                    let modifiers = match picked {
+                        Some((modifier, _)) => Modifiers::Fixed(modifier),
+                        None => Modifiers::None,
+                    };
+                    let formats = format_params(size, fps, modifiers);
+                    let mut pods: Vec<&Pod> =
+                        formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
+                    if let Err(err) = stream.update_params(&mut pods) {
+                        warn!(%err, "portal: can't fix the stream's modifier");
+                    }
+                    return;
+                }
+                Some((true, picked)) => {
+                    let planes = picked.first().and_then(|&m| {
+                        format_allocator
+                            .borrow_mut()
+                            .as_mut()
+                            .and_then(|a| a.pick_modifier((width, height), &[m]))
+                    });
+                    match planes {
+                        Some((modifier, planes)) => Kind::Dmabuf { modifier, planes },
+                        None => {
+                            warn!("portal: can't allocate the dma-bufs negotiated");
+                            return;
+                        }
+                    }
+                }
+            };
+            {
+                let mut memory = format_memory.borrow_mut();
+                memory.kind = Some(kind);
+                memory.size = (width, height);
+            }
+            debug!(?kind, "portal: stream buffers negotiated");
+            let Some(bytes) = buffers_param(width, height, kind) else {
                 return;
             };
             let Some(pod) = Pod::from_bytes(&bytes) else {
@@ -925,19 +1037,37 @@ fn new_stream(
                 warn!(%err, "portal: can't set the stream's buffers");
             }
         })
-        .remove_buffer(move |_, _, _| {
+        .add_buffer(move |_, _, buffer| {
+            // SAFETY: PipeWire adds it, with the negotiated blocks.
+            unsafe {
+                add_memory
+                    .borrow_mut()
+                    .add(buffer, allocator.borrow_mut().as_mut())
+            };
+        })
+        .remove_buffer(move |_, _, buffer| {
+            memory.borrow_mut().remove(buffer);
             events.borrow_mut().push((id, CastEvent::Buffers));
         })
         .register()
         .map_err(|e| e.to_string())?;
-    let format = format_param(size, fps).ok_or("can't describe the format")?;
-    let format = Pod::from_bytes(&format).ok_or("can't describe the format")?;
+    let offered = pipewire
+        .allocator
+        .borrow()
+        .as_ref()
+        .map(|a| a.modifiers.clone())
+        .unwrap_or_default();
+    let formats = format_params(size, fps, Modifiers::Offer(&offered));
+    let mut pods: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
+    if pods.is_empty() {
+        return Err("can't describe the format".into());
+    }
     stream
         .connect(
             spa::utils::Direction::Output,
             None,
-            StreamFlags::DRIVER | StreamFlags::MAP_BUFFERS,
-            &mut [format],
+            StreamFlags::DRIVER | StreamFlags::ALLOC_BUFFERS,
+            &mut pods,
         )
         .map_err(|e| e.to_string())?;
     Ok((stream, listener))
@@ -951,48 +1081,97 @@ fn serialize(object: Object) -> Option<Vec<u8>> {
 
 /// The format offered: raw video, BGRx (XRGB8888, as GL reads it back), of
 /// the output's `size`, at a variable rate of at most `fps`.
-fn format_param(size: Size<i32, Physical>, fps: u32) -> Option<Vec<u8>> {
+fn format_param(size: Size<i32, Physical>, fps: u32, modifiers: Modifiers<'_>) -> Option<Vec<u8>> {
     let id = |raw: u32| Value::Id(spa::utils::Id(raw));
+    let mut properties = vec![
+        Property::new(
+            FormatProperties::MediaType.as_raw(),
+            id(MediaType::Video.as_raw()),
+        ),
+        Property::new(
+            FormatProperties::MediaSubtype.as_raw(),
+            id(MediaSubtype::Raw.as_raw()),
+        ),
+        Property::new(
+            FormatProperties::VideoFormat.as_raw(),
+            id(VideoFormat::BGRx.as_raw()),
+        ),
+        Property::new(
+            FormatProperties::VideoSize.as_raw(),
+            Value::Rectangle(SpaRectangle {
+                width: size.w as u32,
+                height: size.h as u32,
+            }),
+        ),
+        Property::new(
+            FormatProperties::VideoFramerate.as_raw(),
+            Value::Fraction(Fraction { num: 0, denom: 1 }),
+        ),
+        Property::new(
+            FormatProperties::VideoMaxFramerate.as_raw(),
+            Value::Choice(ChoiceValue::Fraction(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Range {
+                    default: Fraction { num: fps, denom: 1 },
+                    min: Fraction { num: 1, denom: 1 },
+                    max: Fraction { num: fps, denom: 1 },
+                },
+            ))),
+        ),
+    ];
+    let modifier = |flags: u32, value: Value| Property {
+        key: FormatProperties::VideoModifier.as_raw(),
+        flags: spa::pod::PropertyFlags::from_bits_retain(flags),
+        value,
+    };
+    match modifiers {
+        Modifiers::None => {}
+        Modifiers::Offer(all) => {
+            let (&first, _) = all.split_first()?;
+            properties.push(modifier(
+                spa::sys::SPA_POD_PROP_FLAG_MANDATORY | spa::sys::SPA_POD_PROP_FLAG_DONT_FIXATE,
+                Value::Choice(ChoiceValue::Long(Choice(
+                    ChoiceFlags::empty(),
+                    ChoiceEnum::Enum {
+                        default: first as i64,
+                        alternatives: all.iter().map(|&m| m as i64).collect(),
+                    },
+                ))),
+            ));
+        }
+        Modifiers::Fixed(one) => properties.push(modifier(
+            spa::sys::SPA_POD_PROP_FLAG_MANDATORY,
+            Value::Long(one as i64),
+        )),
+    }
     serialize(Object {
         type_: SpaTypes::ObjectParamFormat.as_raw(),
         id: ParamType::EnumFormat.as_raw(),
-        properties: vec![
-            Property::new(
-                FormatProperties::MediaType.as_raw(),
-                id(MediaType::Video.as_raw()),
-            ),
-            Property::new(
-                FormatProperties::MediaSubtype.as_raw(),
-                id(MediaSubtype::Raw.as_raw()),
-            ),
-            Property::new(
-                FormatProperties::VideoFormat.as_raw(),
-                id(VideoFormat::BGRx.as_raw()),
-            ),
-            Property::new(
-                FormatProperties::VideoSize.as_raw(),
-                Value::Rectangle(SpaRectangle {
-                    width: size.w as u32,
-                    height: size.h as u32,
-                }),
-            ),
-            Property::new(
-                FormatProperties::VideoFramerate.as_raw(),
-                Value::Fraction(Fraction { num: 0, denom: 1 }),
-            ),
-            Property::new(
-                FormatProperties::VideoMaxFramerate.as_raw(),
-                Value::Choice(ChoiceValue::Fraction(Choice(
-                    ChoiceFlags::empty(),
-                    ChoiceEnum::Range {
-                        default: Fraction { num: fps, denom: 1 },
-                        min: Fraction { num: 1, denom: 1 },
-                        max: Fraction { num: fps, denom: 1 },
-                    },
-                ))),
-            ),
-        ],
+        properties,
     })
+}
+
+/// Which dma-buf modifiers a format offers.
+#[derive(Clone, Copy)]
+enum Modifiers<'a> {
+    /// None: shared memory.
+    None,
+    /// These, for the app to pick from.
+    Offer(&'a [u64]),
+    /// This one, picked.
+    Fixed(u64),
+}
+
+/// The formats a stream offers: with `modifiers` (dma-bufs) if there are
+/// any, then without (shared memory).
+fn format_params(size: Size<i32, Physical>, fps: u32, modifiers: Modifiers<'_>) -> Vec<Vec<u8>> {
+    let with = match modifiers {
+        Modifiers::Offer([]) | Modifiers::None => None,
+        modifiers => format_param(size, fps, modifiers),
+    };
+    with.into_iter()
+        .chain(format_param(size, fps, Modifiers::None))
+        .collect()
 }
 
 /// A metadata block of `kind`, `size` bytes, on every buffer.
@@ -1010,10 +1189,14 @@ fn meta_param(kind: u32, size: usize) -> Option<Vec<u8>> {
     })
 }
 
-/// The buffers a stream of `width` by `height` BGRx frames wants: shm
-/// (`MemFd`), one plane, tightly packed.
-fn buffers_param(width: u32, height: u32) -> Option<Vec<u8>> {
+/// The buffers a stream of `width` by `height` BGRx frames wants, `kind`:
+/// shm (`MemFd`), one plane, tightly packed; or dma-bufs of so many planes.
+fn buffers_param(width: u32, height: u32, kind: Kind) -> Option<Vec<u8>> {
     let stride = width as i32 * 4;
+    let (blocks, data_type) = match kind {
+        Kind::Shm => (1, spa::sys::SPA_DATA_MemFd),
+        Kind::Dmabuf { planes, .. } => (planes as i32, spa::sys::SPA_DATA_DmaBuf),
+    };
     serialize(Object {
         type_: SpaTypes::ObjectParamBuffers.as_raw(),
         id: ParamType::Buffers.as_raw(),
@@ -1029,7 +1212,7 @@ fn buffers_param(width: u32, height: u32) -> Option<Vec<u8>> {
                     },
                 ))),
             ),
-            Property::new(spa::sys::SPA_PARAM_BUFFERS_blocks, Value::Int(1)),
+            Property::new(spa::sys::SPA_PARAM_BUFFERS_blocks, Value::Int(blocks)),
             Property::new(
                 spa::sys::SPA_PARAM_BUFFERS_size,
                 Value::Int(stride * height as i32),
@@ -1040,7 +1223,7 @@ fn buffers_param(width: u32, height: u32) -> Option<Vec<u8>> {
                 Value::Choice(ChoiceValue::Int(Choice(
                     ChoiceFlags::empty(),
                     ChoiceEnum::Flags {
-                        default: 1 << spa::sys::SPA_DATA_MemFd,
+                        default: 1 << data_type,
                         flags: vec![],
                     },
                 ))),
@@ -1055,9 +1238,21 @@ mod tests {
 
     #[test]
     fn the_params_serialize() {
-        let format = format_param((1920, 1080).into(), 60).unwrap();
-        assert!(Pod::from_bytes(&format).is_some());
-        let buffers = buffers_param(1920, 1080).unwrap();
+        for modifiers in [
+            Modifiers::None,
+            Modifiers::Offer(&[0, 1, 2]),
+            Modifiers::Fixed(1),
+        ] {
+            let format = format_param((1920, 1080).into(), 60, modifiers).unwrap();
+            let pod = Pod::from_bytes(&format).unwrap();
+            let expected = match modifiers {
+                Modifiers::None => None,
+                Modifiers::Offer(all) => Some((false, all.to_vec())),
+                Modifiers::Fixed(one) => Some((true, vec![one])),
+            };
+            assert_eq!(crate::screencast_buffers::format_modifiers(pod), expected);
+        }
+        let buffers = buffers_param(1920, 1080, Kind::Shm).unwrap();
         assert!(Pod::from_bytes(&buffers).is_some());
         let meta = meta_param(spa::sys::SPA_META_Cursor, cursor_meta_size()).unwrap();
         assert!(Pod::from_bytes(&meta).is_some());

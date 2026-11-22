@@ -1104,9 +1104,10 @@ Key flows and invariants:
   cast does, and go when the last ends. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
   asks for one at a time (below). Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
-  output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it
-  offscreen and read it back (`Captures::read_back`, shared with shm captures), written into
-  the buffer and queued once the GPU is done (`Pila::when_copied`); with no buffer free the
+  output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it:
+  straight into the buffer if it's a dma-buf (`capture::render_into_dmabuf`), else offscreen and
+  read back into it (`Captures::read_back`, shared with shm captures); queued once the GPU is
+  done (`Pila::when_copied`); with no buffer free the
   tracker starts over, so the next change sends a whole frame. The pointer is hidden, drawn into
   the frames, or (cursor metadata, what browsers ask for, offered by `AvailableCursorModes`;
   they ask for nothing otherwise) written into each buffer's `SPA_META_Cursor`: where its hotspot
@@ -1114,7 +1115,14 @@ Key flows and invariants:
   `cursor::NamedCursor::image`, a client's from its shm buffer) only when it changed. A buffer
   that only moves the pointer goes out with no picture (`chunk.size` 0): consumers keep the last
   frame. The consumer asks for the metadata too: PipeWire gives a buffer the metas both ends ask
-  for. A buffer generation
+  for. Pila allocates the buffers (`screencast_buffers.rs`, `ALLOC_BUFFERS`): it offers a
+  format with the modifiers its renderer draws into (`DmabufTarget::modifiers`, choices left
+  to the app: `DONT_FIXATE`) and one without (shared memory); a format that comes back with a
+  choice of modifiers, even of one, isn't set until Pila fixes one (a test buffer from GBM on
+  the renderer's render node picks it, `Allocator::pick_modifier`) and offers it alone, which
+  negotiates again; then dma-bufs from GBM of that modifier, else memfds Pila maps. A buffer
+  bringing the pointer alone is empty and marked corrupted (apps take the pointer, keep the
+  last frame). A buffer generation
   (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
   ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
   PipeWire's connection; the app is told (`portal::end_session`: `Closed`), and with no cast
