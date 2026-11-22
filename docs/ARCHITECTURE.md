@@ -1105,7 +1105,7 @@ Key flows and invariants:
   `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy
   already waiting when its output goes (`fail_screencopies_of`), or one asked afterwards, at
   once (its output has no frame of its own to come, and no other output's is asked).
-- **Portal screen sharing** (`portal.rs`, `screencast.rs`, `share_picker.rs`; prototype, branch only): Pila serves
+- **Portal screen sharing** (`portal.rs`, `screencast.rs`, `share_picker.rs`): Pila serves
   xdg-desktop-portal's ScreenCast backend itself, as `org.freedesktop.impl.portal.desktop.pila`
   on the session bus (`Pila::start_portal`, at startup, when `Backend::serves_portal`: bare metal,
   or headless with a bus a test gives it; nested, the host's portal shares the host's screen).
