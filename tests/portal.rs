@@ -289,6 +289,35 @@ fn an_app_that_takes_dmabufs_gets_the_frames_drawn_into_them() {
     consumer.wait_frame("with the window's new color", |f| {
         f.dmabuf && f.rgba(x, y) == rgba(GREEN)
     });
+    // Turned: dma-bufs of the new size, a modifier fixed again.
+    pila.write_config("[[output]]\nname = \"HEADLESS-1\"\ntransform = \"90\"\n");
+    consumer.wait_frame("turned", |f| f.dmabuf && (f.width, f.height) == (480, 640));
+}
+
+#[test]
+fn a_share_follows_its_output_turned_or_scaled() {
+    let (mut pila, bus, pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let node = share(&mut pila, &mut portal, "follows");
+    let consumer = pipewire.consume(node);
+    consumer.wait_frame("the first", |f| (f.width, f.height) == (640, 480));
+
+    // Turned a quarter: the stream's size is negotiated again, not ended.
+    pila.write_config("[[output]]\nname = \"HEADLESS-1\"\ntransform = \"90\"\n");
+    consumer.wait_frame("turned", |f| (f.width, f.height) == (480, 640));
+    assert_eq!(pila.state()["screencast"]["casts"], 1, "still sharing");
+
+    // Scaled: the same pixels, frames go on.
+    pila.write_config("[[output]]\nname = \"HEADLESS-1\"\ntransform = \"90\"\nscale = 2\n");
+    pila.wait("the new scale", |s| s["outputs"][0]["scale"] == 2.0);
+    let _ = consumer.pending();
+    let client = pila.client();
+    client.window("after").size(100, 100).color(BLUE).create();
+    pila.wait_window("after");
+    consumer.wait_frame("after the scale changed", |f| {
+        (f.width, f.height) == (480, 640)
+    });
+    assert_eq!(pila.state()["screencast"]["casts"], 1, "still sharing");
 }
 
 #[test]

@@ -171,7 +171,11 @@ impl Shm {
 #[derive(Default)]
 pub struct Buffers {
     pub kind: Option<Kind>,
+    /// The size negotiated, which buffers are allocated at.
     pub size: (u32, u32),
+    /// What the stream offers now: its frames' size and rate (the output's
+    /// mode), which a modifier is fixed for.
+    pub offered: ((i32, i32), u32),
     memory: HashMap<usize, Memory>,
 }
 

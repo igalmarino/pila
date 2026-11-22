@@ -287,7 +287,7 @@ impl Pila {
         };
         let size = output.current_transform().transform_size(mode.size);
         let scale = output_scale(&output);
-        let fps = ((mode.refresh + 500) / 1000).max(1) as u32;
+        let fps = fps_of(mode);
         if let Err(err) = self.connect_pipewire() {
             warn!(err, "portal: can't connect to PipeWire");
             return reply.send(Err(Refused::Failed));
@@ -542,13 +542,42 @@ impl Pila {
         };
         let size = output.current_transform().transform_size(mode.size);
         let scale = output_scale(&output);
-        if (size, scale) != (cast.size, cast.scale) {
-            // Prototype: a new size ends the share instead of renegotiating.
+        if size != cast.size {
+            // A new size (a mode, a turn): the stream's format is offered
+            // again at it, and frames wait for buffers of that size.
             info!(
                 session = cast.session,
-                "portal: the shared output changed size"
+                ?size,
+                "portal: the shared output changed size; negotiating again"
             );
-            cast.ended = true;
+            cast.size = size;
+            cast.scale = scale;
+            cast.tracker = None;
+            cast.buffers.set(cast.buffers.get() + 1);
+            let fps = fps_of(mode);
+            cast.memory.borrow_mut().offered = ((size.w, size.h), fps);
+            let offered = self
+                .screencast
+                .pipewire
+                .as_ref()
+                .map(modifiers_offered)
+                .unwrap_or_default();
+            let formats = format_params(size, fps, Modifiers::Offer(&offered));
+            let mut pods: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
+            if let Err(err) = cast.stream.update_params(&mut pods) {
+                warn!(%err, "portal: can't offer the new size");
+                cast.ended = true;
+            }
+            return;
+        }
+        if scale != cast.scale {
+            // The same pixels at another scale: drawn anew, nothing to
+            // negotiate.
+            cast.scale = scale;
+            cast.tracker = None;
+        }
+        if cast.memory.borrow().size != (size.w as u32, size.h as u32) {
+            // Still negotiating the new size.
             return;
         }
         let input = &*input.get_or_insert_with(|| self.frame_input());
@@ -1016,6 +1045,7 @@ fn new_stream(
     let format_allocator = allocator.clone();
     let format_memory = memory.clone();
     let add_memory = memory.clone();
+    let remove_memory = memory.clone();
     let listener = stream
         .add_local_listener_with_user_data(())
         .state_changed(move |_, _, _, new| {
@@ -1047,7 +1077,8 @@ fn new_stream(
                         Some((modifier, _)) => Modifiers::Fixed(modifier),
                         None => Modifiers::None,
                     };
-                    let formats = format_params(size, fps, modifiers);
+                    let ((w, h), fps) = format_memory.borrow().offered;
+                    let formats = format_params(Size::from((w, h)), fps, modifiers);
                     let mut pods: Vec<&Pod> =
                         formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
                     if let Err(err) = stream.update_params(&mut pods) {
@@ -1107,17 +1138,13 @@ fn new_stream(
             };
         })
         .remove_buffer(move |_, _, buffer| {
-            memory.borrow_mut().remove(buffer);
+            remove_memory.borrow_mut().remove(buffer);
             events.borrow_mut().push((id, CastEvent::Buffers));
         })
         .register()
         .map_err(|e| e.to_string())?;
-    let offered = pipewire
-        .allocator
-        .borrow()
-        .as_ref()
-        .map(|a| a.modifiers.clone())
-        .unwrap_or_default();
+    memory.borrow_mut().offered = ((size.w, size.h), fps);
+    let offered = modifiers_offered(pipewire);
     let formats = format_params(size, fps, Modifiers::Offer(&offered));
     let mut pods: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
     if pods.is_empty() {
@@ -1132,6 +1159,22 @@ fn new_stream(
         )
         .map_err(|e| e.to_string())?;
     Ok((stream, listener))
+}
+
+/// The dma-buf modifiers streams offer: what the renderer draws into, if
+/// there's an allocator for them.
+fn modifiers_offered(pipewire: &PipeWire) -> Vec<u64> {
+    pipewire
+        .allocator
+        .borrow()
+        .as_ref()
+        .map(|a| a.modifiers.clone())
+        .unwrap_or_default()
+}
+
+/// A stream's refresh, as its max framerate: the output mode's, rounded.
+fn fps_of(mode: smithay::output::Mode) -> u32 {
+    ((mode.refresh + 500) / 1000).max(1) as u32
 }
 
 fn serialize(object: Object) -> Option<Vec<u8>> {

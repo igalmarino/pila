@@ -1129,7 +1129,9 @@ Key flows and invariants:
   bringing the pointer alone is empty and marked corrupted (apps take the pointer, keep the
   last frame). A buffer generation
   (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
-  ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
+  ended). A new output size (a mode, a turn) offers the
+  formats again at it (`update_params`), and frames wait for buffers of that size; a new scale
+  only starts the damage tracker over. A cast ends with its output, a stream error or
   PipeWire's connection; the app is told (`portal::end_session`: `Closed`).
 - **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
