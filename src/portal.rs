@@ -124,10 +124,16 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
                     .serve_at(PATH, screencast)
                     .build(),
             );
+            let serving = built.is_ok();
             let _ = send.send(match built {
                 Ok(connection) => Request::Serving(connection),
                 Err(err) => Request::Failed(err.to_string()),
             });
+            // Off the event loop, what its first connection to PipeWire would
+            // otherwise load from a cold disk (10 ms on bare metal).
+            if serving {
+                crate::screencast::warm_pipewire();
+            }
         });
     if let Err(err) = spawned {
         let _ = send.send(Request::Failed(err.to_string()));

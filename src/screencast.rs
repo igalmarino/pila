@@ -87,6 +87,26 @@ impl ScreenCasts {
     }
 }
 
+/// Load what a first connection to PipeWire needs (its libraries, plugins
+/// and configuration) by making one and dropping it, on the calling thread:
+/// the portal's, at startup. The event loop's own first connection then
+/// finds them loaded or cached instead of reading them.
+pub fn warm_pipewire() {
+    let started = Instant::now();
+    pw::init();
+    let warmed = (|| -> Result<(), pw::Error> {
+        let main_loop = pw::main_loop::MainLoopRc::new(None)?;
+        let context = pw::context::ContextRc::new(&main_loop, None)?;
+        let _core = context.connect_rc(None)?;
+        Ok(())
+    })();
+    debug!(
+        elapsed = ?started.elapsed(),
+        connected = warmed.is_ok(),
+        "portal: PipeWire warmed up"
+    );
+}
+
 /// A request to share, from the portal's `Start`.
 pub struct Share {
     /// The portal session, by its object path.
@@ -119,6 +139,8 @@ enum CastEvent {
     /// The stream's buffers changed: copies in flight into the old ones
     /// are dropped, and the next frame is whole.
     Buffers,
+    /// The stream's buffers were negotiated, of this kind and size.
+    Negotiated(Kind, (u32, u32)),
     /// The connection to PipeWire failed.
     Disconnected(String),
 }
@@ -208,6 +230,11 @@ impl Pila {
                 app,
                 reply,
             } => {
+                // Connected now, while the user picks: the first connection
+                // can take a while, and not as a frame is due.
+                if let Err(err) = self.connect_pipewire() {
+                    warn!(err, "portal: can't connect to PipeWire");
+                }
                 self.screencast.waiting.push_back(Share {
                     session,
                     cursor,
@@ -262,10 +289,6 @@ impl Pila {
             }
         };
         let (stream, listener) = stream;
-        // The first frame's texture now, while the app links to the stream.
-        if let Some(mut renderer) = self.backend.as_mut().and_then(|b| b.renderer()) {
-            self.capture.prepare_read_back(&mut renderer, size);
-        }
         info!(
             session,
             output = output.name(),
@@ -415,6 +438,16 @@ impl Pila {
                     cast.buffers.set(cast.buffers.get() + 1);
                     cast.tracker = None;
                 }
+                // Shared memory: the texture frames are read back through,
+                // made now, ahead of the first frame (a one-time cost that
+                // made it late). Dma-bufs are drawn into: none.
+                CastEvent::Negotiated(Kind::Shm, (w, h)) => {
+                    let size = Size::from((w as i32, h as i32));
+                    if let Some(mut renderer) = self.backend.as_mut().and_then(|b| b.renderer()) {
+                        self.capture.prepare_read_back(&mut renderer, size);
+                    }
+                }
+                CastEvent::Negotiated(..) => {}
                 CastEvent::Disconnected(_) => {}
             }
         }
@@ -441,8 +474,11 @@ impl Pila {
 
     /// With no cast left, PipeWire's connection goes (it's made again at
     /// the next), and the offscreen textures if no capture keeps them.
-    fn disconnect_pipewire_if_idle(&mut self) {
-        if !self.screencast.casts.is_empty() {
+    pub(crate) fn disconnect_pipewire_if_idle(&mut self) {
+        if !self.screencast.casts.is_empty()
+            || !self.screencast.waiting.is_empty()
+            || self.share_picker_open()
+        {
             return;
         }
         // Its texture goes now, not at the next frame drawn (a still
@@ -1019,6 +1055,9 @@ fn new_stream(
                 memory.size = (width, height);
             }
             debug!(?kind, "portal: stream buffers negotiated");
+            format_events
+                .borrow_mut()
+                .push((id, CastEvent::Negotiated(kind, (width, height))));
             let Some(bytes) = buffers_param(width, height, kind) else {
                 return;
             };

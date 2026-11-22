@@ -1098,10 +1098,14 @@ Key flows and invariants:
   loop's fd a calloop source, iterated without waiting: `dispatch_pipewire`; callbacks only
   queue `CastEvent`s, handled after) and makes a driver stream per session, offering BGRx of the
   output's size at a variable rate up to its refresh; `Start` is answered once the node has an
-  id. The offscreen texture its frames are drawn into is made then, drawn into once
-  (`Captures::prepare_read_back`), while the app links to the stream: not in the first frame,
-  where its cost made the output miss a refresh on bare metal. Captures' textures stay while a
-  cast does, and go when the last ends. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
+  id. With shared memory negotiated, the offscreen texture
+  its frames are read back through is made then, drawn into once (`Captures::prepare_read_back`,
+  on `CastEvent::Negotiated`): not in the first frame; dma-bufs need none. Captures' textures
+  stay while a cast does, and go when the last ends. PipeWire is connected when a request comes,
+  while the picker asks (not as the user picks: the first connection took 10 ms on bare metal),
+  and disconnected once no cast, picker or request is left; the portal's thread warms it up at
+  startup (`screencast::warm_pipewire`: a connection made and dropped, so libraries, plugins and
+  configuration are loaded off the event loop). What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
   asks for one at a time (below). Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
   output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it:

@@ -327,6 +327,7 @@ impl Pila {
         info!("portal: sharing cancelled");
         shown.share.reply.send(Err(Refused::Cancelled));
         self.show_share_picker();
+        self.disconnect_pipewire_if_idle();
     }
 
     /// The app closed the session whose picker is shown: it goes, and the
@@ -340,6 +341,7 @@ impl Pila {
         {
             self.take_share_picker();
             self.show_share_picker();
+            self.disconnect_pipewire_if_idle();
         }
     }
 

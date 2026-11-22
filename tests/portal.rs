@@ -204,20 +204,54 @@ fn the_pointer_shows_as_the_app_asks() {
 }
 
 #[test]
-fn a_share_is_ready_to_draw_before_its_first_frame() {
-    let (mut pila, bus, _pipewire) = start();
+fn only_a_share_in_shared_memory_has_a_read_back_texture() {
+    let (mut pila, bus, pipewire) = start();
     pila.settle();
     assert_eq!(pila.state()["capture"]["textures"], 0);
     let mut portal = Portal::connect(&bus.address);
-    // Answered, and no app linked to it yet: its first frame's texture is
-    // made already, not in that frame (a one-time cost paid ahead).
-    share(&mut pila, &mut portal, "ready");
-    pila.settle();
-    assert_eq!(pila.state()["capture"]["textures"], 1, "made ahead");
-    portal.close("ready");
+    // Shared memory: frames are read back through a texture, made once the
+    // buffers are negotiated (ahead of the first frame).
+    let node = share(&mut pila, &mut portal, "shm");
+    let consumer = pipewire.consume(node);
+    consumer.wait_frame("the first", |_| true);
+    assert_eq!(
+        pila.state()["capture"]["textures"],
+        1,
+        "a read-back texture"
+    );
+    drop(consumer);
+    portal.close("shm");
     pila.wait("the texture gone with the share", |s| {
         s["capture"]["textures"] == 0
     });
+    // Dma-bufs: drawn into, no texture.
+    if pila.state()["capture"]["dmabuf"] != true {
+        return;
+    }
+    let node = share(&mut pila, &mut portal, "dmabufs");
+    let consumer = pipewire.consume_dmabufs(node);
+    consumer.wait_frame("the first", |f| f.dmabuf);
+    assert_eq!(
+        pila.state()["capture"]["textures"],
+        0,
+        "no read-back texture"
+    );
+}
+
+#[test]
+fn pipewire_is_connected_while_the_picker_asks() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    // Connecting may take a while the first time: not as the user picks.
+    let started = portal.request("early", "org.example.Browser", 1);
+    wait_picker(&mut pila);
+    assert!(
+        pila.log().contains("portal: connected to PipeWire"),
+        "not connected while asking"
+    );
+    pila.key("Escape");
+    started.answer();
+    pila.wait_log("portal: disconnected from PipeWire");
 }
 
 #[test]
@@ -327,7 +361,7 @@ fn escape_or_cancel_shares_nothing() {
     assert_eq!(answered_with(started), 1);
     pila.wait("the picker gone", |s| s["share_picker"]["shown"] == false);
     assert!(
-        !pila.log().contains("portal: connected to PipeWire"),
+        !pila.log().contains("portal: sharing an output"),
         "nothing was streamed"
     );
 }
@@ -477,7 +511,14 @@ fn startup_programs_wait_for_the_portal() {
         ..Default::default()
     });
     pila.wait_log("spawning");
+    // And what PipeWire loads, off the event loop.
+    pila.wait_log("portal: PipeWire warmed up");
     let log = pila.log();
+    assert!(
+        log.lines()
+            .any(|l| l.contains("PipeWire warmed up") && l.contains("connected=true")),
+        "PipeWire wasn't warmed up"
+    );
     let serving = log.find("portal: serving ScreenCast");
     let spawning = log.find("spawning");
     assert!(
