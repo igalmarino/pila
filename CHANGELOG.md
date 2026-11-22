@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-11-22)
 
 - **Screen sharing served by Pila:** browsers, OBS and video calls now share the screen through
   Pila itself, Pila's own backend of the desktop portal (`pila.portal`), over PipeWire: no
