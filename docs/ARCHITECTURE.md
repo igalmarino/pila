@@ -1101,11 +1101,12 @@ Key flows and invariants:
   id. With shared memory negotiated, the offscreen texture
   its frames are read back through is made then, drawn into once (`Captures::prepare_read_back`,
   on `CastEvent::Negotiated`): not in the first frame; dma-bufs need none. Captures' textures
-  stay while a cast does, and go when the last ends. PipeWire is connected when a request comes,
-  while the picker asks (not as the user picks: the first connection took 10 ms on bare metal),
-  and disconnected once no cast, picker or request is left; the portal's thread warms it up at
-  startup (`screencast::warm_pipewire`: a connection made and dropped, so libraries, plugins and
-  configuration are loaded off the event loop). What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
+  stay while a cast does, and go when the last ends. PipeWire is connected once, as Pila starts serving
+  the portal, and kept (connecting held the event loop 7 ms on bare metal, and as a share or the
+  picker started that missed a refresh: a one-time cost paid at startup); the portal's thread
+  warms it up first (`screencast::warm_pipewire`: a connection made and dropped, so libraries,
+  plugins and configuration are loaded off the event loop). A lost connection (the daemon went)
+  ends the casts and is dropped (`disconnect_pipewire`), made again at the next request. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
   asks for one at a time (below). Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
   output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it:
@@ -1129,8 +1130,7 @@ Key flows and invariants:
   last frame). A buffer generation
   (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
   ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
-  PipeWire's connection; the app is told (`portal::end_session`: `Closed`), and with no cast
-  left the connection goes.
+  PipeWire's connection; the app is told (`portal::end_session`: `Closed`).
 - **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id) and shows every output, left to right, as a live preview,

@@ -80,6 +80,16 @@ impl ScreenCasts {
         self.casts.iter().any(|cast| cast.streaming)
     }
 
+    /// How many casts there are, for tests (`Pila::state_json`).
+    pub fn cast_count(&self) -> usize {
+        self.casts.len()
+    }
+
+    /// Whether Pila is connected to PipeWire.
+    pub fn connected(&self) -> bool {
+        self.pipewire.is_some()
+    }
+
     /// Whether there's a cast, streaming or not yet: captures' offscreen
     /// textures are kept (one is made with the cast, `start_cast`).
     pub fn active(&self) -> bool {
@@ -218,6 +228,14 @@ impl Pila {
             Request::Serving(connection) => {
                 info!(name = portal::BUS_NAME, "portal: serving ScreenCast");
                 self.screencast.portal = Some(connection);
+                // Connected once, now, and kept: connecting holds the event
+                // loop a few ms, a one-time cost paid at startup.
+                if let Err(err) = self.connect_pipewire() {
+                    warn!(
+                        err,
+                        "portal: can't connect to PipeWire; trying again at a request"
+                    );
+                }
                 self.startup_step_done();
             }
             Request::Failed(err) => {
@@ -230,8 +248,7 @@ impl Pila {
                 app,
                 reply,
             } => {
-                // Connected now, while the user picks: the first connection
-                // can take a while, and not as a frame is due.
+                // Connected at startup; again if the connection went.
                 if let Err(err) = self.connect_pipewire() {
                     warn!(err, "portal: can't connect to PipeWire");
                 }
@@ -250,7 +267,7 @@ impl Pila {
                     .retain(|share| share.session != session);
                 self.close_share_picker_of(&session);
                 self.screencast.casts.retain(|cast| cast.session != session);
-                self.disconnect_pipewire_if_idle();
+                self.trim_after_casts();
             }
         }
     }
@@ -396,12 +413,14 @@ impl Pila {
             return;
         };
         let events = std::mem::take(&mut *pipewire.events.borrow_mut());
+        let mut lost = false;
         for (id, event) in events {
             if let CastEvent::Disconnected(err) = event {
                 warn!(err, "portal: PipeWire connection lost");
                 for cast in &mut self.screencast.casts {
                     cast.ended = true;
                 }
+                lost = true;
                 continue;
             }
             let Some(cast) = self.screencast.casts.iter_mut().find(|c| c.id == id) else {
@@ -452,6 +471,9 @@ impl Pila {
             }
         }
         self.end_casts();
+        if lost {
+            self.disconnect_pipewire();
+        }
     }
 
     /// Drop the casts Pila ended, telling their apps.
@@ -469,21 +491,21 @@ impl Pila {
                 portal::end_session(connection, cast.session.clone());
             }
         }
-        self.disconnect_pipewire_if_idle();
+        self.trim_after_casts();
     }
 
-    /// With no cast left, PipeWire's connection goes (it's made again at
-    /// the next), and the offscreen textures if no capture keeps them.
-    pub(crate) fn disconnect_pipewire_if_idle(&mut self) {
-        if !self.screencast.casts.is_empty()
-            || !self.screencast.waiting.is_empty()
-            || self.share_picker_open()
-        {
-            return;
+    /// With no cast left, the offscreen textures go if no capture keeps
+    /// them: now, not at the next frame drawn (a still screen has none).
+    /// PipeWire's connection stays for the next.
+    fn trim_after_casts(&mut self) {
+        if self.screencast.casts.is_empty() {
+            self.capture.trim_textures(false);
         }
-        // Its texture goes now, not at the next frame drawn (a still
-        // screen has none).
-        self.capture.trim_textures(false);
+    }
+
+    /// PipeWire's connection is gone (the daemon went): dropped, made again
+    /// at the next request.
+    fn disconnect_pipewire(&mut self) {
         if let Some(pipewire) = self.screencast.pipewire.take() {
             self.loop_handle.remove(pipewire.source);
             debug!("portal: disconnected from PipeWire");

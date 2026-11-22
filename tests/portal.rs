@@ -239,19 +239,30 @@ fn only_a_share_in_shared_memory_has_a_read_back_texture() {
 }
 
 #[test]
-fn pipewire_is_connected_while_the_picker_asks() {
-    let (mut pila, bus, _pipewire) = start();
+fn pipewire_is_connected_from_the_start_and_stays() {
+    let (mut pila, bus, pipewire) = start();
+    // Connecting took 7 ms on bare metal: paid once, at startup, not as a
+    // share starts.
+    pila.wait("connected to PipeWire", |s| {
+        s["screencast"]["pipewire"] == true
+    });
     let mut portal = Portal::connect(&bus.address);
-    // Connecting may take a while the first time: not as the user picks.
-    let started = portal.request("early", "org.example.Browser", 1);
-    wait_picker(&mut pila);
-    assert!(
-        pila.log().contains("portal: connected to PipeWire"),
-        "not connected while asking"
+    let node = share(&mut pila, &mut portal, "first");
+    let consumer = pipewire.consume(node);
+    consumer.wait_frame("the first", |_| true);
+    drop(consumer);
+    portal.close("first");
+    pila.wait("the share gone", |s| s["screencast"]["casts"] == 0);
+    assert_eq!(
+        pila.state()["screencast"]["pipewire"],
+        true,
+        "still connected"
     );
-    pila.key("Escape");
-    started.answer();
-    pila.wait_log("portal: disconnected from PipeWire");
+    assert_eq!(
+        pila.log().matches("portal: connected to PipeWire").count(),
+        1,
+        "connected once"
+    );
 }
 
 #[test]
@@ -308,7 +319,7 @@ fn closing_the_session_stops_its_stream() {
     let consumer = pipewire.consume(node);
     consumer.wait_frame("the first", |_| true);
     portal.close("closed");
-    pila.wait_log("portal: disconnected from PipeWire");
+    pila.wait("the stream gone", |s| s["screencast"]["casts"] == 0);
 }
 
 #[test]
