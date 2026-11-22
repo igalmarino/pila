@@ -6,6 +6,9 @@ mod common;
 use common::client::Ev;
 use common::*;
 
+/// The accent, opaque: `[colors] snap-preview` ("#4477cc4d").
+const ACCENT: [u8; 4] = [0x44, 0x77, 0xcc, 255];
+
 /// The open menu (`window_menu` in the state), or Null.
 fn menu(state: &Value) -> &Value {
     &state["window_menu"]
@@ -385,6 +388,30 @@ fn the_window_menu_is_drawn_in_front_of_the_cheatsheet() {
     pila.wait_pixel_is((sx + 5) as f64, (sy + 5) as f64, "the cheatsheet", |p| {
         p != desktop
     });
-    // `[colors] hover`, the row under the pointer's.
-    assert_eq!(pila.pixel(x, y), [0x3f, 0x42, 0x49, 255]);
+    // The accent, the row under the pointer's.
+    assert_eq!(pila.pixel(x, y), ACCENT);
+}
+
+/// The menu is drawn as Pila's other panels: on `bar-inactive` with a
+/// border of `hover`, the row under the pointer on the accent.
+#[test]
+fn the_window_menu_looks_like_pilas_other_panels() {
+    let (mut pila, _client, _a, geometry) = one_window();
+    let state = open_from_title_bar(&mut pila, geometry);
+    let (x, y, w, h) = rect(&menu(&state)["geometry"]);
+    let (_, row_y) = row(&state, 4);
+    pila.move_to((x + w - 30) as f64, row_y);
+    pila.wait("Close under the pointer", |s| menu(s)["hover"] == 4);
+    pila.settle();
+    assert_eq!(pila.pixel((x + w - 30) as f64, row_y), ACCENT, "the hover");
+    assert_eq!(
+        pila.pixel((x + w - 30) as f64, (y + 2) as f64),
+        [0x26, 0x27, 0x2b, 255],
+        "the background: bar-inactive"
+    );
+    assert_eq!(
+        pila.pixel((x - 1) as f64, (y + h / 2) as f64),
+        [0x3f, 0x42, 0x49, 255],
+        "the border: hover"
+    );
 }

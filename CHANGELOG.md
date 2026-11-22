@@ -12,6 +12,10 @@
   pointer shows as the app asks (drawn by browsers themselves), and a share follows its monitor
   turned or scaled. Pila now needs `libpipewire` (and libclang to build); a single window is
   still shared through xdg-desktop-portal-wlr (the manual says how).
+- **Pila's panels look alike:** the window menu is drawn as the switcher, the cheatsheet and the
+  share picker are (their background, border and corners, the row under the pointer on the
+  accent); the panels with a title share its font and place and end in a row of key hints; the
+  cheatsheet and the welcome dim every monitor while they're shown, as the share picker does.
 - **Fixed:** the window menu is drawn in front of the shortcuts cheatsheet shown while it's open
   (by `pila msg action show-shortcuts`, say), not behind it.
 - **`pila-check` judges captures' copies** into shared memory too (`copies` in the frame

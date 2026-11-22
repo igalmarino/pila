@@ -22,7 +22,7 @@ use smithay::{
 
 use crate::{
     config::{Action, Colors, Config, KeyCombo, ModKey, Trigger, WorkspaceTarget},
-    panel::{bits, draw_text, Align, ContentImage, Font, FrameBuffers, Item, TextKey},
+    panel::{self, draw_text, Align, ContentImage, FrameBuffers, Item, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -31,25 +31,27 @@ use crate::{
 const FIT_MARGIN: i32 = 32;
 
 /// The welcome: its width, where its rows start, each row's height, where
-/// the keys and what they do go, and the room under the rows.
+/// the keys and what they do go, and the room under the rows (the
+/// footer's, as the cheatsheet's).
 const WELCOME_WIDTH: i32 = 560;
 const WELCOME_ROWS_AT: i32 = 120;
 const WELCOME_ROW: i32 = 38;
 const WELCOME_KEYS_AT: i32 = 90;
 const WELCOME_WHAT_AT: i32 = 300;
-const WELCOME_BOTTOM: i32 = 50;
+const WELCOME_BOTTOM: i32 = panel::FOOTER - (WELCOME_ROW - panel::CAP_HEIGHT);
 
 /// The full cheatsheet: its width, its columns, where its sections start,
 /// a section's heading and row heights, where what a row does goes (from
-/// its column) and the room under the columns.
+/// its column) and the room under the columns (the footer's: the last
+/// row's own room under its keys is part of it).
 const SHORTCUTS_WIDTH: i32 = 860;
-const COLUMNS_AT: [i32; 2] = [28, 448];
+const COLUMNS_AT: [i32; 2] = [panel::PADDING, 448];
 const SECTIONS_AT: i32 = 72;
 const SECTION_HEADING: i32 = 22;
 const SECTION_ROW: i32 = 32;
 const SECTION_GAP: i32 = 14;
 const SECTION_WHAT_AT: i32 = 200;
-const SHORTCUTS_BOTTOM: i32 = 16;
+const SHORTCUTS_BOTTOM: i32 = panel::FOOTER - (SECTION_ROW - panel::CAP_HEIGHT);
 
 /// What the panel is shown as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,8 +76,6 @@ impl Heading {
 #[derive(Default)]
 pub struct ShortcutsView {
     shown: Option<Shown>,
-    /// Where the panel was last drawn, redrawn when it goes.
-    drawn: Option<Rectangle<i32, Logical>>,
     /// The content being drawn on a thread (`Pila::draw_shortcuts_text`).
     pending: Option<TextKey>,
     buffers: Rc<RefCell<Buffers>>,
@@ -92,6 +92,11 @@ struct Shown {
 #[derive(Default)]
 struct Buffers {
     frame: FrameBuffers,
+    /// The dim over each output, by name.
+    dims: std::collections::HashMap<
+        String,
+        smithay::backend::renderer::element::solid::SolidColorBuffer,
+    >,
     /// Everything on the panel, its text and keycaps, in one image the size
     /// of the panel: one texture, made on a thread
     /// (`Pila::draw_shortcuts_text`).
@@ -115,32 +120,31 @@ pub struct Section {
     pub rows: Vec<Row>,
 }
 
-/// The panel's palette: text, dimmed text and the accent.
-fn text_colors(colors: &Colors) -> ([u32; 3], [u32; 3], [u32; 3]) {
-    let [r, g, b, _] = crate::panel::accent(colors);
-    (
-        bits(colors.icon),
-        bits(colors.icon_inactive),
-        bits([r, g, b]),
-    )
-}
+/// The footer's hint, the same on both.
+const HINTS: &[(&str, &str)] = &[("Esc", "close")];
 
 /// The welcome's items: the title, a line under it, its rows centered, and
-/// `notes` at the bottom, for a panel `height` high.
+/// the footer with `notes`, for a panel `height` high.
 fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -> Vec<Item> {
-    let (text, dim, _) = text_colors(colors);
-    let center = |text: String, y, h, size, bold, color| Item::Text {
+    let (text, dim, _) = panel::text_colors(colors);
+    let center = |text: String, y, h, font, color| Item::Text {
         text,
         at: (0, y),
         w: WELCOME_WIDTH,
         h,
-        font: Font { size, bold },
+        font,
         align: Align::Center,
         color,
     };
     let mut items = vec![
-        center(Heading::Welcome.text().into(), 34, 40, 26, true, text),
-        center("A few keys to get going".into(), 74, 20, 14, false, dim),
+        center(
+            Heading::Welcome.text().into(),
+            34,
+            40,
+            panel::WELCOME_TITLE,
+            text,
+        ),
+        center("A few keys to get going".into(), 74, 20, panel::NOTE, dim),
     ];
     for (i, row) in rows.iter().enumerate() {
         let y = WELCOME_ROWS_AT + i as i32 * WELCOME_ROW;
@@ -148,68 +152,36 @@ fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -
             caps: row.keys.clone(),
             at: (WELCOME_KEYS_AT, y),
             w: WELCOME_WHAT_AT - WELCOME_KEYS_AT - 10,
-            size: 14,
+            size: panel::KEY,
         });
         items.push(Item::Text {
             text: row.what.into(),
             at: (WELCOME_WHAT_AT, y),
             w: WELCOME_WIDTH - WELCOME_WHAT_AT - 20,
-            h: crate::panel::CAP_HEIGHT,
-            font: Font {
-                size: 15,
-                bold: false,
-            },
+            h: panel::CAP_HEIGHT,
+            font: panel::BODY,
             align: Align::Left,
             color: text,
         });
     }
-    // With room at the sides: a long settings path ends in "…" before them.
-    items.push(Item::Text {
-        text: notes.join("  ·  "),
-        at: (20, height - 36),
-        w: WELCOME_WIDTH - 40,
-        h: 20,
-        font: Font {
-            size: 12,
-            bold: false,
-        },
-        align: Align::Center,
-        color: dim,
-    });
+    items.extend(footer(notes, WELCOME_WIDTH, height, colors));
     items
 }
 
-/// The full cheatsheet's items: the title and `notes` across the top, then
-/// its sections in two columns.
-fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Colors) -> Vec<Item> {
-    let (text, dim, accent) = text_colors(colors);
-    let x = COLUMNS_AT[0];
-    let mut items = vec![
-        Item::Text {
-            text: Heading::Shortcuts.text().into(),
-            at: (x, 20),
-            w: 300,
-            h: 34,
-            font: Font {
-                size: 22,
-                bold: true,
-            },
-            align: Align::Left,
-            color: text,
-        },
-        Item::Text {
-            text: notes.join("  ·  "),
-            at: (SHORTCUTS_WIDTH / 2, 27),
-            w: SHORTCUTS_WIDTH / 2 - x,
-            h: 20,
-            font: Font {
-                size: 12,
-                bold: false,
-            },
-            align: Align::Right,
-            color: dim,
-        },
-    ];
+/// The full cheatsheet's items: the title, its sections in two columns,
+/// and the footer with `notes`, for a panel `height` high.
+fn shortcuts_items(
+    columns: &[Vec<Section>; 2],
+    notes: &[String],
+    height: i32,
+    colors: &Colors,
+) -> Vec<Item> {
+    let (text, _, accent) = panel::text_colors(colors);
+    let mut items = vec![panel::title(
+        Heading::Shortcuts.text(),
+        SHORTCUTS_WIDTH,
+        colors,
+    )];
     for (column, sections) in COLUMNS_AT.iter().zip(columns) {
         let mut y = SECTIONS_AT;
         for section in sections {
@@ -218,10 +190,7 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
                 at: (*column, y),
                 w: 380,
                 h: 16,
-                font: Font {
-                    size: 11,
-                    bold: true,
-                },
+                font: panel::SECTION,
                 align: Align::Left,
                 color: accent,
             });
@@ -231,26 +200,31 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
                     caps: row.keys.clone(),
                     at: (*column, y),
                     w: SECTION_WHAT_AT - 10,
-                    size: 13,
+                    size: panel::KEY,
                 });
                 items.push(Item::Text {
                     text: row.what.into(),
                     at: (column + SECTION_WHAT_AT, y),
                     w: 380 - SECTION_WHAT_AT,
-                    h: crate::panel::CAP_HEIGHT,
-                    font: Font {
-                        size: 14,
-                        bold: false,
-                    },
+                    h: panel::CAP_HEIGHT,
+                    font: panel::BODY,
                     align: Align::Left,
-                    color: dim,
+                    color: text,
                 });
                 y += SECTION_ROW;
             }
             y += SECTION_GAP;
         }
     }
+    items.extend(footer(notes, SHORTCUTS_WIDTH, height, colors));
     items
+}
+
+/// The footer of a panel `width` by `height`: the hint, and `notes`.
+fn footer(notes: &[String], width: i32, height: i32, colors: &Colors) -> Vec<Item> {
+    let note = (!notes.is_empty()).then(|| notes.join("  ·  "));
+    let y = height - panel::PADDING - panel::FOOTER_HEIGHT;
+    panel::footer(HINTS, note.as_deref(), y, width, colors)
 }
 
 /// A column's height: its sections' headings and rows, a gap between them.
@@ -273,7 +247,8 @@ pub struct SceneShortcuts {
     /// Its sections: the welcome's one, untitled; the full cheatsheet's in
     /// two columns, the first section the first column.
     pub sections: Vec<Section>,
-    /// The lines that go with them: where the settings are, how to close it.
+    /// What the footer says beside its hint: where the settings are (the
+    /// welcome's).
     pub notes: Vec<String>,
     /// Its corners, the windows' (`corner-radius`, `rounded-corners`);
     /// `None`: square.
@@ -620,7 +595,12 @@ impl Pila {
                 let rows: Vec<Row> = view.rows().cloned().collect();
                 welcome_items(&rows, &view.notes, view.layout_size.h, colors)
             }
-            Heading::Shortcuts => shortcuts_items(&columns(&view.sections), &view.notes, colors),
+            Heading::Shortcuts => shortcuts_items(
+                &columns(&view.sections),
+                &view.notes,
+                view.layout_size.h,
+                colors,
+            ),
         };
         let key = TextKey {
             items,
@@ -724,15 +704,9 @@ impl Pila {
         self.shortcuts_view.shown.is_some()
     }
 
-    /// Redraw where the panel was and where it is now.
+    /// Redraw every output: the panel dims them all while it's shown.
     fn redraw_shortcuts_view(&mut self) {
-        if let Some(rect) = self.shortcuts_view.drawn.take() {
-            self.queue_redraw_rect(rect);
-        }
-        if let Some((rect, ..)) = self.shortcuts_layout() {
-            self.shortcuts_view.drawn = Some(rect);
-            self.queue_redraw_rect(rect);
-        }
+        self.queue_redraw();
     }
 
     /// The panel (where it shows, and its size as laid out), its sections,
@@ -768,7 +742,6 @@ impl Pila {
                 notes.push(format!("Settings: {}", home_relative(path)));
             }
         }
-        notes.push("Any key or click closes this".into());
         let layout_size = panel_size(shown.heading, &sections);
         let scale = fit(layout_size, area.size);
         let size = Size::from((
@@ -831,14 +804,18 @@ impl Pila {
     }
 }
 
-/// The cheatsheet's elements, front to back, relative to `origin`.
+/// The cheatsheet's elements for the output `output_name` at `output_geo`,
+/// front to back: the panel on its output, and the dim on every one, once
+/// its content is there.
 pub fn elements(
     renderer: &mut GlesRenderer,
     view: &SceneShortcuts,
     colors: &Colors,
-    origin: Point<i32, Logical>,
+    output_name: &str,
+    output_geo: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
+    let origin = output_geo.loc;
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
     let mut elements = Vec::new();
@@ -847,15 +824,25 @@ pub fn elements(
     let Some(text) = buffers.text.as_mut() else {
         return elements;
     };
-    // Shown at the panel's size: smaller than drawn where it was shrunk to
-    // fit its monitor.
-    elements.extend(text.element(renderer, view.rect, origin, scale));
-    elements.extend(crate::panel::frame(
-        renderer,
-        &mut buffers.frame,
-        view.rect,
-        view.rounding,
-        colors,
+    if output_name == view.output {
+        // Shown at the panel's size: smaller than drawn where it was shrunk
+        // to fit its monitor.
+        elements.extend(text.element(renderer, view.rect, origin, scale));
+        elements.extend(crate::panel::frame(
+            renderer,
+            &mut buffers.frame,
+            view.rect,
+            view.rounding,
+            colors,
+            origin,
+            scale,
+        ));
+    }
+    elements.push(crate::panel::dim(
+        &mut buffers.dims,
+        output_name,
+        output_geo,
+        1.0,
         origin,
         scale,
     ));

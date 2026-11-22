@@ -780,15 +780,21 @@ Key flows and invariants:
   popup's commit any more, so without it that popover's initial commit read as a hiding one
   and got no configure, while its grab held the app's input.
 - **Panels** (`panel.rs`): what Pila's own panels share, so that they look alike (the switcher,
-  the cheatsheet and welcome, the share picker; the overview takes its dim and accent from it).
-  `panel::frame` draws a panel's background (`bar-inactive`, opaque) and its `BORDER` of
-  `hover`, with the windows' corners (`panel::rounding`: `corner-radius`, `rounded-corners`;
-  `render::solid_element`, the border's radius a pixel bigger to follow the curve; square where
-  the shaders didn't compile), its buffers kept in `FrameBuffers`. What's selected sits on the
-  accent (`panel::accent`, `snap-preview` made opaque). A modal panel dims every output with
-  `DIM` (`panel::dim`). Texts and keycaps are `Item`s drawn by `draw_text` on a thread into one
-  image the size of the panel (`TextKey` says what it shows, the keycaps in `key_caps`), shown
-  as one texture by `ContentImage`.
+  the cheatsheet and welcome, the share picker, the window menu; the overview takes its dim and
+  accent from it). `panel::frame` draws a panel's background (`bar-inactive`, opaque) and its
+  `BORDER` of `hover`, with the windows' corners (`panel::rounding`: `corner-radius`,
+  `rounded-corners`; `render::solid_element`, the border's radius a pixel bigger to follow the
+  curve; square where the shaders didn't compile), its buffers kept in `FrameBuffers`. What's
+  selected sits on the accent (`panel::accent`, `snap-preview` made opaque), its text in
+  `hover-icon`. A modal panel (the cheatsheet and welcome, the share picker) dims every output
+  with `DIM` (`panel::dim`), so it redraws them all when it shows or goes. One type scale
+  (`TITLE`, `WELCOME_TITLE`, `BODY`, `NOTE`, `SECTION`, `KEY`, `HINT_KEY`); a panel with a title
+  has `PADDING` around its content, its title in the same place (`panel::title`) and a footer of
+  key hints at its bottom (`panel::footer`: each an `Item::Hint`, a keycap and what it does right
+  after it, from the left; a note at the right), `FOOTER` under its content. The switcher and
+  the window menu have no title, and tighter room of their own. Texts and keycaps are `Item`s
+  drawn by `draw_text` on a thread into one image the size of the panel (`TextKey` says what it
+  shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`.
 - **Switcher** (`switcher_view.rs`): Pila's own window switcher, drawn by Pila, that only shows
   the switch `switcher.rs` does (see "Window switching"). `Pila::switch_changed` (and
   `cycle_focus` once the switch is in place) call `switcher_view_changed`: a new switch arms a
@@ -902,9 +908,10 @@ Key flows and invariants:
   (`shortcuts_config_changed`, which makes its background and border anew so that a change of
   corners alone is drawn); one that fails with the fonts loaded isn't asked again until it
   changes. The panel is drawn only once its content is there, never empty. Its background and
-  border have the windows' corners (`corner-radius`, `rounded-corners`: `RoundedSolid`, the
-  border's a pixel wider). The image and the solid buffers are kept in `Buffers` while it's
-  shown. The state dump has it
+  border are the panels' (`panel::frame`), and while its content is there it dims every output
+  (`shortcuts_view::elements` is called for each; `redraw_shortcuts_view` redraws them all);
+  its footer has the Esc hint and, on the welcome, where the settings are (`notes`). The image
+  and the solid buffers are kept in `Buffers` while it's shown. The state dump has it
   (`shortcuts_view_json`: its rows, keys joined by "+", and sections).
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
@@ -1146,9 +1153,9 @@ Key flows and invariants:
 - **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id) and shows every output, left to right, as a live preview,
-  the one under the pointer selected. It's drawn as Pila's other panels are: the windows'
-  corners, the selected tile on a block of the accent (the switcher's), buttons rounded as the
-  cheatsheet's keys. Modal: every key goes to it (`input.rs`, before the window
+  the one under the pointer selected. It's drawn as Pila's other panels are (`panel.rs`): their
+  frame, title and footer of key hints, the selected tile on a block of the accent (the
+  switcher's), buttons rounded as the cheatsheet's keys, Share's label in `hover-icon`. Modal: every key goes to it (`input.rs`, before the window
   menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,
   and every output is dimmed under it (`share_picker::elements`, in front of everything of
   Pila's in `render::output_elements`; never while locked). Arrows/Tab select, Enter/Share
@@ -1528,7 +1535,11 @@ Key flows and invariants:
   `forget_window`, a lock, a workspace switch) ends it through the pointer. The keyboard
   filter gives it every press while open (kept as `menu_key` for after the filter, in
   `on_keyboard`). Drawn first by
-  `output_elements` from `Scene::window_menu`, its label textures and solid buffers kept in
+  `output_elements` from `Scene::window_menu` (in front of Pila's other panels), as they are
+  (`panel::frame`, the windows' corners), the row under the pointer on the accent with its
+  label in `hover-icon`; its rows are inset from its sides by `padding`, more than `PADDING`
+  where the corners are round enough that a highlighted row would stick out of them. Its label
+  textures (by text, scale and whether highlighted) and solid buffers are kept in
   `MenuBuffers`.
 - **Urgency** (`urgency.rs`): a mark in a window's user data (`set_urgent`, `is_urgent`), set by
   an activation whose token had no serial (`UrgentOnlyToken`, accepted for any client in

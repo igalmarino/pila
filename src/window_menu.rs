@@ -13,9 +13,10 @@
 //! closes with its window (`forget_window`), a lock or a workspace switch.
 //!
 //! It's drawn by pila, above everything but the cursor (`render::output_elements`),
-//! in the title bar's colors; its textures and solid buffers are kept between
-//! frames (`MenuBuffers`), so an open menu costs a few elements and no damage
-//! unless the hover moves.
+//! as Pila's other panels are (`panel.rs`): their frame and corners, the row
+//! under the pointer on the accent. Its textures and solid buffers are kept
+//! between frames (`MenuBuffers`), so an open menu costs a few elements and no
+//! damage unless the hover moves.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -51,7 +52,8 @@ use crate::{config::Colors, render::PilaRenderElement, state::fill_state, Pila};
 /// A row's height and the menu's width, in logical pixels.
 pub const ITEM_HEIGHT: i32 = 28;
 pub const WIDTH: i32 = 220;
-/// Space above the first row and below the last.
+/// Space around the rows, at least: more with rounder corners
+/// (`padding`).
 const PADDING: i32 = 4;
 /// Left of a label.
 const TEXT_INSET: i32 = 12;
@@ -117,17 +119,22 @@ pub struct WindowMenu {
     pub rect: Rectangle<i32, Logical>,
     /// The row under the pointer or picked with the keyboard.
     pub hover: Option<usize>,
+    /// Its corners, the windows' (`panel::rounding`), and the room around
+    /// its rows that keeps them inside them (`padding`).
+    rounding: crate::panel::Shape,
+    padding: i32,
     buffers: Rc<RefCell<MenuBuffers>>,
 }
 
 /// Kept between frames so an unchanged menu adds no damage.
 #[derive(Default)]
 struct MenuBuffers {
-    background: Option<SolidColorBuffer>,
+    frame: crate::panel::FrameBuffers,
     hover: Option<SolidColorBuffer>,
-    mark: Option<SolidColorBuffer>,
-    /// Label textures by text and buffer scale.
-    labels: HashMap<(&'static str, i32), MemoryRenderBuffer>,
+    /// The marks of rows that are on: off the accent and on it.
+    marks: [Option<SolidColorBuffer>; 2],
+    /// Label textures by text, buffer scale and whether on the accent.
+    labels: HashMap<(&'static str, i32, bool), MemoryRenderBuffer>,
 }
 
 /// What `Pila::scene` gives the renderer of an open menu.
@@ -135,12 +142,24 @@ pub struct SceneMenu {
     rect: Rectangle<i32, Logical>,
     rows: Vec<(&'static str, bool)>,
     hover: Option<usize>,
+    rounding: crate::panel::Shape,
+    padding: i32,
     buffers: Rc<RefCell<MenuBuffers>>,
+}
+
+/// The room around the rows: `PADDING`, or more where the corners are round
+/// enough that a highlighted row's corner would stick out of them (it's
+/// inside where it's `radius·(1 − 1/√2)` in from both sides).
+fn padding(rounding: crate::panel::Shape) -> i32 {
+    let curve = rounding.map_or(0.0, |(radius, _)| {
+        radius * (1.0 - std::f64::consts::FRAC_1_SQRT_2)
+    });
+    PADDING.max(curve.ceil() as i32)
 }
 
 impl WindowMenu {
     fn row_rect(&self, index: usize) -> Rectangle<i32, Logical> {
-        row_rect(self.rect, index)
+        row_rect(self.rect, self.padding, index)
     }
 
     /// The row at `location` (global), if any.
@@ -156,6 +175,8 @@ impl WindowMenu {
                 .map(|item| (item.label(&self.window), item.checked(&self.window)))
                 .collect(),
             hover: self.hover,
+            rounding: self.rounding,
+            padding: self.padding,
             buffers: self.buffers.clone(),
         }
     }
@@ -173,14 +194,15 @@ impl WindowMenu {
     }
 }
 
-fn row_rect(menu: Rectangle<i32, Logical>, index: usize) -> Rectangle<i32, Logical> {
+/// Row `index` of the menu at `menu`, `padding` in from its sides.
+fn row_rect(menu: Rectangle<i32, Logical>, padding: i32, index: usize) -> Rectangle<i32, Logical> {
     Rectangle::new(
         (
-            menu.loc.x,
-            menu.loc.y + PADDING + index as i32 * ITEM_HEIGHT,
+            menu.loc.x + padding,
+            menu.loc.y + padding + index as i32 * ITEM_HEIGHT,
         )
             .into(),
-        (menu.size.w, ITEM_HEIGHT).into(),
+        (menu.size.w - 2 * padding, ITEM_HEIGHT).into(),
     )
 }
 
@@ -201,7 +223,9 @@ impl Pila {
             return;
         };
         self.dismiss_popup_grab();
-        let size = Size::from((WIDTH, PADDING * 2 + ITEMS.len() as i32 * ITEM_HEIGHT));
+        let rounding = crate::panel::rounding(&self.config);
+        let padding = padding(rounding);
+        let size = Size::from((WIDTH, padding * 2 + ITEMS.len() as i32 * ITEM_HEIGHT));
         let mut rect = Rectangle::new(at, size);
         if let Some(output) = self.output_geometry_at(at.to_f64()) {
             let max = output.loc + output.size.to_point() - size.to_point();
@@ -217,6 +241,8 @@ impl Pila {
             window: window.clone(),
             rect,
             hover: None,
+            rounding,
+            padding,
             buffers: Default::default(),
         });
         let grab = WindowMenuGrab {
@@ -527,27 +553,27 @@ pub fn elements(
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
     let mut buffers = menu.buffers.borrow_mut();
+    let buffers = &mut *buffers;
     let buffer_scale = crate::scale::buffer_scale(scale);
     let physical = |loc: Point<i32, Logical>| -> Point<i32, Physical> {
         (loc - origin).to_physical_precise_round(scale)
     };
-    let solid = |slot: &mut Option<SolidColorBuffer>, size: Size<i32, Logical>, color: [f32; 4]| {
-        let buffer = slot.get_or_insert_with(|| SolidColorBuffer::new(size, color));
-        buffer.update(size, color);
-        buffer.clone()
-    };
-    let opaque = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
     let mut elements = Vec::new();
 
     for (index, (label, checked)) in menu.rows.iter().enumerate() {
-        let row = row_rect(menu.rect, index);
-        let key = (*label, buffer_scale);
+        let row = row_rect(menu.rect, menu.padding, index);
+        let lit = menu.hover == Some(index);
+        let color = if lit { colors.hover_icon } else { colors.icon };
+        // The label and the mark where they'd be without the padding.
+        let left = menu.rect.loc.x + TEXT_INSET;
+        let right = menu.rect.loc.x + menu.rect.size.w - TEXT_INSET;
+        let key = (*label, buffer_scale, lit);
         // None until the fonts have loaded; then the next frame draws it.
         let label = match buffers.labels.entry(key) {
             std::collections::hash_map::Entry::Occupied(entry) => Some(entry.into_mut()),
             std::collections::hash_map::Entry::Vacant(slot) => {
                 let width = WIDTH - TEXT_INSET * 2 - MARK_SIZE;
-                crate::text::render_title(label, colors.icon, width, ITEM_HEIGHT, buffer_scale).map(
+                crate::text::render_title(label, color, width, ITEM_HEIGHT, buffer_scale).map(
                     |title| {
                         slot.insert(MemoryRenderBuffer::from_slice(
                             &title.pixels,
@@ -562,7 +588,7 @@ pub fn elements(
             }
         };
         if let Some(buffer) = label {
-            let loc = (row.loc + Point::from((TEXT_INSET, 0))).to_f64();
+            let loc = Point::<i32, Logical>::from((left, row.loc.y)).to_f64();
             let loc = (loc - origin.to_f64()).to_physical(scale);
             if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
@@ -578,15 +604,15 @@ pub fn elements(
         }
         if *checked {
             let size = Size::from((MARK_SIZE, MARK_SIZE));
-            let buffer = solid(&mut buffers.mark, size, opaque(colors.icon));
-            let at = row.loc
-                + Point::from((
-                    row.size.w - TEXT_INSET - MARK_SIZE,
-                    (ITEM_HEIGHT - MARK_SIZE) / 2,
-                ));
+            let buffer = crate::panel::solid_buffer(
+                &mut buffers.marks[usize::from(lit)],
+                size,
+                crate::panel::rgb(color),
+            );
+            let at = Point::from((right - MARK_SIZE, row.loc.y + (ITEM_HEIGHT - MARK_SIZE) / 2));
             elements.push(PilaRenderElement::Solid(
                 SolidColorRenderElement::from_buffer(
-                    &buffer,
+                    buffer,
                     physical(at),
                     scale,
                     1.0,
@@ -596,11 +622,12 @@ pub fn elements(
         }
     }
     if let Some(index) = menu.hover {
-        let row = row_rect(menu.rect, index);
-        let buffer = solid(&mut buffers.hover, row.size, opaque(colors.hover));
+        let row = row_rect(menu.rect, menu.padding, index);
+        let buffer =
+            crate::panel::solid_buffer(&mut buffers.hover, row.size, crate::panel::accent(colors));
         elements.push(PilaRenderElement::Solid(
             SolidColorRenderElement::from_buffer(
-                &buffer,
+                buffer,
                 physical(row.loc),
                 scale,
                 1.0,
@@ -608,15 +635,34 @@ pub fn elements(
             ),
         ));
     }
-    let buffer = solid(&mut buffers.background, menu.rect.size, colors.bar);
-    elements.push(PilaRenderElement::Solid(
-        SolidColorRenderElement::from_buffer(
-            &buffer,
-            physical(menu.rect.loc),
-            scale,
-            1.0,
-            Kind::Unspecified,
-        ),
+    elements.extend(crate::panel::frame(
+        renderer,
+        &mut buffers.frame,
+        menu.rect,
+        menu.rounding,
+        colors,
+        origin,
+        scale,
     ));
     elements
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rounded::Corners;
+
+    /// A highlighted row stays inside the menu's corners: the room around
+    /// the rows grows with their radius, never under `PADDING`.
+    #[test]
+    fn the_rows_stay_inside_round_corners() {
+        assert_eq!(padding(None), PADDING);
+        assert_eq!(padding(Some((8.0, Corners::Top))), PADDING);
+        for radius in [8.0, 16.0, 24.0, 40.0] {
+            let p = f64::from(padding(Some((radius, Corners::All))));
+            // The row's corner, from the corner circle's center.
+            let off = (radius - p) * std::f64::consts::SQRT_2;
+            assert!(off <= radius, "radius {radius}: padding {p}");
+        }
+    }
 }

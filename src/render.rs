@@ -1868,14 +1868,17 @@ pub fn output_elements(
         Some(view) => crate::switcher_view::elements(renderer, view, &scene.colors, origin, scale),
         None => Vec::new(),
     };
-    if let Some(view) = scene
-        .shortcuts
-        .as_ref()
-        .filter(|view| !scene.locked && view.output == output_name)
-    {
-        // In front of the switcher: it's first, front to back.
-        let mut front =
-            crate::shortcuts_view::elements(renderer, view, &scene.colors, origin, scale);
+    if let Some(view) = scene.shortcuts.as_ref().filter(|_| !scene.locked) {
+        // In front of the switcher: it's first, front to back. It dims
+        // every output.
+        let mut front = crate::shortcuts_view::elements(
+            renderer,
+            view,
+            &scene.colors,
+            output_name,
+            Rectangle::new(origin, output_geo.size),
+            scale,
+        );
         front.append(&mut elements);
         elements = front;
     }

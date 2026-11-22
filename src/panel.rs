@@ -13,6 +13,11 @@
 //! - Their content image (`Item`, `TextKey`, `draw_text`, `ContentImage`):
 //!   texts and keycaps drawn on a thread into one image the size of the
 //!   panel, a single texture.
+//! - One type scale (`TITLE`, `BODY`, `NOTE`, ...) and, on a panel with a
+//!   title, the same room around its content (`PADDING`), the title in the
+//!   same place (`title`) and a footer of key hints at its bottom
+//!   (`footer`). The switcher and the window menu have no title: their room
+//!   is their own, tighter.
 
 use std::collections::HashMap;
 
@@ -48,6 +53,47 @@ pub const CAP_RADIUS: i32 = 4;
 const CAP_PADDING: i32 = 7;
 /// Between keycaps, where a "+" goes.
 const CAP_GAP: i32 = 18;
+
+/// The room around a titled panel's content, and its title's place.
+pub const PADDING: i32 = 28;
+pub const TITLE_AT: i32 = 20;
+pub const TITLE_HEIGHT: i32 = 34;
+/// The footer: its row (the keycaps' height), and the room above it.
+pub const FOOTER_HEIGHT: i32 = CAP_HEIGHT;
+pub const FOOTER_GAP: i32 = 32;
+/// What a titled panel keeps under its content: the footer and its room.
+pub const FOOTER: i32 = FOOTER_GAP + FOOTER_HEIGHT + PADDING;
+/// A hint in the footer: its keycap's room, then its word's.
+const HINT_CAP: i32 = 54;
+const HINT_WORD: i32 = 70;
+/// Between a hint's keycap and its word.
+const HINT_SPACE: i32 = 8;
+
+/// The type scale. A panel's title; the welcome's, larger; what it says;
+/// a note, dimmed; a section's heading, in the accent and capitals.
+pub const TITLE: Font = Font {
+    size: 22,
+    bold: true,
+};
+pub const WELCOME_TITLE: Font = Font {
+    size: 26,
+    bold: true,
+};
+pub const BODY: Font = Font {
+    size: 14,
+    bold: false,
+};
+pub const NOTE: Font = Font {
+    size: 13,
+    bold: false,
+};
+pub const SECTION: Font = Font {
+    size: 11,
+    bold: true,
+};
+/// A keycap's label in a list of shortcuts, and in the footer's hints.
+pub const KEY: u8 = 13;
+pub const HINT_KEY: u8 = 12;
 
 /// A corner radius and which corners it rounds; `None`: square.
 pub type Shape = Option<(f64, Corners)>;
@@ -206,6 +252,15 @@ pub enum Item {
         w: i32,
         size: u8,
     },
+    /// A footer's hint: a keycap (its label at `HINT_KEY` px), then what it
+    /// does right after it, in `NOTE`, within `w`.
+    Hint {
+        cap: String,
+        what: String,
+        at: (i32, i32),
+        w: i32,
+        color: [u32; 3],
+    },
 }
 
 /// What a content image shows: its items in the panel's palette, the
@@ -303,12 +358,105 @@ fn blit_text(pixels: &mut [u8], width: i32, text: &crate::text::Title, x: i32, y
     }
 }
 
+/// The texts' colors: text, dimmed text and the accent.
+pub fn text_colors(colors: &Colors) -> ([u32; 3], [u32; 3], [u32; 3]) {
+    let [r, g, b, _] = accent(colors);
+    (
+        bits(colors.icon),
+        bits(colors.icon_inactive),
+        bits([r, g, b]),
+    )
+}
+
+/// A titled panel's title, at its place, within `width` (the panel's).
+pub fn title(text: &str, width: i32, colors: &Colors) -> Item {
+    Item::Text {
+        text: text.into(),
+        at: (PADDING, TITLE_AT),
+        w: width - 2 * PADDING,
+        h: TITLE_HEIGHT,
+        font: TITLE,
+        align: Align::Left,
+        color: text_colors(colors).0,
+    }
+}
+
+/// The width of `count` hints in the footer.
+pub const fn hints_width(count: usize) -> i32 {
+    count as i32 * (HINT_CAP + HINT_WORD)
+}
+
+/// A titled panel's footer, its row at `y`, across a panel `width` wide:
+/// `hints` (a key's cap and what it does, dimmed) from the left, and a
+/// `note` at the right, dimmed.
+pub fn footer(
+    hints: &[(&str, &str)],
+    note: Option<&str>,
+    y: i32,
+    width: i32,
+    colors: &Colors,
+) -> Vec<Item> {
+    let (_, dimmed, _) = text_colors(colors);
+    let mut items = Vec::new();
+    let mut x = PADDING;
+    for (cap, what) in hints {
+        items.push(Item::Hint {
+            cap: cap.to_string(),
+            what: what.to_string(),
+            at: (x, y),
+            w: HINT_CAP + HINT_WORD - 16,
+            color: dimmed,
+        });
+        x += HINT_CAP + HINT_WORD;
+    }
+    if let Some(note) = note {
+        // With room after the hints: a long settings path ends in "…".
+        let from = x + 16;
+        items.push(Item::Text {
+            text: note.into(),
+            at: (from, y + 1),
+            w: (width - PADDING - from).max(0),
+            h: 20,
+            font: NOTE,
+            align: Align::Right,
+            color: dimmed,
+        });
+    }
+    items
+}
+
+/// A keycap `cap_w` wide at (`x`, `y`) (physical pixels) with `text` on
+/// it: its fill inside an edge a pixel wide.
+#[allow(clippy::too_many_arguments)]
+fn draw_cap(
+    pixels: &mut [u8],
+    width: i32,
+    text: &crate::text::Title,
+    x: i32,
+    y: i32,
+    cap_w: i32,
+    scale: i32,
+    [fill, edge]: [[f32; 3]; 2],
+) {
+    let s = scale as f32;
+    let rect = (
+        x as f32,
+        y as f32,
+        cap_w as f32,
+        (CAP_HEIGHT * scale) as f32,
+    );
+    let radius = CAP_RADIUS as f32 * s;
+    fill_rounded(pixels, width, rect, radius, edge);
+    let inner = (rect.0 + s, rect.1 + s, rect.2 - 2.0 * s, rect.3 - 2.0 * s);
+    fill_rounded(pixels, width, inner, radius - s, fill);
+    blit_text(pixels, width, text, x + (cap_w - text.width) / 2, y);
+}
+
 /// `key`'s items drawn into one image (`None` until the fonts have loaded).
 /// On a thread: shaping and rasterizing them all takes a few milliseconds.
 pub fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
     use crate::text::{render_text, Style};
     let scale = key.scale;
-    let s = scale as f32;
     let (width, height) = (key.size.0 * scale, key.size.1 * scale);
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
     let [label, fill, edge, plus] = key.caps.map(|c| c.map(f32::from_bits));
@@ -358,18 +506,35 @@ pub fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
                     if x + cap_w > end {
                         break;
                     }
-                    let rect = (
-                        x as f32,
-                        y as f32,
-                        cap_w as f32,
-                        (CAP_HEIGHT * scale) as f32,
-                    );
-                    let radius = CAP_RADIUS as f32 * s;
-                    fill_rounded(&mut pixels, width, rect, radius, edge);
-                    let inner = (rect.0 + s, rect.1 + s, rect.2 - 2.0 * s, rect.3 - 2.0 * s);
-                    fill_rounded(&mut pixels, width, inner, radius - s, fill);
-                    blit_text(&mut pixels, width, &text, x + (cap_w - text.width) / 2, y);
+                    draw_cap(&mut pixels, width, &text, x, y, cap_w, scale, [fill, edge]);
                     x += cap_w;
+                }
+            }
+            Item::Hint {
+                cap,
+                what,
+                at,
+                w,
+                color,
+            } => {
+                let key = Style {
+                    size: f32::from(HINT_KEY),
+                    bold: false,
+                };
+                let text = render_text(cap, label, *w, CAP_HEIGHT, scale, key)?;
+                let cap_w = (text.width + 2 * CAP_PADDING * scale).max(CAP_HEIGHT * scale);
+                let (x, y) = (at.0 * scale, at.1 * scale);
+                draw_cap(&mut pixels, width, &text, x, y, cap_w, scale, [fill, edge]);
+                let style = Style {
+                    size: f32::from(NOTE.size),
+                    bold: NOTE.bold,
+                };
+                let room = (w * scale - cap_w) / scale - HINT_SPACE;
+                if room > 0 {
+                    let line =
+                        render_text(what, color.map(f32::from_bits), room, 20, scale, style)?;
+                    let after = x + cap_w + HINT_SPACE * scale;
+                    blit_text(&mut pixels, width, &line, after, y + scale);
                 }
             }
         }

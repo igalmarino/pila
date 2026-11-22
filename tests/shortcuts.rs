@@ -96,7 +96,7 @@ fn a_config_of_ones_own_starts_without_it_and_mod_question_mark_toggles_it() {
     // Only the welcome names the settings file.
     assert_eq!(
         state["shortcuts_view"]["notes"].as_array().unwrap().len(),
-        1
+        0
     );
     pila.combo("Super+Shift+slash");
     pila.wait("hidden", |s| !shown(s));
@@ -207,14 +207,16 @@ fn the_panel_has_the_windows_corners() {
         ("", false, false),
     ] {
         let mut pila = TestPila::with_config(config);
+        let desktop = pila.pixel(5.0, 5.0);
         pila.combo("Super+Shift+slash");
         let state = pila.wait("shown", shown);
         let (x, y, w, h) = rect(&state["shortcuts_view"]["rect"]);
-        let desktop = pila.pixel(5.0, 5.0);
         // The panel, drawn: its content came.
         pila.wait_pixel_is((x + w - 5) as f64, (y + 28) as f64, "drawn", |p| {
             p != desktop
         });
+        // The desktop, dimmed under it.
+        let desktop = pila.pixel(5.0, 5.0);
         // The panel's very corners, its 1 px border just outside.
         let top = pila.pixel((x - 1) as f64, (y - 1) as f64);
         let bottom = pila.pixel((x - 1) as f64, (y + h) as f64);
@@ -301,4 +303,31 @@ fn without_fonts_no_panel_takes_the_keys() {
             }
         })
     });
+}
+
+/// While it's shown every output is dimmed, the panel's and the others, as
+/// under the share picker; hidden, they're as they were.
+#[test]
+fn it_dims_every_output_while_shown() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:800x600,B:800x600".into()),
+        config: "[colors]\nbackground = \"#ffffff\"\n".into(),
+        ..Options::default()
+    });
+    pila.move_to(400.0, 300.0);
+    pila.settle();
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    assert_eq!(pila.pixel(5.0, 5.0), WHITE);
+    pila.combo("Super+Shift+slash");
+    let state = pila.wait("shown", shown);
+    assert_eq!(state["shortcuts_view"]["output"], "A");
+    // White under 45 % black.
+    let dimmed = |p: [u8; 4]| p[..3].iter().all(|&c| (138..=142).contains(&c));
+    pila.wait_pixel_is(5.0, 5.0, "A dimmed", dimmed);
+    let (bx, by) = (800.0 + 5.0, 5.0);
+    pila.wait_pixel_is(bx, by, "B dimmed", dimmed);
+    pila.key("Escape");
+    pila.wait("hidden", |s| !shown(s));
+    pila.wait_pixel(5.0, 5.0, WHITE);
+    pila.wait_pixel(bx, by, WHITE);
 }

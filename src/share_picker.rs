@@ -36,17 +36,16 @@ use tracing::{info, warn};
 
 use crate::{
     config::Colors,
-    panel::{bits, draw_text, Align, ContentImage, Font, FrameBuffers, Item, TextKey},
+    panel::{bits, draw_text, Align, ContentImage, FrameBuffers, Item, TextKey},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
     Pila,
 };
 
-/// The panel's room around its content, and where its lines go.
-const PADDING: i32 = 28;
-const TITLE_AT: i32 = 22;
-const TITLE_HEIGHT: i32 = 30;
+/// The panel's room around its content (Pila's titled panels'), and where
+/// the note under its title goes.
+const PADDING: i32 = crate::panel::PADDING;
 const NOTE_AT: i32 = 56;
 const NOTE_HEIGHT: i32 = 20;
 /// The tiles: a preview's box, the label under it, the room between them.
@@ -61,8 +60,7 @@ const COLUMNS: usize = 3;
 const SELECTED_MARGIN: i32 = 6;
 /// The buttons' corners: the cheatsheet's keys'.
 const KEY_RADIUS: i32 = crate::panel::CAP_RADIUS;
-/// The footer: the buttons, and the room above it.
-const FOOTER_GAP: i32 = 32;
+/// The footer: the buttons, as tall as they are, the hints beside them.
 const BUTTON_HEIGHT: i32 = 36;
 const SHARE_WIDTH: i32 = 120;
 const CANCEL_WIDTH: i32 = 110;
@@ -72,12 +70,9 @@ const FOOTER_SPACE: i32 = 24;
 /// The narrowest panel (one source): its footer, the hints then the buttons.
 const MIN_WIDTH: i32 =
     2 * PADDING + HINTS_WIDTH + FOOTER_SPACE + CANCEL_WIDTH + BUTTON_GAP + SHARE_WIDTH;
-/// A hint's keycap slot, before its text, and where each hint starts.
-const HINT_KEYS: i32 = 60;
-const HINT_TEXT: i32 = 70;
-const HINT_SLOTS: [i32; 3] = [0, 120, 250];
-/// All of the hints: the last one's keycap and text.
-const HINTS_WIDTH: i32 = HINT_SLOTS[2] + HINT_KEYS - 6 + HINT_TEXT;
+/// The key hints in the footer, and their width.
+const HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "share"), ("Esc", "cancel")];
+const HINTS_WIDTH: i32 = crate::panel::hints_width(HINTS.len());
 
 /// The picker while it's shown (`Pila::share_picker`).
 #[derive(Default)]
@@ -132,8 +127,12 @@ pub fn layout(area: Rectangle<i32, Logical>, count: usize) -> Layout {
     let rows = count.div_ceil(COLUMNS) as i32;
     let tile_row = TILE.1 + LABEL_GAP + LABEL_HEIGHT;
     let width = (2 * PADDING + columns * TILE.0 + (columns - 1) * TILE_GAP).max(MIN_WIDTH);
-    let height =
-        TILES_AT + rows * tile_row + (rows - 1) * ROW_GAP + FOOTER_GAP + BUTTON_HEIGHT + PADDING;
+    let height = TILES_AT
+        + rows * tile_row
+        + (rows - 1) * ROW_GAP
+        + crate::panel::FOOTER_GAP
+        + BUTTON_HEIGHT
+        + PADDING;
     let panel = Rectangle::new(
         area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
         Size::from((width, height)),
@@ -626,36 +625,23 @@ impl Pila {
 
 /// The panel's texts, at places from its top-left.
 fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors) -> Vec<Item> {
+    use crate::panel::{BODY, NOTE};
     let panel = layout.panel;
     let width = panel.size.w - 2 * PADDING;
     let local = |r: Rectangle<i32, Logical>| (r.loc.x - panel.loc.x, r.loc.y - panel.loc.y);
-    let (text, dimmed) = (bits(colors.icon), bits(colors.icon_inactive));
+    let (text, dimmed, _) = crate::panel::text_colors(colors);
     let title = match app {
         Some(app) => format!("Share a screen with {app}"),
         None => "An app asks to share a screen".to_string(),
     };
     let mut items = vec![
-        Item::Text {
-            text: title,
-            at: (PADDING, TITLE_AT),
-            w: width,
-            h: TITLE_HEIGHT,
-            font: Font {
-                size: 20,
-                bold: false,
-            },
-            align: Align::Left,
-            color: text,
-        },
+        crate::panel::title(&title, panel.size.w, colors),
         Item::Text {
             text: "It will see everything the screen shows until it stops sharing.".into(),
             at: (PADDING, NOTE_AT),
             w: width,
             h: NOTE_HEIGHT,
-            font: Font {
-                size: 13,
-                bold: false,
-            },
+            font: NOTE,
             align: Align::Left,
             color: dimmed,
         },
@@ -667,55 +653,36 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (x, y + tile.size.h + LABEL_GAP),
             w: tile.size.w,
             h: LABEL_HEIGHT,
-            font: Font {
-                size: 14,
-                bold: false,
-            },
+            font: BODY,
             align: Align::Center,
             color: text,
         });
     }
-    let buttons_y = local(layout.share).1;
-    for (rect, label) in [(layout.share, "Share"), (layout.cancel, "Cancel")] {
+    // Share's label on the accent, as the switcher's selected title.
+    let on_accent = bits(colors.hover_icon);
+    for (rect, label, color) in [
+        (layout.share, "Share", on_accent),
+        (layout.cancel, "Cancel", text),
+    ] {
         let (x, y) = local(rect);
         items.push(Item::Text {
             text: label.into(),
             at: (x, y + (BUTTON_HEIGHT - LABEL_HEIGHT) / 2),
             w: rect.size.w,
             h: LABEL_HEIGHT,
-            font: Font {
-                size: 14,
-                bold: false,
-            },
+            font: BODY,
             align: Align::Center,
-            color: text,
+            color,
         });
     }
-    let hints_y = buttons_y + (BUTTON_HEIGHT - 22) / 2;
-    for (slot, (cap, what)) in
-        HINT_SLOTS
-            .iter()
-            .zip([("← →", "pick"), ("Enter", "share"), ("Esc", "cancel")])
-    {
-        items.push(Item::Keys {
-            caps: vec![cap.to_string()],
-            at: (PADDING + slot, hints_y),
-            w: HINT_KEYS,
-            size: 12,
-        });
-        items.push(Item::Text {
-            text: what.into(),
-            at: (PADDING + slot + HINT_KEYS - 6, hints_y + 1),
-            w: HINT_TEXT,
-            h: 20,
-            font: Font {
-                size: 13,
-                bold: false,
-            },
-            align: Align::Left,
-            color: dimmed,
-        });
-    }
+    let hints_y = local(layout.share).1 + (BUTTON_HEIGHT - crate::panel::FOOTER_HEIGHT) / 2;
+    items.extend(crate::panel::footer(
+        &HINTS,
+        None,
+        hints_y,
+        panel.size.w,
+        colors,
+    ));
     items
 }
 
@@ -822,6 +789,27 @@ pub fn elements(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The picker's title, type and footer are the other titled panels'
+    /// (`panel.rs`): its title where theirs is, in the same font, and its
+    /// footer's hints.
+    #[test]
+    fn it_has_the_titled_panels_title_and_footer() {
+        let colors = crate::config::Config::parse("", &|_| None, crate::config::ModKey::Super)
+            .unwrap()
+            .colors;
+        let picker = items(&layout(area(), 1), Some("App"), &["A".into()], &colors);
+        let Some(Item::Text { at, font, .. }) = picker.first() else {
+            panic!("no title first: {picker:?}");
+        };
+        assert_eq!(*at, (crate::panel::PADDING, crate::panel::TITLE_AT));
+        assert_eq!(*font, crate::panel::TITLE);
+        let hints = picker
+            .iter()
+            .filter(|item| matches!(item, Item::Hint { .. }))
+            .count();
+        assert_eq!(hints, HINTS.len());
+    }
 
     fn area() -> Rectangle<i32, Logical> {
         Rectangle::new((0, 0).into(), (1920, 1080).into())
