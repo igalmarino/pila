@@ -93,6 +93,7 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
             };
             let built = zbus::block_on(
                 zbus::connection::Builder::address(address.as_str())
+                    .method_timeout(std::time::Duration::from_secs(5))
                     .name(BUS_NAME)
                     .serve_at(PATH, screencast)
                     .build(),

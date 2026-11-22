@@ -151,13 +151,14 @@ impl Drop for Cast {
 
 impl Pila {
     /// Serve the portal on the session bus, if Pila is the session (or a
-    /// headless test given a bus).
-    pub fn start_portal(&mut self) {
+    /// headless test given a bus): whether it's being started, and
+    /// `Pila::startup_step_done` follows once it serves (or failed).
+    pub fn start_portal(&mut self) -> bool {
         if !self.backend.as_ref().is_some_and(|b| b.serves_portal()) {
-            return;
+            return false;
         }
         let Some(bus) = std::env::var_os("DBUS_SESSION_BUS_ADDRESS") else {
-            return;
+            return false;
         };
         let (send, channel) = calloop::channel::channel();
         let inserted = self.loop_handle.insert_source(channel, |event, _, state| {
@@ -167,9 +168,10 @@ impl Pila {
         });
         if let Err(err) = inserted {
             warn!(?err, "portal: can't listen for requests");
-            return;
+            return false;
         }
         portal::serve(bus.to_string_lossy().into_owned(), send);
+        true
     }
 
     fn portal_request(&mut self, request: Request) {
@@ -177,8 +179,12 @@ impl Pila {
             Request::Serving(connection) => {
                 info!(name = portal::BUS_NAME, "portal: serving ScreenCast");
                 self.screencast.portal = Some(connection);
+                self.startup_step_done();
             }
-            Request::Failed(err) => warn!(err, "portal: can't serve the session bus"),
+            Request::Failed(err) => {
+                warn!(err, "portal: can't serve the session bus");
+                self.startup_step_done();
+            }
             Request::Start {
                 session,
                 cursor,

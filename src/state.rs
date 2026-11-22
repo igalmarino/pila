@@ -117,6 +117,9 @@ pub struct Pila {
     /// The startup commands, held back until the session bus has pila's
     /// environment (`export_environment`).
     pub pending_startup: Vec<String>,
+    /// What the startup commands still wait for: the environment's export,
+    /// the portal's bus name (`start_session`).
+    pub startup_waits: u8,
     /// Programs pila started, reaped on SIGCHLD (`reap_children`), with
     /// the shell command of those `spawn` started.
     pub children: Vec<(std::process::Child, Option<String>)>,
@@ -580,6 +583,7 @@ impl Pila {
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
+            startup_waits: 0,
             children: Vec::new(),
             missing_programs: Default::default(),
             tool_configs_dir: Default::default(),
@@ -2067,10 +2071,23 @@ impl Pila {
     /// The startup programs, after the session bus knows pila's environment
     /// (for portals), or `EXPORT_TIMEOUT` if that hangs. The X display is
     /// reserved already (`reserve_xwayland`), so X11 apps among them work.
+    /// They also wait for Pila to serve the portal (`start_portal`): an app
+    /// among them could start xdg-desktop-portal, which reads what a backend
+    /// offers when it starts.
     pub fn start_session(&mut self, commands: Vec<String>) {
         self.pending_startup = commands;
-        self.start_portal();
-        if !self.export_environment() {
+        self.startup_waits = u8::from(self.start_portal()) + u8::from(self.export_environment());
+        if self.startup_waits == 0 {
+            self.run_pending_startup();
+        }
+    }
+
+    /// One of the things the startup commands wait for is done
+    /// (`start_session`); the last one starts them. Later calls (an export
+    /// after a reload) find nothing waiting.
+    pub(crate) fn startup_step_done(&mut self) {
+        self.startup_waits = self.startup_waits.saturating_sub(1);
+        if self.startup_waits == 0 {
             self.run_pending_startup();
         }
     }
@@ -2140,7 +2157,7 @@ impl Pila {
                         Ok(()) => info!(systemd, "exported the environment to the session bus"),
                         Err(err) => warn!(err, "can't export the environment"),
                     }
-                    state.run_pending_startup();
+                    state.startup_step_done();
                 }
             });
         if let Err(err) = done {
@@ -2151,6 +2168,7 @@ impl Pila {
         let _ = self.loop_handle.insert_source(timeout, |_, _, state| {
             if !state.pending_startup.is_empty() {
                 warn!("the session bus doesn't answer; starting the session anyway");
+                state.startup_waits = 0;
                 state.run_pending_startup();
             }
             TimeoutAction::Drop

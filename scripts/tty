@@ -8,11 +8,12 @@
 # pila-tty.log.old.
 #
 # This pila gets its own D-Bus session bus (dbus-run-session), so the portals
-# it starts for screen sharing (xdg-desktop-portal + xdg-desktop-portal-wlr)
+# it starts (xdg-desktop-portal, and xdg-desktop-portal-wlr for screenshots)
 # are its own and the login session's services are left alone. They find
-# resources/xdg/xdg-desktop-portal/pila-portals.conf through XDG_CONFIG_DIRS;
-# xdg-desktop-portal-wlr's settings are copied to ~/.config if missing (and an
-# an older copy's pila-shot becomes slurp again).
+# Pila's own backend (screen sharing, resources/portals/pila.portal) next to
+# the installed ones, and resources/xdg/xdg-desktop-portal/pila-portals.conf,
+# through XDG_DESKTOP_PORTAL_DIR, a directory made for the run; xdg-desktop-portal-wlr's settings are copied to ~/.config if missing
+# (and an older copy's pila-shot becomes slurp again).
 #
 #   scripts/tty                        release build, ~/.config/pila/config.toml
 #   scripts/tty <config.toml>          another config
@@ -75,7 +76,22 @@ if ! command -v dbus-run-session >/dev/null; then
     exit 1
 fi
 
-export XDG_CONFIG_DIRS="$PWD/resources/xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+# xdg-desktop-portal reads its backends from one directory: the installed ones
+# (each data directory's) and Pila's own, together in one made for this run.
+# Given that directory, it reads its configuration from there alone too.
+portal_dir="${XDG_RUNTIME_DIR:-/tmp}/pila-tty-portals"
+rm -rf "$portal_dir"
+mkdir -p "$portal_dir"
+IFS=: read -r -a data_dirs <<<"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+for dir in "${data_dirs[@]}"; do
+    for portal in "$dir"/xdg-desktop-portal/portals/*.portal; do
+        if [ -e "$portal" ] && [ ! -e "$portal_dir/$(basename "$portal")" ]; then
+            ln -s "$portal" "$portal_dir/"
+        fi
+    done
+done
+cp resources/portals/pila.portal resources/xdg/xdg-desktop-portal/pila-portals.conf "$portal_dir/"
+export XDG_DESKTOP_PORTAL_DIR="$portal_dir"
 
 # xdg-desktop-portal-wlr only looks in ~/.config (or /etc/xdg) for its config.
 # A copy made by an older scripts/tty picked the screen with pila-shot, which

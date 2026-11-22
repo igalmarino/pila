@@ -336,3 +336,22 @@ fn the_picker_dims_the_screen_and_shows_a_live_preview() {
     pila.settle();
     assert_eq!(pila.pixel(2.0, 2.0), corner, "undimmed");
 }
+
+#[test]
+fn startup_programs_wait_for_the_portal() {
+    let bus = notifications::Bus::start();
+    let pipewire = Daemon::start();
+    let mut pila = TestPila::start_with(Options {
+        config: "autostart = [\"true\"]\n".into(),
+        env: vec![bus.env(), pipewire.env()],
+        ..Default::default()
+    });
+    pila.wait_log("spawning");
+    let log = pila.log();
+    let serving = log.find("portal: serving ScreenCast");
+    let spawning = log.find("spawning");
+    assert!(
+        serving.is_some() && serving < spawning,
+        "a startup program ran before Pila served the portal"
+    );
+}

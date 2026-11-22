@@ -1275,11 +1275,14 @@ Key flows and invariants:
   Other compositors' IPC sockets and markers (`OTHER_COMPOSITORS_ENV`:
   `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`, …) are removed, for a Pila started from inside
   another session: desktop shells pick their compositor backend by them.
-  Screen sharing goes through xdg-desktop-portal + xdg-desktop-portal-wlr (PipeWire),
-  which `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
-  (`resources/xdg/xdg-desktop-portal-wlr/pila`: pick the screen with slurp) must be in
+  Screen sharing goes through xdg-desktop-portal to Pila's own backend ("Portal screen
+  sharing", `resources/portals/pila.portal`), screenshots to xdg-desktop-portal-wlr, as
+  `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
+  (`resources/xdg/xdg-desktop-portal-wlr/pila`) must be in
   `~/.config/xdg-desktop-portal-wlr/` or `/etc/xdg` (xdpw ignores `XDG_CONFIG_DIRS`;
-  `scripts/install` puts both in `/etc/xdg`). On a TTY, before the startup programs, Pila
+  `scripts/install` puts both in `/etc/xdg`). `scripts/tty` gives xdg-desktop-portal a
+  directory of its own (`XDG_DESKTOP_PORTAL_DIR`: the installed backends, `pila.portal` and
+  the `.conf`, which it then reads from there alone). On a TTY, before the startup programs, Pila
   exports that environment to the D-Bus session bus (`export_environment`, `SESSION_ENV`, with
   `PILA_SOCKET` for shells started as services, and the variables `[environment]` sets): on the systemd
   user bus (a login session) also to `systemd --user`, which starts the portals and
@@ -1288,7 +1291,8 @@ Key flows and invariants:
   is D-Bus itself, no program (`session_bus::export`: `UpdateActivationEnvironment`, then
   systemd's `SetEnvironment`, with the values Pila's programs get, `spawned_env`), on a thread
   (a stuck bus mustn't freeze Pila); the startup programs follow
-  when it's done or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals. Spawned
+  when it's done and Pila serves the portal (`startup_step_done`: an app among them could start
+  xdg-desktop-portal, which reads a backend's properties as it starts), or after `EXPORT_TIMEOUT`. Nested, apps use the host's portals. Spawned
   programs are kept in `Pila::children` and reaped on SIGCHLD (`reap_children`), each of
   `spawn`'s with its command: one that exits 127, the shell's "command not found", has the
   programs its command line names (`missing_program::programs`: each command's first word, past

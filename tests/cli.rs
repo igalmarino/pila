@@ -523,14 +523,26 @@ fn scripts_tty_keeps_the_screen_sharing_settings_current() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scripts_copy("xdpw");
     let shipped = "resources/xdg/xdg-desktop-portal-wlr/pila";
-    std::fs::create_dir_all(dir.join(shipped).parent().unwrap()).unwrap();
-    std::fs::copy(
-        format!("{}/{shipped}", env!("CARGO_MANIFEST_DIR")),
-        dir.join(shipped),
+    for file in [
+        shipped,
+        "resources/xdg/xdg-desktop-portal/pila-portals.conf",
+        "resources/portals/pila.portal",
+    ] {
+        std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
+        std::fs::copy(
+            format!("{}/{file}", env!("CARGO_MANIFEST_DIR")),
+            dir.join(file),
+        )
+        .unwrap();
+    }
+    // Pila's backend and the portals' config, where xdg-desktop-portal is
+    // pointed to: what the fake pila finds there.
+    let fake = dir.join("fake-pila");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\nls \"$XDG_DESKTOP_PORTAL_DIR\" > \"$XDG_RUNTIME_DIR/portals\"\n",
     )
     .unwrap();
-    let fake = dir.join("fake-pila");
-    std::fs::write(&fake, "#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     wait_until_executable(&fake);
     let config = dir.join("config");
@@ -539,6 +551,7 @@ fn scripts_tty_keeps_the_screen_sharing_settings_current() {
         let out = copied_script(&dir, "tty")
             .env("PILA_BIN", &fake)
             .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_RUNTIME_DIR", &dir)
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")
             .output()
@@ -549,6 +562,12 @@ fn scripts_tty_keeps_the_screen_sharing_settings_current() {
     // None yet: Pila's.
     let ours = std::fs::read_to_string(dir.join(shipped)).unwrap();
     assert_eq!(tty(), ours);
+    let portals = std::fs::read_to_string(dir.join("portals")).unwrap();
+    assert!(
+        portals.lines().any(|l| l == "pila.portal")
+            && portals.lines().any(|l| l == "pila-portals.conf"),
+        "the portals' directory: {portals}"
+    );
     // An older copy.
     let older = "[screencast]\nchooser_type=simple\nchooser_cmd=pila-shot pick-output\n";
     std::fs::write(&settings, older).unwrap();
