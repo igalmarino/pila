@@ -1893,13 +1893,10 @@ pub fn output_elements(
         elements = front;
     }
     if let Some(menu) = scene.window_menu.as_ref().filter(|_| !scene.locked) {
-        elements.extend(crate::window_menu::elements(
-            renderer,
-            menu,
-            &scene.colors,
-            origin,
-            scale,
-        ));
+        // In front of all of them: it's first, front to back.
+        let mut front = crate::window_menu::elements(renderer, menu, &scene.colors, origin, scale);
+        front.append(&mut elements);
+        elements = front;
     }
     elements.extend(dnd_icon_elements(renderer, scene, origin, scale));
     elements.extend(scene_elements(

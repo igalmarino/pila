@@ -12,6 +12,8 @@
   pointer shows as the app asks (drawn by browsers themselves), and a share follows its monitor
   turned or scaled. Pila now needs `libpipewire` (and libclang to build); a single window is
   still shared through xdg-desktop-portal-wlr (the manual says how).
+- **Fixed:** the window menu is drawn in front of the shortcuts cheatsheet shown while it's open
+  (by `pila msg action show-shortcuts`, say), not behind it.
 - **`pila-check` judges captures' copies** into shared memory too (`copies` in the frame
   statistics, within 8 ms each): they hold the event loop as uploads do.
 

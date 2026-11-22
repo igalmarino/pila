@@ -352,3 +352,39 @@ fn a_menu_opened_between_pixels_stays_open() {
     let (mx, my, ..) = rect(&opened);
     assert!((mx as f64) <= x as f64 + 60.6 && (my as f64) <= y as f64 - 13.6);
 }
+
+/// The menu is drawn in front of Pila's other panels: the cheatsheet shown
+/// (by `pila msg action`, say) while it's open doesn't cover it.
+#[test]
+fn the_window_menu_is_drawn_in_front_of_the_cheatsheet() {
+    let (mut pila, _client, _a, geometry) = one_window();
+    let state = open_from_title_bar(&mut pila, geometry);
+    let (mx, my, mw, _) = rect(&menu(&state)["geometry"]);
+    let (x, y) = ((mx + mw - 30) as f64, row(&state, 4).1);
+    pila.move_to(x, y);
+    pila.wait("Close under the pointer", |s| menu(s)["hover"] == 4);
+    let desktop = pila.pixel(5.0, 5.0);
+    let actions = pila.request(json!({ "cmd": "actions" }))["actions"].clone();
+    let index = actions
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|a| a == "ShowShortcuts")
+        .unwrap();
+    pila.request(json!({ "cmd": "action", "index": index }));
+    let state = pila.wait("the cheatsheet", |s| s["shortcuts_view"]["shown"] == true);
+    let (sx, sy, sw, sh) = rect(&state["shortcuts_view"]["rect"]);
+    assert!(
+        (sx..sx + sw).contains(&(x as i64)) && (sy..sy + sh).contains(&(y as i64)),
+        "the row isn't over the cheatsheet {:?} {:?}",
+        (sx, sy, sw, sh),
+        (mx, my)
+    );
+    assert!(!menu(&state).is_null(), "the menu still open");
+    // Drawn once its text is there.
+    pila.wait_pixel_is((sx + 5) as f64, (sy + 5) as f64, "the cheatsheet", |p| {
+        p != desktop
+    });
+    // `[colors] hover`, the row under the pointer's.
+    assert_eq!(pila.pixel(x, y), [0x3f, 0x42, 0x49, 255]);
+}
