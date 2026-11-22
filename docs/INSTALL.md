@@ -42,18 +42,19 @@ On a TTY or as a login session, Mod is **Super**:
 
 Pila needs Rust 1.89 or newer. If your distro's Rust is older, install it with
 [rustup](https://rustup.rs). It also needs `pkg-config` and the development files of
-`libseat`, `libinput`, `libudev`, `gbm` (Mesa) and `xkbcommon`. At runtime it loads EGL
+`libseat`, `libinput`, `libudev`, `gbm` (Mesa), `xkbcommon` and `libpipewire`, and libclang
+(its PipeWire bindings are generated at build time). At runtime it loads EGL
 (Mesa) and, for X11 apps, starts `Xwayland` if it's installed (optional). Package names on common distros (they may
 differ between releases):
 
 | Distro | Packages |
 | - | - |
-| Arch | `seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland pkgconf` |
-| Debian, Ubuntu | `libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev libegl1 xwayland pkg-config` |
-| Fedora | `libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland pkgconf-pkg-config` |
-| openSUSE | `libseat-devel libinput-devel libudev-devel libgbm-devel libxkbcommon-devel Mesa-libEGL1 xwayland pkg-config` |
-| Void | `libseat-devel libinput-devel eudev-libudev-devel libgbm-devel libxkbcommon-devel mesa xorg-server-xwayland pkg-config` |
-| Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev xwayland pkgconf` |
+| Arch | `seatd libinput systemd-libs mesa libxkbcommon libpipewire clang xorg-xwayland pkgconf` |
+| Debian, Ubuntu | `libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev libegl1 xwayland pkg-config` |
+| Fedora | `libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libxkbcommon-devel pipewire-devel clang-devel mesa-libEGL xorg-x11-server-Xwayland pkgconf-pkg-config` |
+| openSUSE | `libseat-devel libinput-devel libudev-devel libgbm-devel libxkbcommon-devel pipewire-devel clang-devel Mesa-libEGL1 xwayland pkg-config` |
+| Void | `libseat-devel libinput-devel eudev-libudev-devel libgbm-devel libxkbcommon-devel pipewire-devel clang mesa xorg-server-xwayland pkg-config` |
+| Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev pipewire-dev clang-dev xwayland pkgconf` |
 
 Then `cargo build --release`; `scripts/install` builds and installs it.
 
@@ -245,7 +246,9 @@ same on most distros):
 Apps also want these in any session, so `pila` itself recommends them (Debian and Fedora
 install them with it unless recommends are off; on Arch they're optional dependencies):
 
-- `xdg-desktop-portal-wlr`: screen sharing (its `slurp` picks the screen to share)
+- `xdg-desktop-portal` and `pipewire`: screen sharing, which Pila serves itself (it asks which
+  screen to share and streams it over PipeWire)
+- `xdg-desktop-portal-wlr`: screenshots through the portal
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
 - `xdg-utils`: `xdg-open`, which programs such as kitty use to open links and files; without it
   a click on a link does nothing, and says nothing

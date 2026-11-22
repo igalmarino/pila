@@ -35,6 +35,7 @@ jobs:
               apt-get update && apt-get install -y --no-install-recommends
               build-essential curl ca-certificates git
               libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libpipewire-0.3-dev libclang-dev
               libegl1 xwayland pkg-config
           # The oldest Fedora maintained, likewise (raised when it reaches its end of life).
           - packager: rpm
@@ -42,7 +43,8 @@ jobs:
             install: >-
               dnf install -y gcc curl git tar gzip
               libseat-devel libinput-devel systemd-devel mesa-libgbm-devel
-              libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland
+              libxkbcommon-devel pipewire-devel clang-devel
+              mesa-libEGL xorg-x11-server-Xwayland
               pkgconf-pkg-config
     steps:
       - name: Packages

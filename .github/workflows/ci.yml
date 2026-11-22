@@ -27,8 +27,9 @@ jobs:
         # A font, as every desktop has: the tests that look at text drawn
         # (the shortcuts panel) need one; PILA_HEADLESS_NO_FONTS covers none.
         run: |
-          pacman -Syu --noconfirm --needed git rust gcc pkgconf \
-            seatd libinput systemd-libs mesa libxkbcommon xorg-xwayland ttf-dejavu
+          pacman -Syu --noconfirm --needed git rust gcc clang pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon libpipewire xorg-xwayland ttf-dejavu \
+            pipewire
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0

@@ -51,8 +51,8 @@ jobs:
     steps:
       - name: Packages
         run: |
-          pacman -Syu --noconfirm --needed git rustup gcc pkgconf \
-            seatd libinput systemd-libs mesa libxkbcommon
+          pacman -Syu --noconfirm --needed git rustup gcc clang pkgconf \
+            seatd libinput systemd-libs mesa libxkbcommon libpipewire
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Toolchain from rust-version
         run: |
@@ -80,18 +80,21 @@ jobs:
               apt-get update && apt-get install -y --no-install-recommends
               build-essential curl ca-certificates git
               libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libpipewire-0.3-dev libclang-dev
               libegl1 xwayland pkg-config
           - image: ubuntu:24.04
             install: >-
               apt-get update && apt-get install -y --no-install-recommends
               build-essential curl ca-certificates git
               libseat-dev libinput-dev libudev-dev libgbm-dev libxkbcommon-dev
+              libpipewire-0.3-dev libclang-dev
               libegl1 xwayland pkg-config
           - image: fedora:latest
             install: >-
               dnf install -y gcc curl git
               libseat-devel libinput-devel systemd-devel mesa-libgbm-devel
-              libxkbcommon-devel mesa-libEGL xorg-x11-server-Xwayland
+              libxkbcommon-devel pipewire-devel clang-devel
+              mesa-libEGL xorg-x11-server-Xwayland
               pkgconf-pkg-config
     steps:
       - name: Packages

@@ -37,6 +37,7 @@ install_files=(
     "resources/session/pila.service:$SYSTEMDUSERUNITDIR/pila.service:644"
     "resources/session/pila-shutdown.target:$SYSTEMDUSERUNITDIR/pila-shutdown.target:644"
     "resources/icons/pila.svg:$DATADIR/icons/hicolor/scalable/apps/pila.svg:644"
+    "resources/portals/pila.portal:$DATADIR/xdg-desktop-portal/portals/pila.portal:644"
     "resources/xdg/xdg-desktop-portal/pila-portals.conf:$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf:644"
     "resources/xdg/xdg-desktop-portal-wlr/pila:$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila:644"
 )
@@ -60,6 +61,8 @@ install_dirs=(
     "$SYSTEMDUSERUNITDIR"
     "$SYSCONFDIR/xdg/xdg-desktop-portal"
     "$SYSCONFDIR/xdg/xdg-desktop-portal-wlr"
+    "$DATADIR/xdg-desktop-portal/portals"
+    "$DATADIR/xdg-desktop-portal"
 )
 
 # Runs a command with sudo only if $1's directory (or its nearest existing

@@ -29,6 +29,8 @@ contents:
     dst: /usr/share/man/man1/
   - src: stage/usr/share/doc/pila/*
     dst: /usr/share/doc/pila/
+  - src: stage/usr/share/xdg-desktop-portal/portals/*
+    dst: /usr/share/xdg-desktop-portal/portals/
   - src: stage/etc/xdg/xdg-desktop-portal/*
     dst: /etc/xdg/xdg-desktop-portal/
     type: config
@@ -46,13 +48,18 @@ overrides:
       - libegl1
       - libgbm1
       - libinput10
+      - libpipewire-0.3-0t64
       - libseat1
       - libudev1
       - libxkbcommon0
     # X11 apps: Pila runs without (and with [xwayland] enabled = false).
-    # The rest is how apps work with any compositor: portals and xdg-open.
+    # The rest is how apps work with any compositor: portals (screen sharing
+    # through Pila's own backend, over PipeWire; screenshots through
+    # xdg-desktop-portal-wlr) and xdg-open.
     recommends:
       - xwayland
+      - xdg-desktop-portal
+      - pipewire
       - xdg-desktop-portal-wlr
       - xdg-desktop-portal-gtk
       - xdg-utils
@@ -70,10 +77,13 @@ overrides:
       - mesa-libgbm
       - libinput
       - libseat
+      - pipewire-libs
       - systemd-libs
       - libxkbcommon
     recommends:
       - xorg-x11-server-Xwayland
+      - xdg-desktop-portal
+      - pipewire
       - xdg-desktop-portal-wlr
       - xdg-desktop-portal-gtk
       - xdg-utils

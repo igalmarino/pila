@@ -11,6 +11,7 @@
   libglvnd,
   libinput,
   libxkbcommon,
+  pipewire,
   seatd,
   systemdLibs,
   wayland,
@@ -68,6 +69,8 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     makeWrapper
     pkg-config
+    # The PipeWire bindings are generated at build time.
+    rustPlatform.bindgenHook
   ];
 
   buildInputs = [
@@ -75,6 +78,7 @@ rustPlatform.buildRustPackage {
     libglvnd
     libinput
     libxkbcommon
+    pipewire
     seatd
     systemdLibs
     wayland
@@ -105,6 +109,7 @@ rustPlatform.buildRustPackage {
     substituteInPlace $out/lib/systemd/user/pila.service \
       --replace-fail '@BINDIR@' "$out/bin"
     install -Dm644 resources/icons/pila.svg $out/share/icons/hicolor/scalable/apps/pila.svg
+    install -Dm644 resources/portals/pila.portal -t $out/share/xdg-desktop-portal/portals
     install -Dm644 resources/xdg/xdg-desktop-portal/pila-portals.conf \
       -t $out/share/xdg-desktop-portal
     install -Dm644 resources/xdg/xdg-desktop-portal-wlr/pila \
