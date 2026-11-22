@@ -213,6 +213,7 @@ impl Pila {
         let mut menu_key = None;
         // A key that hides the shortcuts cheatsheet (`shortcuts_view.rs`).
         let mut hide_shortcuts = false;
+        let mut picker_key = None;
         let mut overview_key = None;
         let mut repeat_next = None;
         let mut tap_action = None;
@@ -258,6 +259,13 @@ impl Pila {
                             (raw - first + 1) as i32,
                         )));
                     }
+                }
+                // The share picker takes every press while it's shown: it's
+                // modal (`share_picker.rs`).
+                if key_state == KeyState::Pressed && state.share_picker_open() {
+                    state.input.suppressed_keys.insert(keycode);
+                    picker_key = Some(handle.modified_sym());
+                    return FilterResult::Intercept(None);
                 }
                 // The window menu takes every press while it's open.
                 if key_state == KeyState::Pressed && state.window_menu.is_some() {
@@ -359,6 +367,9 @@ impl Pila {
         let mut acted = action.is_some();
         if let Some(sym) = menu_key {
             self.window_menu_key(sym);
+        }
+        if let Some(sym) = picker_key {
+            self.share_picker_key(sym);
         }
         if hide_shortcuts {
             self.hide_shortcuts();
@@ -797,6 +808,12 @@ impl Pila {
                 client,
                 at: std::time::Instant::now(),
             });
+        }
+        // The share picker takes every press, and its release: it's modal.
+        if button_state == ButtonState::Pressed && self.share_picker_open() {
+            self.input.suppressed_buttons.insert(button);
+            self.share_picker_press(pointer.current_location());
+            return;
         }
         // A click hides the shortcuts cheatsheet: on it, it does nothing else
         // (its release neither).

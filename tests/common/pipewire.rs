@@ -319,6 +319,24 @@ impl Linker {
     }
 }
 
+/// A `Start` waiting for its answer.
+pub struct Started {
+    thread: std::thread::JoinHandle<(u32, Vec<u32>)>,
+}
+
+impl Started {
+    /// The response (0 shared, 1 cancelled, 2 failed) and the streams'
+    /// node ids.
+    pub fn answer(self) -> (u32, Vec<u32>) {
+        self.thread.join().expect("Start's thread")
+    }
+
+    /// Whether it was answered yet.
+    pub fn answered(&self) -> bool {
+        self.thread.is_finished()
+    }
+}
+
 /// The portal Pila serves, called as xdg-desktop-portal calls it.
 pub struct Portal {
     bus: Connection,
@@ -368,30 +386,44 @@ impl Portal {
     }
 
     /// Create a session and select a monitor (`cursor_mode` 1: hidden, 2:
-    /// embedded), then start it: the response and the streams' node ids.
-    pub fn share(&mut self, name: &str, cursor_mode: u32) -> (u32, Vec<u32>) {
+    /// embedded), then start it, as app `app_id`: Pila shows its picker, so
+    /// `Start`'s answer comes once the test picks (`Started::answer`).
+    pub fn request(&mut self, name: &str, app_id: &str, cursor_mode: u32) -> Started {
         let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
         let handle = self.handle();
-        let (response, _) = self.call("CreateSession", &(handle, &session, "test", Vardict::new()));
+        let (response, _) = self.call("CreateSession", &(handle, &session, app_id, Vardict::new()));
         assert_eq!(response, 0, "CreateSession");
         let options = HashMap::from([
             ("types".to_string(), OwnedVariant::from(1u32)),
             ("cursor_mode".to_string(), OwnedVariant::from(cursor_mode)),
         ]);
         let handle = self.handle();
-        let (response, _) = self.call("SelectSources", &(handle, &session, "test", options));
+        let (response, _) = self.call("SelectSources", &(handle, &session, app_id, options));
         assert_eq!(response, 0, "SelectSources");
         let handle = self.handle();
-        let (response, results) =
-            self.call("Start", &(handle, &session, "test", "", Vardict::new()));
-        let nodes = results
-            .get("streams")
-            .map(|streams| {
-                let streams: Vec<(u32, Vardict)> = streams.try_clone().unwrap().try_into().unwrap();
-                streams.into_iter().map(|(node, _)| node).collect()
-            })
-            .unwrap_or_default();
-        (response, nodes)
+        let bus = self.bus.clone();
+        let app_id = app_id.to_string();
+        let thread = std::thread::spawn(move || {
+            let reply = zbus::block_on(bus.call_method(
+                Some(NAME),
+                PATH,
+                Some(SCREENCAST),
+                "Start",
+                &(handle, &session, app_id.as_str(), "", Vardict::new()),
+            ))
+            .unwrap_or_else(|err| panic!("Start: {err}"));
+            let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
+            let nodes = results
+                .get("streams")
+                .map(|streams| {
+                    let streams: Vec<(u32, Vardict)> =
+                        streams.try_clone().unwrap().try_into().unwrap();
+                    streams.into_iter().map(|(node, _)| node).collect()
+                })
+                .unwrap_or_default();
+            (response, nodes)
+        });
+        Started { thread }
     }
 
     /// Close the session `name`, as xdg-desktop-portal does when the app

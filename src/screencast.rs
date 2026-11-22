@@ -10,8 +10,8 @@
 //! back into the buffer (shm, `MemFd`) once the GPU is done, off the event
 //! loop's back (`Captures::read_back`, `Pila::when_copied`), then queued.
 //!
-//! Prototype: what's shared is the output under the pointer, picked with no
-//! question asked; Pila's own picker comes next.
+//! What's shared is picked by the user first (`share_picker.rs`): a request
+//! waits in `ScreenCasts::waiting` until then.
 
 use std::{
     cell::{Cell, RefCell},
@@ -37,7 +37,7 @@ use pipewire::{
 };
 use smithay::{
     backend::{allocator::Fourcc, renderer::damage::OutputDamageTracker},
-    output::WeakOutput,
+    output::{Output, WeakOutput},
     reexports::calloop::{
         channel::Event, generic::Generic, Interest, Mode, PostAction, RegistrationToken,
     },
@@ -65,6 +65,9 @@ pub struct ScreenCasts {
     pipewire: Option<PipeWire>,
     /// Pila's connection to the session bus, serving the portal.
     portal: Option<zbus::Connection>,
+    /// Requests to share waiting for the picker, first come first asked:
+    /// it shows one at a time (`share_picker.rs`).
+    pub(crate) waiting: std::collections::VecDeque<Share>,
     next_id: u64,
 }
 
@@ -73,6 +76,17 @@ impl ScreenCasts {
     pub fn streaming(&self) -> bool {
         self.casts.iter().any(|cast| cast.streaming)
     }
+}
+
+/// A request to share, from the portal's `Start`.
+pub struct Share {
+    /// The portal session, by its object path.
+    pub session: String,
+    /// The pointer drawn into the frames.
+    pub cursor: bool,
+    /// Who asks (`portal::Request::Start`).
+    pub app: Option<String>,
+    pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,
 }
 
 /// Pila's connection to PipeWire, made at the first cast. Fields drop in
@@ -168,30 +182,38 @@ impl Pila {
             Request::Start {
                 session,
                 cursor,
+                app,
                 reply,
-            } => self.start_cast(session, cursor, reply),
+            } => {
+                self.screencast.waiting.push_back(Share {
+                    session,
+                    cursor,
+                    app,
+                    reply,
+                });
+                self.show_share_picker();
+            }
             Request::Close { session } => {
                 debug!(session, "portal: session closed");
+                self.screencast
+                    .waiting
+                    .retain(|share| share.session != session);
+                self.close_share_picker_of(&session);
                 self.screencast.casts.retain(|cast| cast.session != session);
                 self.disconnect_pipewire_if_idle();
             }
         }
     }
 
-    /// Start a session's stream: the output under the pointer (a stand-in
-    /// for the picker), answered once its node has an id.
-    fn start_cast(
-        &mut self,
-        session: String,
-        cursor: bool,
-        reply: Reply<Result<Vec<portal::Stream>, Refused>>,
-    ) {
-        let output = self
-            .output_at(self.pointer_location())
-            .or_else(|| self.space.outputs().next().cloned());
-        let Some(output) = output else {
-            return reply.send(Err(Refused::Cancelled));
-        };
+    /// Start `share`'s stream of `output`, picked by the user
+    /// (`share_picker.rs`), answered once its node has an id.
+    pub(crate) fn start_cast(&mut self, share: Share, output: Output) {
+        let Share {
+            session,
+            cursor,
+            reply,
+            ..
+        } = share;
         let (Some(geo), Some(mode)) = (self.space.output_geometry(&output), output.current_mode())
         else {
             return reply.send(Err(Refused::Cancelled));
@@ -221,7 +243,7 @@ impl Pila {
             output = output.name(),
             ?size,
             fps,
-            "portal: sharing the output under the pointer"
+            "portal: sharing an output"
         );
         self.screencast.casts.push(Cast {
             id,

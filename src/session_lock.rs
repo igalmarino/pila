@@ -232,6 +232,9 @@ impl SessionLockHandler for Pila {
     }
 
     fn lock(&mut self, confirmation: SessionLocker) {
+        // Nothing is shared without the user's say, and nothing is asked
+        // while locked.
+        self.cancel_share_picker();
         self.close_window_menu();
         self.hide_shortcuts();
         self.close_overview();

@@ -48,10 +48,13 @@ pub enum Request {
     /// The bus couldn't be served.
     Failed(String),
     /// Start the streams of `session` and reply with them: what's shared
-    /// is picked now.
+    /// is picked now, by the user (`share_picker.rs`).
     Start {
         session: String,
         cursor: bool,
+        /// Who asks, as the picker names it: its desktop entry's name, else
+        /// its app id; `None` if the portal didn't say (`app_name`).
+        app: Option<String>,
         reply: Reply<Result<Vec<Stream>, Refused>>,
     },
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
@@ -193,7 +196,7 @@ impl ScreenCast {
         &self,
         _handle: OwnedObjectPath,
         session_handle: OwnedObjectPath,
-        _app_id: String,
+        app_id: String,
         _parent_window: String,
         _options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
@@ -205,6 +208,7 @@ impl ScreenCast {
         let request = Request::Start {
             session,
             cursor: selection.cursor,
+            app: app_name(&app_id, &data_dirs()),
             reply,
         };
         if self.send.send(request).is_err() {
@@ -238,6 +242,51 @@ impl ScreenCast {
     fn version(&self) -> u32 {
         5
     }
+}
+
+/// Where desktop entries are looked for: `$XDG_DATA_HOME` (or
+/// `~/.local/share`), then `$XDG_DATA_DIRS` (or `/usr/local/share` and
+/// `/usr/share`), each's `applications`.
+fn data_dirs() -> Vec<std::path::PathBuf> {
+    let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let home = env("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| env("HOME").map(|home| std::path::Path::new(&home).join(".local/share")));
+    let system = env("XDG_DATA_DIRS")
+        .map(|dirs| std::env::split_paths(&dirs).collect::<Vec<_>>())
+        .unwrap_or_else(|| vec!["/usr/local/share".into(), "/usr/share".into()]);
+    home.into_iter()
+        .chain(system)
+        .map(|dir| dir.join("applications"))
+        .collect()
+}
+
+/// The name an app goes by: its desktop entry's `Name` (the first
+/// `<app_id>.desktop` in `dirs`), else the app id itself; `None` for no app
+/// id (apps outside a sandbox often have none). Reads files: on the bus's
+/// thread, never the event loop.
+fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() {
+        return None;
+    }
+    let file = format!("{app_id}.desktop");
+    let name = dirs.iter().find_map(|dir| {
+        let text = std::fs::read_to_string(dir.join(&file)).ok()?;
+        let mut in_entry = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_entry = line == "[Desktop Entry]";
+            } else if in_entry {
+                if let Some(name) = line.strip_prefix("Name=") {
+                    return Some(name.trim().to_string()).filter(|n| !n.is_empty());
+                }
+            }
+        }
+        None
+    });
+    Some(name.unwrap_or_else(|| app_id.to_string()))
 }
 
 /// `Start`'s results: `streams`, `a(ua{sv})`.
@@ -349,6 +398,28 @@ mod tests {
         let (reply, answer) = reply_channel::<u32>();
         drop(reply);
         assert_eq!(zbus::block_on(answer), None);
+    }
+
+    #[test]
+    fn an_app_is_named_by_its_desktop_entry_else_its_id() {
+        let dir = std::env::temp_dir().join(format!("pila-app-name-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("org.example.Browser.desktop"),
+            "[Desktop Action new]\nName=New Window\n\n[Desktop Entry]\nName[es]=Navegador\nName=Web Browser\n",
+        )
+        .unwrap();
+        let dirs = [dir.join("missing"), dir.clone()];
+        assert_eq!(
+            app_name("org.example.Browser", &dirs).as_deref(),
+            Some("Web Browser")
+        );
+        assert_eq!(
+            app_name("org.example.Other", &dirs).as_deref(),
+            Some("org.example.Other")
+        );
+        assert_eq!(app_name("", &dirs), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

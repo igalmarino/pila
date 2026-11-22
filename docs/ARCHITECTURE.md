@@ -1086,7 +1086,7 @@ Key flows and invariants:
   `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy
   already waiting when its output goes (`fail_screencopies_of`), or one asked afterwards, at
   once (its output has no frame of its own to come, and no other output's is asked).
-- **Portal screen sharing** (`portal.rs`, `screencast.rs`; prototype, branch only): Pila serves
+- **Portal screen sharing** (`portal.rs`, `screencast.rs`, `share_picker.rs`; prototype, branch only): Pila serves
   xdg-desktop-portal's ScreenCast backend itself, as `org.freedesktop.impl.portal.desktop.pila`
   on the session bus (`Pila::start_portal`, at startup, when `Backend::serves_portal`: bare metal,
   or headless with a bus a test gives it; nested, the host's portal shares the host's screen).
@@ -1096,7 +1096,8 @@ Key flows and invariants:
   loop's fd a calloop source, iterated without waiting: `dispatch_pipewire`; callbacks only
   queue `CastEvent`s, handled after) and makes a driver stream per session, offering BGRx of the
   output's size at a variable rate up to its refresh; `Start` is answered once the node has an
-  id. Stand-in for the picker: the output under the pointer. Frames are made from
+  id. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
+  asks for one at a time (below). Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
   output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it
   offscreen and read it back (`Captures::read_back`, shared with shm captures), written into
@@ -1106,6 +1107,22 @@ Key flows and invariants:
   ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
   PipeWire's connection; the app is told (`portal::end_session`: `Closed`), and with no cast
   left the connection goes.
+- **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
+  pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
+  the bus's thread, else its app id) and shows every output, left to right, as a live preview,
+  the one under the pointer selected. Modal: every key goes to it (`input.rs`, before the window
+  menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,
+  and every output is dimmed under it (`share_picker::elements`, in front of everything of
+  Pila's in `render::output_elements`; never while locked). Arrows/Tab select, Enter/Share
+  shares (`Pila::start_cast`), Escape/Cancel answers cancelled; then the next request waiting
+  is shown. Opening it ends a switch and closes the cheatsheet, the overview and the window
+  menu; locking cancels it and every request waiting (`SessionLockHandler::lock`), the app
+  closing its session takes its request away (answered as failed). Its texts are one image
+  drawn on a thread with the cheatsheet's code (`shortcuts_view::draw_text`); the panel shows
+  without them until then. Each preview is its output's scene (`render::scene_elements`, no
+  blur backdrops) drawn small into an `OffscreenWindow` from `after_frames`
+  (`Pila::update_share_previews`, with the captures' scene), over a kept background solid:
+  damage only where the output changed, and the picker's output is redrawn only then.
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

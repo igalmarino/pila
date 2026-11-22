@@ -202,6 +202,9 @@ pub struct Scene {
     /// The overview: its windows are among `windows`, mapped onto their
     /// places; what it draws behind them is below them (`overview.rs`).
     pub overview: Option<crate::overview::SceneOverview>,
+    /// The screen-share picker, in front of everything but the cursor, its
+    /// dim over every output (`share_picker.rs`).
+    pub share_picker: Option<crate::share_picker::ScenePicker>,
     pub colors: Colors,
 }
 
@@ -226,6 +229,7 @@ impl Scene {
             switcher: None,
             shortcuts: None,
             overview: None,
+            share_picker: None,
             colors,
         }
     }
@@ -240,6 +244,7 @@ impl Scene {
             || self.switcher.is_some()
             || self.shortcuts.is_some()
             || self.overview.is_some()
+            || self.share_picker.is_some()
         {
             return false;
         }
@@ -1073,17 +1078,31 @@ impl OffscreenWindow {
         &self.buffer
     }
 
+    /// Its size in pixels.
+    pub fn size(&self) -> Size<i32, Physical> {
+        self.size
+    }
+
     /// Draw `elements` (relative to the texture's top-left) into it.
     pub(crate) fn draw(
         &mut self,
         renderer: &mut GlesRenderer,
         elements: &[PilaRenderElement],
     ) -> bool {
+        self.draw_damaged(renderer, elements).is_some()
+    }
+
+    /// `draw`, saying whether anything changed: `None` if it failed.
+    pub(crate) fn draw_damaged(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        elements: &[PilaRenderElement],
+    ) -> Option<bool> {
         let age = usize::from(self.drawn);
         let damage = {
             let mut texture = self.texture.clone();
             let Ok(mut target) = renderer.bind(&mut texture) else {
-                return false;
+                return None;
             };
             match self
                 .tracker
@@ -1092,19 +1111,20 @@ impl OffscreenWindow {
                 Ok(result) => result.damage.cloned().unwrap_or_default(),
                 Err(err) => {
                     tracing::debug!(?err, "animation: offscreen render failed");
-                    return false;
+                    return None;
                 }
             }
         };
         self.drawn = true;
-        if !damage.is_empty() {
-            let damage: Vec<Rectangle<i32, Buffer>> = damage
-                .iter()
-                .map(|r| Rectangle::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into()))
-                .collect();
-            let _ = self.buffer.render().draw(|_| Ok::<_, ()>(damage));
+        if damage.is_empty() {
+            return Some(false);
         }
-        true
+        let damage: Vec<Rectangle<i32, Buffer>> = damage
+            .iter()
+            .map(|r| Rectangle::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into()))
+            .collect();
+        let _ = self.buffer.render().draw(|_| Ok::<_, ()>(damage));
+        Some(true)
     }
 }
 
@@ -1856,6 +1876,19 @@ pub fn output_elements(
         // In front of the switcher: it's first, front to back.
         let mut front =
             crate::shortcuts_view::elements(renderer, view, &scene.colors, origin, scale);
+        front.append(&mut elements);
+        elements = front;
+    }
+    if let Some(view) = scene.share_picker.as_ref().filter(|_| !scene.locked) {
+        // In front of everything of Pila's: it's modal.
+        let mut front = crate::share_picker::elements(
+            renderer,
+            view,
+            &scene.colors,
+            output_name,
+            Rectangle::new(origin, output_geo.size),
+            scale,
+        );
         front.append(&mut elements);
         elements = front;
     }

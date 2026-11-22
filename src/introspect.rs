@@ -306,6 +306,7 @@ impl Pila {
             "switch": switch,
             "switcher_view": self.switcher_view_json(),
             "shortcuts_view": self.shortcuts_view_json(),
+            "share_picker": self.share_picker_json(),
             "overview": self.overview_json(),
             "workspace": self.workspaces.active + 1,
             "workspaces": self.config.workspaces,

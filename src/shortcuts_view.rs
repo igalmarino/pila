@@ -135,7 +135,7 @@ pub struct Section {
 
 /// How a text sits in its box.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Align {
+pub(crate) enum Align {
     Left,
     Center,
     Right,
@@ -143,7 +143,7 @@ enum Align {
 
 /// Something drawn on the panel, at a place from its top-left (logical).
 #[derive(Debug, Clone, PartialEq)]
-enum Item {
+pub(crate) enum Item {
     /// A line of text in a box `w` by `h`, at `size` px, bold or not.
     Text {
         text: String,
@@ -167,12 +167,12 @@ enum Item {
 /// What a content image shows: its items in the panel's palette, the
 /// panel's size and the buffer scale it's drawn at.
 #[derive(Debug, Clone, PartialEq)]
-struct TextKey {
-    items: Vec<Item>,
+pub(crate) struct TextKey {
+    pub(crate) items: Vec<Item>,
     /// A keycap's label, its fill, its edge and the "+" between them.
-    caps: [[u32; 3]; 4],
-    size: (i32, i32),
-    scale: i32,
+    pub(crate) caps: [[u32; 3]; 4],
+    pub(crate) size: (i32, i32),
+    pub(crate) scale: i32,
 }
 
 /// The panel's content drawn into one premultiplied ARGB8888 image.
@@ -184,7 +184,7 @@ struct TextImage {
 }
 
 /// An opaque color as the content image's key keeps it.
-fn bits(color: [f32; 3]) -> [u32; 3] {
+pub(crate) fn bits(color: [f32; 3]) -> [u32; 3] {
     color.map(f32::to_bits)
 }
 
@@ -391,7 +391,7 @@ fn blit_text(pixels: &mut [u8], width: i32, text: &crate::text::Title, x: i32, y
 
 /// `key`'s items drawn into one image (`None` until the fonts have loaded).
 /// On a thread: shaping and rasterizing them all takes a few milliseconds.
-fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
+pub(crate) fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
     use crate::text::{render_text, Style};
     let scale = key.scale;
     let s = scale as f32;

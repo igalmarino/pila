@@ -175,6 +175,8 @@ pub struct Pila {
     pub capture: crate::capture::Captures,
     /// Screen sharing through the portal Pila serves (`screencast.rs`).
     pub screencast: crate::screencast::ScreenCasts,
+    /// The picker that asks which screen to share (`share_picker.rs`).
+    pub share_picker: crate::share_picker::SharePicker,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -574,6 +576,7 @@ impl Pila {
             input: InputState::default(),
             capture: Default::default(),
             screencast: Default::default(),
+            share_picker: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -699,8 +702,12 @@ impl Pila {
                 .lock_surface_under(pos)
                 .map(|(surface, origin)| Under::Lock(surface, origin));
         }
-        // Pila's switcher is in front of everything, and no client's.
-        if self.switcher_view_covers(pos) || self.shortcuts_view_covers(pos) {
+        // Pila's switcher is in front of everything, and no client's; the
+        // share picker is modal: nothing is hit while it's shown.
+        if self.share_picker_open()
+            || self.switcher_view_covers(pos)
+            || self.shortcuts_view_covers(pos)
+        {
             return None;
         }
         let layer = |layers| {
@@ -846,6 +853,7 @@ impl Pila {
             rounded_corners: self.config.rounded_corners,
             switcher: self.scene_switcher(),
             shortcuts: self.scene_shortcuts(),
+            share_picker: self.scene_share_picker(),
             overview,
             ..Scene::blank(self.config.colors)
         }
@@ -1895,6 +1903,7 @@ impl Pila {
             self.process_captures(&mut input);
             self.process_screencopies(&mut input);
             self.process_screencasts(&mut input);
+            self.update_share_previews(&mut input);
             self.capture.trim_textures(self.screencast.streaming());
             captures = started.elapsed();
         }
