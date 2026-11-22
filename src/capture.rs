@@ -782,10 +782,13 @@ impl Pila {
                     trace!("capture: the frame is gone; its copy is dropped");
                     return;
                 }
+                let started = Instant::now();
                 let result = match state.backend.as_mut().and_then(|b| b.renderer()) {
                     Some(mut renderer) => finish(&mut renderer),
                     None => Err(CopyError::Render("no renderer".into())),
                 };
+                // It holds the event loop: counted apart (`copies`).
+                state.record_copy(started.elapsed());
                 then(state, result);
             }
         }

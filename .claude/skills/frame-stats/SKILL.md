@@ -1,6 +1,6 @@
 ---
 name: frame-stats
-description: What Pila's frame statistics log (RUST_LOG=pila::frames=debug, frame_stats.rs) and scripts/check report mean - idle, direct, torn, late, missed refreshes, GPU time, render-late latency, captures, loop, uploads. Use when measuring a change to rendering, input or the event loop, or reading pila-check.log, pila-tty.log or a user's frame numbers.
+description: What Pila's frame statistics log (RUST_LOG=pila::frames=debug, frame_stats.rs) and scripts/check report mean - idle, direct, torn, late, missed refreshes, GPU time, render-late latency, captures, copies, loop, uploads. Use when measuring a change to rendering, input or the event loop, or reading pila-check.log, pila-tty.log or a user's frame numbers.
 ---
 
 # Frame statistics
@@ -33,4 +33,8 @@ own after the outputs', are logged apart (`captures`), held to the same budget
 (`scripts/check` streams one, as a screen share does: `scripts/capture-stream`). The event
 loop's own work after each iteration (`after_frames`: taskbars, IPC, the `Space`), paced
 by events rather than frames, is logged apart too (`loop`), and so are clients' shm buffers,
-copied to the GPU at their commits rather than in the frame (`uploads`, `upload.rs`).
+copied to the GPU at their commits rather than in the frame (`uploads`, `upload.rs`), and
+captures' copies into shm, written on the event loop once the GPU is done with the frame they
+read back (`copies`: a capture client's buffer, or a portal share's; `Pila::when_copied`).
+`scripts/check` holds each upload and each copy to 8 ms: half a 60 Hz period, render late's
+margin, since they hold the event loop and any frame due meanwhile.

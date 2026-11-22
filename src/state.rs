@@ -214,6 +214,8 @@ pub struct Pila {
     /// The uploads of clients' buffers at their commits (`upload.rs`,
     /// `Pila::record_upload`).
     pub upload_stats: crate::frame_stats::FrameStats,
+    /// Captures' copies finished once the GPU was done (`copies`).
+    pub copy_stats: crate::frame_stats::FrameStats,
     /// The event loop's own work after each iteration (`frame_stats.rs`,
     /// `Pila::record_loop`).
     pub loop_stats: crate::frame_stats::LoopStats,
@@ -616,6 +618,7 @@ impl Pila {
             settling_since: None,
             capture_stats: Default::default(),
             upload_stats: Default::default(),
+            copy_stats: Default::default(),
             loop_stats: Default::default(),
             space: Space::default(),
             popups,

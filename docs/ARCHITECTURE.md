@@ -537,7 +537,9 @@ Key flows and invariants:
   a host that renders late draws the first frame after a pause at once and the next late). Screen captures are recorded apart
   (`record_capture`, a `captures` line), the blit into them subtracted from the output's
   frame. Clients' shm buffers copied at their commits ("Uploads") are recorded
-  apart too (`record_upload`, an `uploads` line: how many, average and worst CPU). The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
+  apart too (`record_upload`, an `uploads` line: how many, average and worst CPU), and so
+  are captures' copies into shm finished once the GPU is done (`record_copy`, a `copies` line:
+  a capture client's buffer or a portal share's, written on the event loop). The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
   (no frame queued: a commit with no new picture, the pointer moving with no cursor drawn) is counted
   apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless), and a

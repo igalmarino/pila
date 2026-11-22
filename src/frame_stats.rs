@@ -616,6 +616,17 @@ fn log_capture_report(report: &Report) {
     );
 }
 
+fn log_copy_report(report: &Report) {
+    debug!(
+        target: "pila::frames",
+        secs = (report.secs * 10.0).round() / 10.0,
+        copies = report.frames,
+        cpu_avg_ms = ms(report.cpu_avg),
+        cpu_max_ms = ms(report.cpu_max),
+        "copies"
+    );
+}
+
 fn log_upload_report(report: &Report) {
     debug!(
         target: "pila::frames",
@@ -692,6 +703,16 @@ impl Pila {
         }
     }
 
+    /// A capture's copy, finished once the GPU was done (written into the
+    /// client's shm buffer, or a portal share's; `Pila::when_copied`), took
+    /// `cpu` on the event loop.
+    pub fn record_copy(&mut self, cpu: Duration) {
+        let now = self.animation_time();
+        if let Some(report) = self.copy_stats.record(now, cpu) {
+            log_copy_report(&report);
+        }
+    }
+
     /// A client's buffers, uploaded at its commit (`upload.rs`), took `cpu`.
     pub fn record_upload(&mut self, cpu: Duration) {
         let now = self.animation_time();
@@ -720,6 +741,9 @@ impl Pila {
         }
         if let Some(report) = self.capture_stats.take(now) {
             log_capture_report(&report);
+        }
+        if let Some(report) = self.copy_stats.take(now) {
+            log_copy_report(&report);
         }
         if let Some(report) = self.upload_stats.take(now) {
             log_upload_report(&report);
