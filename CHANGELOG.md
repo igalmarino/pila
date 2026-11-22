@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Screen sharing served by Pila:** browsers, OBS and video calls now share the screen through
+  Pila itself, Pila's own backend of the desktop portal (`pila.portal`), over PipeWire: no
+  xdg-desktop-portal-wlr for it any more (it stays for screenshots). When an app asks, a panel
+  names it and shows every monitor as a live preview; click or arrows to pick, Share or Enter,
+  Cancel or Escape. Nothing is shared until then; the panel is modal, and locking the screen
+  cancels it. Frames are drawn straight into the app's GPU buffers when it takes them (dma-bufs:
+  about 0.2 ms of Pila's time per frame at 1080p), else read back into shared memory; the
+  pointer shows as the app asks (drawn by browsers themselves), and a share follows its monitor
+  turned or scaled. Pila now needs `libpipewire` (and libclang to build); a single window is
+  still shared through xdg-desktop-portal-wlr (the manual says how).
+- **`pila-check` judges captures' copies** into shared memory too (`copies` in the frame
+  statistics, within 8 ms each): they hold the event loop as uploads do.
+
 ## 0.8.3 (2026-11-22)
 
 - **Gaps:** `gaps` leaves room around maximized windows and the halves and quarters windows are

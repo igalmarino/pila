@@ -701,25 +701,31 @@ a daemon they only reach the log.
 `wl-clipboard`. `grim` and other screenshot tools work on their own too, and so do a shell's own
 screenshot features.
 
-**Screen sharing** in browsers, OBS and video calls goes through the desktop portal:
-`xdg-desktop-portal-wlr` for the screen, and `xdg-desktop-portal-gtk` for everything else (the
-file chooser, for instance). Pila installs their configuration for a Pila session. When an app
-asks to share, the pointer becomes a crosshair: click the monitor to share (this uses `slurp`,
-which comes with xdg-desktop-portal-wlr; Escape cancels).
+**Screen sharing** in browsers, OBS and video calls goes through the desktop portal
+(`xdg-desktop-portal`), which hands it to Pila: Pila asks which screen to share and streams it
+over PipeWire, with no other program. When an app asks to share, a panel in the middle of the
+screen names the app and shows every monitor as a live preview, the one under the pointer
+selected: click a preview or use the arrows to pick one, then **Share** (or Enter) to share it,
+or **Cancel** (or Escape). Nothing is shared until then, and while the panel is shown no key or
+click reaches an app. The pointer shows in the share as the app asks (browsers draw it
+themselves). Locking the screen cancels the question. Pila installs the portal's configuration
+for a Pila session (`pila.portal` and `pila-portals.conf`); it needs `xdg-desktop-portal` and
+`pipewire`.
 
-**Sharing a single window** needs a menu to pick it from, since `slurp` can only click
-monitors. With `fuzzel` installed (`wofi`, `rofi`, `bemenu` or `wmenu` work too), copy
-`/etc/xdg/xdg-desktop-portal-wlr/pila` to `~/.config/xdg-desktop-portal-wlr/pila` if it isn't
-there yet, change its two `chooser_` lines to:
+**Sharing a single window** isn't in Pila's panel yet: `xdg-desktop-portal-wlr` can do it,
+with a menu to pick from. With `fuzzel` installed (`wofi`, `rofi`, `bemenu` or `wmenu` work
+too), copy `/etc/xdg/xdg-desktop-portal-wlr/pila` to `~/.config/xdg-desktop-portal-wlr/pila`
+if it isn't there yet, change its two `chooser_` lines to:
 
 ```ini
 chooser_type=dmenu
 chooser_cmd=fuzzel -d -l 10 -p 'Select a source to share: '
 ```
 
-and restart the portal (`systemctl --user restart xdg-desktop-portal-wlr`, or log out and back
-in). The menu then lists monitors and windows. A shared window keeps updating while it's
-covered, minimized or on another workspace.
+and hand it screen sharing with a `~/.config/xdg-desktop-portal/pila-portals.conf` of your own
+(below) whose `ScreenCast` line says `wlr`; then log out and back in. The menu then lists
+monitors and windows. A shared window keeps updating while it's covered, minimized or on another
+workspace.
 
 Screen sharing needs the session's D-Bus bus, which the login screen and `pila-session` set up;
 a nested Pila doesn't have it.
@@ -735,15 +741,15 @@ do. On a TTY Pila hands the session bus and systemd its environment by itself (`
 
 **Portals.** xdg-desktop-portal picks its backends from `pila-portals.conf` (named after
 `XDG_CURRENT_DESKTOP`). Pila's, in `/etc/xdg/xdg-desktop-portal/`, uses `xdg-desktop-portal-gtk`
-for everything (a GTK file chooser) but screen sharing and screenshots
+for everything (a GTK file chooser) but screen sharing (Pila itself) and screenshots
 (`xdg-desktop-portal-wlr`). For GNOME's file chooser, install `xdg-desktop-portal-gnome` and
 Nautilus, and write your own `~/.config/xdg-desktop-portal/pila-portals.conf`. It replaces Pila's
-whole, so keep its two `wlr` lines, or screen sharing stops working:
+whole, so keep its `ScreenCast` and `Screenshot` lines, or screen sharing stops working:
 
 ```ini
 [preferred]
 default=gnome;gtk
-org.freedesktop.impl.portal.ScreenCast=wlr
+org.freedesktop.impl.portal.ScreenCast=pila
 org.freedesktop.impl.portal.Screenshot=wlr
 # These need GNOME Shell in the GNOME backend.
 org.freedesktop.impl.portal.Access=gtk
@@ -986,7 +992,7 @@ does the same in a window of your session, `PILA_CHECK_RENDER_LATE=false pila-ch
 | Clicking a link in the terminal does nothing | Install `xdg-utils`. |
 | No notifications from Pila | Run a notification daemon (mako, or your shell's) on the session bus; the log says once when there's none. |
 | An app's administrator password prompt never shows (`pkexec` fails at once) | No polkit agent runs: start one from `autostart` ([Portals, polkit and the keyring](#portals-polkit-and-the-keyring)). |
-| Screen sharing shows nothing | Install `xdg-desktop-portal-wlr`, and start Pila from the login screen or `pila-session`. An older copy of its configuration in `~/.config/xdg-desktop-portal-wlr/pila` runs `pila-shot`, which Pila no longer has: change its `chooser_cmd` to `slurp -f 'Monitor: %o' -or`, or delete it (`scripts/tty` does the first by itself). |
+| Screen sharing shows nothing, or no panel asks which screen | Install `xdg-desktop-portal` and `pipewire`, and start Pila from the login screen or `pila-session`. A `~/.config/xdg-desktop-portal/pila-portals.conf` of your own whose `ScreenCast` line says `wlr` hands sharing to `xdg-desktop-portal-wlr` instead (its configuration in `~/.config/xdg-desktop-portal-wlr/pila`, if it's an older copy, runs `pila-shot`, which Pila no longer has: change its `chooser_cmd` to `slurp -f 'Monitor: %o' -or`). |
 | The shell doesn't turn the screens off | Some shells run `wlr-randr --off` without a monitor name, which fails; use `pila msg action power-off-monitors` (any input turns them back on). |
 | X11 apps don't start | Install Xwayland; the log says if it couldn't start. |
 | Title bars have no text | Install a font (any TrueType or OpenType font). |

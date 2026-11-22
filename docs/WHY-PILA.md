@@ -38,7 +38,8 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
   (ext-data-control), screenshots (grim; ext-image-copy-capture and wlr-screencopy) and screen sharing
-  (xdg-desktop-portal-wlr, for browsers and OBS), taskbars that act on windows
+  (Pila's own desktop-portal backend over PipeWire, with a picker it draws, for browsers and
+  OBS), taskbars that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
   settings (output power and management), blur behind panels and windows (background-effect),
   workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay

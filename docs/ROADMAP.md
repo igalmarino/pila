@@ -27,13 +27,10 @@ A feature users ask for goes here first.
   wallpaper, the animations, the game's process ending, nor waiting behind its work (a
   high-priority GPU context changed nothing): what's left is in the driver or the switch back
   from asynchronous flips, which needs a GPU trace (amdgpu tracepoints) to tell.
-- **A desktop portal inside Pila** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
-  Pila itself serving the ScreenCast and Screenshot portals, feeding PipeWire from the buffers it
-  already has, with a picker it draws (screens and windows with live previews, like the
-  overview) instead of xdg-desktop-portal-wlr's `slurp`; and GlobalShortcuts, which
-  xdg-desktop-portal-wlr lacks, for apps' global shortcuts (push-to-talk). No program of its own:
-  the service lives in the compositor. First a ScreenCast prototype, kept only if a browser
-  sharing a screen leaves Pila inside its frame budget and nothing it does blocks the event loop.
+- **More of the desktop portal inside Pila** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
+  screen sharing is Pila's own now (unreleased); next, windows in its picker (browsers ask for
+  them too), the Screenshot portal, and GlobalShortcuts, which xdg-desktop-portal-wlr lacks, for
+  apps' global shortcuts (push-to-talk).
 
 ## Waiting for hardware and testers
 
