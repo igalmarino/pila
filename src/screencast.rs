@@ -293,6 +293,7 @@ impl Pila {
         if self.screencast.pipewire.is_some() {
             return Ok(());
         }
+        let started = Instant::now();
         pw::init();
         let main_loop = pw::main_loop::MainLoopRc::new(None).map_err(|e| e.to_string())?;
         let context = pw::context::ContextRc::new(&main_loop, None).map_err(|e| e.to_string())?;
@@ -335,7 +336,7 @@ impl Pila {
             events,
             source,
         });
-        info!("portal: connected to PipeWire");
+        info!(elapsed = ?started.elapsed(), "portal: connected to PipeWire");
         Ok(())
     }
 
