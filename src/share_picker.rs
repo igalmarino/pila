@@ -70,16 +70,23 @@ const BUTTON_HEIGHT: i32 = 36;
 const SHARE_WIDTH: i32 = 120;
 const CANCEL_WIDTH: i32 = 110;
 const BUTTON_GAP: i32 = 12;
-const MIN_WIDTH: i32 = 560;
+/// Room between the hints and the buttons.
+const FOOTER_SPACE: i32 = 24;
+/// The narrowest panel (one source): its footer, the hints then the buttons.
+const MIN_WIDTH: i32 =
+    2 * PADDING + HINTS_WIDTH + FOOTER_SPACE + CANCEL_WIDTH + BUTTON_GAP + SHARE_WIDTH;
 /// The panel's border.
 const BORDER: i32 = 1;
 /// Every output under it.
 const DIM: [f32; 4] = [0.0, 0.0, 0.0, 0.45];
 /// The selected tile's fill: the accent over the panel, this much of it.
 const SELECTED_FILL: f32 = 0.35;
-/// A hint's keycap slot, before its text.
+/// A hint's keycap slot, before its text, and where each hint starts.
 const HINT_KEYS: i32 = 60;
+const HINT_TEXT: i32 = 70;
 const HINT_SLOTS: [i32; 3] = [0, 120, 250];
+/// All of the hints: the last one's keycap and text.
+const HINTS_WIDTH: i32 = HINT_SLOTS[2] + HINT_KEYS - 6 + HINT_TEXT;
 
 /// The picker while it's shown (`Pila::share_picker`).
 #[derive(Default)]
@@ -129,6 +136,8 @@ pub struct Layout {
     pub tiles: Vec<Rectangle<i32, Logical>>,
     pub share: Rectangle<i32, Logical>,
     pub cancel: Rectangle<i32, Logical>,
+    /// The key hints, left of the buttons.
+    pub hints: Rectangle<i32, Logical>,
 }
 
 /// The panel for `count` sources, in the middle of `area`: up to `COLUMNS`
@@ -164,11 +173,16 @@ pub fn layout(area: Rectangle<i32, Logical>, count: usize) -> Layout {
         share.loc - Point::from((BUTTON_GAP + CANCEL_WIDTH, 0)),
         Size::from((CANCEL_WIDTH, BUTTON_HEIGHT)),
     );
+    let hints = Rectangle::new(
+        panel.loc + Point::from((PADDING, buttons_y)),
+        Size::from((HINTS_WIDTH, BUTTON_HEIGHT)),
+    );
     Layout {
         panel,
         tiles,
         share,
         cancel,
+        hints,
     }
 }
 
@@ -714,7 +728,7 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
         items.push(Item::Text {
             text: what.into(),
             at: (PADDING + slot + HINT_KEYS - 6, hints_y + 1),
-            w: 80,
+            w: HINT_TEXT,
             h: 20,
             size: 13,
             bold: false,
@@ -891,6 +905,16 @@ mod tests {
                 assert!(panel.contains_rect(*rect), "{count}: {rect:?} in {panel:?}");
             }
             assert!(!layout.share.overlaps(layout.cancel));
+            assert!(
+                panel.contains_rect(layout.hints),
+                "{count}: the hints in the panel"
+            );
+            assert!(
+                !layout.hints.overlaps(layout.cancel) && !layout.hints.overlaps(layout.share),
+                "{count}: the key hints run into the buttons: {:?} and {:?}",
+                layout.hints,
+                layout.cancel
+            );
         }
         // Three to a row, then another row.
         let four = layout(area(), 4);
