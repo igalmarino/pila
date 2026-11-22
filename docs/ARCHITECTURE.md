@@ -779,6 +779,16 @@ Key flows and invariants:
   opens its next popover on the same surface, and the null commit after the destroy is no
   popup's commit any more, so without it that popover's initial commit read as a hiding one
   and got no configure, while its grab held the app's input.
+- **Panels** (`panel.rs`): what Pila's own panels share, so that they look alike (the switcher,
+  the cheatsheet and welcome, the share picker; the overview takes its dim and accent from it).
+  `panel::frame` draws a panel's background (`bar-inactive`, opaque) and its `BORDER` of
+  `hover`, with the windows' corners (`panel::rounding`: `corner-radius`, `rounded-corners`;
+  `render::solid_element`, the border's radius a pixel bigger to follow the curve; square where
+  the shaders didn't compile), its buffers kept in `FrameBuffers`. What's selected sits on the
+  accent (`panel::accent`, `snap-preview` made opaque). A modal panel dims every output with
+  `DIM` (`panel::dim`). Texts and keycaps are `Item`s drawn by `draw_text` on a thread into one
+  image the size of the panel (`TextKey` says what it shows, the keycaps in `key_caps`), shown
+  as one texture by `ContentImage`.
 - **Switcher** (`switcher_view.rs`): Pila's own window switcher, drawn by Pila, that only shows
   the switch `switcher.rs` does (see "Window switching"). `Pila::switch_changed` (and
   `cycle_focus` once the switch is in place) call `switcher_view_changed`: a new switch arms a
@@ -1146,7 +1156,7 @@ Key flows and invariants:
   is shown. Opening it ends a switch and closes the cheatsheet, the overview and the window
   menu; locking cancels it and every request waiting (`SessionLockHandler::lock`), the app
   closing its session takes its request away (answered as failed). Its texts are one image
-  drawn on a thread with the cheatsheet's code (`shortcuts_view::draw_text`); the panel shows
+  drawn on a thread with the cheatsheet's code (`panel::draw_text`); the panel shows
   without them until then. Each preview is its output's scene (`render::scene_elements`, no
   blur backdrops) drawn small into an `OffscreenWindow` from `after_frames`
   (`Pila::update_share_previews`, with the captures' scene), over a kept background solid:

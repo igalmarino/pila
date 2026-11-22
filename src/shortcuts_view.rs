@@ -14,38 +14,21 @@
 use std::{cell::RefCell, rc::Rc};
 
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::{SolidColorBuffer, SolidColorRenderElement},
-                Kind,
-            },
-            gles::GlesRenderer,
-        },
-    },
+    backend::renderer::gles::GlesRenderer,
     input::keyboard::{xkb, Keysym},
     reexports::calloop,
-    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Point, Rectangle, Scale, Size},
 };
 
 use crate::{
     config::{Action, Colors, Config, KeyCombo, ModKey, Trigger, WorkspaceTarget},
+    panel::{bits, draw_text, Align, ContentImage, Font, FrameBuffers, Item, TextKey},
     render::PilaRenderElement,
     Pila,
 };
 
-/// The panel's border.
-const BORDER: i32 = 1;
 /// The room kept around a panel shrunk to fit its monitor (`fit`).
 const FIT_MARGIN: i32 = 32;
-/// A keycap's height, its rounding and its padding around the label.
-const CAP_HEIGHT: i32 = 22;
-pub(crate) const CAP_RADIUS: i32 = 4;
-const CAP_PADDING: i32 = 7;
-/// Between keycaps, where a "+" goes.
-const CAP_GAP: i32 = 18;
 
 /// The welcome: its width, where its rows start, each row's height, where
 /// the keys and what they do go, and the room under the rows.
@@ -108,12 +91,11 @@ struct Shown {
 /// Kept between frames while it's shown: an unchanged panel adds no damage.
 #[derive(Default)]
 struct Buffers {
-    background: Option<SolidColorBuffer>,
-    border: Option<SolidColorBuffer>,
+    frame: FrameBuffers,
     /// Everything on the panel, its text and keycaps, in one image the size
     /// of the panel: one texture, made on a thread
     /// (`Pila::draw_shortcuts_text`).
-    text: Option<TextImage>,
+    text: Option<ContentImage>,
 }
 
 /// One of a row's keys: what its keycap says ("Super", "Q", "1…4").
@@ -133,64 +115,9 @@ pub struct Section {
     pub rows: Vec<Row>,
 }
 
-/// How a text sits in its box.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Align {
-    Left,
-    Center,
-    Right,
-}
-
-/// Something drawn on the panel, at a place from its top-left (logical).
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Item {
-    /// A line of text in a box `w` by `h`, at `size` px, bold or not.
-    Text {
-        text: String,
-        at: (i32, i32),
-        w: i32,
-        h: i32,
-        size: u8,
-        bold: bool,
-        align: Align,
-        color: [u32; 3],
-    },
-    /// Keycaps from left to right, a "+" between them, within `w`.
-    Keys {
-        caps: Vec<Cap>,
-        at: (i32, i32),
-        w: i32,
-        size: u8,
-    },
-}
-
-/// What a content image shows: its items in the panel's palette, the
-/// panel's size and the buffer scale it's drawn at.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TextKey {
-    pub(crate) items: Vec<Item>,
-    /// A keycap's label, its fill, its edge and the "+" between them.
-    pub(crate) caps: [[u32; 3]; 4],
-    pub(crate) size: (i32, i32),
-    pub(crate) scale: i32,
-}
-
-/// The panel's content drawn into one premultiplied ARGB8888 image.
-struct TextImage {
-    key: TextKey,
-    pixels: Vec<u8>,
-    /// Made from `pixels` by the first frame that shows it.
-    buffer: Option<MemoryRenderBuffer>,
-}
-
-/// An opaque color as the content image's key keeps it.
-pub(crate) fn bits(color: [f32; 3]) -> [u32; 3] {
-    color.map(f32::to_bits)
-}
-
 /// The panel's palette: text, dimmed text and the accent.
 fn text_colors(colors: &Colors) -> ([u32; 3], [u32; 3], [u32; 3]) {
-    let [r, g, b, _] = crate::switcher_view::opaque(colors.snap_preview);
+    let [r, g, b, _] = crate::panel::accent(colors);
     (
         bits(colors.icon),
         bits(colors.icon_inactive),
@@ -207,8 +134,7 @@ fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -
         at: (0, y),
         w: WELCOME_WIDTH,
         h,
-        size,
-        bold,
+        font: Font { size, bold },
         align: Align::Center,
         color,
     };
@@ -228,9 +154,11 @@ fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -
             text: row.what.into(),
             at: (WELCOME_WHAT_AT, y),
             w: WELCOME_WIDTH - WELCOME_WHAT_AT - 20,
-            h: CAP_HEIGHT,
-            size: 15,
-            bold: false,
+            h: crate::panel::CAP_HEIGHT,
+            font: Font {
+                size: 15,
+                bold: false,
+            },
             align: Align::Left,
             color: text,
         });
@@ -241,8 +169,10 @@ fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -
         at: (20, height - 36),
         w: WELCOME_WIDTH - 40,
         h: 20,
-        size: 12,
-        bold: false,
+        font: Font {
+            size: 12,
+            bold: false,
+        },
         align: Align::Center,
         color: dim,
     });
@@ -260,8 +190,10 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
             at: (x, 20),
             w: 300,
             h: 34,
-            size: 22,
-            bold: true,
+            font: Font {
+                size: 22,
+                bold: true,
+            },
             align: Align::Left,
             color: text,
         },
@@ -270,8 +202,10 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
             at: (SHORTCUTS_WIDTH / 2, 27),
             w: SHORTCUTS_WIDTH / 2 - x,
             h: 20,
-            size: 12,
-            bold: false,
+            font: Font {
+                size: 12,
+                bold: false,
+            },
             align: Align::Right,
             color: dim,
         },
@@ -284,8 +218,10 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
                 at: (*column, y),
                 w: 380,
                 h: 16,
-                size: 11,
-                bold: true,
+                font: Font {
+                    size: 11,
+                    bold: true,
+                },
                 align: Align::Left,
                 color: accent,
             });
@@ -301,9 +237,11 @@ fn shortcuts_items(columns: &[Vec<Section>; 2], notes: &[String], colors: &Color
                     text: row.what.into(),
                     at: (column + SECTION_WHAT_AT, y),
                     w: 380 - SECTION_WHAT_AT,
-                    h: CAP_HEIGHT,
-                    size: 14,
-                    bold: false,
+                    h: crate::panel::CAP_HEIGHT,
+                    font: Font {
+                        size: 14,
+                        bold: false,
+                    },
                     align: Align::Left,
                     color: dim,
                 });
@@ -320,148 +258,6 @@ fn column_height(sections: &[Section]) -> i32 {
     let rows: usize = sections.iter().map(|s| s.rows.len()).sum();
     sections.len() as i32 * (SECTION_HEADING + SECTION_GAP) - SECTION_GAP
         + rows as i32 * SECTION_ROW
-}
-
-/// Draw `src` (premultiplied, its alpha `alpha`) over the pixel at `i` of
-/// premultiplied BGRA `pixels`.
-fn blend(pixels: &mut [u8], i: usize, bgr: [f32; 3], alpha: f32) {
-    if alpha <= 0.0 {
-        return;
-    }
-    let keep = 1.0 - alpha;
-    for (c, value) in bgr.iter().enumerate() {
-        let dst = f32::from(pixels[i + c]) / 255.0;
-        pixels[i + c] = ((value * alpha + dst * keep) * 255.0).round() as u8;
-    }
-    let dst = f32::from(pixels[i + 3]) / 255.0;
-    pixels[i + 3] = ((alpha + dst * keep) * 255.0).round() as u8;
-}
-
-/// A rounded rect (physical pixels) filled with `color`, anti-aliased, over
-/// the image `width` wide.
-fn fill_rounded(
-    pixels: &mut [u8],
-    width: i32,
-    rect: (f32, f32, f32, f32),
-    radius: f32,
-    color: [f32; 3],
-) {
-    let (x, y, w, h) = rect;
-    let height = pixels.len() as i32 / 4 / width.max(1);
-    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
-    let bgr = [color[2], color[1], color[0]];
-    for py in (y.floor() as i32).max(0)..((y + h).ceil() as i32).min(height) {
-        for px in (x.floor() as i32).max(0)..((x + w).ceil() as i32).min(width) {
-            // Distance from the pixel's center to the rounded rect.
-            let qx = (px as f32 + 0.5 - cx).abs() - w / 2.0 + radius;
-            let qy = (py as f32 + 0.5 - cy).abs() - h / 2.0 + radius;
-            let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
-            let d = outside + qx.max(qy).min(0.0) - radius;
-            let coverage = (0.5 - d).clamp(0.0, 1.0);
-            blend(pixels, ((py * width + px) * 4) as usize, bgr, coverage);
-        }
-    }
-}
-
-/// A rendered line of text over the image at (`x`, `y`) (physical pixels).
-fn blit_text(pixels: &mut [u8], width: i32, text: &crate::text::Title, x: i32, y: i32) {
-    let height = pixels.len() as i32 / 4 / width.max(1);
-    let rows = text.pixels.len() as i32 / 4 / text.width.max(1);
-    for row in 0..rows {
-        let py = y + row;
-        if py < 0 || py >= height {
-            continue;
-        }
-        for col in 0..text.width {
-            let px = x + col;
-            if px < 0 || px >= width {
-                continue;
-            }
-            let from = ((row * text.width + col) * 4) as usize;
-            let a = f32::from(text.pixels[from + 3]) / 255.0;
-            if a <= 0.0 {
-                continue;
-            }
-            // Premultiplied already: un-premultiply to blend.
-            let bgr = [0, 1, 2].map(|c| f32::from(text.pixels[from + c]) / 255.0 / a);
-            blend(pixels, ((py * width + px) * 4) as usize, bgr, a);
-        }
-    }
-}
-
-/// `key`'s items drawn into one image (`None` until the fonts have loaded).
-/// On a thread: shaping and rasterizing them all takes a few milliseconds.
-pub(crate) fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
-    use crate::text::{render_text, Style};
-    let scale = key.scale;
-    let s = scale as f32;
-    let (width, height) = (key.size.0 * scale, key.size.1 * scale);
-    let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    let [label, fill, edge, plus] = key.caps.map(|c| c.map(f32::from_bits));
-    for item in &key.items {
-        match item {
-            Item::Text {
-                text,
-                at,
-                w,
-                h,
-                size,
-                bold,
-                align,
-                color,
-            } => {
-                let style = Style {
-                    size: f32::from(*size),
-                    bold: *bold,
-                };
-                let line = render_text(text, color.map(f32::from_bits), *w, *h, scale, style)?;
-                let room = w * scale - line.width;
-                let x = at.0 * scale
-                    + match align {
-                        Align::Left => 0,
-                        Align::Center => room / 2,
-                        Align::Right => room,
-                    };
-                blit_text(&mut pixels, width, &line, x, at.1 * scale);
-            }
-            Item::Keys { caps, at, w, size } => {
-                let style = Style {
-                    size: f32::from(*size),
-                    bold: false,
-                };
-                let end = (at.0 + w) * scale;
-                let mut x = at.0 * scale;
-                let y = at.1 * scale;
-                for (i, cap) in caps.iter().enumerate() {
-                    if i > 0 {
-                        let sign = render_text("+", plus, CAP_GAP, CAP_HEIGHT, scale, style)?;
-                        let room = CAP_GAP * scale - sign.width;
-                        blit_text(&mut pixels, width, &sign, x + room / 2, y);
-                        x += CAP_GAP * scale;
-                    }
-                    let text = render_text(cap, label, 200, CAP_HEIGHT, scale, style)?;
-                    let cap_w = (text.width + 2 * CAP_PADDING * scale).max(CAP_HEIGHT * scale);
-                    // Keys that don't fit their room stop at its edge.
-                    if x + cap_w > end {
-                        break;
-                    }
-                    let rect = (
-                        x as f32,
-                        y as f32,
-                        cap_w as f32,
-                        (CAP_HEIGHT * scale) as f32,
-                    );
-                    let radius = CAP_RADIUS as f32 * s;
-                    fill_rounded(&mut pixels, width, rect, radius, edge);
-                    let inner = (rect.0 + s, rect.1 + s, rect.2 - 2.0 * s, rect.3 - 2.0 * s);
-                    fill_rounded(&mut pixels, width, inner, radius - s, fill);
-                    blit_text(&mut pixels, width, &text, x + (cap_w - text.width) / 2, y);
-                    x += cap_w;
-                }
-            }
-        }
-    }
-    Some(pixels)
 }
 
 /// What `Pila::scene` gives the renderer of the panel shown.
@@ -828,15 +624,7 @@ impl Pila {
         };
         let key = TextKey {
             items,
-            caps: [
-                bits(colors.icon),
-                {
-                    let [r, g, b, _] = crate::switcher_view::opaque(colors.bar);
-                    bits([r, g, b])
-                },
-                bits(colors.hover),
-                bits(colors.icon_inactive),
-            ],
+            caps: crate::panel::key_caps(colors),
             size: (view.layout_size.w, view.layout_size.h),
             scale,
         };
@@ -880,11 +668,8 @@ impl Pila {
                     return;
                 };
                 state.shortcuts_view.pending = None;
-                state.shortcuts_view.buffers.borrow_mut().text = Some(TextImage {
-                    key: key.clone(),
-                    pixels,
-                    buffer: None,
-                });
+                state.shortcuts_view.buffers.borrow_mut().text =
+                    Some(ContentImage::new(key.clone(), pixels));
                 state.redraw_shortcuts_view();
             });
         if let Err(err) = inserted {
@@ -911,11 +696,7 @@ impl Pila {
         if !self.shortcuts_shown() {
             return;
         }
-        {
-            let mut buffers = self.shortcuts_view.buffers.borrow_mut();
-            buffers.background = None;
-            buffers.border = None;
-        }
+        self.shortcuts_view.buffers.borrow_mut().frame = FrameBuffers::default();
         self.redraw_shortcuts_view();
         self.draw_shortcuts_text();
     }
@@ -1017,10 +798,8 @@ impl Pila {
             heading,
             sections,
             notes,
-            rounding: (self.config.corner_radius > 0).then_some((
-                f64::from(self.config.corner_radius) * shrunk,
-                self.config.rounded_corners,
-            )),
+            rounding: crate::panel::rounding(&self.config)
+                .map(|(radius, corners)| (radius * shrunk, corners)),
             buffers: self.shortcuts_view.buffers.clone(),
         })
     }
@@ -1062,87 +841,24 @@ pub fn elements(
 ) -> Vec<PilaRenderElement> {
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
-    let physical = |loc: Point<i32, Logical>| -> Point<i32, Physical> {
-        (loc - origin).to_physical_precise_round(scale)
-    };
     let mut elements = Vec::new();
     // Drawn only with its text, which comes from a thread
     // (`Pila::draw_shortcuts_text`): never an empty panel.
     let Some(text) = buffers.text.as_mut() else {
         return elements;
     };
-    let (width, height) = text.key.size;
-    let text_scale = text.key.scale;
-    let pixels = &text.pixels;
-    let buffer = text.buffer.get_or_insert_with(|| {
-        MemoryRenderBuffer::from_slice(
-            pixels,
-            Fourcc::Argb8888,
-            (width * text_scale, height * text_scale),
-            text_scale,
-            Transform::Normal,
-            None,
-        )
-    });
     // Shown at the panel's size: smaller than drawn where it was shrunk to
     // fit its monitor.
-    let loc = (view.rect.loc - origin).to_f64().to_physical(scale);
-    if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
+    elements.extend(text.element(renderer, view.rect, origin, scale));
+    elements.extend(crate::panel::frame(
         renderer,
-        loc,
-        buffer,
-        None,
-        // All of it, at its size as laid out (without a source, Smithay
-        // takes `size` for it and crops).
-        Some(Rectangle::from_size(view.layout_size.to_f64())),
-        Some(view.rect.size),
-        Kind::Unspecified,
-    ) {
-        elements.push(PilaRenderElement::Memory(element));
-    }
-    // The windows' corners, if their shaders compiled; else square.
-    let shaders = view
-        .rounding
-        .and_then(|_| crate::rounded::Shaders::get(renderer));
-    let mut solid = |slot: &mut Option<SolidColorBuffer>,
-                     rect: Rectangle<i32, Logical>,
-                     color: [f32; 4],
-                     rounding: Option<(f64, crate::rounded::Corners)>| {
-        let buffer = slot.get_or_insert_with(|| SolidColorBuffer::new(rect.size, color));
-        buffer.update(rect.size, color);
-        let element = SolidColorRenderElement::from_buffer(
-            buffer,
-            physical(rect.loc),
-            scale,
-            1.0,
-            Kind::Unspecified,
-        );
-        elements.push(match (rounding, &shaders) {
-            (Some((radius, corners)), Some(shaders)) => PilaRenderElement::RoundedSolid(
-                crate::rounded::RoundedSolid::new(element, shaders, radius, corners, scale),
-            ),
-            _ => PilaRenderElement::Solid(element),
-        });
-    };
-    solid(
-        &mut buffers.background,
+        &mut buffers.frame,
         view.rect,
-        crate::switcher_view::opaque(colors.bar_inactive),
         view.rounding,
-    );
-    // One pixel around it, its corners a pixel wider to follow the curve.
-    let outer = Rectangle::new(
-        view.rect.loc - Point::from((BORDER, BORDER)),
-        view.rect.size + Size::from((2 * BORDER, 2 * BORDER)),
-    );
-    let [r, g, b] = colors.hover;
-    solid(
-        &mut buffers.border,
-        outer,
-        [r, g, b, 1.0],
-        view.rounding
-            .map(|(radius, corners)| (radius + f64::from(BORDER), corners)),
-    );
+        colors,
+        origin,
+        scale,
+    ));
     elements
 }
 
@@ -1316,22 +1032,5 @@ mod tests {
         assert!(f64::from(welcome.h) * shrunk <= f64::from(400 - 2 * FIT_MARGIN) + 0.5);
         let sheet = Size::from((SHORTCUTS_WIDTH, 374));
         assert!(f64::from(sheet.w) * fit(sheet, (640, 400).into()) <= 576.5);
-    }
-
-    /// A keycap is drawn over what's under it, its label over the cap.
-    #[test]
-    fn text_blends_over_what_is_under_it() {
-        let mut pixels = vec![0u8; 4 * 4];
-        fill_rounded(&mut pixels, 2, (0.0, 0.0, 2.0, 2.0), 0.0, [1.0, 0.0, 0.0]);
-        // Opaque red, as BGRA.
-        assert_eq!(&pixels[..4], &[0, 0, 255, 255]);
-        let half_green = crate::text::Title {
-            pixels: vec![0, 128, 0, 128],
-            width: 1,
-            whole: true,
-        };
-        blit_text(&mut pixels, 2, &half_green, 1, 1);
-        let i = (2 + 1) * 4;
-        assert_eq!(&pixels[i..i + 4], &[0, 128, 127, 255]);
     }
 }

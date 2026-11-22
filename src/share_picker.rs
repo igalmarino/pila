@@ -11,7 +11,7 @@
 //! cancels them all, and the app closing its session takes its request away.
 //!
 //! Its texts are drawn on a thread into one image the size of the panel, as
-//! the cheatsheet's are (`shortcuts_view::draw_text`); the panel shows from
+//! the cheatsheet's are (`panel::draw_text`); the panel shows from
 //! the start, its text once it's there. Each preview is its output's scene
 //! drawn small into a texture of its own with its own damage tracker
 //! (`render::OffscreenWindow`), from `after_frames` like captures
@@ -21,29 +21,25 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::{SolidColorBuffer, SolidColorRenderElement},
-                Kind,
-            },
-            gles::GlesRenderer,
+    backend::renderer::{
+        element::{
+            solid::{SolidColorBuffer, SolidColorRenderElement},
+            Kind,
         },
+        gles::GlesRenderer,
     },
     input::keyboard::Keysym,
     reexports::calloop,
-    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size},
 };
 use tracing::{info, warn};
 
 use crate::{
     config::Colors,
+    panel::{bits, draw_text, Align, ContentImage, Font, FrameBuffers, Item, TextKey},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
-    shortcuts_view::{bits, draw_text, Align, Item, TextKey},
     Pila,
 };
 
@@ -64,7 +60,7 @@ const COLUMNS: usize = 3;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
 /// The buttons' corners: the cheatsheet's keys'.
-const KEY_RADIUS: i32 = crate::shortcuts_view::CAP_RADIUS;
+const KEY_RADIUS: i32 = crate::panel::CAP_RADIUS;
 /// The footer: the buttons, and the room above it.
 const FOOTER_GAP: i32 = 32;
 const BUTTON_HEIGHT: i32 = 36;
@@ -76,10 +72,6 @@ const FOOTER_SPACE: i32 = 24;
 /// The narrowest panel (one source): its footer, the hints then the buttons.
 const MIN_WIDTH: i32 =
     2 * PADDING + HINTS_WIDTH + FOOTER_SPACE + CANCEL_WIDTH + BUTTON_GAP + SHARE_WIDTH;
-/// The panel's border.
-const BORDER: i32 = 1;
-/// Every output under it.
-const DIM: [f32; 4] = [0.0, 0.0, 0.0, 0.45];
 /// A hint's keycap slot, before its text, and where each hint starts.
 const HINT_KEYS: i32 = 60;
 const HINT_TEXT: i32 = 70;
@@ -108,23 +100,16 @@ struct Shown {
 /// Kept between frames while it's shown: an unchanged panel adds no damage.
 #[derive(Default)]
 struct Buffers {
-    /// The panel's solids, by their place in `elements`.
+    frame: FrameBuffers,
+    /// The panel's other solids, by their place in `elements`.
     solids: HashMap<&'static str, SolidColorBuffer>,
     /// The dim over each output, by name.
     dims: HashMap<String, SolidColorBuffer>,
-    text: Option<TextImage>,
+    text: Option<ContentImage>,
     /// Each output's preview, by name (`Pila::update_share_previews`), and
     /// the background drawn behind it (kept: a new one would be damage).
     previews: HashMap<String, OffscreenWindow>,
     backgrounds: HashMap<String, SolidColorBuffer>,
-}
-
-/// The panel's texts in one premultiplied ARGB8888 image.
-struct TextImage {
-    key: TextKey,
-    pixels: Vec<u8>,
-    /// Made from `pixels` by the first frame that shows it.
-    buffer: Option<MemoryRenderBuffer>,
 }
 
 /// Where the panel and its parts are, global.
@@ -436,10 +421,7 @@ impl Pila {
             layout,
             previews,
             selected: shown.selected,
-            rounding: (self.config.corner_radius > 0).then_some((
-                f64::from(self.config.corner_radius),
-                self.config.rounded_corners,
-            )),
+            rounding: crate::panel::rounding(&self.config),
             buffers: self.share_picker.buffers.clone(),
         })
     }
@@ -569,15 +551,7 @@ impl Pila {
                 &labels,
                 &self.config.colors,
             ),
-            caps: [
-                bits(self.config.colors.icon),
-                {
-                    let [r, g, b, _] = crate::switcher_view::opaque(self.config.colors.bar);
-                    bits([r, g, b])
-                },
-                bits(self.config.colors.hover),
-                bits(self.config.colors.icon_inactive),
-            ],
+            caps: crate::panel::key_caps(&self.config.colors),
             size: (view.layout.panel.size.w, view.layout.panel.size.h),
             scale,
         };
@@ -612,11 +586,8 @@ impl Pila {
                     // No fonts: the panel goes on without its text.
                     return;
                 };
-                state.share_picker.buffers.borrow_mut().text = Some(TextImage {
-                    key: key.clone(),
-                    pixels,
-                    buffer: None,
-                });
+                state.share_picker.buffers.borrow_mut().text =
+                    Some(ContentImage::new(key.clone(), pixels));
                 if let Some(view) = state.scene_share_picker() {
                     state.queue_redraw_named_output(&view.output);
                 }
@@ -669,8 +640,10 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (PADDING, TITLE_AT),
             w: width,
             h: TITLE_HEIGHT,
-            size: 20,
-            bold: false,
+            font: Font {
+                size: 20,
+                bold: false,
+            },
             align: Align::Left,
             color: text,
         },
@@ -679,8 +652,10 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (PADDING, NOTE_AT),
             w: width,
             h: NOTE_HEIGHT,
-            size: 13,
-            bold: false,
+            font: Font {
+                size: 13,
+                bold: false,
+            },
             align: Align::Left,
             color: dimmed,
         },
@@ -692,8 +667,10 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (x, y + tile.size.h + LABEL_GAP),
             w: tile.size.w,
             h: LABEL_HEIGHT,
-            size: 14,
-            bold: false,
+            font: Font {
+                size: 14,
+                bold: false,
+            },
             align: Align::Center,
             color: text,
         });
@@ -706,8 +683,10 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (x, y + (BUTTON_HEIGHT - LABEL_HEIGHT) / 2),
             w: rect.size.w,
             h: LABEL_HEIGHT,
-            size: 14,
-            bold: false,
+            font: Font {
+                size: 14,
+                bold: false,
+            },
             align: Align::Center,
             color: text,
         });
@@ -729,8 +708,10 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             at: (PADDING + slot + HINT_KEYS - 6, hints_y + 1),
             w: HINT_TEXT,
             h: 20,
-            size: 13,
-            bold: false,
+            font: Font {
+                size: 13,
+                bold: false,
+            },
             align: Align::Left,
             color: dimmed,
         });
@@ -739,13 +720,12 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
 }
 
 /// One of the panel's solids: its name (its buffer's key), where it is,
-/// its color, and its corners' radius and which are rounded (`None`:
-/// square).
+/// its color, and its corners.
 type PanelSolid = (
     &'static str,
     Rectangle<i32, Logical>,
     [f32; 4],
-    Option<(f64, crate::rounded::Corners)>,
+    crate::panel::Shape,
 );
 
 /// The picker's elements for the output `output_name`, front to back,
@@ -761,52 +741,21 @@ pub fn elements(
     let origin = output_geo.loc;
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
-    let physical = |loc: Point<i32, Logical>| -> Point<i32, Physical> {
-        (loc - origin).to_physical_precise_round(scale)
-    };
-    let mut elements = Vec::new();
-    let dim = buffers
-        .dims
-        .entry(output_name.to_string())
-        .or_insert_with(|| SolidColorBuffer::new(output_geo.size, DIM));
-    dim.update(output_geo.size, DIM);
-    let dim = PilaRenderElement::Solid(SolidColorRenderElement::from_buffer(
-        dim,
-        (0, 0),
-        scale,
+    let dim = crate::panel::dim(
+        &mut buffers.dims,
+        output_name,
+        output_geo,
         1.0,
-        Kind::Unspecified,
-    ));
+        origin,
+        scale,
+    );
     if output_name != view.output {
         return vec![dim];
     }
     let layout = &view.layout;
-
+    let mut elements = Vec::new();
     if let Some(text) = buffers.text.as_mut() {
-        let (width, height) = text.key.size;
-        let text_scale = text.key.scale;
-        let pixels = &text.pixels;
-        let buffer = text.buffer.get_or_insert_with(|| {
-            MemoryRenderBuffer::from_slice(
-                pixels,
-                Fourcc::Argb8888,
-                (width * text_scale, height * text_scale),
-                text_scale,
-                Transform::Normal,
-                None,
-            )
-        });
-        if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            physical(layout.panel.loc).to_f64(),
-            buffer,
-            None,
-            Some(Rectangle::from_size(layout.panel.size.to_f64())),
-            Some(layout.panel.size),
-            Kind::Unspecified,
-        ) {
-            elements.push(PilaRenderElement::Memory(element));
-        }
+        elements.extend(text.element(renderer, layout.panel, origin, scale));
     }
     for (name, rect) in &view.previews {
         if let Some(preview) = buffers.previews.get(name) {
@@ -821,16 +770,9 @@ pub fn elements(
         }
     }
 
-    let accent = crate::switcher_view::opaque(colors.snap_preview);
-    let [pr, pg, pb, _] = crate::switcher_view::opaque(colors.bar_inactive);
-    let [hr, hg, hb] = colors.hover;
-    let hover = [hr, hg, hb, 1.0];
-    let key_fill = crate::switcher_view::opaque(colors.bar);
-    let panel_color = [pr, pg, pb, 1.0];
-    let border = Rectangle::new(
-        layout.panel.loc - Point::from((BORDER, BORDER)),
-        layout.panel.size + Size::from((2 * BORDER, 2 * BORDER)),
-    );
+    let accent = crate::panel::accent(colors);
+    let hover = crate::panel::rgb(colors.hover);
+    let key_fill = crate::panel::opaque(colors.bar);
     let inset = |rect: Rectangle<i32, Logical>, by: i32| {
         Rectangle::new(
             rect.loc + Point::from((by, by)),
@@ -849,34 +791,30 @@ pub fn elements(
     solids.push(("share", layout.share, accent, key));
     solids.push(("cancel", inset(layout.cancel, 1), key_fill, key_inner));
     solids.push(("cancel-edge", layout.cancel, hover, key));
-    // The panel with the windows' corners, as Pila's other panels.
-    let panel_corners = view.rounding;
-    let border_corners = view
-        .rounding
-        .map(|(radius, corners)| (radius + f64::from(BORDER), corners));
-    solids.push(("panel", layout.panel, panel_color, panel_corners));
-    solids.push(("border", border, hover, border_corners));
-    let shaders = crate::rounded::Shaders::get(renderer);
     for (name, rect, color, rounding) in solids {
         let buffer = buffers
             .solids
             .entry(name)
             .or_insert_with(|| SolidColorBuffer::new(rect.size, color));
         buffer.update(rect.size, color);
-        let element = SolidColorRenderElement::from_buffer(
+        elements.push(crate::render::solid_element(
+            renderer,
             buffer,
-            physical(rect.loc),
-            scale,
+            rect.loc - origin,
+            rounding,
             1.0,
-            Kind::Unspecified,
-        );
-        elements.push(match (rounding, &shaders) {
-            (Some((radius, corners)), Some(shaders)) => PilaRenderElement::RoundedSolid(
-                crate::rounded::RoundedSolid::new(element, shaders, radius, corners, scale),
-            ),
-            _ => PilaRenderElement::Solid(element),
-        });
+            scale,
+        ));
     }
+    elements.extend(crate::panel::frame(
+        renderer,
+        &mut buffers.frame,
+        layout.panel,
+        view.rounding,
+        colors,
+        origin,
+        scale,
+    ));
     elements.push(dim);
     elements
 }

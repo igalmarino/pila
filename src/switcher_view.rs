@@ -66,8 +66,6 @@ pub const TILE: (i32, i32) = (
 /// Between tiles, and around them all.
 pub const SPACING: i32 = 4;
 pub const PADDING: i32 = 12;
-/// The panel's border.
-const BORDER: i32 = 1;
 
 /// The switcher while a switch goes on.
 #[derive(Default)]
@@ -85,8 +83,7 @@ pub struct SwitcherView {
 /// damage.
 #[derive(Default)]
 struct Buffers {
-    background: Option<SolidColorBuffer>,
-    border: Option<SolidColorBuffer>,
+    frame: crate::panel::FrameBuffers,
     selected: Option<SolidColorBuffer>,
     /// Each tile's preview texture, by window (a handful: a list).
     previews: Vec<(Window, OffscreenWindow)>,
@@ -266,10 +263,7 @@ impl Pila {
             output,
             rect,
             tiles,
-            rounding: (self.config.corner_radius > 0).then_some((
-                f64::from(self.config.corner_radius),
-                self.config.rounded_corners,
-            )),
+            rounding: crate::panel::rounding(&self.config),
             buffers: self.switcher_view.buffers.clone(),
         })
     }
@@ -317,15 +311,6 @@ impl Pila {
     }
 }
 
-/// An opaque version of a premultiplied color.
-pub(crate) fn opaque(color: [f32; 4]) -> [f32; 4] {
-    let a = color[3];
-    if a <= 0.0 {
-        return [0.0, 0.0, 0.0, 1.0];
-    }
-    [color[0] / a, color[1] / a, color[2] / a, 1.0]
-}
-
 /// The switcher's elements, front to back, relative to `origin`.
 pub fn elements(
     renderer: &mut GlesRenderer,
@@ -345,7 +330,6 @@ pub fn elements(
         buffer.update(size, color);
         buffer.clone()
     };
-    let rgb = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
     let mut elements = Vec::new();
     // Textures of windows no longer shown go.
     buffers
@@ -413,7 +397,7 @@ pub fn elements(
             let buffer = solid(
                 &mut buffers.selected,
                 tile.rect.size,
-                opaque(colors.snap_preview),
+                crate::panel::accent(colors),
             );
             elements.push(PilaRenderElement::Solid(
                 SolidColorRenderElement::from_buffer(
@@ -426,53 +410,14 @@ pub fn elements(
             ));
         }
     }
-    // The panel and one pixel around it, with the windows' corners (the
-    // border's a pixel wider, to follow the curve), if their shaders
-    // compiled; else square.
-    let shaders = view
-        .rounding
-        .and_then(|_| crate::rounded::Shaders::get(renderer));
-    let shaped = |element: SolidColorRenderElement, grow: i32| match (view.rounding, &shaders) {
-        (Some((radius, corners)), Some(shaders)) => {
-            PilaRenderElement::RoundedSolid(crate::rounded::RoundedSolid::new(
-                element,
-                shaders,
-                radius + f64::from(grow),
-                corners,
-                scale,
-            ))
-        }
-        _ => PilaRenderElement::Solid(element),
-    };
-    let background = solid(
-        &mut buffers.background,
-        view.rect.size,
-        opaque(colors.bar_inactive),
-    );
-    elements.push(shaped(
-        SolidColorRenderElement::from_buffer(
-            &background,
-            physical(view.rect.loc),
-            scale,
-            1.0,
-            Kind::Unspecified,
-        ),
-        0,
-    ));
-    let outer = Rectangle::new(
-        view.rect.loc - Point::from((BORDER, BORDER)),
-        view.rect.size + Size::from((2 * BORDER, 2 * BORDER)),
-    );
-    let border = solid(&mut buffers.border, outer.size, rgb(colors.hover));
-    elements.push(shaped(
-        SolidColorRenderElement::from_buffer(
-            &border,
-            physical(outer.loc),
-            scale,
-            1.0,
-            Kind::Unspecified,
-        ),
-        BORDER,
+    elements.extend(crate::panel::frame(
+        renderer,
+        &mut buffers.frame,
+        view.rect,
+        view.rounding,
+        colors,
+        origin,
+        scale,
     ));
     elements
 }

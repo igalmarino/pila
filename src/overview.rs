@@ -66,8 +66,6 @@ const STRIP_TOP: i32 = 24;
 /// A thumbnail's border, and the active or hovered one's.
 const THUMB_BORDER: i32 = 1;
 const THUMB_BORDER_MARKED: i32 = 3;
-/// What the wallpaper is dimmed with (premultiplied black).
-const DIM: [f32; 4] = [0.0, 0.0, 0.0, 0.45];
 
 /// The overview while it's open, or gliding closed.
 #[derive(Default)]
@@ -1100,10 +1098,8 @@ impl Pila {
                 .filter_map(|o| Some((o.name(), self.space.output_geometry(o)?)))
                 .collect(),
             selected,
-            rounding: (self.config.corner_radius > 0).then_some((
-                f64::from(self.config.corner_radius + OUTLINE as u32),
-                self.config.rounded_corners,
-            )),
+            rounding: crate::panel::rounding(&self.config)
+                .map(|(radius, corners)| (radius + f64::from(OUTLINE), corners)),
             shown: self.overview_shown(self.animation_time()) as f32,
             thumbs: self.scene_thumbs(),
             buffers: self.overview.buffers.clone(),
@@ -1187,7 +1183,7 @@ pub fn overview_elements(
     };
     let mut elements = Vec::new();
     if let Some(rect) = view.selected.map(outline_rect).filter(|r| shows(*r)) {
-        let color = crate::switcher_view::opaque(colors.snap_preview);
+        let color = crate::panel::accent(colors);
         let buffer = buffers
             .outline
             .get_or_insert_with(|| SolidColorBuffer::new(rect.size, color));
@@ -1218,14 +1214,11 @@ pub fn overview_elements(
             elements.push(element);
         }
         let (width, color) = if thumb.active {
-            (
-                THUMB_BORDER_MARKED,
-                crate::switcher_view::opaque(colors.snap_preview),
-            )
+            (THUMB_BORDER_MARKED, crate::panel::accent(colors))
         } else if thumb.hovered {
-            (THUMB_BORDER_MARKED, opaque_rgb(colors.hover))
+            (THUMB_BORDER_MARKED, crate::panel::rgb(colors.hover))
         } else {
-            (THUMB_BORDER, opaque_rgb(colors.hover))
+            (THUMB_BORDER, crate::panel::rgb(colors.hover))
         };
         let border = thumb_border_rect(thumb.rect, width);
         let buffer = buffers
@@ -1238,19 +1231,16 @@ pub fn overview_elements(
     }
     drop(thumbnails);
     for (name, geo) in view.outputs.iter().filter(|(_, geo)| shows(*geo)) {
-        let buffer = buffers
-            .dim
-            .entry(name.clone())
-            .or_insert_with(|| SolidColorBuffer::new(geo.size, DIM));
-        buffer.update(geo.size, DIM);
-        elements.push(PilaRenderElement::Solid(element(buffer, geo.loc)));
+        elements.push(crate::panel::dim(
+            &mut buffers.dim,
+            name,
+            *geo,
+            view.shown,
+            origin,
+            scale,
+        ));
     }
     elements
-}
-
-/// An opaque color from an RGB one.
-fn opaque_rgb([r, g, b]: [f32; 3]) -> [f32; 4] {
-    [r, g, b, 1.0]
 }
 
 /// `thumb`'s texture, drawn as its workspace is now, and its size; made

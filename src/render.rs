@@ -1652,9 +1652,9 @@ fn popup_elements(
     elements
 }
 
-/// A solid color at `loc` (relative to the output), with all four corners
-/// rounded by `radius` when there is one and the shaders compiled.
-fn solid_element(
+/// A solid color at `loc` (relative to the output), with its corners
+/// rounded when there's a rounding and the shaders compiled.
+pub(crate) fn solid_element(
     renderer: &mut GlesRenderer,
     buffer: &SolidColorBuffer,
     loc: Point<i32, Logical>,
