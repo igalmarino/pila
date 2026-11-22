@@ -1102,7 +1102,14 @@ Key flows and invariants:
   output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it
   offscreen and read it back (`Captures::read_back`, shared with shm captures), written into
   the buffer and queued once the GPU is done (`Pila::when_copied`); with no buffer free the
-  tracker starts over, so the next change sends a whole frame. A buffer generation
+  tracker starts over, so the next change sends a whole frame. The pointer is hidden, drawn into
+  the frames, or (cursor metadata, what browsers ask for, offered by `AvailableCursorModes`;
+  they ask for nothing otherwise) written into each buffer's `SPA_META_Cursor`: where its hotspot
+  is in the stream's pixels, and its image (BGRA, a named cursor's from the theme,
+  `cursor::NamedCursor::image`, a client's from its shm buffer) only when it changed. A buffer
+  that only moves the pointer goes out with no picture (`chunk.size` 0): consumers keep the last
+  frame. The consumer asks for the metadata too: PipeWire gives a buffer the metas both ends ask
+  for. A buffer generation
   (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
   ended). A cast ends with its output, a size change (no renegotiation yet), a stream error or
   PipeWire's connection; the app is told (`portal::end_session`: `Closed`), and with no cast

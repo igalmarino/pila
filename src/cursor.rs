@@ -160,6 +160,19 @@ type Loaded = HashMap<CursorIcon, Arc<Vec<RawImage>>>;
 pub struct NamedCursor {
     pub buffer: MemoryRenderBuffer,
     pub hotspot: Point<i32, Logical>,
+    /// The same image in memory, for what can't take a render buffer (a
+    /// screen share's cursor metadata, `screencast.rs`).
+    pub image: Arc<CursorPixels>,
+}
+
+/// A cursor image's pixels: Argb8888 (B, G, R, A in memory, premultiplied),
+/// rows `width * 4` bytes long, and its hotspot, in pixels of the image.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CursorPixels {
+    pub pixels: Vec<u8>,
+    pub width: i32,
+    pub height: i32,
+    pub hotspot: (i32, i32),
 }
 
 /// A cursor image for drawing magnified, at buffer scale 1: it's shown at
@@ -314,6 +327,12 @@ impl RawImage {
         NamedCursor {
             buffer: self.buffer(buffer_scale),
             hotspot: (self.hotspot.0 / buffer_scale, self.hotspot.1 / buffer_scale).into(),
+            image: Arc::new(CursorPixels {
+                pixels: self.pixels.clone(),
+                width: self.size.0,
+                height: self.size.1,
+                hotspot: self.hotspot,
+            }),
         }
     }
 
@@ -450,6 +469,12 @@ fn builtin_arrow() -> NamedCursor {
             None,
         ),
         hotspot: (0, 0).into(),
+        image: Arc::new(CursorPixels {
+            width: W as i32,
+            height: ARROW.len() as i32,
+            pixels,
+            hotspot: (0, 0),
+        }),
     }
 }
 

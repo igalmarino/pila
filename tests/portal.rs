@@ -62,7 +62,13 @@ fn wait_picker(pila: &mut TestPila) -> Value {
 /// Ask to share, and share what the picker selects first (Enter): the
 /// stream's node.
 fn share(pila: &mut TestPila, portal: &mut Portal, name: &str) -> u32 {
-    let started = portal.request(name, "org.example.Browser", 1);
+    share_with_cursor(pila, portal, name, 1)
+}
+
+/// `share`, with the pointer hidden (1), drawn into the frames (2) or sent
+/// as metadata (4).
+fn share_with_cursor(pila: &mut TestPila, portal: &mut Portal, name: &str, cursor: u32) -> u32 {
+    let started = portal.request(name, "org.example.Browser", cursor);
     wait_picker(pila);
     pila.key("Return");
     let (response, nodes) = started.answer();
@@ -114,6 +120,87 @@ fn a_shared_output_streams_what_it_shows_and_its_changes() {
     let expected = pila.pixel(x as f64, y as f64);
     assert_ne!(frame.rgba(x, y), expected, "the window changed color");
     consumer.wait_frame("with the window's new color", |f| f.rgba(x, y) == expected);
+}
+
+/// A window "app" with the pointer over it, which sets a `color` cursor
+/// surface 16 px square with its hotspot at the top left: the pointer, in
+/// the output's pixels.
+fn pointer_with_a_cursor_surface(
+    pila: &mut TestPila,
+    client: &Client,
+    color: [u8; 4],
+) -> (u32, u32) {
+    client.window("app").size(600, 440).color(BLUE).create();
+    pila.wait_focus("app");
+    let (x, y, ..) = rect(&pila.window("app")["geometry"]);
+    let (px, py) = ((x + 200) as f64, (y + 150) as f64);
+    pila.move_to(px, py);
+    client.wait("pointer enter", |s| {
+        s.pointer_name.as_deref() == Some("app")
+    });
+    let serial = client.lock().pointer_enter_serial;
+    let compositor = client.lock().compositor.clone().unwrap();
+    let surface = compositor.create_surface(&client.qh, ());
+    let shm = client.lock().shm.clone().unwrap();
+    common::client::paint(&shm, &client.qh, &surface, color, (16, 16));
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, Some(&surface), 0, 0);
+    client.flush();
+    pila.wait("a surface cursor", |s| s["pointer"]["cursor"] == "surface");
+    pila.wait_pixel(px + 8.0, py + 8.0, rgba(color));
+    (px as u32, py as u32)
+}
+
+#[test]
+fn the_pointer_shows_as_the_app_asks() {
+    const RED: [u8; 4] = [255, 220, 40, 40];
+    let (mut pila, bus, pipewire) = start();
+    let client = pila.client();
+    let (px, py) = pointer_with_a_cursor_surface(&mut pila, &client, RED);
+    let (x, y) = (px + 8, py + 8);
+    let mut portal = Portal::connect(&bus.address);
+
+    // Drawn into the frames.
+    let node = share_with_cursor(&mut pila, &mut portal, "drawn", 2);
+    let consumer = pipewire.consume(node);
+    let frame = consumer.wait_frame("the first", |_| true);
+    assert_eq!(
+        frame.rgba(x, y),
+        rgba(RED),
+        "the pointer drawn into the frame"
+    );
+    drop(consumer);
+    portal.close("drawn");
+
+    // Hidden.
+    let node = share_with_cursor(&mut pila, &mut portal, "hidden", 1);
+    let consumer = pipewire.consume(node);
+    let frame = consumer.wait_frame("the first", |_| true);
+    assert_eq!(frame.rgba(x, y), rgba(BLUE), "no pointer when hidden");
+    drop(consumer);
+    portal.close("hidden");
+
+    // Beside the frames, for the app to draw: its place and its image.
+    let node = share_with_cursor(&mut pila, &mut portal, "metadata", 4);
+    let consumer = pipewire.consume(node);
+    let frame = consumer.wait_frame("the first", |f| f.cursor.is_some());
+    assert_eq!(frame.rgba(x, y), rgba(BLUE), "not drawn into the frame");
+    let cursor = frame.cursor.unwrap();
+    assert_eq!(cursor.position, (px as i32, py as i32));
+    assert_eq!(cursor.hotspot, (0, 0));
+    let (w, h, pixels) = cursor.bitmap.expect("its image with the first frame");
+    assert_eq!((w, h), (16, 16));
+    let [a, r, g, b] = RED;
+    assert_eq!(pixels[..4], [b, g, r, a], "BGRA");
+    // Moved: the pointer alone, no new picture, no new image.
+    pila.move_to(f64::from(px) + 10.0, f64::from(py) + 5.0);
+    let moved = consumer.wait_buffer("the pointer moved", |f| {
+        f.cursor
+            .as_ref()
+            .is_some_and(|c| c.position == (px as i32 + 10, py as i32 + 5))
+    });
+    assert!(moved.data.is_empty(), "a picture for the pointer alone");
+    assert_eq!(moved.cursor.unwrap().bitmap, None, "the same image again");
 }
 
 #[test]

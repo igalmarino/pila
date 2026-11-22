@@ -89,13 +89,25 @@ impl Drop for Daemon {
     }
 }
 
-/// A frame the consumer got: BGRx, rows `stride` bytes apart.
+/// A buffer the consumer got: a frame (BGRx, rows `stride` bytes apart),
+/// or none (`data` empty: the pointer alone), and the pointer's metadata if
+/// it had some.
 #[derive(Clone)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub stride: usize,
     pub data: Vec<u8>,
+    pub cursor: Option<CursorMeta>,
+}
+
+/// A buffer's cursor metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CursorMeta {
+    pub position: (i32, i32),
+    pub hotspot: (i32, i32),
+    /// A new image, if it came with one: width, height, BGRA pixels.
+    pub bitmap: Option<(u32, u32, Vec<u8>)>,
 }
 
 impl Frame {
@@ -114,9 +126,16 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    /// The next frame that `is` accepts, dropping the others.
+    /// The next frame (with a picture) that `is` accepts, dropping the
+    /// other buffers.
     #[track_caller]
     pub fn wait_frame(&self, what: &str, is: impl Fn(&Frame) -> bool) -> Frame {
+        self.wait_buffer(what, |frame| !frame.data.is_empty() && is(frame))
+    }
+
+    /// The next buffer, with a picture or not, that `is` accepts.
+    #[track_caller]
+    pub fn wait_buffer(&self, what: &str, is: impl Fn(&Frame) -> bool) -> Frame {
         let started = Instant::now();
         loop {
             let left = TIMEOUT.saturating_sub(started.elapsed());
@@ -207,36 +226,35 @@ fn consume(socket: &str, node: u32, frames: mpsc::Sender<Frame>, stop: pw::chann
                 linker.try_link();
             }
         })
-        .param_changed(move |_, _, id, param| {
+        .param_changed(move |stream, _, id, param| {
             if id != spa::param::ParamType::Format.as_raw() {
                 return;
             }
-            if let Some(param) = param {
-                let _ = parsed.borrow_mut().parse(param);
+            let Some(param) = param else {
+                return;
+            };
+            let _ = parsed.borrow_mut().parse(param);
+            // Room for the cursor's metadata, as browsers ask for it
+            // (libwebrtc: a 64 to 384 px square image).
+            let bytes = cursor_meta_param();
+            if let Some(pod) = spa::pod::Pod::from_bytes(&bytes) {
+                let _ = stream.update_params(&mut [pod]);
             }
         })
         .process(move |stream, _| {
-            let Some(mut buffer) = stream.dequeue_buffer() else {
-                return;
-            };
-            let info = *format.borrow();
-            let datas = buffer.datas_mut();
-            let Some(data) = datas.first_mut() else {
-                return;
-            };
-            let (size, stride) = (data.chunk().size() as usize, data.chunk().stride());
-            if size == 0 {
+            // SAFETY: the stream is alive; the buffer is ours until queued.
+            let buffer = unsafe { stream.dequeue_raw_buffer() };
+            if buffer.is_null() {
                 return;
             }
-            let Some(bytes) = data.data() else {
-                return;
-            };
-            let _ = frames.send(Frame {
-                width: info.size().width,
-                height: info.size().height,
-                stride: stride as usize,
-                data: bytes[..size].to_vec(),
-            });
+            let info = *format.borrow();
+            // SAFETY: a dequeued buffer of a stream mapped with MAP_BUFFERS.
+            let frame = unsafe { read_buffer(buffer, info.size().width, info.size().height) };
+            // SAFETY: dequeued from this stream.
+            unsafe { stream.queue_raw_buffer(buffer) };
+            if let Some(frame) = frame {
+                let _ = frames.send(frame);
+            }
         })
         .register()
         .unwrap();
@@ -334,6 +352,102 @@ impl Started {
     /// Whether it was answered yet.
     pub fn answered(&self) -> bool {
         self.thread.is_finished()
+    }
+}
+
+/// The cursor metadata a consumer asks for: room for an image 64 to 384
+/// px square, as libwebrtc asks.
+fn cursor_meta_param() -> Vec<u8> {
+    use spa::pod::{ChoiceValue, Object, Property, Value};
+    use spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+    let size = |side: i32| {
+        (std::mem::size_of::<spa::sys::spa_meta_cursor>()
+            + std::mem::size_of::<spa::sys::spa_meta_bitmap>()) as i32
+            + side * side * 4
+    };
+    let object = Object {
+        type_: spa::utils::SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(
+                spa::sys::SPA_PARAM_META_type,
+                Value::Id(spa::utils::Id(spa::sys::SPA_META_Cursor)),
+            ),
+            Property::new(
+                spa::sys::SPA_PARAM_META_size,
+                Value::Choice(ChoiceValue::Int(Choice(
+                    ChoiceFlags::empty(),
+                    ChoiceEnum::Range {
+                        default: size(64),
+                        min: size(1),
+                        max: size(384),
+                    },
+                ))),
+            ),
+        ],
+    };
+    spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
+}
+
+/// What a dequeued `buffer` holds: its picture (if any) and its cursor
+/// metadata (if any).
+///
+/// SAFETY: `buffer` is dequeued from a live stream mapped with MAP_BUFFERS.
+unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) -> Option<Frame> {
+    use spa::sys::{spa_meta_bitmap, spa_meta_cursor};
+    // SAFETY: per this function's contract; every pointer is checked and
+    // every range read is within the buffer's own sizes.
+    unsafe {
+        let spa_buffer = (*buffer).buffer;
+        if spa_buffer.is_null() || (*spa_buffer).n_datas == 0 {
+            return None;
+        }
+        let data = &*(*spa_buffer).datas;
+        let chunk = &*data.chunk;
+        let size = (chunk.size as usize).min(data.maxsize as usize);
+        let pixels = if size == 0 || data.data.is_null() {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data.data.cast::<u8>(), size).to_vec()
+        };
+        let meta = spa::sys::spa_buffer_find_meta(spa_buffer, spa::sys::SPA_META_Cursor);
+        let cursor = (!meta.is_null() && !(*meta).data.is_null()).then(|| {
+            let cursor = &*(*meta).data.cast::<spa_meta_cursor>();
+            let bitmap = (cursor.id != 0 && cursor.bitmap_offset != 0).then(|| {
+                let bitmap = (*meta)
+                    .data
+                    .cast::<u8>()
+                    .add(cursor.bitmap_offset as usize)
+                    .cast::<spa_meta_bitmap>();
+                let (w, h) = ((*bitmap).size.width, (*bitmap).size.height);
+                let bytes = std::slice::from_raw_parts(
+                    bitmap.cast::<u8>().add((*bitmap).offset as usize),
+                    (w * h * 4) as usize,
+                );
+                (w, h, bytes.to_vec())
+            });
+            CursorMeta {
+                position: (cursor.position.x, cursor.position.y),
+                hotspot: (cursor.hotspot.x, cursor.hotspot.y),
+                bitmap,
+            }
+        });
+        if pixels.is_empty() && cursor.is_none() {
+            return None;
+        }
+        Some(Frame {
+            width,
+            height,
+            stride: chunk.stride as usize,
+            data: pixels,
+            cursor,
+        })
     }
 }
 

@@ -17,6 +17,7 @@ use std::{
     cell::{Cell, RefCell},
     os::fd::OwnedFd,
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -47,7 +48,8 @@ use tracing::{debug, info, warn};
 
 use crate::{
     capture::{CopyError, ReadBack, Source},
-    portal::{self, Refused, Reply, Request},
+    cursor::CursorPixels,
+    portal::{self, CursorMode, Refused, Reply, Request},
     render::{self, PilaRenderElement},
     scale::output_scale,
     Pila,
@@ -82,8 +84,8 @@ impl ScreenCasts {
 pub struct Share {
     /// The portal session, by its object path.
     pub session: String,
-    /// The pointer drawn into the frames.
-    pub cursor: bool,
+    /// How the pointer shows in the stream.
+    pub cursor: CursorMode,
     /// Who asks (`portal::Request::Start`).
     pub app: Option<String>,
     pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,
@@ -117,7 +119,10 @@ struct Cast {
     /// The portal session, by its object path.
     session: String,
     output: WeakOutput,
-    cursor: bool,
+    cursor: CursorMode,
+    /// The cursor metadata last sent (`CursorMode::Metadata`): where, and
+    /// which image.
+    cursor_sent: Option<CursorFrame>,
     /// What the stream was offered: the output's size and scale then.
     size: Size<i32, Physical>,
     scale: Scale<f64>,
@@ -236,7 +241,7 @@ impl Pila {
         };
         let id = self.screencast.next_id;
         self.screencast.next_id += 1;
-        let stream = match new_stream(pipewire, id, size, fps) {
+        let stream = match new_stream(pipewire, id, size, fps, cursor) {
             Ok(stream) => stream,
             Err(err) => {
                 warn!(err, "portal: can't make a stream");
@@ -256,6 +261,7 @@ impl Pila {
             session,
             output: output.downgrade(),
             cursor,
+            cursor_sent: None,
             size,
             scale,
             _listener: listener,
@@ -459,6 +465,8 @@ impl Pila {
         }
         let input = &*input.get_or_insert_with(|| self.frame_input());
         let clear = render::clear_color(&input.scene);
+        let cursor_frame = (cast.cursor == CursorMode::Metadata)
+            .then(|| self.cursor_frame(input.pointer, geo.loc, scale));
         let Pila {
             backend,
             blur,
@@ -474,7 +482,7 @@ impl Pila {
         };
         let renderer = &mut *renderer;
         let mut elements: Vec<PilaRenderElement> = Vec::new();
-        if cast.cursor {
+        if cast.cursor == CursorMode::Embedded {
             elements = render::pointer_elements(renderer, input, cursor_theme, geo.loc, scale);
         }
         elements.extend(render::output_elements(
@@ -490,13 +498,23 @@ impl Pila {
         let tracker = cast
             .tracker
             .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-        match tracker.damage_output(1, &elements) {
-            Ok((Some(damage), _)) if !damage.is_empty() => {}
-            Ok(_) => return,
+        let changed = match tracker.damage_output(1, &elements) {
+            Ok((Some(damage), _)) => !damage.is_empty(),
+            Ok(_) => false,
             Err(err) => {
                 warn!(?err, "portal: damage tracking failed");
                 cast.tracker = None;
+                true
             }
+        };
+        // The pointer moved or changed (metadata): a buffer for that alone.
+        let cursor_moved = cursor_frame.as_ref().is_some_and(|frame| {
+            cast.cursor_sent
+                .as_ref()
+                .is_none_or(|sent| !sent.same_as(frame))
+        });
+        if !changed && !cursor_moved {
+            return;
         }
         // SAFETY: the stream is alive; the buffer is ours until queued.
         let buffer = unsafe { cast.stream.dequeue_raw_buffer() };
@@ -506,7 +524,27 @@ impl Pila {
                 session = cast.session,
                 "portal: no buffer free, frame skipped"
             );
-            cast.tracker = None;
+            if changed {
+                cast.tracker = None;
+            }
+            return;
+        }
+        if let Some(frame) = cursor_frame {
+            let new_image = cast
+                .cursor_sent
+                .as_ref()
+                .is_none_or(|sent| !sent.same_image(&frame));
+            // SAFETY: dequeued, so ours to write until queued.
+            unsafe { write_cursor_meta(buffer, &frame, new_image) };
+            cast.cursor_sent = Some(frame);
+        }
+        if !changed {
+            // The pointer alone: no picture in it.
+            // SAFETY: as above.
+            unsafe {
+                mark_cursor_only(buffer);
+                cast.stream.queue_raw_buffer(buffer);
+            }
             return;
         }
         let generation = cast.buffers.get();
@@ -560,6 +598,200 @@ impl Pila {
                 cast.tracker = None;
                 queue(false);
             }
+        }
+    }
+}
+
+/// The pointer as a stream's cursor metadata gives it: where its hotspot
+/// is, in the stream's pixels, and its image (`None`: hidden).
+pub(crate) struct CursorFrame {
+    position: (i32, i32),
+    image: Option<Arc<CursorPixels>>,
+}
+
+impl CursorFrame {
+    fn same_image(&self, other: &CursorFrame) -> bool {
+        match (&self.image, &other.image) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
+            (None, None) => true,
+            _ => false,
+        }
+    }
+
+    fn same_as(&self, other: &CursorFrame) -> bool {
+        self.position == other.position && self.same_image(other)
+    }
+}
+
+/// The largest cursor image sent as metadata, a side in pixels: a theme's
+/// at twice its size is far from it.
+const CURSOR_META_MAX: i32 = 256;
+
+/// The room a buffer's cursor metadata takes: the cursor, a bitmap's
+/// header and the largest image.
+fn cursor_meta_size() -> usize {
+    std::mem::size_of::<spa::sys::spa_meta_cursor>()
+        + std::mem::size_of::<spa::sys::spa_meta_bitmap>()
+        + (CURSOR_META_MAX * CURSOR_META_MAX * 4) as usize
+}
+
+impl Pila {
+    /// The pointer for a stream of the output at `origin`, at `scale`.
+    fn cursor_frame(
+        &mut self,
+        pointer: smithay::utils::Point<f64, smithay::utils::Logical>,
+        origin: smithay::utils::Point<i32, smithay::utils::Logical>,
+        scale: Scale<f64>,
+    ) -> CursorFrame {
+        use smithay::input::pointer::CursorImageStatus;
+        let position = (pointer - origin.to_f64())
+            .to_physical(scale)
+            .to_i32_round();
+        let image = match &self.cursor_status {
+            CursorImageStatus::Hidden => None,
+            CursorImageStatus::Named(icon) => Some(
+                self.cursor_theme
+                    .get(*icon, crate::scale::buffer_scale(scale))
+                    .image,
+            ),
+            CursorImageStatus::Surface(surface) => {
+                let hotspot = crate::cursor::surface_position(&self.cursor_status, pointer)
+                    .map(|(_, top_left)| pointer.to_i32_round() - top_left)
+                    .unwrap_or_default();
+                shm_cursor(surface, (hotspot.x, hotspot.y)).map(Arc::new)
+            }
+        };
+        CursorFrame {
+            position: (position.x, position.y),
+            image,
+        }
+    }
+}
+
+/// A client's cursor surface as an image, if its buffer is shm in a format
+/// a cursor bitmap takes (most are; one that isn't goes without a picture).
+fn shm_cursor(
+    surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    hotspot: (i32, i32),
+) -> Option<CursorPixels> {
+    use smithay::{
+        backend::renderer::utils::with_renderer_surface_state,
+        reexports::wayland_server::protocol::wl_shm, wayland::shm::with_buffer_contents,
+    };
+    let buffer = with_renderer_surface_state(surface, |state| state.buffer().cloned()).flatten()?;
+    with_buffer_contents(&buffer, |ptr, len, data| {
+        let opaque = match data.format {
+            wl_shm::Format::Argb8888 => false,
+            wl_shm::Format::Xrgb8888 => true,
+            _ => return None,
+        };
+        let (w, h, stride) = (data.width, data.height, data.stride as usize);
+        if w <= 0 || h <= 0 || w > CURSOR_META_MAX || h > CURSOR_META_MAX {
+            return None;
+        }
+        let row = w as usize * 4;
+        let end = data.offset as usize + stride * (h as usize - 1) + row;
+        if end > len || stride < row {
+            return None;
+        }
+        // SAFETY: the pool is mapped, `len` bytes long, for this closure;
+        // the range was checked.
+        let src = unsafe { std::slice::from_raw_parts(ptr, len) };
+        let mut pixels = Vec::with_capacity(row * h as usize);
+        for y in 0..h as usize {
+            let start = data.offset as usize + y * stride;
+            pixels.extend_from_slice(&src[start..start + row]);
+        }
+        if opaque {
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                pixel[3] = 0xff;
+            }
+        }
+        Some(CursorPixels {
+            pixels,
+            width: w,
+            height: h,
+            hotspot,
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+/// Write the pointer into a dequeued `buffer`'s cursor metadata, with its
+/// image if `new_image` (apps keep the last one). Nothing if the buffer has
+/// none (the consumer didn't take it).
+///
+/// SAFETY: `buffer` is a dequeued buffer of a live stream.
+unsafe fn write_cursor_meta(buffer: *mut pw::sys::pw_buffer, frame: &CursorFrame, new_image: bool) {
+    use spa::sys::{spa_meta_bitmap, spa_meta_cursor};
+    // SAFETY: per this function's contract.
+    unsafe {
+        let spa_buffer = (*buffer).buffer;
+        if spa_buffer.is_null() {
+            return;
+        }
+        let meta = spa::sys::spa_buffer_find_meta(spa_buffer, spa::sys::SPA_META_Cursor);
+        if meta.is_null() || ((*meta).size as usize) < std::mem::size_of::<spa_meta_cursor>() {
+            debug!(
+                metas = (*spa_buffer).n_metas,
+                "portal: a buffer without room for the cursor's metadata"
+            );
+            return;
+        }
+        let room = (*meta).size as usize;
+        let cursor = (*meta).data.cast::<spa_meta_cursor>();
+        if cursor.is_null() {
+            return;
+        }
+        (*cursor).id = 1;
+        (*cursor).flags = 0;
+        (*cursor).position.x = frame.position.0;
+        (*cursor).position.y = frame.position.1;
+        (*cursor).bitmap_offset = 0;
+        if !new_image {
+            return;
+        }
+        // Hidden: an empty image.
+        let (pixels, width, height, hotspot) = match &frame.image {
+            Some(image) => (&image.pixels[..], image.width, image.height, image.hotspot),
+            None => (&[0u8; 4][..], 1, 1, (0, 0)),
+        };
+        let header = std::mem::size_of::<spa_meta_cursor>();
+        let bitmap_header = std::mem::size_of::<spa_meta_bitmap>();
+        let bytes = (width * height * 4) as usize;
+        if header + bitmap_header + bytes > room || pixels.len() < bytes {
+            debug!(width, height, "portal: a cursor too big for its metadata");
+            return;
+        }
+        (*cursor).hotspot.x = hotspot.0;
+        (*cursor).hotspot.y = hotspot.1;
+        (*cursor).bitmap_offset = header as u32;
+        let bitmap = cursor.cast::<u8>().add(header).cast::<spa_meta_bitmap>();
+        (*bitmap).format = spa::sys::SPA_VIDEO_FORMAT_BGRA;
+        (*bitmap).size.width = width as u32;
+        (*bitmap).size.height = height as u32;
+        (*bitmap).stride = width * 4;
+        (*bitmap).offset = bitmap_header as u32;
+        let dst = bitmap.cast::<u8>().add(bitmap_header);
+        std::ptr::copy_nonoverlapping(pixels.as_ptr(), dst, bytes);
+    }
+}
+
+/// Mark a dequeued `buffer` as bringing the pointer alone: no picture (its
+/// data empty), so apps keep the last one.
+///
+/// SAFETY: as `fill`'s.
+unsafe fn mark_cursor_only(buffer: *mut pw::sys::pw_buffer) {
+    // SAFETY: per this function's contract.
+    unsafe {
+        let spa_buffer = (*buffer).buffer;
+        if spa_buffer.is_null() || (*spa_buffer).n_datas == 0 {
+            return;
+        }
+        if let Some(chunk) = (*(*spa_buffer).datas).chunk.as_mut() {
+            chunk.size = 0;
+            chunk.flags = 0;
         }
     }
 }
@@ -625,6 +857,7 @@ fn new_stream(
     id: u64,
     size: Size<i32, Physical>,
     fps: u32,
+    cursor: CursorMode,
 ) -> Result<(StreamRc, StreamListener<()>), String> {
     let core = pipewire.core.clone();
     let stream = StreamRc::new(
@@ -666,7 +899,15 @@ fn new_stream(
             let Some(pod) = Pod::from_bytes(&bytes) else {
                 return;
             };
-            if let Err(err) = stream.update_params(&mut [pod]) {
+            // The pointer beside the frames, for the app to draw.
+            let cursor_meta = (cursor == CursorMode::Metadata)
+                .then(|| meta_param(spa::sys::SPA_META_Cursor, cursor_meta_size()))
+                .flatten();
+            let mut params = vec![pod];
+            if let Some(meta) = cursor_meta.as_deref().and_then(Pod::from_bytes) {
+                params.push(meta);
+            }
+            if let Err(err) = stream.update_params(&mut params) {
                 warn!(%err, "portal: can't set the stream's buffers");
             }
         })
@@ -740,6 +981,21 @@ fn format_param(size: Size<i32, Physical>, fps: u32) -> Option<Vec<u8>> {
     })
 }
 
+/// A metadata block of `kind`, `size` bytes, on every buffer.
+fn meta_param(kind: u32, size: usize) -> Option<Vec<u8>> {
+    serialize(Object {
+        type_: SpaTypes::ObjectParamMeta.as_raw(),
+        id: ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(
+                spa::sys::SPA_PARAM_META_type,
+                Value::Id(spa::utils::Id(kind)),
+            ),
+            Property::new(spa::sys::SPA_PARAM_META_size, Value::Int(size as i32)),
+        ],
+    })
+}
+
 /// The buffers a stream of `width` by `height` BGRx frames wants: shm
 /// (`MemFd`), one plane, tightly packed.
 fn buffers_param(width: u32, height: u32) -> Option<Vec<u8>> {
@@ -789,5 +1045,7 @@ mod tests {
         assert!(Pod::from_bytes(&format).is_some());
         let buffers = buffers_param(1920, 1080).unwrap();
         assert!(Pod::from_bytes(&buffers).is_some());
+        let meta = meta_param(spa::sys::SPA_META_Cursor, cursor_meta_size()).unwrap();
+        assert!(Pod::from_bytes(&meta).is_some());
     }
 }

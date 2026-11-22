@@ -31,9 +31,35 @@ const PATH: &str = "/org/freedesktop/portal/desktop";
 
 /// Source types (`AvailableSourceTypes`): a monitor.
 const SOURCE_MONITOR: u32 = 1;
-/// Cursor modes (`AvailableCursorModes`): hidden, or drawn into the frames.
+/// Cursor modes (`AvailableCursorModes`): hidden, drawn into the frames, or
+/// sent beside them for the app to draw (metadata: what browsers ask for,
+/// and they ask for nothing if it isn't offered).
 const CURSOR_HIDDEN: u32 = 1;
 const CURSOR_EMBEDDED: u32 = 2;
+const CURSOR_METADATA: u32 = 4;
+
+/// How a stream shows the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorMode {
+    Hidden,
+    /// Drawn into the frames.
+    Embedded,
+    /// Its position and image in each buffer's cursor metadata, for the
+    /// app to draw.
+    Metadata,
+}
+
+impl CursorMode {
+    /// The mode an app asked for (`cursor_mode`); hidden if it asked for
+    /// none, as the portal's documentation has it.
+    fn from_request(mode: Option<u32>) -> Self {
+        match mode {
+            Some(CURSOR_EMBEDDED) => CursorMode::Embedded,
+            Some(CURSOR_METADATA) => CursorMode::Metadata,
+            _ => CursorMode::Hidden,
+        }
+    }
+}
 
 /// A portal response: done, cancelled by the user, or failed.
 const RESPONSE_SUCCESS: u32 = 0;
@@ -51,7 +77,7 @@ pub enum Request {
     /// is picked now, by the user (`share_picker.rs`).
     Start {
         session: String,
-        cursor: bool,
+        cursor: CursorMode,
         /// Who asks, as the picker names it: its desktop entry's name, else
         /// its app id; `None` if the portal didn't say (`app_name`).
         app: Option<String>,
@@ -134,7 +160,7 @@ pub fn end_session(connection: &zbus::Connection, session: String) {
 /// What `SelectSources` chose for a session, used by `Start`.
 #[derive(Debug, Clone, Copy)]
 struct Selection {
-    cursor: bool,
+    cursor: CursorMode,
 }
 
 /// `org.freedesktop.impl.portal.ScreenCast`.
@@ -165,9 +191,12 @@ impl ScreenCast {
             warn!(%err, "portal: can't serve a session");
             return (RESPONSE_OTHER, Results::new());
         }
-        self.selections
-            .locked()
-            .insert(path, Selection { cursor: false });
+        self.selections.locked().insert(
+            path,
+            Selection {
+                cursor: CursorMode::Hidden,
+            },
+        );
         (RESPONSE_SUCCESS, Results::new())
     }
 
@@ -184,7 +213,8 @@ impl ScreenCast {
             debug!(types, "portal: only monitors can be shared");
             return (RESPONSE_OTHER, Results::new());
         }
-        let cursor = wanted("cursor_mode").unwrap_or(CURSOR_HIDDEN) == CURSOR_EMBEDDED;
+        let cursor = CursorMode::from_request(wanted("cursor_mode"));
+        debug!(types, ?cursor, "portal: sources selected");
         let mut selections = self.selections.locked();
         let Some(selection) = selections.get_mut(session_handle.as_str()) else {
             return (RESPONSE_OTHER, Results::new());
@@ -236,7 +266,7 @@ impl ScreenCast {
 
     #[zbus(property)]
     fn available_cursor_modes(&self) -> u32 {
-        CURSOR_HIDDEN | CURSOR_EMBEDDED
+        CURSOR_HIDDEN | CURSOR_EMBEDDED | CURSOR_METADATA
     }
 
     #[zbus(property, name = "version")]
