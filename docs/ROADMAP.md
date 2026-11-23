@@ -4,17 +4,17 @@ Pila's one roadmap: what comes next and in what order, what waits for testers or
 projects, and what isn't planned. It changes with each release; the
 [changelog](https://github.com/igalmarino/pila/blob/main/CHANGELOG.md) says what's done.
 
-Last updated for **0.9.2** (2026-11-22). Pila is alpha and usable day to day on its development
+Last updated for **0.9.3** (2026-11-22). Pila is alpha and usable day to day on its development
 machine: windows, Xwayland, workspaces, snapping, rules, input methods, screen capture, desktop
 shells and tools (waybar and friends), bare metal with direct scanout, all covered by
-1216 tests and real-app checks. What's left is mostly hardware Pila hasn't met and protocols it
+1219 tests and real-app checks. What's left is mostly hardware Pila hasn't met and protocols it
 doesn't speak yet.
 
 ## Now: the next release
 
 Small, testable in CI, no new hardware needed.
 
-Nothing open: 0.9.2 took what was here.
+Nothing open: 0.9.3 took what was here.
 
 ## Next
 

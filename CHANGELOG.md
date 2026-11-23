@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.3 (2026-11-22)
 
 - **Fixed:** started without `XDG_RUNTIME_DIR` (with sudo, say, or outside a login session), Pila
   crashed with a backtrace; it now says what's missing and how to start it.
