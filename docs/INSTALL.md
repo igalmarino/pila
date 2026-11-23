@@ -56,7 +56,8 @@ differ between releases):
 | Void | `libseat-devel libinput-devel eudev-libudev-devel libgbm-devel libxkbcommon-devel pipewire-devel clang mesa xorg-server-xwayland pkg-config` |
 | Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev pipewire-dev clang-dev xwayland pkgconf` |
 
-Then `cargo build --release`; `scripts/install` builds and installs it.
+Then `cargo build --release`; `scripts/install` builds and installs it, and checks first that
+these are there (it names the ones missing; a libclang elsewhere: `LIBCLANG_PATH`).
 
 ## Debian, Ubuntu and Fedora
 

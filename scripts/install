@@ -44,8 +44,69 @@ if [ "$build" = auto ]; then
     if command -v cargo >/dev/null; then build=native; else build=container; fi
 fi
 
+# What the build needs from the system (docs/INSTALL.md, "Building"), checked
+# before it starts: without it the build fails deep in a crate's build script
+# (bindgen's panic for libclang). Each library: its pkg-config name, and what
+# to install, named as distros package it.
+build_libraries=(
+    "libseat:libseat's development files (libseat, seatd, libseat-dev or libseat-devel)"
+    "libinput:libinput's development files (libinput, libinput-dev or libinput-devel)"
+    "libudev:libudev's development files (systemd-libs, libudev-dev, systemd-devel or eudev)"
+    "gbm:gbm's development files (Mesa: mesa, libgbm-dev or mesa-libgbm-devel)"
+    "xkbcommon:xkbcommon's development files (libxkbcommon, libxkbcommon-dev or libxkbcommon-devel)"
+    "libpipewire-0.3:libpipewire's development files (libpipewire, libpipewire-0.3-dev or pipewire-devel)"
+)
+
+# Whether libclang can be loaded as bindgen loads it: from LIBCLANG_PATH when
+# it's set, else from llvm-config's library directory, the linker's cache or
+# the usual directories. libclang-cpp is another library.
+have_libclang() {
+    local dirs=()
+    if [ -n "${LIBCLANG_PATH:-}" ]; then
+        dirs=("$LIBCLANG_PATH")
+    else
+        if command -v llvm-config >/dev/null; then
+            dirs+=("$(llvm-config --libdir 2>/dev/null)")
+        fi
+        if command -v ldconfig >/dev/null &&
+            ldconfig -p 2>/dev/null | grep -Eq '[[:space:]]libclang(-[0-9][^[:space:]]*)?\.so'; then
+            return 0
+        fi
+        dirs+=(/usr/lib /usr/lib64 /usr/local/lib /usr/lib/*-linux-gnu /usr/lib/llvm*/lib /usr/lib64/llvm*/lib)
+    fi
+    local dir file
+    for dir in "${dirs[@]}"; do
+        for file in "$dir"/libclang.so* "$dir"/libclang-[0-9]*.so*; do
+            [ -e "$file" ] && return 0
+        done
+    done
+    return 1
+}
+
+check_build_deps() {
+    local missing=() entry name what
+    if ! command -v pkg-config >/dev/null; then
+        missing+=("pkg-config (pkg-config or pkgconf)")
+    else
+        for entry in "${build_libraries[@]}"; do
+            IFS=: read -r name what <<<"$entry"
+            pkg-config --exists "$name" || missing+=("$what")
+        done
+    fi
+    have_libclang || missing+=("libclang (clang, libclang-dev or clang-devel)")
+    [ ${#missing[@]} -eq 0 ] && return 0
+    echo "Pila can't be built here yet. Missing:" >&2
+    for what in "${missing[@]}"; do
+        echo "  - $what" >&2
+    done
+    echo "Install them (each distro's package names are in docs/INSTALL.md, \"Building\")," >&2
+    echo "then run scripts/install again. A libclang in another directory: set LIBCLANG_PATH to it." >&2
+    exit 1
+}
+
 case "$build" in
     native)
+        check_build_deps
         cargo build --release
         ;;
     container)

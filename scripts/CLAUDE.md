@@ -123,8 +123,9 @@ a helper in `demo-scenes`, not a sleep.
 
 # scripts/install
 
-`scripts/install` builds the release binary (with the host's cargo if there is one, else
-`--container`; `--no-build`) and installs it with the files listed in its `install_files`
+`scripts/install` builds the release binary (with the host's cargo if there is one, after
+checking what the build needs from the system, `check_build_deps`: keep its list in step with
+`docs/INSTALL.md`'s; else `--container`; `--no-build`) and installs it with the files listed in its `install_files`
 (what they are: `docs/INSTALL.md`), among them `resources/session/` (the `pila-session`
 wrapper, the `wayland-sessions` entry and, where there's systemd, the user units Pila runs
 as); `scripts/uninstall` removes them. Paths come from `scripts/install-paths` (`PREFIX`,

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **`scripts/install` names what a source build is missing:** it checks that pkg-config, the
+  libraries' development files and libclang are there before it builds, and lists what to
+  install, instead of a build script's panic deep in the build (bindgen's, for libclang).
+
 ## 0.9.0 (2026-11-22)
 
 - **Screen sharing served by Pila:** browsers, OBS and video calls now share the screen through

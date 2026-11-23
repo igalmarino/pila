@@ -1043,3 +1043,76 @@ fn pila_service_and_pila_no_systemd_run_pila_itself() {
         assert!(calls.is_empty(), "{name}: {calls:?}");
     }
 }
+
+/// Run scripts/install as a source build on a system whose `pkg-config`
+/// knows every library but `lacking`, with libclang only where
+/// `LIBCLANG_PATH` says (`libclang`: whether it's there), and a fake `cargo`
+/// that notes it ran and fails (so nothing gets installed). Its output, and
+/// whether cargo ran.
+fn install_with_build_deps(
+    name: &str,
+    lacking: &str,
+    libclang: bool,
+) -> (std::process::Output, bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("pila-build-deps-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bin = dir.join("bin");
+    let clang = dir.join("clang");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&clang).unwrap();
+    if libclang {
+        std::fs::write(clang.join("libclang.so.23.1"), "").unwrap();
+    }
+    let ran = dir.join("cargo-ran");
+    for (tool, script) in [
+        (
+            "cargo",
+            format!("#!/bin/sh\ntouch {}\nexit 1\n", ran.display()),
+        ),
+        (
+            "pkg-config",
+            format!("#!/bin/sh\n[ \"$1\" = --exists ] && [ \"$2\" != \"{lacking}\" ]\n"),
+        ),
+    ] {
+        let path = bin.join(tool);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_executable(&path);
+    }
+    let _ = std::fs::remove_file(&ran);
+    let out = Command::new("bash")
+        .arg("scripts/install")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", &dir)
+        .env("DESTDIR", dir.join("stage"))
+        .env("LIBCLANG_PATH", &clang)
+        .output()
+        .unwrap();
+    (out, ran.exists())
+}
+
+/// A source build missing what it needs stops before cargo runs and names
+/// what to install (not a build script's panic deep in the build); with
+/// everything there, it builds.
+#[test]
+fn install_names_the_missing_build_dependencies() {
+    let (out, cargo_ran) = install_with_build_deps("missing", "libpipewire-0.3", false);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(!cargo_ran, "cargo ran: {stderr}");
+    assert!(
+        stderr.contains("libpipewire's development files"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("libclang"), "{stderr}");
+    assert!(!stderr.contains("libseat"), "{stderr}");
+    assert!(stderr.contains("docs/INSTALL.md"), "{stderr}");
+
+    let (out, cargo_ran) = install_with_build_deps("present", "", true);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(cargo_ran, "cargo didn't run: {stderr}");
+    assert!(!stderr.contains("Missing"), "{stderr}");
+}
