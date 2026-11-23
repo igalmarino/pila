@@ -52,24 +52,40 @@ fn past(what: &str, value: impl std::fmt::Debug) -> String {
 pub fn check_commit(surface: &wl_surface::WlSurface) {
     let root = crate::redraw::root_surface(surface);
     let errors = std::cell::RefCell::new(Vec::new());
+    // Where each surface will be once all that's pending applies, and how far
+    // it may be on the way: a subsurface's place applies on its parent's
+    // commit, so this commit may apply a child's place while its parent
+    // stays where it is, or the other way round. Each level counts the
+    // farther of its place now and its place pending.
     with_surface_tree_downward(
         &root,
-        Point::<i64, Logical>::from((0, 0)),
-        |surface, states, parent_loc| {
-            let mut loc = *parent_loc;
+        (Point::<i64, Logical>::from((0, 0)), (0i64, 0i64)),
+        |surface, states, (parent_loc, parent_reach)| {
+            let (mut loc, mut reach) = (*parent_loc, *parent_reach);
             if states.role == Some(SUBSURFACE_ROLE) && surface != &root {
                 let mut cached = states.cached_state.get::<SubsurfaceCachedState>();
+                let now = cached.current().location;
                 let pending = cached.pending();
                 loc += Point::from((pending.location.x as i64, pending.location.y as i64));
-                if !position_ok(loc.x, loc.y) {
-                    errors
-                        .borrow_mut()
-                        .push((surface.clone(), past("a subsurface at", (loc.x, loc.y))));
+                let farther =
+                    |now: i32, pending: i32| (now as i64).abs().max((pending as i64).abs());
+                reach.0 += farther(now.x, pending.location.x);
+                reach.1 += farther(now.y, pending.location.y);
+                let err = if !position_ok(loc.x, loc.y) {
+                    Some(past("a subsurface at", (loc.x, loc.y)))
+                } else if !position_ok(reach.0, reach.1) {
+                    Some(past("a subsurface as far as", reach))
+                } else {
+                    None
+                };
+                if let Some(err) = err {
+                    errors.borrow_mut().push((surface.clone(), err));
+                    // At its parent's place, it's as far as its parent.
                     pending.location = (0, 0).into();
-                    loc = *parent_loc;
+                    (loc, reach) = (*parent_loc, *parent_reach);
                 }
             }
-            TraversalAction::DoChildren(loc)
+            TraversalAction::DoChildren((loc, reach))
         },
         |surface, states, _| {
             if let Some(err) = check_surface(states) {
@@ -160,7 +176,7 @@ fn check_surface(states: &SurfaceData) -> Option<String> {
 }
 
 fn clamp_size(size: Size<i32, Logical>) -> Size<i32, Logical> {
-    (size.w.min(MAX_EXTENT), size.h.min(MAX_EXTENT)).into()
+    (size.w.clamp(0, MAX_EXTENT), size.h.clamp(0, MAX_EXTENT)).into()
 }
 
 /// A popup's positioner, which Pila applies as the popup is made or moved,

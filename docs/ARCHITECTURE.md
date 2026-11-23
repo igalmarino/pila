@@ -663,7 +663,9 @@ Key flows and invariants:
   overflows, in Pila's layout and drawing or in Smithay's (bounding boxes, popup placement).
   The first pre-commit hook on every surface (`check_commit`) walks its whole tree from the
   root, since a parent's commit applies its synchronized subsurfaces' positions: each
-  subsurface's place relative to the root, buffer sizes and offsets, viewport destinations,
+  subsurface's place relative to the root (and how far it may be on the way, each level
+  counting the farther of its applied and pending place: a commit may apply a child's place
+  and not its parent's), buffer sizes and offsets, viewport destinations,
   xdg window geometry, layer-shell sizes, margins and exclusive zones. What's past the limit
   is a `wl_surface` protocol error (`invalid_size`, logged), and is cleared or reset in the
   pending state, so the commit that still applies before the client is gone is within it;

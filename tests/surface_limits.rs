@@ -84,6 +84,33 @@ fn nested_subsurfaces_cant_add_up_past_the_limit() {
     refused(&mut pila, &client, "a subsurface at");
 }
 
+/// A subsurface's position applies on its parent's commit: one moved back
+/// near its parent but not yet applied doesn't make room for a child placed
+/// far from where it still is.
+#[test]
+fn a_subsurface_moved_back_but_not_applied_makes_no_room_for_its_child() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").color(RED).create();
+    pila.wait_focus("a");
+    let root = client.surface(window);
+    let (sub1, sub1_object) = client.subsurface(&root, "sub1", (30_000, 0), (1, 1), RED);
+    // The window's commit applies sub1's place.
+    root.commit();
+    client.roundtrip();
+    pila.settle();
+    let sub1 = client.surface_data(sub1, |s| s.surface.clone());
+    // Moved back, applied only on the window's next commit, which never
+    // comes.
+    sub1_object.set_position(0, 0);
+    client.expect_error();
+    // sub1's commit applies sub2's place: 60000 from the window.
+    client.subsurface(&sub1, "sub2", (30_000, 0), (1, 1), RED);
+    sub1.commit();
+    client.flush();
+    refused(&mut pila, &client, "a subsurface as far as");
+}
+
 #[test]
 fn a_buffer_past_the_limit_is_an_error() {
     let mut pila = TestPila::start();
