@@ -1215,18 +1215,24 @@ Key flows and invariants:
   `name_share_picker_app`) and shows what it may share as live previews: every output,
   left to right, then, if it shares windows, every window with a foreign-toplevel identifier and
   a size, in focus order (`focus_history`; minimized and other workspaces' too). With both kinds
-  they're in sections under headings, the outputs' tiles smaller (`layout`); windows come
-  `WINDOW_COLUMNS` to a row, `WINDOW_ROWS` rows shown, scrolled to the selected one's
-  (`Shown::first_window_row`, with the switcher's `first_shown`; the labels are drawn again as it
-  scrolls). The output under the pointer is selected first, else the window used last. A window's
+  they're on two tabs, Screens (the outputs and the region) and Windows (`share_picker::Tab`,
+  `Shown::tab`), one shown at a time; the panel is sized for both, so it doesn't move between
+  them (`layout`). Tab, Shift+Tab or a click on a tab shows the other (`show_share_tab`), each
+  keeping what was selected on it (`Shown::other_selected`); the arrows go round the tab shown
+  (`Shown::on_tab`). Only the tab shown has tiles, so only its previews are drawn and only its
+  windows draw for the panel. Windows come `WINDOW_COLUMNS` to a row, `WINDOW_ROWS` rows shown,
+  scrolled to the selected one's (`Shown::first_window_row`, with the switcher's `first_shown`;
+  the labels are drawn again as it scrolls). The output under the pointer is selected first,
+  else the window used last. A window's
   preview is the switcher's (`switcher_view::preview`, drawn with the panel); the windows shown
   get frame callbacks from the panel's output (`frame::send_frames`) and a commit of one redraws
   it (`share_picker_committed`). It's drawn as Pila's other panels are (`panel.rs`): their
   frame, title and footer of key hints, the selected tile on a block of the accent (the
-  switcher's), buttons rounded as the cheatsheet's keys, Share's label in `hover-icon`. Modal: every key goes to it (`input.rs`, before the window
+  switcher's), buttons (and tabs, the one shown as Share) rounded as the cheatsheet's keys,
+  Share's label in `hover-icon`. Modal: every key goes to it (`input.rs`, before the window
   menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,
   and every output is dimmed under it (`share_picker::elements`, in front of everything of
-  Pila's in `render::output_elements`; never while locked). Arrows/Tab select, Enter/Share
+  Pila's in `render::output_elements`; never while locked). Arrows select (Tab too without tabs), Enter/Share
   shares (`Pila::start_cast`), Escape/Cancel answers cancelled; then the next request waiting
   is shown. Opening it ends a switch and closes the cheatsheet, the overview and the window
   menu; locking cancels it and every request waiting (`SessionLockHandler::lock`), the app

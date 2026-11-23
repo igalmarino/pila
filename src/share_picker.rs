@@ -2,10 +2,11 @@
 //! Pila serves to share a screen or a window (`portal.rs`), a panel in the
 //! middle of the output under the pointer names the app and shows what it may
 //! share as live previews: every output, every window (most recently used
-//! first, minimized ones and those on other workspaces too), in sections when
-//! it may share both; the user picks one (a click, or the arrows) and shares
-//! it (Share, Enter), or cancels (Cancel, Escape). Nothing is shared without
-//! it: this is the consent.
+//! first, minimized ones and those on other workspaces too), on two tabs,
+//! Screens and Windows, when it may share both (Tab or a click switches, each
+//! tab keeping its selection); the user picks one (a click, or the arrows)
+//! and shares it (Share, Enter), or cancels (Cancel, Escape). Nothing is
+//! shared without it: this is the consent.
 //!
 //! Where it may share a screen, it offers a region of one too (Region,
 //! after the outputs): picking it hides the panel for the user to drag one
@@ -59,6 +60,7 @@ const PADDING: i32 = crate::panel::PADDING;
 const NOTE_AT: i32 = 56;
 const NOTE_HEIGHT: i32 = 20;
 /// The tiles: a preview's box, the label under it, the room between them.
+/// With tabs, the tabs are where the tiles would start, the tiles under them.
 const TILES_AT: i32 = 100;
 pub const TILE: (i32, i32) = (320, 180);
 const LABEL_GAP: i32 = 14;
@@ -66,19 +68,16 @@ const LABEL_HEIGHT: i32 = 20;
 const TILE_GAP: i32 = 64;
 const ROW_GAP: i32 = 24;
 const COLUMNS: usize = 3;
-/// With windows too, outputs' tiles are smaller, closer together.
-const SMALL_TILE: (i32, i32) = (240, 135);
-const SMALL_GAP: i32 = 40;
 /// Windows' tiles: up to `WINDOW_COLUMNS` a row, `WINDOW_ROWS` rows shown
 /// (the selected one's kept in view).
 pub const WINDOW_TILE: (i32, i32) = (176, 100);
 const WINDOW_GAP: i32 = 20;
 const WINDOW_COLUMNS: usize = 5;
 const WINDOW_ROWS: usize = 2;
-/// A section's heading (with both kinds): its line and the room under it,
-/// and the room above the second one.
-const SECTION_HEADING: i32 = 22;
-const SECTION_GAP: i32 = 28;
+/// The tabs (with both kinds): as tall as the buttons, side by side in the
+/// middle, the room under them.
+const TAB_WIDTH: i32 = 120;
+const TABS_GAP: i32 = 28;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
 /// The footer: the buttons, as tall as they are, the hints beside them.
@@ -88,13 +87,56 @@ const CANCEL_WIDTH: i32 = 110;
 const BUTTON_GAP: i32 = 12;
 /// Room between the hints and the buttons.
 const FOOTER_SPACE: i32 = 24;
-/// The narrowest panel (one source): its footer, the hints then the buttons.
-const MIN_WIDTH: i32 =
-    2 * PADDING + HINTS_WIDTH + FOOTER_SPACE + CANCEL_WIDTH + BUTTON_GAP + SHARE_WIDTH;
-/// The key hints in the footer, and their width.
+/// The narrowest panel (one source) with `hints` key hints: its footer, the
+/// hints then the buttons.
+const fn min_width(hints: usize) -> i32 {
+    2 * PADDING
+        + crate::panel::hints_width(hints)
+        + FOOTER_SPACE
+        + CANCEL_WIDTH
+        + BUTTON_GAP
+        + SHARE_WIDTH
+}
+/// The key hints in the footer, for a share or a screenshot, without tabs
+/// and with them.
 const HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "share"), ("Esc", "cancel")];
 const SCREENSHOT_HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "take"), ("Esc", "cancel")];
-const HINTS_WIDTH: i32 = crate::panel::hints_width(HINTS.len());
+const TABBED_HINTS: [(&str, &str); 4] = [
+    ("← →", "pick"),
+    ("Tab", "switch"),
+    ("Enter", "share"),
+    ("Esc", "cancel"),
+];
+const TABBED_SCREENSHOT_HINTS: [(&str, &str); 4] = [
+    ("← →", "pick"),
+    ("Tab", "switch"),
+    ("Enter", "take"),
+    ("Esc", "cancel"),
+];
+
+/// A tab of the picker that offers both kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    /// The outputs and the region.
+    Screens,
+    Windows,
+}
+
+impl Tab {
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Screens => "Screens",
+            Tab::Windows => "Windows",
+        }
+    }
+
+    fn other(self) -> Tab {
+        match self {
+            Tab::Screens => Tab::Windows,
+            Tab::Windows => Tab::Screens,
+        }
+    }
+}
 
 /// The picker while it's shown (`Pila::share_picker`).
 #[derive(Default)]
@@ -123,6 +165,10 @@ struct Shown {
     /// then the windows.
     sources: Vec<Source>,
     selected: usize,
+    /// The kind shown (with both: its tab), and what's selected on the
+    /// other tab, back when it's shown again.
+    tab: Tab,
+    other_selected: usize,
 }
 
 /// What the picker asks about: a share, or a screenshot.
@@ -200,6 +246,22 @@ impl Shown {
         (outputs, self.sources.len() - outputs)
     }
 
+    /// Whether it offers both kinds, on tabs.
+    fn tabbed(&self) -> bool {
+        let (outputs, windows) = self.counts();
+        outputs > 0 && windows > 0
+    }
+
+    /// The sources on the tab shown (all of them without tabs).
+    fn on_tab(&self) -> std::ops::Range<usize> {
+        let (outputs, _) = self.counts();
+        match self.tab {
+            _ if !self.tabbed() => 0..self.sources.len(),
+            Tab::Screens => 0..outputs,
+            Tab::Windows => outputs..self.sources.len(),
+        }
+    }
+
     /// The first row of windows shown: from the top, until the selected
     /// window's would fall off.
     fn first_window_row(&self) -> usize {
@@ -219,6 +281,8 @@ struct Buffers {
     frame: FrameBuffers,
     /// The panel's other solids, by their place in `elements`.
     solids: HashMap<&'static str, SolidColorBuffer>,
+    /// The tabs' (named as the buttons are: `panel::buttons`).
+    tabs: HashMap<&'static str, SolidColorBuffer>,
     /// The dim over each output, by name.
     dims: HashMap<String, SolidColorBuffer>,
     text: Option<ContentImage>,
@@ -237,12 +301,13 @@ struct Buffers {
 pub struct Layout {
     pub panel: Rectangle<i32, Logical>,
     /// The tiles shown (the box a preview fits in), and the source each
-    /// one is: the outputs', then the windows' rows shown.
+    /// one is: the outputs' (and the region's), or the windows' rows shown.
     pub tiles: Vec<Rectangle<i32, Logical>>,
     pub shown: Vec<usize>,
-    /// The sections' headings and where they go, from the panel's top
-    /// (none with one kind of source).
-    pub headings: Vec<(&'static str, i32)>,
+    /// The tabs and where they are (none with one kind of source), and the
+    /// one shown.
+    pub tabs: Vec<(Tab, Rectangle<i32, Logical>)>,
+    pub tab: Option<Tab>,
     pub share: Rectangle<i32, Logical>,
     pub cancel: Rectangle<i32, Logical>,
     /// The key hints, left of the buttons.
@@ -250,51 +315,80 @@ pub struct Layout {
 }
 
 /// The panel for `outputs` outputs and `windows` windows (rows of them from
-/// `first_row` shown), in the middle of `area`. With one kind, its rows are
-/// centered, the outputs' three to a row as large tiles; with both, under
-/// their headings from the left, the outputs' smaller.
+/// `first_row` shown), in the middle of `area`. With both kinds, they're on
+/// tabs, `tab` shown, the panel the same on either. The outputs' rows are
+/// centered, three to a row; the windows' rows a grid in the middle.
 pub fn layout(
     area: Rectangle<i32, Logical>,
     outputs: usize,
     windows: usize,
+    tab: Tab,
     first_row: usize,
 ) -> Layout {
-    let both = outputs > 0 && windows > 0;
+    let tabbed = outputs > 0 && windows > 0;
     let outputs_shown = if outputs == 0 && windows == 0 {
         1
     } else {
         outputs
     };
-    let (tile, gap) = if both {
-        (SMALL_TILE, SMALL_GAP)
-    } else {
-        (TILE, TILE_GAP)
+    // The kind shown.
+    let shows = match tab {
+        _ if tabbed => tab,
+        _ if outputs == 0 && windows > 0 => Tab::Windows,
+        _ => Tab::Screens,
     };
     let row_width =
         |n: usize, tile: (i32, i32), gap: i32| n as i32 * tile.0 + (n as i32 - 1).max(0) * gap;
-    let window_columns = windows.min(WINDOW_COLUMNS);
-    let width = (2 * PADDING
-        + row_width(outputs_shown.min(COLUMNS), tile, gap).max(row_width(
-            window_columns,
-            WINDOW_TILE,
-            WINDOW_GAP,
-        )))
-    .max(MIN_WIDTH);
+    let tile_row = |tile: (i32, i32)| tile.1 + LABEL_GAP + LABEL_HEIGHT;
+    let rows_height =
+        |rows: usize, tile: (i32, i32)| rows as i32 * tile_row(tile) + (rows as i32 - 1) * ROW_GAP;
+    let window_rows = windows.div_ceil(WINDOW_COLUMNS);
+    // What each kind takes, the panel sized for both: it doesn't change
+    // between tabs.
+    let screens = (outputs > 0 || windows == 0).then(|| {
+        (
+            row_width(outputs_shown.min(COLUMNS), TILE, TILE_GAP),
+            rows_height(outputs_shown.div_ceil(COLUMNS), TILE),
+        )
+    });
+    let window_grid = (windows > 0).then(|| {
+        (
+            row_width(windows.min(WINDOW_COLUMNS), WINDOW_TILE, WINDOW_GAP),
+            rows_height(window_rows.min(WINDOW_ROWS), WINDOW_TILE),
+        )
+    });
+    let content = [screens, window_grid]
+        .into_iter()
+        .flatten()
+        .fold((0, 0), |(w, h), (cw, ch)| (w.max(cw), h.max(ch)));
+    let hints = if tabbed {
+        TABBED_HINTS.len()
+    } else {
+        HINTS.len()
+    };
+    let width = (2 * PADDING + content.0).max(min_width(hints));
+    let top = if tabbed {
+        TILES_AT + BUTTON_HEIGHT + TABS_GAP
+    } else {
+        TILES_AT
+    };
+    let height = top + content.1 + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
+    let panel = Rectangle::new(
+        area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
+        Size::from((width, height)),
+    );
+    // `count` tiles of `tile` in rows of `columns` from the top, sources
+    // `sources`: each row centered, or (`grid`) the rows as a grid in the
+    // middle.
     let mut tiles = Vec::new();
     let mut shown = Vec::new();
-    let mut headings = Vec::new();
-    // `count` tiles of `tile` in rows of `columns`, from `y` (local): under
-    // a heading from the left; else each row centered, or (`grid`) the rows
-    // as a grid in the middle; the bottom of the last row.
     let mut place = |count: usize,
                      columns: usize,
                      tile: (i32, i32),
                      gap: i32,
-                     y: i32,
                      grid: bool,
-                     sources: &mut dyn Iterator<Item = usize>| {
-        let rows = count.div_ceil(columns).max(1) as i32;
-        let tile_row = tile.1 + LABEL_GAP + LABEL_HEIGHT;
+                     sources: std::ops::Range<usize>| {
+        let mut sources = sources;
         for i in 0..count {
             let (row, column) = ((i / columns) as i32, (i % columns) as i32);
             let in_row = if grid {
@@ -302,61 +396,49 @@ pub fn layout(
             } else {
                 (count - row as usize * columns).min(columns)
             };
-            let x = if both {
-                PADDING
-            } else {
-                (width - row_width(in_row, tile, gap)) / 2
-            } + column * (tile.0 + gap);
-            let y = y + row * (tile_row + ROW_GAP);
-            tiles.push(Rectangle::new(Point::from((x, y)), Size::from(tile)));
+            let x = (width - row_width(in_row, tile, gap)) / 2 + column * (tile.0 + gap);
+            let y = top + row * (tile_row(tile) + ROW_GAP);
+            tiles.push(Rectangle::new(
+                panel.loc + Point::from((x, y)),
+                Size::from(tile),
+            ));
             shown.extend(sources.next());
         }
-        y + rows * tile_row + (rows - 1) * ROW_GAP
     };
-    let mut y = TILES_AT;
-    if outputs > 0 || windows == 0 {
-        if both {
-            headings.push(("Screens", y));
-            y += SECTION_HEADING;
+    match shows {
+        Tab::Screens => place(outputs_shown, COLUMNS, TILE, TILE_GAP, false, 0..outputs),
+        Tab::Windows => {
+            let first_row = first_row.min(window_rows.saturating_sub(WINDOW_ROWS));
+            let from = first_row * WINDOW_COLUMNS;
+            let count = (windows - from).min(WINDOW_COLUMNS * WINDOW_ROWS);
+            let first = outputs + from;
+            place(
+                count,
+                WINDOW_COLUMNS,
+                WINDOW_TILE,
+                WINDOW_GAP,
+                true,
+                first..first + count,
+            );
         }
-        y = place(
-            outputs_shown,
-            COLUMNS,
-            tile,
-            gap,
-            y,
-            false,
-            &mut (0..outputs),
-        );
     }
-    if windows > 0 {
-        if both {
-            y += SECTION_GAP;
-            headings.push(("Windows", y));
-            y += SECTION_HEADING;
-        }
-        let rows = windows.div_ceil(WINDOW_COLUMNS);
-        let first_row = first_row.min(rows.saturating_sub(WINDOW_ROWS));
-        let from = first_row * WINDOW_COLUMNS;
-        let count = (windows - from).min(WINDOW_COLUMNS * WINDOW_ROWS);
-        y = place(
-            count,
-            WINDOW_COLUMNS,
-            WINDOW_TILE,
-            WINDOW_GAP,
-            y,
-            true,
-            &mut (outputs + from..outputs + from + count),
-        );
-    }
-    let height = y + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
-    let panel = Rectangle::new(
-        area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
-        Size::from((width, height)),
-    );
-    for tile in &mut tiles {
-        tile.loc += panel.loc;
-    }
+    // The tabs side by side in the middle, above the tiles.
+    let tabs = if tabbed {
+        let x = (width - 2 * TAB_WIDTH - BUTTON_GAP) / 2;
+        [Tab::Screens, Tab::Windows]
+            .into_iter()
+            .enumerate()
+            .map(|(i, tab)| {
+                let at = Point::from((x + i as i32 * (TAB_WIDTH + BUTTON_GAP), TILES_AT));
+                (
+                    tab,
+                    Rectangle::new(panel.loc + at, Size::from((TAB_WIDTH, BUTTON_HEIGHT))),
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let buttons_y = height - PADDING - BUTTON_HEIGHT;
     let share = Rectangle::new(
         panel.loc + Point::from((width - PADDING - SHARE_WIDTH, buttons_y)),
@@ -368,13 +450,14 @@ pub fn layout(
     );
     let hints = Rectangle::new(
         panel.loc + Point::from((PADDING, buttons_y)),
-        Size::from((HINTS_WIDTH, BUTTON_HEIGHT)),
+        Size::from((crate::panel::hints_width(hints), BUTTON_HEIGHT)),
     );
     Layout {
         panel,
         tiles,
         shown,
-        headings,
+        tabs,
+        tab: tabbed.then_some(shows),
         share,
         cancel,
         hints,
@@ -413,6 +496,10 @@ fn selected_rect(tile: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
 pub enum KeyEffect {
     Previous,
     Next,
+    /// Tab and Shift+Tab: the other tab, or without tabs, as Next and
+    /// Previous.
+    NextTab,
+    PreviousTab,
     Share,
     Cancel,
     Nothing,
@@ -420,8 +507,10 @@ pub enum KeyEffect {
 
 pub fn key_effect(sym: Keysym) -> KeyEffect {
     match sym {
-        Keysym::Left | Keysym::Up | Keysym::ISO_Left_Tab => KeyEffect::Previous,
-        Keysym::Right | Keysym::Down | Keysym::Tab => KeyEffect::Next,
+        Keysym::Left | Keysym::Up => KeyEffect::Previous,
+        Keysym::Right | Keysym::Down => KeyEffect::Next,
+        Keysym::Tab => KeyEffect::NextTab,
+        Keysym::ISO_Left_Tab => KeyEffect::PreviousTab,
         Keysym::Return | Keysym::KP_Enter | Keysym::space => KeyEffect::Share,
         Keysym::Escape => KeyEffect::Cancel,
         _ => KeyEffect::Nothing,
@@ -513,8 +602,17 @@ impl Pila {
             return self.show_share_picker();
         }
         // The output under the pointer selected first, else the window used
-        // last.
-        let selected = if wanted.monitors { under } else { 0 };
+        // last; with both, the window used last is the Windows tab's.
+        let (selected, tab) = if wanted.monitors {
+            (under, Tab::Screens)
+        } else {
+            (0, Tab::Windows)
+        };
+        let other_selected = if wanted.monitors {
+            outputs.len() + 1
+        } else {
+            0
+        };
         // Modal, in front of everything: nothing else of Pila's stays open.
         self.end_switch();
         self.hide_shortcuts();
@@ -547,6 +645,8 @@ impl Pila {
             output,
             sources,
             selected,
+            tab,
+            other_selected,
         });
         *self.share_picker.buffers.borrow_mut() = Buffers::default();
         self.share_picker.pending = None;
@@ -688,6 +788,25 @@ impl Pila {
         self.show_share_picker();
     }
 
+    /// Show `tab` (with both kinds), what was selected on it selected again.
+    fn show_share_tab(&mut self, tab: Tab) {
+        let Some(shown) = self.share_picker.shown.as_mut() else {
+            return;
+        };
+        if !shown.tabbed() || shown.tab == tab {
+            return;
+        }
+        shown.tab = tab;
+        std::mem::swap(&mut shown.selected, &mut shown.other_selected);
+        let output = shown.output.clone();
+        self.queue_redraw_named_output(&output);
+        // Other tiles and labels; the outputs' previews drawn after the next
+        // frames, now.
+        self.draw_share_picker_text();
+        self.capture_due = true;
+        self.wake.ping();
+    }
+
     fn select_share(&mut self, index: usize) {
         let Some(shown) = self.share_picker.shown.as_mut() else {
             return;
@@ -717,18 +836,28 @@ impl Pila {
         let Some(shown) = self.share_picker.shown.as_ref() else {
             return;
         };
-        let (selected, count) = (shown.selected, shown.sources.len());
+        // Round the tab shown.
+        let range = shown.on_tab();
+        let (first, count) = (range.start, range.len().max(1));
+        let at = shown.selected.saturating_sub(first) % count;
+        let (tabbed, tab) = (shown.tabbed(), shown.tab);
         match key_effect(sym) {
-            KeyEffect::Previous => self.select_share((selected + count - 1) % count),
-            KeyEffect::Next => self.select_share((selected + 1) % count),
+            KeyEffect::NextTab | KeyEffect::PreviousTab if tabbed => {
+                self.show_share_tab(tab.other())
+            }
+            KeyEffect::Previous | KeyEffect::PreviousTab => {
+                self.select_share(first + (at + count - 1) % count)
+            }
+            KeyEffect::Next | KeyEffect::NextTab => self.select_share(first + (at + 1) % count),
             KeyEffect::Share => self.pick_share(),
             KeyEffect::Cancel => self.cancel_share_picker(),
             KeyEffect::Nothing => {}
         }
     }
 
-    /// A press at `location` while it's shown (it takes them all): a tile
-    /// selects its output, the buttons share or cancel, elsewhere nothing.
+    /// A press at `location` while it's shown (it takes them all): a tab
+    /// shows it, a tile selects its source, the buttons share or cancel,
+    /// elsewhere nothing.
     pub fn share_picker_press(&mut self, location: Point<f64, Logical>) {
         if self.region_selecting() {
             return self.region_press(location);
@@ -741,6 +870,12 @@ impl Pila {
             self.pick_share();
         } else if layout.cancel.to_f64().contains(location) {
             self.cancel_share_picker();
+        } else if let Some((tab, _)) = layout
+            .tabs
+            .iter()
+            .find(|(_, rect)| rect.to_f64().contains(location))
+        {
+            self.show_share_tab(*tab);
         } else if let Some(index) = layout
             .tiles
             .iter()
@@ -784,7 +919,7 @@ impl Pila {
             .or_else(|| self.space.outputs().next())?;
         let area = self.space.output_geometry(output)?;
         let (outputs, windows) = shown.counts();
-        let layout = layout(area, outputs, windows, shown.first_window_row());
+        let layout = layout(area, outputs, windows, shown.tab, shown.first_window_row());
         let mut previews = Vec::new();
         let mut shown_windows = Vec::new();
         let mut region_tile = None;
@@ -1049,7 +1184,9 @@ impl Pila {
             "panel": rect(view.layout.panel),
             "tiles": view.layout.tiles.iter().map(|t| rect(*t)).collect::<Vec<_>>(),
             "tile_sources": view.layout.shown,
-            "headings": view.layout.headings.iter().map(|(text, _)| *text).collect::<Vec<_>>(),
+            "tabs": view.layout.tabs.iter().map(|(tab, _)| tab.name()).collect::<Vec<_>>(),
+            "tab_rects": view.layout.tabs.iter().map(|(_, r)| rect(*r)).collect::<Vec<_>>(),
+            "tab": view.layout.tab.map(Tab::name),
             "window_previews": view.buffers.borrow().windows.len(),
             "share": rect(view.layout.share),
             "cancel": rect(view.layout.cancel),
@@ -1073,7 +1210,7 @@ fn items(
     let panel = layout.panel;
     let width = panel.size.w - 2 * PADDING;
     let local = |r: Rectangle<i32, Logical>| (r.loc.x - panel.loc.x, r.loc.y - panel.loc.y);
-    let (text, dimmed, accent) = crate::panel::text_colors(colors);
+    let (text, dimmed, _) = crate::panel::text_colors(colors);
     let what = match (sources.monitors, sources.windows) {
         (true, false) => "a screen",
         (false, true) => "a window",
@@ -1107,17 +1244,6 @@ fn items(
             color: dimmed,
         },
     ];
-    for (heading, y) in &layout.headings {
-        items.push(Item::Text {
-            text: heading.to_uppercase(),
-            at: (PADDING, *y),
-            w: width,
-            h: 16,
-            font: crate::panel::SECTION,
-            align: Align::Left,
-            color: accent,
-        });
-    }
     for (tile, label) in layout.tiles.iter().zip(labels) {
         let (x, y) = local(*tile);
         items.push(Item::Text {
@@ -1130,13 +1256,25 @@ fn items(
             color: text,
         });
     }
-    // Share's label on the accent, as the switcher's selected title.
+    // Share's label on the accent, as the switcher's selected title, and
+    // the tab shown's.
     let on_accent = bits(colors.hover_icon);
     let act = if screenshot { "Take" } else { "Share" };
+    let tabs = layout.tabs.iter().map(|(tab, rect)| {
+        let color = if Some(*tab) == layout.tab {
+            on_accent
+        } else {
+            text
+        };
+        (*rect, tab.name(), color)
+    });
     for (rect, label, color) in [
         (layout.share, act, on_accent),
         (layout.cancel, "Cancel", text),
-    ] {
+    ]
+    .into_iter()
+    .chain(tabs)
+    {
         let (x, y) = local(rect);
         items.push(Item::Text {
             text: label.into(),
@@ -1149,10 +1287,11 @@ fn items(
         });
     }
     let hints_y = local(layout.share).1 + (BUTTON_HEIGHT - crate::panel::FOOTER_HEIGHT) / 2;
-    let hints = if screenshot {
-        &SCREENSHOT_HINTS
-    } else {
-        &HINTS
+    let hints: &[(&str, &str)] = match (screenshot, layout.tab.is_some()) {
+        (false, false) => &HINTS,
+        (true, false) => &SCREENSHOT_HINTS,
+        (false, true) => &TABBED_HINTS,
+        (true, true) => &TABBED_SCREENSHOT_HINTS,
     };
     items.extend(crate::panel::footer(
         hints,
@@ -1312,6 +1451,18 @@ pub fn elements(
         origin,
         scale,
     ));
+    // The tabs as the buttons: the one shown as Share, the other as Cancel.
+    let active = layout.tabs.iter().find(|(tab, _)| Some(*tab) == layout.tab);
+    let inactive = layout.tabs.iter().find(|(tab, _)| Some(*tab) != layout.tab);
+    if let (Some((_, active)), Some((_, inactive))) = (active, inactive) {
+        elements.extend(crate::panel::solids(
+            renderer,
+            &mut buffers.tabs,
+            crate::panel::buttons(*active, *inactive, colors),
+            origin,
+            scale,
+        ));
+    }
     elements.extend(crate::panel::frame(
         renderer,
         &mut buffers.frame,
@@ -1342,7 +1493,7 @@ mod tests {
             windows: false,
         };
         let picker = items(
-            &layout(area(), 1, 0, 0),
+            &layout(area(), 1, 0, Tab::Screens, 0),
             Some("App"),
             monitors,
             false,
@@ -1365,82 +1516,98 @@ mod tests {
         Rectangle::new((0, 0).into(), (1920, 1080).into())
     }
 
+    /// The panel's parts inside it, none on another.
+    fn assert_inside(layout: &Layout, what: &str) {
+        let panel = layout.panel;
+        let tabs = layout.tabs.iter().map(|(_, rect)| *rect);
+        let controls: Vec<_> = [layout.share, layout.cancel, layout.hints]
+            .into_iter()
+            .chain(tabs)
+            .collect();
+        for rect in &controls {
+            assert!(panel.contains_rect(*rect), "{what}: {rect:?} in {panel:?}");
+        }
+        for (i, a) in controls.iter().enumerate() {
+            for b in &controls[i + 1..] {
+                assert!(!a.overlaps(*b), "{what}: {a:?} on {b:?}");
+            }
+        }
+        for tile in &layout.tiles {
+            let around = selected_rect(*tile);
+            assert!(panel.contains_rect(around), "{what}: {tile:?} in {panel:?}");
+            for rect in &controls {
+                assert!(!around.overlaps(*rect), "{what}: {tile:?} on {rect:?}");
+            }
+        }
+    }
+
     #[test]
     fn the_panel_is_centered_with_its_tiles_and_buttons_inside() {
         for count in 1..=5 {
-            let layout = layout(area(), count, 0, 0);
+            let layout = layout(area(), count, 0, Tab::Screens, 0);
             assert_eq!(layout.tiles.len(), count);
+            assert!(layout.tabs.is_empty(), "no tabs with one kind");
             let panel = layout.panel;
             assert_eq!(panel.loc.x * 2 + panel.size.w, 1920, "centered");
-            for rect in layout.tiles.iter().chain([&layout.share, &layout.cancel]) {
-                assert!(panel.contains_rect(*rect), "{count}: {rect:?} in {panel:?}");
-            }
-            assert!(!layout.share.overlaps(layout.cancel));
-            assert!(
-                panel.contains_rect(layout.hints),
-                "{count}: the hints in the panel"
-            );
-            assert!(
-                !layout.hints.overlaps(layout.cancel) && !layout.hints.overlaps(layout.share),
-                "{count}: the key hints run into the buttons: {:?} and {:?}",
-                layout.hints,
-                layout.cancel
-            );
+            assert_inside(&layout, &format!("{count} outputs"));
         }
         // Three to a row, then another row.
-        let four = layout(area(), 4, 0, 0);
+        let four = layout(area(), 4, 0, Tab::Screens, 0);
         assert_eq!(
             four.tiles[3].loc.y,
             four.tiles[0].loc.y + TILE.1 + LABEL_GAP + LABEL_HEIGHT + ROW_GAP
         );
     }
 
-    /// With windows too, the outputs and the windows are in sections, at
-    /// most two rows of windows shown, scrolled to the selected one's; the
-    /// panel fits a 1280x800 logical monitor (1920x1200 at 1.5).
+    /// With windows too, the outputs and the windows are on tabs, the panel
+    /// the same on both: on Screens the outputs alone, on Windows at most two
+    /// rows of windows, scrolled to the selected one's; it fits a 1280x800
+    /// logical monitor (1920x1200 at 1.5).
     #[test]
-    fn outputs_and_windows_are_in_sections() {
+    fn outputs_and_windows_are_on_tabs() {
         let small = Rectangle::new((0, 0).into(), (1280, 800).into());
-        let layout = layout(small, 2, 12, 0);
-        assert_eq!(
-            layout.headings.iter().map(|(h, _)| *h).collect::<Vec<_>>(),
-            ["Screens", "Windows"]
-        );
-        assert_eq!(layout.tiles.len(), 2 + 10, "two rows of five windows");
-        assert_eq!(layout.shown, (0..12).collect::<Vec<_>>());
-        let panel = layout.panel;
-        assert!(small.contains_rect(panel), "{panel:?} on 1280x800");
-        for tile in &layout.tiles {
-            assert!(
-                panel.contains_rect(selected_rect(*tile)),
-                "{tile:?} in {panel:?}"
-            );
-            assert!(!tile.overlaps(layout.share) && !tile.overlaps(layout.hints));
+        for outputs in [2, 4] {
+            let screens = layout(small, outputs, 12, Tab::Screens, 0);
+            let windows = layout(small, outputs, 12, Tab::Windows, 0);
+            for (layout, tab) in [(&screens, Tab::Screens), (&windows, Tab::Windows)] {
+                assert_eq!(
+                    layout.tabs.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+                    [Tab::Screens, Tab::Windows]
+                );
+                assert_eq!(layout.tab, Some(tab));
+                assert!(small.contains_rect(layout.panel), "{:?}", layout.panel);
+                assert_inside(layout, &format!("{outputs} outputs, {tab:?}"));
+                // The tabs above the tiles.
+                let tabs_bottom = layout.tabs[0].1.loc.y + layout.tabs[0].1.size.h;
+                assert!(layout.tiles.iter().all(|t| t.loc.y > tabs_bottom));
+            }
+            assert_eq!(screens.panel, windows.panel, "the panel doesn't move");
+            assert_eq!(screens.shown, (0..outputs).collect::<Vec<_>>());
+            assert_eq!(screens.tiles[0].size, Size::from(TILE));
+            assert_eq!(windows.shown, (outputs..outputs + 10).collect::<Vec<_>>());
         }
-        // The windows under their heading, below the outputs.
-        let (_, windows_at) = layout.headings[1];
-        assert!(layout.tiles[2].loc.y - panel.loc.y > windows_at);
-        assert!(layout.tiles[2].loc.y > layout.tiles[0].loc.y + SMALL_TILE.1);
         // Scrolled: the second and third rows of windows.
-        let scrolled = super::layout(small, 2, 12, 1);
-        assert_eq!(scrolled.shown, [0, 1, 7, 8, 9, 10, 11, 12, 13]);
+        let scrolled = layout(small, 2, 12, Tab::Windows, 1);
+        assert_eq!(scrolled.shown, [7, 8, 9, 10, 11, 12, 13]);
         assert_eq!(scrolled.shown.len(), scrolled.tiles.len());
         // Past the end: the last two rows.
-        assert_eq!(super::layout(small, 2, 12, 5).shown, scrolled.shown);
+        assert_eq!(layout(small, 2, 12, Tab::Windows, 5).shown, scrolled.shown);
     }
 
-    /// Windows alone: no headings, their rows a grid in the middle.
+    /// Windows alone: no tabs, their rows a grid in the middle.
     #[test]
-    fn windows_alone_have_no_headings() {
-        let layout = layout(area(), 0, 3, 0);
-        assert!(layout.headings.is_empty());
+    fn windows_alone_have_no_tabs() {
+        let layout = layout(area(), 0, 3, Tab::Windows, 0);
+        assert!(layout.tabs.is_empty());
+        assert_eq!(layout.tab, None);
         assert_eq!(layout.shown, [0, 1, 2]);
+        assert_inside(&layout, "3 windows");
         let panel = layout.panel;
         let left = layout.tiles[0].loc.x - panel.loc.x;
         let right = panel.loc.x + panel.size.w - (layout.tiles[2].loc.x + WINDOW_TILE.0);
         assert!((left - right).abs() <= 1, "centered: {left} and {right}");
         // A second row starts under the first's first tile.
-        let seven = super::layout(area(), 0, 7, 0);
+        let seven = super::layout(area(), 0, 7, Tab::Windows, 0);
         assert_eq!(seven.tiles[5].loc.x, seven.tiles[0].loc.x);
     }
 
@@ -1458,7 +1625,9 @@ mod tests {
     #[test]
     fn keys_move_share_or_cancel() {
         assert_eq!(key_effect(Keysym::Left), KeyEffect::Previous);
-        assert_eq!(key_effect(Keysym::Tab), KeyEffect::Next);
+        assert_eq!(key_effect(Keysym::Right), KeyEffect::Next);
+        assert_eq!(key_effect(Keysym::Tab), KeyEffect::NextTab);
+        assert_eq!(key_effect(Keysym::ISO_Left_Tab), KeyEffect::PreviousTab);
         assert_eq!(key_effect(Keysym::Return), KeyEffect::Share);
         assert_eq!(key_effect(Keysym::Escape), KeyEffect::Cancel);
         assert_eq!(key_effect(Keysym::a), KeyEffect::Nothing);

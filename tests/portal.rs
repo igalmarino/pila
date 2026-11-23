@@ -675,9 +675,18 @@ fn tile_of(picker: &Value, index: usize) -> (f64, f64) {
     center(&picker["tiles"][slot])
 }
 
-/// An app that may share windows too sees them in a section of their own,
-/// most recently used first; the one picked is streamed alone, at its size,
-/// as a window (no position) in `Start`'s answer.
+/// Show the picker's `tab` with Tab, its text drawn: the picker then.
+fn show_tab(pila: &mut TestPila, tab: &str) -> Value {
+    pila.key("Tab");
+    pila.wait(&format!("the {tab} tab"), |s| {
+        s["share_picker"]["tab"] == tab && s["share_picker"]["text"] == true
+    })["share_picker"]
+        .clone()
+}
+
+/// An app that may share windows too sees them on a tab of their own, most
+/// recently used first; the one picked is streamed alone, at its size, as a
+/// window (no position) in `Start`'s answer.
 #[test]
 fn an_app_can_share_a_window() {
     let (mut pila, bus, pipewire) = start_with("HEADLESS-1:1280x720");
@@ -698,12 +707,24 @@ fn an_app_can_share_a_window() {
         picker["sources"],
         serde_json::json!(["HEADLESS-1", "region", "newer", "older"])
     );
-    assert_eq!(
-        picker["headings"],
-        serde_json::json!(["Screens", "Windows"])
-    );
+    assert_eq!(picker["tabs"], serde_json::json!(["Screens", "Windows"]));
+    assert_eq!(picker["tab"], "Screens");
     assert_eq!(picker["selected"], 0, "the output under the pointer first");
-    // Its preview drawn.
+    assert_eq!(
+        picker["tile_sources"],
+        serde_json::json!([0, 1]),
+        "screens alone"
+    );
+    pila.settle();
+    assert_eq!(
+        pila.state()["share_picker"]["window_previews"],
+        0,
+        "no window drawn on the Screens tab"
+    );
+    let picker = show_tab(&mut pila, "Windows");
+    assert_eq!(picker["tile_sources"], serde_json::json!([2, 3]));
+    assert_eq!(picker["selected"], 2, "the window used last");
+    // Their previews drawn.
     pila.wait("the windows' previews", |s| {
         s["share_picker"]["window_previews"] == 2
     });
@@ -730,6 +751,80 @@ fn an_app_can_share_a_window() {
     );
 }
 
+/// With screens and windows on tabs, Tab and Shift+Tab or a click on a tab
+/// switch them, the arrows stay on the tab shown, and each tab keeps what
+/// was selected on it; the tab shown is drawn in the accent.
+#[test]
+fn the_picker_switches_between_screens_and_windows() {
+    const ACCENT: [u8; 4] = [0x44, 0x77, 0xcc, 255];
+    let (mut pila, bus, _pipewire) = start_with("HEADLESS-1:1280x720,HEADLESS-2:1280x720");
+    let client = pila.client();
+    for name in ["a", "b", "c"] {
+        client.window(name).size(200, 150).create();
+        pila.wait_focus(name);
+    }
+    pila.move_to(100.0, 100.0);
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("tabs", "org.example.Browser", 1, 3);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(
+        picker["kinds"],
+        serde_json::json!(["output", "output", "region", "window", "window", "window"])
+    );
+    assert_eq!(picker["tab"], "Screens");
+    let panel = picker["panel"].clone();
+
+    // The arrows go round the screens, Region among them, not to a window.
+    pila.key("Right");
+    pila.wait("the second screen", |s| s["share_picker"]["selected"] == 1);
+    pila.key("Right");
+    pila.wait("Region", |s| s["share_picker"]["selected"] == 2);
+    pila.key("Right");
+    pila.wait("back to the first screen", |s| {
+        s["share_picker"]["selected"] == 0
+    });
+    pila.key("Left");
+    pila.wait("round to Region", |s| s["share_picker"]["selected"] == 2);
+
+    // Tab: the windows, the one used last selected; the panel stays put.
+    let picker = show_tab(&mut pila, "Windows");
+    assert_eq!(picker["selected"], 3);
+    assert_eq!(picker["sources"][3], "c");
+    assert_eq!(picker["tile_sources"], serde_json::json!([3, 4, 5]));
+    assert_eq!(picker["panel"], panel, "the panel the same on both tabs");
+    pila.key("Left");
+    pila.wait("round to the oldest window", |s| {
+        s["share_picker"]["selected"] == 5
+    });
+
+    // Shift+Tab: back to the screens, Region still selected there.
+    pila.combo("Shift+Tab");
+    let picker = pila.wait("the Screens tab", |s| {
+        s["share_picker"]["tab"] == "Screens" && s["share_picker"]["text"] == true
+    })["share_picker"]
+        .clone();
+    assert_eq!(picker["selected"], 2, "the screens' selection kept");
+
+    // A click on the Windows tab: its selection kept too, and it's drawn
+    // in the accent.
+    let (x, y, w, h) = rect(&picker["tab_rects"][1]);
+    pila.click_at((x + w / 2) as f64, (y + h / 2) as f64);
+    pila.wait("the Windows tab", |s| s["share_picker"]["tab"] == "Windows");
+    assert_eq!(pila.state()["share_picker"]["selected"], 5);
+    pila.settle();
+    assert_eq!(
+        pila.pixel((x + w / 2) as f64, (y + h - 2) as f64),
+        ACCENT,
+        "the tab shown"
+    );
+
+    pila.key("Return");
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    assert_eq!(streams.len(), 1);
+}
+
 /// An app that may share only windows sees them alone, the one used last
 /// selected first.
 #[test]
@@ -742,7 +837,8 @@ fn an_app_that_shares_only_windows_sees_only_windows() {
     let started = portal.request_sources("w2", "org.example.Browser", 1, 2);
     let picker = wait_picker(&mut pila);
     assert_eq!(picker["kinds"], serde_json::json!(["window"]));
-    assert_eq!(picker["headings"], serde_json::json!([]));
+    assert_eq!(picker["tabs"], serde_json::json!([]));
+    assert_eq!(picker["tab"], Value::Null);
     assert_eq!(picker["selected"], 0);
     pila.key("Escape");
     assert_eq!(started.answer().0, 1, "cancelled");
@@ -931,6 +1027,7 @@ fn a_screenshot_of_what_the_user_picks() {
         serde_json::json!(["output", "region", "window", "window"])
     );
     assert_eq!(picker["sources"][3], "under");
+    let picker = show_tab(&mut pila, "Windows");
     let (x, y) = tile_of(&picker, 3);
     pila.click_at(x, y);
     pila.wait("under selected", |s| s["share_picker"]["selected"] == 3);

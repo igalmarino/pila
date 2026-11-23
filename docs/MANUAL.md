@@ -704,8 +704,8 @@ screenshot features.
 **An app's screenshot** (a browser's, a Flatpak's, anything that asks the desktop portal) is
 Pila's too. An app the portal lets take one without asking (its permission store) gets every
 monitor at once, as they're laid out; otherwise, or when the app wants you to choose, the same
-panel as for screen sharing asks what to take, a monitor, a region of one or a window (the window
-alone, even covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** (or
+panel as for screen sharing asks what to take, a monitor or a region of one (**Screens**) or a
+window (**Windows**: the window alone, even covered or minimized): Tab between them, click or arrows, then **Take** (or Enter), or **Cancel** (or
 Escape). The
 pointer isn't in it. The picture is saved in `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten
 are kept; it goes at logout) and handed to the app.
@@ -730,9 +730,10 @@ pixel whose color you want, or Escape to give up. No app gets that click or any 
 PipeWire, with no other program. When an app asks to share, a panel in the middle of the screen
 names the app and shows what it may share as live previews: every monitor and, if the app shares
 windows too, every window, most recently used first (minimized ones and those on other workspaces
-too), under **Screens** and **Windows**. The monitor under the pointer is selected first (the
-window you used last, for an app that shares only windows): click a preview or use the arrows
-to pick one, then **Share** (or Enter) to share it, or **Cancel** (or Escape). Nothing is shared
+too), on two tabs, **Screens** and **Windows**: Tab (or a click on a tab) shows the other, and
+each keeps what you selected on it. The monitor under the pointer is selected first (the window
+you used last, for an app that shares only windows): click a preview or use the arrows to pick
+one, then **Share** (or Enter) to share it, or **Cancel** (or Escape). Nothing is shared
 until then, and while the panel is shown no key or click reaches an app. **Region**, after the
 monitors, shares part of one: the panel hides and the pointer becomes a crosshair; drag a
 rectangle over what to share (it stays on the monitor where you start) and let go to share it, or
