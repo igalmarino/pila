@@ -54,8 +54,8 @@ to say so.
   method): each is swapped for its `ext-` version once one lands in wayland-protocols and
   Smithay.
 - **Smithay with the changes Pila's fork carries** (a text cursor with no width, asynchronous
-  page flips, the X display reserved apart from Xwayland): Pila goes back to Smithay's own
-  repository.
+  page flips, the X display reserved apart from Xwayland, shm buffers uploaded in strips, the
+  surface an xdg-foreign handle names): Pila goes back to Smithay's own repository.
 - **Direct scanout of EGL apps on AMD GPUs**: a fullscreen app drawn with OpenGL (kitty,
   weston-simple-egl) keeps the render-only compressed (DCC) buffer layout Mesa 26.3's radeonsi
   picks, which the display can't read, after Pila tells it the layouts the screen takes (a
