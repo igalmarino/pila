@@ -29,8 +29,37 @@ pub const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.pila";
 /// Where backends serve their interfaces.
 const PATH: &str = "/org/freedesktop/portal/desktop";
 
-/// Source types (`AvailableSourceTypes`): a monitor.
+/// Source types (`AvailableSourceTypes`): a monitor, a window.
 const SOURCE_MONITOR: u32 = 1;
+const SOURCE_WINDOW: u32 = 2;
+
+/// What an app may share (`SelectSources`' `types`): the picker offers
+/// these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sources {
+    pub monitors: bool,
+    pub windows: bool,
+}
+
+impl Sources {
+    /// The types an app asked for; a monitor if it asked for none, as the
+    /// portal's documentation has it. `None`: none Pila shares.
+    fn from_request(types: Option<u32>) -> Option<Self> {
+        let types = types.unwrap_or(SOURCE_MONITOR);
+        let sources = Sources {
+            monitors: types & SOURCE_MONITOR != 0,
+            windows: types & SOURCE_WINDOW != 0,
+        };
+        (sources.monitors || sources.windows).then_some(sources)
+    }
+}
+
+/// What a stream shares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceType {
+    Monitor,
+    Window,
+}
 /// Cursor modes (`AvailableCursorModes`): hidden, drawn into the frames, or
 /// sent beside them for the app to draw (metadata: what browsers ask for,
 /// and they ask for nothing if it isn't offered).
@@ -78,6 +107,7 @@ pub enum Request {
     Start {
         session: String,
         cursor: CursorMode,
+        sources: Sources,
         /// Who asks, as the picker names it: its desktop entry's name, else
         /// its app id; `None` if the portal didn't say (`app_name`).
         app: Option<String>,
@@ -91,7 +121,9 @@ pub enum Request {
 #[derive(Debug, Clone)]
 pub struct Stream {
     pub node_id: u32,
-    /// Where the source is and its size, in logical coordinates.
+    pub source_type: SourceType,
+    /// Where the source is (a monitor's) and its size, in logical
+    /// coordinates.
     pub position: (i32, i32),
     pub size: (i32, i32),
 }
@@ -167,6 +199,7 @@ pub fn end_session(connection: &zbus::Connection, session: String) {
 #[derive(Debug, Clone, Copy)]
 struct Selection {
     cursor: CursorMode,
+    sources: Sources,
 }
 
 /// `org.freedesktop.impl.portal.ScreenCast`.
@@ -201,6 +234,10 @@ impl ScreenCast {
             path,
             Selection {
                 cursor: CursorMode::Hidden,
+                sources: Sources {
+                    monitors: true,
+                    windows: false,
+                },
             },
         );
         (RESPONSE_SUCCESS, Results::new())
@@ -214,18 +251,19 @@ impl ScreenCast {
         options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
         let wanted = |key: &str| options.get(key).and_then(|v| u32::try_from(v).ok());
-        let types = wanted("types").unwrap_or(SOURCE_MONITOR);
-        if types & SOURCE_MONITOR == 0 {
-            debug!(types, "portal: only monitors can be shared");
+        let types = wanted("types");
+        let Some(sources) = Sources::from_request(types) else {
+            debug!(types, "portal: only monitors and windows can be shared");
             return (RESPONSE_OTHER, Results::new());
-        }
+        };
         let cursor = CursorMode::from_request(wanted("cursor_mode"));
-        debug!(types, ?cursor, "portal: sources selected");
+        debug!(?sources, ?cursor, "portal: sources selected");
         let mut selections = self.selections.locked();
         let Some(selection) = selections.get_mut(session_handle.as_str()) else {
             return (RESPONSE_OTHER, Results::new());
         };
         selection.cursor = cursor;
+        selection.sources = sources;
         (RESPONSE_SUCCESS, Results::new())
     }
 
@@ -245,6 +283,7 @@ impl ScreenCast {
         let request = Request::Start {
             session,
             cursor: selection.cursor,
+            sources: selection.sources,
             app: app_name(&app_id, &data_dirs()),
             reply,
         };
@@ -267,7 +306,7 @@ impl ScreenCast {
 
     #[zbus(property)]
     fn available_source_types(&self) -> u32 {
-        SOURCE_MONITOR
+        SOURCE_MONITOR | SOURCE_WINDOW
     }
 
     #[zbus(property)]
@@ -331,11 +370,16 @@ fn streams_result(streams: &[Stream]) -> zbus::Result<Results> {
     let streams: Vec<(u32, HashMap<String, Variant<'static>>)> = streams
         .iter()
         .map(|stream| {
-            let properties = HashMap::from([
-                ("position".to_string(), Variant::from(stream.position)),
-                ("size".to_string(), Variant::from(stream.size)),
-                ("source_type".to_string(), Variant::from(SOURCE_MONITOR)),
-            ]);
+            let mut properties = HashMap::from([("size".to_string(), Variant::from(stream.size))]);
+            let source_type = match stream.source_type {
+                SourceType::Monitor => {
+                    // Only a monitor's position means anything.
+                    properties.insert("position".to_string(), Variant::from(stream.position));
+                    SOURCE_MONITOR
+                }
+                SourceType::Window => SOURCE_WINDOW,
+            };
+            properties.insert("source_type".to_string(), Variant::from(source_type));
             (stream.node_id, properties)
         })
         .collect();
@@ -461,13 +505,43 @@ mod tests {
 
     #[test]
     fn streams_are_described_as_the_portal_wants() {
-        let results = streams_result(&[Stream {
-            node_id: 42,
-            position: (0, 0),
-            size: (1920, 1080),
-        }])
+        let results = streams_result(&[
+            Stream {
+                node_id: 42,
+                source_type: SourceType::Monitor,
+                position: (1920, 0),
+                size: (1920, 1080),
+            },
+            Stream {
+                node_id: 43,
+                source_type: SourceType::Window,
+                position: (0, 0),
+                size: (800, 600),
+            },
+        ])
         .unwrap();
         let streams = &results["streams"];
         assert_eq!(streams.value_signature().to_string(), "a(ua{sv})");
+        let streams: Vec<(u32, HashMap<String, OwnedVariant>)> =
+            streams.try_clone().unwrap().try_into().unwrap();
+        let property = |i: usize, key: &str| streams[i].1.get(key).map(|v| u32::try_from(v).ok());
+        assert_eq!(property(0, "source_type"), Some(Some(SOURCE_MONITOR)));
+        assert!(streams[0].1.contains_key("position"));
+        // A window's position means nothing: it has none.
+        assert_eq!(property(1, "source_type"), Some(Some(SOURCE_WINDOW)));
+        assert!(!streams[1].1.contains_key("position"));
+    }
+
+    /// The types an app selects: a monitor by default, windows when asked
+    /// for, nothing Pila doesn't share (a virtual monitor alone).
+    #[test]
+    fn the_sources_are_what_the_app_selects() {
+        let sources = |monitors, windows| Some(Sources { monitors, windows });
+        assert_eq!(Sources::from_request(None), sources(true, false));
+        assert_eq!(Sources::from_request(Some(1)), sources(true, false));
+        assert_eq!(Sources::from_request(Some(2)), sources(false, true));
+        assert_eq!(Sources::from_request(Some(3)), sources(true, true));
+        assert_eq!(Sources::from_request(Some(4)), None);
+        assert_eq!(Sources::from_request(Some(6)), sources(false, true));
     }
 }

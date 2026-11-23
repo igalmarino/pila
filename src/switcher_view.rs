@@ -140,7 +140,7 @@ pub fn panel_size(tiles: usize) -> Size<i32, Logical> {
 
 /// A title as a tile shows it: one line, control characters dropped; the
 /// app id where the window has no title.
-fn caption(title: &str, app_id: &str) -> String {
+pub(crate) fn caption(title: &str, app_id: &str) -> String {
     let title: String = title.chars().filter(|c| !c.is_control()).collect();
     if title.trim().is_empty() {
         app_id.to_string()
@@ -424,7 +424,7 @@ pub fn elements(
 
 /// `window` drawn into its preview's texture, scaled to fit `area` (never
 /// grown) and centered in it: the texture redrawn where the window changed.
-fn preview(
+pub(crate) fn preview(
     renderer: &mut GlesRenderer,
     previews: &mut Vec<(Window, OffscreenWindow)>,
     window: &Window,

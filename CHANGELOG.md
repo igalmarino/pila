@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Share a window:** an app that may share windows (browsers, video calls, OBS) gets them in
+  Pila's panel too, under the monitors: every window, most recently used first, minimized ones
+  and those on other workspaces too, each as a live preview. The window is streamed alone at its
+  size, keeps updating while it's covered, minimized or on another workspace, follows its size,
+  shows nothing new while the screen is locked, and its share ends when it closes. No more need
+  of xdg-desktop-portal-wlr to share a single window.
 - **`scripts/install` names what a source build is missing:** it checks that pkg-config, the
   libraries' development files and libclang are there before it builds, and lists what to
   install, instead of a build script's panic deep in the build (bindgen's, for libclang).

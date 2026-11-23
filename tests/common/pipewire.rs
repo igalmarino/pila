@@ -386,13 +386,23 @@ impl Linker {
 
 /// A `Start` waiting for its answer.
 pub struct Started {
-    thread: std::thread::JoinHandle<(u32, Vec<u32>)>,
+    thread: std::thread::JoinHandle<(u32, Vec<(u32, Vardict)>)>,
 }
 
 impl Started {
     /// The response (0 shared, 1 cancelled, 2 failed) and the streams'
     /// node ids.
     pub fn answer(self) -> (u32, Vec<u32>) {
+        let (response, streams) = self.answer_streams();
+        (
+            response,
+            streams.into_iter().map(|(node, _)| node).collect(),
+        )
+    }
+
+    /// The response and the streams: each node id and its properties
+    /// (`source_type`, `size`, a monitor's `position`).
+    pub fn answer_streams(self) -> (u32, Vec<(u32, Vardict)>) {
         self.thread.join().expect("Start's thread")
     }
 
@@ -556,7 +566,7 @@ pub struct Portal {
     serial: usize,
 }
 
-type Vardict = HashMap<String, OwnedVariant>;
+pub type Vardict = HashMap<String, OwnedVariant>;
 
 const NAME: &str = "org.freedesktop.impl.portal.desktop.pila";
 const PATH: &str = "/org/freedesktop/portal/desktop";
@@ -602,12 +612,24 @@ impl Portal {
     /// embedded), then start it, as app `app_id`: Pila shows its picker, so
     /// `Start`'s answer comes once the test picks (`Started::answer`).
     pub fn request(&mut self, name: &str, app_id: &str, cursor_mode: u32) -> Started {
+        self.request_sources(name, app_id, cursor_mode, 1)
+    }
+
+    /// `request`, selecting the source `types` (1: monitors, 2: windows, 3:
+    /// both).
+    pub fn request_sources(
+        &mut self,
+        name: &str,
+        app_id: &str,
+        cursor_mode: u32,
+        types: u32,
+    ) -> Started {
         let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
         let handle = self.handle();
         let (response, _) = self.call("CreateSession", &(handle, &session, app_id, Vardict::new()));
         assert_eq!(response, 0, "CreateSession");
         let options = HashMap::from([
-            ("types".to_string(), OwnedVariant::from(1u32)),
+            ("types".to_string(), OwnedVariant::from(types)),
             ("cursor_mode".to_string(), OwnedVariant::from(cursor_mode)),
         ]);
         let handle = self.handle();
@@ -626,15 +648,15 @@ impl Portal {
             ))
             .unwrap_or_else(|err| panic!("Start: {err}"));
             let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
-            let nodes = results
+            let streams = results
                 .get("streams")
                 .map(|streams| {
                     let streams: Vec<(u32, Vardict)> =
                         streams.try_clone().unwrap().try_into().unwrap();
-                    streams.into_iter().map(|(node, _)| node).collect()
+                    streams
                 })
                 .unwrap_or_default();
-            (response, nodes)
+            (response, streams)
         });
         Started { thread }
     }

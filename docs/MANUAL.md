@@ -702,30 +702,20 @@ a daemon they only reach the log.
 screenshot features.
 
 **Screen sharing** in browsers, OBS and video calls goes through the desktop portal
-(`xdg-desktop-portal`), which hands it to Pila: Pila asks which screen to share and streams it
-over PipeWire, with no other program. When an app asks to share, a panel in the middle of the
-screen names the app and shows every monitor as a live preview, the one under the pointer
-selected: click a preview or use the arrows to pick one, then **Share** (or Enter) to share it,
-or **Cancel** (or Escape). Nothing is shared until then, and while the panel is shown no key or
-click reaches an app. The pointer shows in the share as the app asks (browsers draw it
-themselves). Locking the screen cancels the question. Pila installs the portal's configuration
-for a Pila session (`pila.portal` and `pila-portals.conf`); it needs `xdg-desktop-portal` and
-`pipewire`.
-
-**Sharing a single window** isn't in Pila's panel yet: `xdg-desktop-portal-wlr` can do it,
-with a menu to pick from. With `fuzzel` installed (`wofi`, `rofi`, `bemenu` or `wmenu` work
-too), copy `/etc/xdg/xdg-desktop-portal-wlr/pila` to `~/.config/xdg-desktop-portal-wlr/pila`
-if it isn't there yet, change its two `chooser_` lines to:
-
-```ini
-chooser_type=dmenu
-chooser_cmd=fuzzel -d -l 10 -p 'Select a source to share: '
-```
-
-and hand it screen sharing with a `~/.config/xdg-desktop-portal/pila-portals.conf` of your own
-(below) whose `ScreenCast` line says `wlr`; then log out and back in. The menu then lists
-monitors and windows. A shared window keeps updating while it's covered, minimized or on another
-workspace.
+(`xdg-desktop-portal`), which hands it to Pila: Pila asks what to share and streams it over
+PipeWire, with no other program. When an app asks to share, a panel in the middle of the screen
+names the app and shows what it may share as live previews: every monitor and, if the app shares
+windows too, every window, most recently used first (minimized ones and those on other workspaces
+too), under **Screens** and **Windows**. The monitor under the pointer is selected first (the
+window you used last, for an app that shares only windows): click a preview or use the arrows
+to pick one, then **Share** (or Enter) to share it, or **Cancel** (or Escape). Nothing is shared
+until then, and while the panel is shown no key or click reaches an app. A shared window is
+streamed alone, at its size, and keeps updating while it's covered, minimized or on another
+workspace; while the screen is locked its stream shows nothing new, and closing the window ends
+the share. The pointer shows in the share as the app asks (browsers draw it themselves), over a
+window only while it's over it. Locking the screen cancels the question. Pila installs the
+portal's configuration for a Pila session (`pila.portal` and `pila-portals.conf`); it needs
+`xdg-desktop-portal` and `pipewire`.
 
 Screen sharing needs the session's D-Bus bus, which the login screen and `pila-session` set up;
 a nested Pila doesn't have it.

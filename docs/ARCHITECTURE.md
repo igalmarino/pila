@@ -1111,10 +1111,13 @@ Key flows and invariants:
   or headless with a bus a test gives it; nested, the host's portal shares the host's screen).
   The bus is served from zbus's thread: `CreateSession` and `SelectSources` answer there, and
   `Start` sends a `portal::Request` to the event loop and waits off it for its `portal::Reply`
-  (dropped unsent, `Start` fails). The event loop connects to PipeWire at the first cast (its
+  (dropped unsent, `Start` fails). Monitors and windows are offered (`AvailableSourceTypes`);
+  what an app selects (`portal::Sources`) is what its picker offers, and `Start` describes each
+  stream by its `portal::SourceType` (a window's has no position). The event loop connects to PipeWire at the first cast (its
   loop's fd a calloop source, iterated without waiting: `dispatch_pipewire`; callbacks only
   queue `CastEvent`s, handled after) and makes a driver stream per session, offering BGRx of the
-  output's size at a variable rate up to its refresh; `Start` is answered once the node has an
+  source's size at a variable rate up to its output's refresh (`cast_fps`; a window's: the output
+  it's drawn for); `Start` is answered once the node has an
   id. With shared memory negotiated, the offscreen texture
   its frames are read back through is made then, drawn into once (`Captures::prepare_read_back`,
   on `CastEvent::Negotiated`): not in the first frame; dma-bufs need none. Captures' textures
@@ -1124,9 +1127,14 @@ Key flows and invariants:
   warms it up first (`screencast::warm_pipewire`: a connection made and dropped, so libraries,
   plugins and configuration are loaded off the event loop). A lost connection (the daemon went)
   ends the casts and is dropped (`disconnect_pipewire`), made again at the next request. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
-  asks for one at a time (below). Frames are made from
+  asks for one at a time (below). What a cast shares is a `capture::Target`, an output or a
+  window, sized as screen captures size it (`Pila::capture_geometry`). Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
-  output's elements (and the pointer's, cursor embedded); a change and a free buffer draw it:
+  output's elements, or the window's alone, its geometry's top-left the buffer's (and the
+  pointer's, cursor embedded, over a window only while it's over it; its metadata is hidden
+  there otherwise). A window's frames wait while the screen is locked; each one sent brings the
+  window's surfaces shown on no output their frame callbacks (`Pila::send_capture_frames`), so an
+  app drawing on them keeps drawing for the share while minimized or covered; a change and a free buffer draw it:
   straight into the buffer if it's a dma-buf (`capture::render_into_dmabuf`), else offscreen and
   read back into it (`Captures::read_back`, shared with shm captures); queued once the GPU is
   done (`Pila::when_copied`); with no buffer free the
@@ -1148,12 +1156,21 @@ Key flows and invariants:
   (`Cast::buffers`) drops a copy in flight whose buffer went (new format, removed buffers, cast
   ended). A new output size (a mode, a turn) offers the
   formats again at it (`update_params`), and frames wait for buffers of that size; a new scale
-  only starts the damage tracker over. A cast ends with its output, a stream error or
-  PipeWire's connection; the app is told (`portal::end_session`: `Closed`).
+  only starts the damage tracker over; a window resized does the same as a new output size. A
+  cast ends with its output or window, a stream error or PipeWire's connection; the app is told
+  (`portal::end_session`: `Closed`).
 - **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
-  the bus's thread, else its app id) and shows every output, left to right, as a live preview,
-  the one under the pointer selected. It's drawn as Pila's other panels are (`panel.rs`): their
+  the bus's thread, else its app id) and shows what it may share as live previews: every output,
+  left to right, then, if it shares windows, every window with a foreign-toplevel identifier and
+  a size, in focus order (`focus_history`; minimized and other workspaces' too). With both kinds
+  they're in sections under headings, the outputs' tiles smaller (`layout`); windows come
+  `WINDOW_COLUMNS` to a row, `WINDOW_ROWS` rows shown, scrolled to the selected one's
+  (`Shown::first_window_row`, with the switcher's `first_shown`; the labels are drawn again as it
+  scrolls). The output under the pointer is selected first, else the window used last. A window's
+  preview is the switcher's (`switcher_view::preview`, drawn with the panel); the windows shown
+  get frame callbacks from the panel's output (`frame::send_frames`) and a commit of one redraws
+  it (`share_picker_committed`). It's drawn as Pila's other panels are (`panel.rs`): their
   frame, title and footer of key hints, the selected tile on a block of the accent (the
   switcher's), buttons rounded as the cheatsheet's keys, Share's label in `hover-icon`. Modal: every key goes to it (`input.rs`, before the window
   menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,

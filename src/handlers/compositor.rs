@@ -79,6 +79,7 @@ impl CompositorHandler for Pila {
         if let Some(window) = self.window_for_surface(&crate::redraw::root_surface(surface)) {
             self.switcher_view_committed(&window);
             self.overview_committed(&window);
+            self.share_picker_committed(&window);
         }
     }
 

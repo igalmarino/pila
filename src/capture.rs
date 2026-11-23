@@ -172,7 +172,7 @@ impl DmabufTarget {
 }
 
 /// Behind a captured window's (possibly translucent) surfaces.
-const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+pub(crate) const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 /// What an `ext_image_capture_source_v1` captures.
 #[derive(Debug, Clone)]
@@ -410,7 +410,7 @@ impl Session {
 impl Pila {
     /// The size (physical pixels) and scale `target` is captured at, or
     /// `None` if it's gone. `last`: the geometry advertised before, if any.
-    fn capture_geometry(
+    pub(crate) fn capture_geometry(
         &self,
         target: &Target,
         last: Option<(Size<i32, Physical>, Scale<f64>)>,
@@ -717,7 +717,7 @@ impl Pila {
     /// client that draws on frame callbacks would stall the share. Shown
     /// surfaces keep the screen's pace. Not frame pacing by pila: the
     /// capture client sets the rate, one window frame per captured frame.
-    fn send_capture_frames(&self, window: &Window) {
+    pub(crate) fn send_capture_frames(&self, window: &Window) {
         let Some(output) = self.space.outputs().next().cloned() else {
             return;
         };

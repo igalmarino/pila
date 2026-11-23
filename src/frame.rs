@@ -214,6 +214,16 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
     {
         window.send_frame(output, time, None, |_, _| Some(output.clone()));
     }
+    // So are the share picker's windows: hidden ones too (minimized, on
+    // other workspaces).
+    for window in scene
+        .share_picker
+        .iter()
+        .filter(|view| view.output == output.name())
+        .flat_map(|view| view.windows())
+    {
+        window.send_frame(output, time, None, |_, _| Some(output.clone()));
+    }
     // So are the overview's workspace thumbnails: the windows of the other
     // workspaces draw for their output too while it's shown.
     let name = output.name();

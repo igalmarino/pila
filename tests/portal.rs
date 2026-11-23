@@ -597,3 +597,220 @@ fn startup_programs_wait_for_the_portal() {
         "a startup program ran before Pila served the portal"
     );
 }
+
+/// What `Start` says of a stream: its `source_type`, its `size`, and
+/// whether it has a `position` (a monitor's only).
+fn described(properties: &common::pipewire::Vardict) -> (u32, (i32, i32), bool) {
+    let source_type = properties
+        .get("source_type")
+        .map(|v| u32::try_from(v).unwrap())
+        .unwrap();
+    let size: (i32, i32) = properties
+        .get("size")
+        .map(|v| v.try_clone().unwrap().try_into().unwrap())
+        .unwrap();
+    (source_type, size, properties.contains_key("position"))
+}
+
+/// The picker's tile showing source `index`, and its center.
+fn tile_of(picker: &Value, index: usize) -> (f64, f64) {
+    let slot = picker["tile_sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|i| i == index)
+        .unwrap_or_else(|| panic!("source {index} not shown: {picker}"));
+    center(&picker["tiles"][slot])
+}
+
+/// An app that may share windows too sees them in a section of their own,
+/// most recently used first; the one picked is streamed alone, at its size,
+/// as a window (no position) in `Start`'s answer.
+#[test]
+fn an_app_can_share_a_window() {
+    let (mut pila, bus, pipewire) = start_with("HEADLESS-1:1280x720");
+    let client = pila.client();
+    client.window("older").size(300, 200).color(GREEN).create();
+    pila.wait_focus("older");
+    client.window("newer").size(240, 160).color(BLUE).create();
+    pila.wait_focus("newer");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("w1", "org.example.Browser", 1, 3);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(
+        picker["kinds"],
+        serde_json::json!(["output", "window", "window"])
+    );
+    assert_eq!(
+        picker["sources"],
+        serde_json::json!(["HEADLESS-1", "newer", "older"])
+    );
+    assert_eq!(
+        picker["headings"],
+        serde_json::json!(["Screens", "Windows"])
+    );
+    assert_eq!(picker["selected"], 0, "the output under the pointer first");
+    // Its preview drawn.
+    pila.wait("the windows' previews", |s| {
+        s["share_picker"]["window_previews"] == 2
+    });
+
+    let (x, y) = tile_of(&picker, 2);
+    pila.click_at(x, y);
+    pila.wait("older selected", |s| s["share_picker"]["selected"] == 2);
+    pila.key("Return");
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    let (node, properties) = &streams[0];
+    assert_eq!(
+        described(properties),
+        (2, (300, 200), false),
+        "a window's stream"
+    );
+
+    let consumer = pipewire.consume(*node);
+    let frame = consumer.wait_frame("of the window", |f| f.width == 300 && f.height == 200);
+    assert_eq!(
+        frame.rgba(150, 100),
+        rgba(GREEN),
+        "the window alone, under the other"
+    );
+}
+
+/// An app that may share only windows sees them alone, the one used last
+/// selected first.
+#[test]
+fn an_app_that_shares_only_windows_sees_only_windows() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("a").size(200, 150).create();
+    pila.wait_focus("a");
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("w2", "org.example.Browser", 1, 2);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(picker["kinds"], serde_json::json!(["window"]));
+    assert_eq!(picker["headings"], serde_json::json!([]));
+    assert_eq!(picker["selected"], 0);
+    pila.key("Escape");
+    assert_eq!(started.answer().0, 1, "cancelled");
+}
+
+/// A shared window keeps streaming while minimized, drawing for the share;
+/// resized, the stream follows its size; closed, the share ends.
+#[test]
+fn a_shared_window_follows_it_until_it_closes() {
+    let (mut pila, bus, pipewire) = start_with("HEADLESS-1:1280x720");
+    let client = pila.client();
+    let window = client.window("shared").size(300, 200).color(GREEN).create();
+    pila.wait_focus("shared");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("w3", "org.example.Browser", 1, 2);
+    wait_picker(&mut pila);
+    pila.key("Return");
+    let (response, nodes) = started.answer();
+    assert_eq!(response, 0, "Start");
+    let consumer = pipewire.consume(nodes[0]);
+    consumer.wait_frame("of the window", |f| f.rgba(150, 100) == rgba(GREEN));
+
+    // Minimized, it still draws for the share.
+    client.request(window, |t| t.set_minimized());
+    pila.wait("minimized", |s| {
+        window_in(s, "shared").unwrap()["minimized"] == true
+    });
+    client.with_window(window, |w| w.color = BLUE);
+    client.draw(window, None);
+    consumer.wait_frame("with its new color", |f| f.rgba(150, 100) == rgba(BLUE));
+    // An app drawing on frame callbacks keeps drawing: off the screen it
+    // gets none, but the share's frames bring them.
+    let surface = client.surface(window);
+    for n in 0..3 {
+        let callback = format!("callback{n}");
+        let _callback = surface.frame(&client.qh, callback.clone());
+        client.draw(window, None);
+        client.wait_logged(&callback, "Done");
+    }
+
+    // A new size: the stream's.
+    client.draw(window, Some((400, 250)));
+    consumer.wait_frame("at its new size", |f| f.width == 400 && f.height == 250);
+
+    // Closed: the share is over.
+    client.destroy(window);
+    pila.wait("the share over", |s| s["screencast"]["casts"] == 0);
+}
+
+/// In a window's stream the pointer's place is in the window's pixels, and
+/// it's hidden while the pointer is off the window.
+#[test]
+fn a_shared_windows_pointer_is_where_it_is_over_it() {
+    let (mut pila, bus, pipewire) = start_with("HEADLESS-1:1280x720");
+    let client = pila.client();
+    client.window("app").size(300, 200).color(BLUE).create();
+    pila.wait_focus("app");
+    let (x, y, ..) = rect(&pila.window("app")["geometry"]);
+    pila.move_to((x + 50) as f64, (y + 40) as f64);
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("w4", "org.example.Browser", 4, 2);
+    wait_picker(&mut pila);
+    pila.key("Return");
+    let (response, nodes) = started.answer();
+    assert_eq!(response, 0, "Start");
+    let consumer = pipewire.consume(nodes[0]);
+    let frame = consumer.wait_frame("with the pointer", |f| f.cursor.is_some());
+    let cursor = frame.cursor.unwrap();
+    assert_eq!(cursor.position, (50, 40), "in the window's pixels");
+    assert_ne!(cursor.bitmap, Some((1, 1, vec![0; 4])), "shown");
+
+    // Off the window: hidden (an empty image).
+    pila.move_to((x - 30) as f64, (y + 40) as f64);
+    consumer.wait_buffer("the pointer hidden", |f| {
+        f.cursor
+            .as_ref()
+            .is_some_and(|c| c.bitmap == Some((1, 1, vec![0; 4])))
+    });
+}
+
+/// A shared window's contents stay private while the screen is locked: its
+/// changes go out once it's unlocked.
+#[test]
+fn a_shared_window_sends_nothing_while_locked() {
+    let (mut pila, bus, pipewire) = start();
+    let client = pila.client();
+    let window = client.window("shared").size(200, 150).color(GREEN).create();
+    pila.wait_focus("shared");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("w5", "org.example.Browser", 1, 2);
+    wait_picker(&mut pila);
+    pila.key("Return");
+    let (response, nodes) = started.answer();
+    assert_eq!(response, 0, "Start");
+    let consumer = pipewire.consume(nodes[0]);
+    consumer.wait_frame("of the window", |f| f.rgba(100, 75) == rgba(GREEN));
+
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    locker.lock_surface(&lock, "HEADLESS-1", [255, 0, 0, 0]);
+    locker.wait_logged("lock", "Locked");
+    client.with_window(window, |w| w.color = BLUE);
+    client.draw(window, None);
+    pila.stays(
+        "nothing sent",
+        std::time::Duration::from_millis(300),
+        |_| true,
+    );
+    assert!(
+        consumer
+            .pending()
+            .iter()
+            .all(|f| f.data.is_empty() || f.rgba(100, 75) != rgba(BLUE)),
+        "the window's change sent while locked"
+    );
+    lock.unlock_and_destroy();
+    locker.flush();
+    pila.wait("unlocked", |s| s["locked"] == false);
+    consumer.wait_frame("with its change", |f| f.rgba(100, 75) == rgba(BLUE));
+}

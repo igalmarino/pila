@@ -11,7 +11,10 @@
 //! loop's back (`Captures::read_back`, `Pila::when_copied`), then queued.
 //!
 //! What's shared is picked by the user first (`share_picker.rs`): a request
-//! waits in `ScreenCasts::waiting` until then.
+//! waits in `ScreenCasts::waiting` until then. It's an output or a window
+//! (`capture::Target`, as screen captures have it): a window's stream is its
+//! surfaces alone, at its size, kept while it's covered, minimized or on
+//! another workspace.
 
 use std::{
     cell::{Cell, RefCell},
@@ -37,21 +40,22 @@ use pipewire::{
     stream::{StreamFlags, StreamListener, StreamRc, StreamState},
 };
 use smithay::{
-    backend::{allocator::Fourcc, renderer::damage::OutputDamageTracker},
-    output::{Output, WeakOutput},
+    backend::{
+        allocator::Fourcc,
+        renderer::{damage::OutputDamageTracker, element::AsRenderElements, gles::GlesRenderer},
+    },
     reexports::calloop::{
         channel::Event, generic::Generic, Interest, Mode, PostAction, RegistrationToken,
     },
-    utils::{Physical, Scale, Size, Transform},
+    utils::{Physical, Point, Rectangle, Scale, Size, Transform},
 };
 use tracing::{debug, info, warn};
 
 use crate::{
-    capture::{CopyError, ReadBack, Source},
+    capture::{CopyError, ReadBack, Source, Target},
     cursor::CursorPixels,
     portal::{self, CursorMode, Refused, Reply, Request},
     render::{self, PilaRenderElement},
-    scale::output_scale,
     screencast_buffers::{Allocator, Buffers, Kind, Memory},
     Pila,
 };
@@ -125,6 +129,8 @@ pub struct Share {
     pub cursor: CursorMode,
     /// Who asks (`portal::Request::Start`).
     pub app: Option<String>,
+    /// What it may share: the picker offers these.
+    pub sources: portal::Sources,
     pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,
 }
 
@@ -160,14 +166,16 @@ struct Cast {
     id: u64,
     /// The portal session, by its object path.
     session: String,
-    output: WeakOutput,
+    /// What's shared: an output or a window.
+    target: Target,
+    source_type: portal::SourceType,
     cursor: CursorMode,
     /// The cursor metadata last sent (`CursorMode::Metadata`): where, and
     /// which image.
     cursor_sent: Option<CursorFrame>,
     /// The stream's buffers, allocated by Pila (`screencast_buffers.rs`).
     memory: Rc<RefCell<Buffers>>,
-    /// What the stream was offered: the output's size and scale then.
+    /// What the stream was offered: the source's size and scale then.
     size: Size<i32, Physical>,
     scale: Scale<f64>,
     /// Dropped before `stream`.
@@ -184,7 +192,8 @@ struct Cast {
     /// Bumped when the stream's buffers change and when the cast ends: a
     /// copy in flight into one of the old ones is dropped.
     buffers: Rc<Cell<u64>>,
-    /// Ended by Pila (its output went away, an error): told to the app.
+    /// Ended by Pila (its output or window went away, an error): told to
+    /// the app.
     ended: bool,
 }
 
@@ -245,6 +254,7 @@ impl Pila {
             Request::Start {
                 session,
                 cursor,
+                sources,
                 app,
                 reply,
             } => {
@@ -256,6 +266,7 @@ impl Pila {
                     session,
                     cursor,
                     app,
+                    sources,
                     reply,
                 });
                 self.show_share_picker();
@@ -272,22 +283,50 @@ impl Pila {
         }
     }
 
-    /// Start `share`'s stream of `output`, picked by the user
-    /// (`share_picker.rs`), answered once its node has an id.
-    pub(crate) fn start_cast(&mut self, share: Share, output: Output) {
+    /// Start `share`'s stream of `target` (an output or a window), picked
+    /// by the user (`share_picker.rs`), answered once its node has an id.
+    pub(crate) fn start_cast(&mut self, share: Share, target: Target) {
         let Share {
             session,
             cursor,
             reply,
             ..
         } = share;
-        let (Some(geo), Some(mode)) = (self.space.output_geometry(&output), output.current_mode())
-        else {
+        let Some((size, scale)) = self.capture_geometry(&target, None) else {
             return reply.send(Err(Refused::Cancelled));
         };
-        let size = output.current_transform().transform_size(mode.size);
-        let scale = output_scale(&output);
-        let fps = fps_of(mode);
+        if size.w <= 0 || size.h <= 0 {
+            return reply.send(Err(Refused::Cancelled));
+        }
+        let (source_type, position, logical_size, name) = match &target {
+            Target::Output(output) => {
+                let Some((output, geo)) = output
+                    .upgrade()
+                    .and_then(|o| Some((self.space.output_geometry(&o)?, o)))
+                    .map(|(geo, o)| (o, geo))
+                else {
+                    return reply.send(Err(Refused::Cancelled));
+                };
+                let position = (geo.loc.x, geo.loc.y);
+                (
+                    portal::SourceType::Monitor,
+                    position,
+                    (geo.size.w, geo.size.h),
+                    output.name(),
+                )
+            }
+            Target::Toplevel(identifier) => {
+                let Some(window) = self.window_for_identifier(identifier) else {
+                    return reply.send(Err(Refused::Cancelled));
+                };
+                let geometry = window.geometry();
+                let size = (geometry.size.w, geometry.size.h);
+                let name = crate::foreign_toplevel::app_id(&window);
+                (portal::SourceType::Window, (0, 0), size, name)
+            }
+            Target::Gone => return reply.send(Err(Refused::Cancelled)),
+        };
+        let fps = self.cast_fps(&target);
         if let Err(err) = self.connect_pipewire() {
             warn!(err, "portal: can't connect to PipeWire");
             return reply.send(Err(Refused::Failed));
@@ -308,15 +347,17 @@ impl Pila {
         let (stream, listener) = stream;
         info!(
             session,
-            output = output.name(),
+            ?source_type,
+            source = name,
             ?size,
             fps,
-            "portal: sharing an output"
+            "portal: sharing"
         );
         self.screencast.casts.push(Cast {
             id,
             session,
-            output: output.downgrade(),
+            target,
+            source_type,
             cursor,
             cursor_sent: None,
             memory,
@@ -325,8 +366,8 @@ impl Pila {
             _listener: listener,
             stream,
             reply: Some(reply),
-            position: (geo.loc.x, geo.loc.y),
-            logical_size: (geo.size.w, geo.size.h),
+            position,
+            logical_size,
             streaming: false,
             tracker: None,
             buffers: Rc::new(Cell::new(0)),
@@ -334,6 +375,22 @@ impl Pila {
         });
         // Callbacks may have run while connecting.
         self.handle_cast_events();
+    }
+
+    /// The rate a stream of `target` is offered at: its output's refresh
+    /// (a window's: the output it's drawn for, else the first output's).
+    fn cast_fps(&self, target: &Target) -> u32 {
+        let output = match target {
+            Target::Output(output) => output.upgrade(),
+            Target::Toplevel(identifier) => self
+                .window_for_identifier(identifier)
+                .and_then(|window| self.window_output(&window)),
+            Target::Gone => None,
+        };
+        output
+            .or_else(|| self.space.outputs().next().cloned())
+            .and_then(|o| o.current_mode())
+            .map_or(60, fps_of)
     }
 
     /// Connect to PipeWire if not yet, its loop a source of the event loop.
@@ -434,6 +491,7 @@ impl Pila {
                         debug!(node_id, "portal: stream ready");
                         reply.send(Ok(vec![portal::Stream {
                             node_id,
+                            source_type: cast.source_type,
                             position: cast.position,
                             size: cast.logical_size,
                         }]));
@@ -531,30 +589,26 @@ impl Pila {
     }
 
     fn process_cast(&mut self, cast: &mut Cast, input: &mut Option<render::FrameInput>) {
-        let Some(output) = cast.output.upgrade() else {
-            cast.ended = true;
-            return;
-        };
-        let (Some(geo), Some(mode)) = (self.space.output_geometry(&output), output.current_mode())
+        let Some((size, scale)) =
+            self.capture_geometry(&cast.target, Some((cast.size, cast.scale)))
         else {
             cast.ended = true;
             return;
         };
-        let size = output.current_transform().transform_size(mode.size);
-        let scale = output_scale(&output);
         if size != cast.size {
-            // A new size (a mode, a turn): the stream's format is offered
-            // again at it, and frames wait for buffers of that size.
+            // A new size (a mode, a turn, a window resized): the stream's
+            // format is offered again at it, and frames wait for buffers of
+            // that size.
             info!(
                 session = cast.session,
                 ?size,
-                "portal: the shared output changed size; negotiating again"
+                "portal: what's shared changed size; negotiating again"
             );
             cast.size = size;
             cast.scale = scale;
             cast.tracker = None;
             cast.buffers.set(cast.buffers.get() + 1);
-            let fps = fps_of(mode);
+            let fps = self.cast_fps(&cast.target);
             cast.memory.borrow_mut().offered = ((size.w, size.h), fps);
             let offered = self
                 .screencast
@@ -576,14 +630,69 @@ impl Pila {
             cast.scale = scale;
             cast.tracker = None;
         }
-        if cast.memory.borrow().size != (size.w as u32, size.h as u32) {
+        if size.w <= 0 || size.h <= 0 || cast.memory.borrow().size != (size.w as u32, size.h as u32)
+        {
             // Still negotiating the new size.
             return;
         }
+        // What's shared: the output at its place, or the window, its
+        // geometry's top-left the buffer's (`capture::Target`, as screen
+        // captures draw it). A window's contents stay private while the
+        // screen is locked.
+        let (origin, output, window) = match &cast.target {
+            Target::Output(output) => {
+                let Some(output) = output.upgrade() else {
+                    cast.ended = true;
+                    return;
+                };
+                let Some(geo) = self.space.output_geometry(&output) else {
+                    cast.ended = true;
+                    return;
+                };
+                (geo.loc, Some((output.name(), geo)), None)
+            }
+            Target::Toplevel(identifier) => {
+                if self.is_locked() {
+                    return;
+                }
+                let Some(window) = self.window_for_identifier(identifier) else {
+                    cast.ended = true;
+                    return;
+                };
+                let origin = self.space.element_location(&window).unwrap_or_default();
+                (origin, None, Some(window))
+            }
+            Target::Gone => {
+                cast.ended = true;
+                return;
+            }
+        };
         let input = &*input.get_or_insert_with(|| self.frame_input());
-        let clear = render::clear_color(&input.scene);
-        let cursor_frame = (cast.cursor == CursorMode::Metadata)
-            .then(|| self.cursor_frame(input.pointer, geo.loc, scale));
+        // The pointer shows over an output's stream, and over a window's
+        // where it's over the window (and the window on the screen).
+        let pointer_over = match &window {
+            None => true,
+            Some(window) => self.space.element_location(window).is_some_and(|loc| {
+                Rectangle::new(loc, window.geometry().size)
+                    .to_f64()
+                    .contains(input.pointer)
+            }),
+        };
+        let clear = match window {
+            Some(_) => crate::capture::TRANSPARENT,
+            None => render::clear_color(&input.scene),
+        };
+        let cursor_frame = (cast.cursor == CursorMode::Metadata).then(|| {
+            let frame = self.cursor_frame(input.pointer, origin, scale);
+            if pointer_over {
+                frame
+            } else {
+                CursorFrame {
+                    image: None,
+                    ..frame
+                }
+            }
+        });
         let Pila {
             backend,
             blur,
@@ -599,18 +708,28 @@ impl Pila {
         };
         let renderer = &mut *renderer;
         let mut elements: Vec<PilaRenderElement> = Vec::new();
-        if cast.cursor == CursorMode::Embedded {
-            elements = render::pointer_elements(renderer, input, cursor_theme, geo.loc, scale);
+        if cast.cursor == CursorMode::Embedded && pointer_over {
+            elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);
         }
-        elements.extend(render::output_elements(
-            renderer,
-            blur,
-            &input.scene,
-            &output.name(),
-            geo,
-            geo.loc,
-            scale,
-        ));
+        match (&window, &output) {
+            (Some(window), _) => {
+                let loc: Point<i32, Physical> =
+                    (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
+                elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
+                    PilaRenderElement,
+                >(window, renderer, loc, scale, 1.0));
+            }
+            (None, Some((name, geo))) => elements.extend(render::output_elements(
+                renderer,
+                blur,
+                &input.scene,
+                name,
+                *geo,
+                geo.loc,
+                scale,
+            )),
+            (None, None) => return,
+        }
 
         let tracker = cast
             .tracker
@@ -714,6 +833,12 @@ impl Pila {
             // SAFETY: dequeued from this stream, whose buffers are the same.
             unsafe { stream.queue_raw_buffer(buffer) };
         };
+        // A window off the screen (or covered) draws for the share: frame
+        // callbacks now, one window frame per frame sent
+        // (`Pila::send_capture_frames`, as screen captures do).
+        if let Some(window) = &window {
+            self.send_capture_frames(window);
+        }
         match copied {
             Ok(copied) => {
                 let wanted = cast.buffers.clone();

@@ -1,9 +1,11 @@
 //! The screen-share picker drawn by Pila itself: when an app asks the portal
-//! Pila serves to share a screen (`portal.rs`), a panel in the middle of the
-//! output under the pointer names the app and shows every output as a live
-//! preview; the user picks one (a click, or the arrows) and shares it (Share,
-//! Enter), or cancels (Cancel, Escape). Nothing is shared without it: this is
-//! the consent.
+//! Pila serves to share a screen or a window (`portal.rs`), a panel in the
+//! middle of the output under the pointer names the app and shows what it may
+//! share as live previews: every output, every window (most recently used
+//! first, minimized ones and those on other workspaces too), in sections when
+//! it may share both; the user picks one (a click, or the arrows) and shares
+//! it (Share, Enter), or cancels (Cancel, Escape). Nothing is shared without
+//! it: this is the consent.
 //!
 //! While it's shown it's modal: every key goes to it (`input.rs`), a click
 //! does nothing but on its controls, and every output is dimmed under it.
@@ -16,7 +18,9 @@
 //! drawn small into a texture of its own with its own damage tracker
 //! (`render::OffscreenWindow`), from `after_frames` like captures
 //! (`Pila::update_share_previews`): an output that didn't change costs no
-//! drawing, and one that did redraws the picker's output.
+//! drawing, and one that did redraws the picker's output. A window's preview
+//! is the switcher's (`switcher_view::preview`): drawn as the panel is, the
+//! window drawing for the panel's output while it's shown.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -33,6 +37,8 @@ use smithay::{
     utils::{Logical, Physical, Point, Rectangle, Scale, Size},
 };
 use tracing::{info, warn};
+
+use smithay::{desktop::Window, utils::IsAlive};
 
 use crate::{
     config::Colors,
@@ -56,6 +62,19 @@ const LABEL_HEIGHT: i32 = 20;
 const TILE_GAP: i32 = 64;
 const ROW_GAP: i32 = 24;
 const COLUMNS: usize = 3;
+/// With windows too, outputs' tiles are smaller, closer together.
+const SMALL_TILE: (i32, i32) = (240, 135);
+const SMALL_GAP: i32 = 40;
+/// Windows' tiles: up to `WINDOW_COLUMNS` a row, `WINDOW_ROWS` rows shown
+/// (the selected one's kept in view).
+pub const WINDOW_TILE: (i32, i32) = (176, 100);
+const WINDOW_GAP: i32 = 20;
+const WINDOW_COLUMNS: usize = 5;
+const WINDOW_ROWS: usize = 2;
+/// A section's heading (with both kinds): its line and the room under it,
+/// and the room above the second one.
+const SECTION_HEADING: i32 = 22;
+const SECTION_GAP: i32 = 28;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
 /// The buttons' corners: the cheatsheet's keys'.
@@ -87,9 +106,41 @@ struct Shown {
     share: Share,
     /// The output the panel is on, by name.
     output: String,
-    /// The outputs to pick from, by name, left to right.
-    sources: Vec<String>,
+    /// What there is to pick: the outputs, left to right, then the windows.
+    sources: Vec<Source>,
     selected: usize,
+}
+
+/// Something the picker offers.
+#[derive(Clone, PartialEq)]
+enum Source {
+    /// An output, by name.
+    Output(String),
+    Window(Window),
+}
+
+impl Shown {
+    /// How many outputs, then windows, it offers.
+    fn counts(&self) -> (usize, usize) {
+        let outputs = self
+            .sources
+            .iter()
+            .filter(|s| matches!(s, Source::Output(_)))
+            .count();
+        (outputs, self.sources.len() - outputs)
+    }
+
+    /// The first row of windows shown: from the top, until the selected
+    /// window's would fall off.
+    fn first_window_row(&self) -> usize {
+        let (outputs, windows) = self.counts();
+        let selected = self.selected.checked_sub(outputs);
+        crate::switcher_view::first_shown(
+            windows.div_ceil(WINDOW_COLUMNS),
+            WINDOW_ROWS,
+            selected.map(|i| i / WINDOW_COLUMNS),
+        )
+    }
 }
 
 /// Kept between frames while it's shown: an unchanged panel adds no damage.
@@ -105,48 +156,135 @@ struct Buffers {
     /// the background drawn behind it (kept: a new one would be damage).
     previews: HashMap<String, OffscreenWindow>,
     backgrounds: HashMap<String, SolidColorBuffer>,
+    /// Each window's preview shown (`switcher_view::preview`).
+    windows: Vec<(Window, OffscreenWindow)>,
 }
 
 /// Where the panel and its parts are, global.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     pub panel: Rectangle<i32, Logical>,
-    /// Each source's tile: the box its preview fits in.
+    /// The tiles shown (the box a preview fits in), and the source each
+    /// one is: the outputs', then the windows' rows shown.
     pub tiles: Vec<Rectangle<i32, Logical>>,
+    pub shown: Vec<usize>,
+    /// The sections' headings and where they go, from the panel's top
+    /// (none with one kind of source).
+    pub headings: Vec<(&'static str, i32)>,
     pub share: Rectangle<i32, Logical>,
     pub cancel: Rectangle<i32, Logical>,
     /// The key hints, left of the buttons.
     pub hints: Rectangle<i32, Logical>,
 }
 
-/// The panel for `count` sources, in the middle of `area`: up to `COLUMNS`
-/// tiles a row, each row centered.
-pub fn layout(area: Rectangle<i32, Logical>, count: usize) -> Layout {
-    let count = count.max(1);
-    let columns = count.min(COLUMNS) as i32;
-    let rows = count.div_ceil(COLUMNS) as i32;
-    let tile_row = TILE.1 + LABEL_GAP + LABEL_HEIGHT;
-    let width = (2 * PADDING + columns * TILE.0 + (columns - 1) * TILE_GAP).max(MIN_WIDTH);
-    let height = TILES_AT
-        + rows * tile_row
-        + (rows - 1) * ROW_GAP
-        + crate::panel::FOOTER_GAP
-        + BUTTON_HEIGHT
-        + PADDING;
+/// The panel for `outputs` outputs and `windows` windows (rows of them from
+/// `first_row` shown), in the middle of `area`. With one kind, its rows are
+/// centered, the outputs' three to a row as large tiles; with both, under
+/// their headings from the left, the outputs' smaller.
+pub fn layout(
+    area: Rectangle<i32, Logical>,
+    outputs: usize,
+    windows: usize,
+    first_row: usize,
+) -> Layout {
+    let both = outputs > 0 && windows > 0;
+    let outputs_shown = if outputs == 0 && windows == 0 {
+        1
+    } else {
+        outputs
+    };
+    let (tile, gap) = if both {
+        (SMALL_TILE, SMALL_GAP)
+    } else {
+        (TILE, TILE_GAP)
+    };
+    let row_width =
+        |n: usize, tile: (i32, i32), gap: i32| n as i32 * tile.0 + (n as i32 - 1).max(0) * gap;
+    let window_columns = windows.min(WINDOW_COLUMNS);
+    let width = (2 * PADDING
+        + row_width(outputs_shown.min(COLUMNS), tile, gap).max(row_width(
+            window_columns,
+            WINDOW_TILE,
+            WINDOW_GAP,
+        )))
+    .max(MIN_WIDTH);
+    let mut tiles = Vec::new();
+    let mut shown = Vec::new();
+    let mut headings = Vec::new();
+    // `count` tiles of `tile` in rows of `columns`, from `y` (local): under
+    // a heading from the left; else each row centered, or (`grid`) the rows
+    // as a grid in the middle; the bottom of the last row.
+    let mut place = |count: usize,
+                     columns: usize,
+                     tile: (i32, i32),
+                     gap: i32,
+                     y: i32,
+                     grid: bool,
+                     sources: &mut dyn Iterator<Item = usize>| {
+        let rows = count.div_ceil(columns).max(1) as i32;
+        let tile_row = tile.1 + LABEL_GAP + LABEL_HEIGHT;
+        for i in 0..count {
+            let (row, column) = ((i / columns) as i32, (i % columns) as i32);
+            let in_row = if grid {
+                count.min(columns)
+            } else {
+                (count - row as usize * columns).min(columns)
+            };
+            let x = if both {
+                PADDING
+            } else {
+                (width - row_width(in_row, tile, gap)) / 2
+            } + column * (tile.0 + gap);
+            let y = y + row * (tile_row + ROW_GAP);
+            tiles.push(Rectangle::new(Point::from((x, y)), Size::from(tile)));
+            shown.extend(sources.next());
+        }
+        y + rows * tile_row + (rows - 1) * ROW_GAP
+    };
+    let mut y = TILES_AT;
+    if outputs > 0 || windows == 0 {
+        if both {
+            headings.push(("Screens", y));
+            y += SECTION_HEADING;
+        }
+        y = place(
+            outputs_shown,
+            COLUMNS,
+            tile,
+            gap,
+            y,
+            false,
+            &mut (0..outputs),
+        );
+    }
+    if windows > 0 {
+        if both {
+            y += SECTION_GAP;
+            headings.push(("Windows", y));
+            y += SECTION_HEADING;
+        }
+        let rows = windows.div_ceil(WINDOW_COLUMNS);
+        let first_row = first_row.min(rows.saturating_sub(WINDOW_ROWS));
+        let from = first_row * WINDOW_COLUMNS;
+        let count = (windows - from).min(WINDOW_COLUMNS * WINDOW_ROWS);
+        y = place(
+            count,
+            WINDOW_COLUMNS,
+            WINDOW_TILE,
+            WINDOW_GAP,
+            y,
+            true,
+            &mut (outputs + from..outputs + from + count),
+        );
+    }
+    let height = y + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
     let panel = Rectangle::new(
         area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
         Size::from((width, height)),
     );
-    let tiles = (0..count)
-        .map(|i| {
-            let (row, column) = ((i / COLUMNS) as i32, (i % COLUMNS) as i32);
-            let in_row = (count - row as usize * COLUMNS).min(COLUMNS) as i32;
-            let row_width = in_row * TILE.0 + (in_row - 1) * TILE_GAP;
-            let x = (width - row_width) / 2 + column * (TILE.0 + TILE_GAP);
-            let y = TILES_AT + row * (tile_row + ROW_GAP);
-            Rectangle::new(panel.loc + Point::from((x, y)), Size::from(TILE))
-        })
-        .collect();
+    for tile in &mut tiles {
+        tile.loc += panel.loc;
+    }
     let buttons_y = height - PADDING - BUTTON_HEIGHT;
     let share = Rectangle::new(
         panel.loc + Point::from((width - PADDING - SHARE_WIDTH, buttons_y)),
@@ -163,6 +301,8 @@ pub fn layout(area: Rectangle<i32, Logical>, count: usize) -> Layout {
     Layout {
         panel,
         tiles,
+        shown,
+        headings,
         share,
         cancel,
         hints,
@@ -222,13 +362,22 @@ pub struct ScenePicker {
     /// The output the panel is on, by name.
     pub output: String,
     pub layout: Layout,
-    /// The sources' previews: output name and where it shows.
+    /// The outputs' previews: output name and where it shows.
     pub previews: Vec<(String, Rectangle<i32, Logical>)>,
+    /// The windows shown and the tile each one's preview fits in.
+    pub windows: Vec<(Window, Rectangle<i32, Logical>)>,
     pub selected: usize,
     /// The windows' corners (`corner-radius`, `rounded-corners`); `None`:
     /// square.
     pub rounding: Option<(f64, crate::rounded::Corners)>,
     buffers: Rc<RefCell<Buffers>>,
+}
+
+impl ScenePicker {
+    /// The windows it shows: they draw for its output while it's shown.
+    pub fn windows(&self) -> impl Iterator<Item = &Window> {
+        self.windows.iter().map(|(window, _)| window)
+    }
 }
 
 impl Pila {
@@ -263,6 +412,28 @@ impl Pila {
             .position(|(geo, _)| geo.to_f64().contains(pointer))
             .unwrap_or(0);
         let output = outputs[under].1.clone();
+        // What it may share: the outputs, then the windows that can be
+        // (a foreign-toplevel identifier, a size), most recently used first.
+        let mut sources: Vec<Source> = Vec::new();
+        if share.sources.monitors {
+            sources.extend(outputs.iter().map(|(_, name)| Source::Output(name.clone())));
+        }
+        if share.sources.windows {
+            let windows = self.windows.focus_history.iter().filter(|window| {
+                window.alive()
+                    && crate::foreign_toplevel::identifier(window).is_some()
+                    && !window.geometry().size.is_empty()
+            });
+            sources.extend(windows.cloned().map(Source::Window));
+        }
+        if sources.is_empty() {
+            info!("portal: nothing the app may share");
+            share.reply.send(Err(Refused::Cancelled));
+            return self.show_share_picker();
+        }
+        // The output under the pointer selected first, else the window used
+        // last.
+        let selected = if share.sources.monitors { under } else { 0 };
         // Modal, in front of everything: nothing else of Pila's stays open.
         self.end_switch();
         self.hide_shortcuts();
@@ -270,13 +441,13 @@ impl Pila {
         self.close_window_menu();
         info!(
             app = share.app.as_deref().unwrap_or("?"),
-            "portal: asking which screen to share"
+            "portal: asking what to share"
         );
         self.share_picker.shown = Some(Shown {
             share,
             output,
-            sources: outputs.into_iter().map(|(_, name)| name).collect(),
-            selected: under,
+            sources,
+            selected,
         });
         *self.share_picker.buffers.borrow_mut() = Buffers::default();
         self.share_picker.pending = None;
@@ -326,17 +497,24 @@ impl Pila {
         }
     }
 
-    /// Share the selected output (Share, Enter).
+    /// Share what's selected (Share, Enter).
     fn pick_share(&mut self) {
         let Some(shown) = self.take_share_picker() else {
             return;
         };
-        let output = shown
-            .sources
-            .get(shown.selected)
-            .and_then(|name| self.space.outputs().find(|o| &o.name() == name).cloned());
-        match output {
-            Some(output) => self.start_cast(shown.share, output),
+        let target = match shown.sources.get(shown.selected) {
+            Some(Source::Output(name)) => self
+                .space
+                .outputs()
+                .find(|o| &o.name() == name)
+                .map(|o| crate::capture::Target::Output(o.downgrade())),
+            Some(Source::Window(window)) => crate::foreign_toplevel::identifier(window)
+                .filter(|_| window.alive())
+                .map(crate::capture::Target::Toplevel),
+            None => None,
+        };
+        match target {
+            Some(target) => self.start_cast(shown.share, target),
             None => shown.share.reply.send(Err(Refused::Cancelled)),
         }
         self.show_share_picker();
@@ -350,6 +528,8 @@ impl Pila {
             shown.selected = index;
             let output = shown.output.clone();
             self.queue_redraw_named_output(&output);
+            // The windows' rows may scroll: other labels.
+            self.draw_share_picker_text();
         }
     }
 
@@ -382,7 +562,9 @@ impl Pila {
         } else if let Some(index) = layout
             .tiles
             .iter()
-            .position(|tile| selected_rect(*tile).to_f64().contains(location))
+            .zip(&layout.shown)
+            .find(|(tile, _)| selected_rect(**tile).to_f64().contains(location))
+            .map(|(_, index)| *index)
         {
             self.select_share(index);
         }
@@ -404,25 +586,47 @@ impl Pila {
             .find(|o| o.name() == shown.output)
             .or_else(|| self.space.outputs().next())?;
         let area = self.space.output_geometry(output)?;
-        let layout = layout(area, shown.sources.len());
-        let previews = shown
-            .sources
-            .iter()
-            .zip(&layout.tiles)
-            .filter_map(|(name, tile)| {
-                let source = self.space.outputs().find(|o| &o.name() == name)?;
-                let geo = self.space.output_geometry(source)?;
-                Some((name.clone(), preview_rect(*tile, geo.size)))
-            })
-            .collect();
+        let (outputs, windows) = shown.counts();
+        let layout = layout(area, outputs, windows, shown.first_window_row());
+        let mut previews = Vec::new();
+        let mut shown_windows = Vec::new();
+        for (tile, index) in layout.tiles.iter().zip(&layout.shown) {
+            match shown.sources.get(*index) {
+                Some(Source::Output(name)) => {
+                    let Some(source) = self.space.outputs().find(|o| &o.name() == name) else {
+                        continue;
+                    };
+                    let Some(geo) = self.space.output_geometry(source) else {
+                        continue;
+                    };
+                    previews.push((name.clone(), preview_rect(*tile, geo.size)));
+                }
+                Some(Source::Window(window)) if window.alive() => {
+                    shown_windows.push((window.clone(), *tile));
+                }
+                _ => {}
+            }
+        }
         Some(ScenePicker {
             output: output.name(),
             layout,
             previews,
+            windows: shown_windows,
             selected: shown.selected,
             rounding: crate::panel::rounding(&self.config),
             buffers: self.share_picker.buffers.clone(),
         })
+    }
+
+    /// A window committed: if the picker shows it, its output is redrawn,
+    /// so the preview stays live.
+    pub(crate) fn share_picker_committed(&mut self, window: &Window) {
+        let Some(view) = self.scene_share_picker() else {
+            return;
+        };
+        if view.windows().any(|w| w == window) {
+            self.queue_redraw_named_output(&view.output);
+        }
     }
 
     /// Draw the previews whose outputs changed, from `after_frames` (`input`
@@ -529,24 +733,35 @@ impl Pila {
             .find(|o| o.name() == view.output)
             .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
             .unwrap_or(1);
-        let labels: Vec<String> = shown
-            .sources
+        // The labels of the tiles shown: an output's name and size, a
+        // window's title (its app id without one).
+        let labels: Vec<String> = view
+            .layout
+            .shown
             .iter()
-            .map(|name| {
-                let size = self
-                    .space
-                    .outputs()
-                    .find(|o| &o.name() == name)
-                    .and_then(|o| o.current_mode())
-                    .map(|mode| format!("  {} × {}", mode.size.w, mode.size.h))
-                    .unwrap_or_default();
-                format!("{name}{size}")
+            .map(|index| match shown.sources.get(*index) {
+                Some(Source::Output(name)) => {
+                    let size = self
+                        .space
+                        .outputs()
+                        .find(|o| &o.name() == name)
+                        .and_then(|o| o.current_mode())
+                        .map(|mode| format!("  {} × {}", mode.size.w, mode.size.h))
+                        .unwrap_or_default();
+                    format!("{name}{size}")
+                }
+                Some(Source::Window(window)) => crate::switcher_view::caption(
+                    &crate::foreign_toplevel::title(window),
+                    &crate::foreign_toplevel::app_id(window),
+                ),
+                None => String::new(),
             })
             .collect();
         let key = TextKey {
             items: items(
                 &view.layout,
                 shown.share.app.as_deref(),
+                shown.share.sources,
                 &labels,
                 &self.config.colors,
             ),
@@ -610,10 +825,21 @@ impl Pila {
             "shown": true,
             "app": shown.share.app,
             "output": view.output,
-            "sources": shown.sources,
+            // Outputs by name, windows by app id.
+            "sources": shown.sources.iter().map(|source| match source {
+                Source::Output(name) => name.clone(),
+                Source::Window(window) => crate::foreign_toplevel::app_id(window),
+            }).collect::<Vec<_>>(),
+            "kinds": shown.sources.iter().map(|source| match source {
+                Source::Output(_) => "output",
+                Source::Window(_) => "window",
+            }).collect::<Vec<_>>(),
             "selected": view.selected,
             "panel": rect(view.layout.panel),
             "tiles": view.layout.tiles.iter().map(|t| rect(*t)).collect::<Vec<_>>(),
+            "tile_sources": view.layout.shown,
+            "headings": view.layout.headings.iter().map(|(text, _)| *text).collect::<Vec<_>>(),
+            "window_previews": view.buffers.borrow().windows.len(),
             "share": rect(view.layout.share),
             "cancel": rect(view.layout.cancel),
             "text": view.buffers.borrow().text.is_some(),
@@ -624,20 +850,37 @@ impl Pila {
 }
 
 /// The panel's texts, at places from its top-left.
-fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors) -> Vec<Item> {
+fn items(
+    layout: &Layout,
+    app: Option<&str>,
+    sources: crate::portal::Sources,
+    labels: &[String],
+    colors: &Colors,
+) -> Vec<Item> {
     use crate::panel::{BODY, NOTE};
     let panel = layout.panel;
     let width = panel.size.w - 2 * PADDING;
     let local = |r: Rectangle<i32, Logical>| (r.loc.x - panel.loc.x, r.loc.y - panel.loc.y);
-    let (text, dimmed, _) = crate::panel::text_colors(colors);
+    let (text, dimmed, accent) = crate::panel::text_colors(colors);
+    let what = match (sources.monitors, sources.windows) {
+        (true, false) => "a screen",
+        (false, true) => "a window",
+        _ => "a screen or a window",
+    };
     let title = match app {
-        Some(app) => format!("Share a screen with {app}"),
-        None => "An app asks to share a screen".to_string(),
+        Some(app) if sources.monitors && sources.windows => format!("Share with {app}"),
+        Some(app) => format!("Share {what} with {app}"),
+        None => format!("An app asks to share {what}"),
+    };
+    let note = if sources.windows {
+        "It will see everything in what you pick until it stops sharing."
+    } else {
+        "It will see everything the screen shows until it stops sharing."
     };
     let mut items = vec![
         crate::panel::title(&title, panel.size.w, colors),
         Item::Text {
-            text: "It will see everything the screen shows until it stops sharing.".into(),
+            text: note.into(),
             at: (PADDING, NOTE_AT),
             w: width,
             h: NOTE_HEIGHT,
@@ -646,6 +889,17 @@ fn items(layout: &Layout, app: Option<&str>, labels: &[String], colors: &Colors)
             color: dimmed,
         },
     ];
+    for (heading, y) in &layout.headings {
+        items.push(Item::Text {
+            text: heading.to_uppercase(),
+            at: (PADDING, *y),
+            w: width,
+            h: 16,
+            font: crate::panel::SECTION,
+            align: Align::Left,
+            color: accent,
+        });
+    }
     for (tile, label) in layout.tiles.iter().zip(labels) {
         let (x, y) = local(*tile);
         items.push(Item::Text {
@@ -737,6 +991,24 @@ pub fn elements(
         }
     }
 
+    // The windows' previews, drawn now, each fitted in its tile; those no
+    // longer shown go.
+    buffers
+        .windows
+        .retain(|(window, _)| view.windows.iter().any(|(w, _)| w == window));
+    for (window, tile) in &view.windows {
+        if let Some(element) = crate::switcher_view::preview(
+            renderer,
+            &mut buffers.windows,
+            window,
+            *tile,
+            origin,
+            scale,
+        ) {
+            elements.push(element);
+        }
+    }
+
     let accent = crate::panel::accent(colors);
     let hover = crate::panel::rgb(colors.hover);
     let key_fill = crate::panel::opaque(colors.bar);
@@ -798,7 +1070,17 @@ mod tests {
         let colors = crate::config::Config::parse("", &|_| None, crate::config::ModKey::Super)
             .unwrap()
             .colors;
-        let picker = items(&layout(area(), 1), Some("App"), &["A".into()], &colors);
+        let monitors = crate::portal::Sources {
+            monitors: true,
+            windows: false,
+        };
+        let picker = items(
+            &layout(area(), 1, 0, 0),
+            Some("App"),
+            monitors,
+            &["A".into()],
+            &colors,
+        );
         let Some(Item::Text { at, font, .. }) = picker.first() else {
             panic!("no title first: {picker:?}");
         };
@@ -818,7 +1100,7 @@ mod tests {
     #[test]
     fn the_panel_is_centered_with_its_tiles_and_buttons_inside() {
         for count in 1..=5 {
-            let layout = layout(area(), count);
+            let layout = layout(area(), count, 0, 0);
             assert_eq!(layout.tiles.len(), count);
             let panel = layout.panel;
             assert_eq!(panel.loc.x * 2 + panel.size.w, 1920, "centered");
@@ -838,11 +1120,60 @@ mod tests {
             );
         }
         // Three to a row, then another row.
-        let four = layout(area(), 4);
+        let four = layout(area(), 4, 0, 0);
         assert_eq!(
             four.tiles[3].loc.y,
             four.tiles[0].loc.y + TILE.1 + LABEL_GAP + LABEL_HEIGHT + ROW_GAP
         );
+    }
+
+    /// With windows too, the outputs and the windows are in sections, at
+    /// most two rows of windows shown, scrolled to the selected one's; the
+    /// panel fits a 1280x800 logical monitor (1920x1200 at 1.5).
+    #[test]
+    fn outputs_and_windows_are_in_sections() {
+        let small = Rectangle::new((0, 0).into(), (1280, 800).into());
+        let layout = layout(small, 2, 12, 0);
+        assert_eq!(
+            layout.headings.iter().map(|(h, _)| *h).collect::<Vec<_>>(),
+            ["Screens", "Windows"]
+        );
+        assert_eq!(layout.tiles.len(), 2 + 10, "two rows of five windows");
+        assert_eq!(layout.shown, (0..12).collect::<Vec<_>>());
+        let panel = layout.panel;
+        assert!(small.contains_rect(panel), "{panel:?} on 1280x800");
+        for tile in &layout.tiles {
+            assert!(
+                panel.contains_rect(selected_rect(*tile)),
+                "{tile:?} in {panel:?}"
+            );
+            assert!(!tile.overlaps(layout.share) && !tile.overlaps(layout.hints));
+        }
+        // The windows under their heading, below the outputs.
+        let (_, windows_at) = layout.headings[1];
+        assert!(layout.tiles[2].loc.y - panel.loc.y > windows_at);
+        assert!(layout.tiles[2].loc.y > layout.tiles[0].loc.y + SMALL_TILE.1);
+        // Scrolled: the second and third rows of windows.
+        let scrolled = super::layout(small, 2, 12, 1);
+        assert_eq!(scrolled.shown, [0, 1, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(scrolled.shown.len(), scrolled.tiles.len());
+        // Past the end: the last two rows.
+        assert_eq!(super::layout(small, 2, 12, 5).shown, scrolled.shown);
+    }
+
+    /// Windows alone: no headings, their rows a grid in the middle.
+    #[test]
+    fn windows_alone_have_no_headings() {
+        let layout = layout(area(), 0, 3, 0);
+        assert!(layout.headings.is_empty());
+        assert_eq!(layout.shown, [0, 1, 2]);
+        let panel = layout.panel;
+        let left = layout.tiles[0].loc.x - panel.loc.x;
+        let right = panel.loc.x + panel.size.w - (layout.tiles[2].loc.x + WINDOW_TILE.0);
+        assert!((left - right).abs() <= 1, "centered: {left} and {right}");
+        // A second row starts under the first's first tile.
+        let seven = super::layout(area(), 0, 7, 0);
+        assert_eq!(seven.tiles[5].loc.x, seven.tiles[0].loc.x);
     }
 
     #[test]
