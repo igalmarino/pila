@@ -22,8 +22,11 @@ A feature users ask for goes here first.
 
 - **More of the desktop portal inside Pila** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
   screen sharing is Pila's own since 0.9.0; windows, apps' screenshots, the color picker and apps'
-  global shortcuts too since 0.9.1. Next, if apps ask for them: a region of the screen to share
-  or take, and the RemoteDesktop portal.
+  global shortcuts too since 0.9.1. Next, if apps ask for it: the RemoteDesktop portal.
+- **Share a region of the screen** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
+  the share panel offers monitors and windows; a third choice would draw a rectangle on the screen
+  (as Kooha's own selection does) and stream that part of the output alone, following what it
+  shows, as a window's share does.
 
 ## Waiting for hardware and testers
 
