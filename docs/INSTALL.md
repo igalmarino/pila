@@ -176,8 +176,9 @@ PREFIX=/usr scripts/install    # for display managers that only read /usr/share
 
 This installs the binary, a session wrapper, `pila-report` and `pila-check` in `$PREFIX/bin`
 (`pila-check`'s helpers in `$PREFIX/share/pila/check`), the man page,
-a `pila` entry in `$PREFIX/share/wayland-sessions` for the display manager, and the portal
-configs for screen sharing in `$SYSCONFDIR/xdg`. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
+a `pila` entry in `$PREFIX/share/wayland-sessions` for the display manager, and Pila's desktop
+portal (`pila.portal` in `$PREFIX/share/xdg-desktop-portal/portals`, `pila-portals.conf` in
+`$SYSCONFDIR/xdg`) for screen sharing, apps' screenshots and their global shortcuts. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
 to `/etc`; `DESTDIR` stages the files for a distro package (see `scripts/install-paths`).
 GDM reads `/usr/local`; LightDM and some SDDM setups need `PREFIX=/usr`.
 
@@ -257,9 +258,9 @@ install them with it unless recommends are off; on Arch they're optional depende
 By hand, without `pila-desktop` (the portals and `xdg-utils` included):
 
 ```bash
-sudo pacman -S kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard   # Arch
-sudo apt install kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard # Debian, Ubuntu
-sudo dnf install kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard  # Fedora
+sudo pacman -S swaybg kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard   # Arch
+sudo apt install swaybg kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard # Debian, Ubuntu
+sudo dnf install swaybg kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard  # Fedora
 ```
 
 The rest of a desktop (notifications, a lock screen, another bar or launcher)

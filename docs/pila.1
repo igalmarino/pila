@@ -24,6 +24,9 @@ pila \- a stacking Wayland compositor
 .br
 .B pila\-report
 .RI [ file ]
+.br
+.B pila\-check
+.RB [ \-\-nested ]
 .SH DESCRIPTION
 .B pila
 is a stacking Wayland compositor: overlapping windows with title bars, snapping, workspaces
@@ -57,6 +60,17 @@ valid, the end of the log) into
 without the user name, host name and home directory.
 It sends nothing anywhere.
 .PP
+.B pila\-check
+tests Pila on this computer's hardware: run from a TTY while no graphical session is shown, it
+starts Pila for about a minute with scripted scenarios (windows, workspaces, captures, blur,
+fullscreen) and prints PASS or FAIL for each check, with frame times and each monitor's latency;
+its log is
+.IR ~/.local/state/pila/pila\-tty.log .
+.B \-\-nested
+runs it in a window of the current session instead;
+.B \-\-help
+lists the rest.
+.PP
 The user manual,
 .IR MANUAL.md ,
 describes how to use and set up Pila; Pila's packages install it with the documentation
@@ -70,7 +84,7 @@ Run the shell command
 .I CMD
 at startup, instead of the configuration's
 .B autostart
-(which defaults to waybar, mako and swayidle).
+(which defaults to swaybg, waybar, mako and swayidle).
 .TP
 .BR \-\-config " " \fIFILE\fR
 Read the configuration from
@@ -387,6 +401,14 @@ A crash is logged as "pila crashed", with where it happened.
 .IR ~/.local/state/pila/sessions.json " (or " $XDG_STATE_HOME/pila/sessions.json )
 Where windows were, for apps that ask to get them back (xdg\-session\-management).
 A nested Pila, or a second one started next to a session, keeps that in memory only.
+.TP
+.IR ~/.local/state/pila/app\-shortcuts.json " (or " $XDG_STATE_HOME/pila/app\-shortcuts.json )
+The keys confirmed for each app's global shortcuts (the desktop portal's GlobalShortcuts), so
+Pila doesn't ask again.
+.TP
+.I $XDG_RUNTIME_DIR/pila\-screenshots/
+The screenshots apps asked the desktop portal for, handed to them from here; the last ten are
+kept.
 .TP
 .I $XDG_RUNTIME_DIR/pila\-WAYLAND_DISPLAY.sock
 The socket of

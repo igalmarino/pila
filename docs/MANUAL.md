@@ -48,8 +48,8 @@ This manual says how to use Pila and set it up. Every configuration option is de
   your system changes, so it's a safe way to try a config. Nested, the Mod key is Alt (the
   desktop around it keeps Super), and the mouse, touchpad and monitors belong to that desktop.
 
-At startup Pila runs the programs in `autostart`, by default the bar `waybar`; no terminal
-opens by itself: Mod+Return opens one. The first time, when it writes your configuration file
+At startup Pila runs the programs in `autostart`, by default the wallpaper, the bar `waybar`, the
+notifications and the lock on idle; no terminal opens by itself: Mod+Return opens one. The first time, when it writes your configuration file
 (below), Pila welcomes you with the few keys to get going (a terminal, the launcher, switching and
 closing windows, quitting), as they're bound; any key or click hides it (a binding still runs:
 Mod+Return hides it and opens the terminal). **Mod+Shift+/** (Mod+?) shows all the shortcuts at
@@ -519,8 +519,8 @@ The environment variables `PILA_MOD`, `PILA_TERMINAL` and `PILA_LAUNCHER` overri
 ## Building your desktop
 
 Pila starts the programs listed in `autostart` once it's ready (X11 apps too: the first starts
-Xwayland); by default the bar `waybar`, the notification daemon `mako` and `swayidle`, and no
-terminal. `autostart = []` starts nothing. The defaults are skipped, with only a line in the log,
+Xwayland); by default the wallpaper `swaybg`, the bar `waybar`, the notification daemon `mako`
+and `swayidle`, and no terminal. `autostart = []` starts nothing. The defaults are skipped, with only a line in the log,
 where they aren't installed: Pila without them is a bare compositor, and the package
 `pila-desktop` brings them all (see [INSTALL.md](https://github.com/igalmarino/pila/blob/main/docs/INSTALL.md#packages-for-a-full-session)). A
 command you wrote yourself whose program isn't installed says so in a notification.
