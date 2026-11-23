@@ -1145,7 +1145,10 @@ Key flows and invariants:
   `cursor::NamedCursor::image`, a client's from its shm buffer) only when it changed. A buffer
   that only moves the pointer goes out with no picture (`chunk.size` 0): consumers keep the last
   frame. The consumer asks for the metadata too: PipeWire gives a buffer the metas both ends ask
-  for. Pila allocates the buffers (`screencast_buffers.rs`, `ALLOC_BUFFERS`): it offers a
+  for. Every buffer's `SPA_META_Header` (GStreamer's pipewiresrc asks for one) carries when it
+  was made (`pts`, `CLOCK_MONOTONIC`, Pila's clock) and its sequence number (`write_header`):
+  without it pipewiresrc times frames by the graph's time, which a driver stream doesn't move, and
+  GStreamer recorders (Kooha) got every frame at one time, a recording 0 seconds long. Pila allocates the buffers (`screencast_buffers.rs`, `ALLOC_BUFFERS`): it offers a
   format with the modifiers its renderer draws into (`DmabufTarget::modifiers`, choices left
   to the app: `DONT_FIXATE`) and one without (shared memory); a format that comes back with a
   choice of modifiers, even of one, isn't set until Pila fixes one (a test buffer from GBM on

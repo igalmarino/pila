@@ -122,6 +122,58 @@ fn a_shared_output_streams_what_it_shows_and_its_changes() {
     consumer.wait_frame("with the window's new color", |f| f.rgba(x, y) == expected);
 }
 
+/// Now on `CLOCK_MONOTONIC`, in nanoseconds.
+fn monotonic_now() -> i64 {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid timespec to write into.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    now.tv_sec * 1_000_000_000 + now.tv_nsec
+}
+
+/// Recorders built on GStreamer (Kooha) time each frame by its
+/// `SPA_META_Header`'s pts, or without one by the graph's time, which
+/// stands still for a stream that drives itself: their recordings came out
+/// 0 seconds long.
+#[test]
+fn frames_carry_when_they_were_made() {
+    let (mut pila, bus, pipewire) = start();
+    let client = pila.client();
+    let window = client.window("shared").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "shared");
+    pila.settle();
+
+    let mut portal = Portal::connect(&bus.address);
+    let node = share(&mut pila, &mut portal, "s1");
+    let consumer = pipewire.consume(node);
+    let before = monotonic_now();
+    let first = consumer.wait_frame("of the output", |f| f.width == 640);
+    let after = monotonic_now();
+    let header = first.header.expect("a header");
+    assert!(
+        header.pts <= after && header.pts > before - 1_000_000_000,
+        "the pts is when it was made: {} not in {before}..{after}",
+        header.pts
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    client.with_window(window, |w| w.color = GREEN);
+    client.draw(window, None);
+    pila.settle();
+    let expected = pila.pixel(x as f64, y as f64);
+    let second = consumer.wait_frame("with the change", |f| f.rgba(x, y) == expected);
+    let next = second.header.expect("a header");
+    assert!(
+        next.pts - header.pts >= 50_000_000,
+        "the pts advances with the time between: {} then {}",
+        header.pts,
+        next.pts
+    );
+    assert!(next.seq > header.seq, "the sequence number advances");
+}
+
 /// A window "app" with the pointer over it, which sets a `color` cursor
 /// surface 16 px square with its hotspot at the top left: the pointer, in
 /// the output's pixels.

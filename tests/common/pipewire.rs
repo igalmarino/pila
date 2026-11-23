@@ -110,6 +110,18 @@ pub struct Frame {
     pub cursor: Option<CursorMeta>,
     /// It came in a dma-buf (mapped to read it).
     pub dmabuf: bool,
+    /// Its `SPA_META_Header`, if it had one: what GStreamer's pipewiresrc
+    /// takes its timestamps from.
+    pub header: Option<Header>,
+}
+
+/// A buffer's `SPA_META_Header`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Header {
+    /// Nanoseconds, of `CLOCK_MONOTONIC`.
+    pub pts: i64,
+    pub seq: u64,
+    pub flags: u32,
 }
 
 /// A buffer's cursor metadata.
@@ -253,7 +265,8 @@ fn consume(
             let _ = parsed.borrow_mut().parse(param);
             // Room for the cursor's metadata, as browsers ask for it
             // (libwebrtc: a 64 to 384 px square image).
-            let mut params = vec![cursor_meta_param()];
+            // And for a header, as GStreamer's pipewiresrc asks for one.
+            let mut params = vec![cursor_meta_param(), header_meta_param()];
             // The buffers it takes, as libwebrtc says it: dma-bufs too.
             if dmabufs {
                 params.push(buffer_types_param(
@@ -452,6 +465,32 @@ fn cursor_meta_param() -> Vec<u8> {
     .into_inner()
 }
 
+/// The `SPA_META_Header` a consumer asks for.
+fn header_meta_param() -> Vec<u8> {
+    use spa::pod::{Object, Property, Value};
+    let object = Object {
+        type_: spa::utils::SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(
+                spa::sys::SPA_PARAM_META_type,
+                Value::Id(spa::utils::Id(spa::sys::SPA_META_Header)),
+            ),
+            Property::new(
+                spa::sys::SPA_PARAM_META_size,
+                Value::Int(std::mem::size_of::<spa::sys::spa_meta_header>() as i32),
+            ),
+        ],
+    };
+    spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
+}
+
 /// The `Buffers` a consumer asks for: of the data types in `types`.
 fn buffer_types_param(types: i32) -> Vec<u8> {
     use spa::pod::{ChoiceValue, Object, Property, Value};
@@ -549,6 +588,18 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
         if pixels.is_empty() && cursor.is_none() {
             return None;
         }
+        let meta = spa::sys::spa_buffer_find_meta(spa_buffer, spa::sys::SPA_META_Header);
+        let header = (!meta.is_null()
+            && !(*meta).data.is_null()
+            && (*meta).size as usize >= std::mem::size_of::<spa::sys::spa_meta_header>())
+        .then(|| {
+            let header = &*(*meta).data.cast::<spa::sys::spa_meta_header>();
+            Header {
+                pts: header.pts,
+                seq: header.seq,
+                flags: header.flags,
+            }
+        });
         Some(Frame {
             width,
             height,
@@ -556,6 +607,7 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
             data: pixels,
             cursor,
             dmabuf,
+            header,
         })
     }
 }

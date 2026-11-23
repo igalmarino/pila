@@ -196,6 +196,8 @@ struct Cast {
     /// Ended by Pila (its output or window went away, an error): told to
     /// the app.
     ended: bool,
+    /// The sequence number of the next buffer sent (`write_header`).
+    seq: u64,
 }
 
 impl Drop for Cast {
@@ -402,6 +404,7 @@ impl Pila {
             tracker: None,
             buffers: Rc::new(Cell::new(0)),
             ended: false,
+            seq: 0,
         });
         // Callbacks may have run while connecting.
         self.handle_cast_events();
@@ -795,6 +798,10 @@ impl Pila {
             }
             return;
         }
+        let pts = Duration::from(self.clock.now()).as_nanos() as i64;
+        // SAFETY: dequeued, so ours to write until queued.
+        unsafe { write_header(buffer, pts, cast.seq) };
+        cast.seq += 1;
         if let Some(frame) = cursor_frame {
             let new_image = cast
                 .cursor_sent
@@ -1003,6 +1010,38 @@ fn shm_cursor(
     })
     .ok()
     .flatten()
+}
+
+/// Stamp a dequeued `buffer`'s header, if the consumer asked for one: when
+/// it was made (`pts`, nanoseconds of `CLOCK_MONOTONIC`, as mutter's and
+/// xdg-desktop-portal-wlr's) and its place in the stream (`seq`). GStreamer's
+/// pipewiresrc (Kooha, OBS's GStreamer sources) times frames by it, and
+/// without one by the graph's time, which a stream that drives itself
+/// doesn't move: every frame at the same time, a recording 0 seconds long.
+///
+/// SAFETY: `buffer` is a dequeued buffer of a live stream.
+unsafe fn write_header(buffer: *mut pw::sys::pw_buffer, pts: i64, seq: u64) {
+    use spa::sys::spa_meta_header;
+    // SAFETY: per this function's contract.
+    unsafe {
+        let spa_buffer = (*buffer).buffer;
+        if spa_buffer.is_null() {
+            return;
+        }
+        let meta = spa::sys::spa_buffer_find_meta(spa_buffer, spa::sys::SPA_META_Header);
+        if meta.is_null() || ((*meta).size as usize) < std::mem::size_of::<spa_meta_header>() {
+            return;
+        }
+        let header = (*meta).data.cast::<spa_meta_header>();
+        if header.is_null() {
+            return;
+        }
+        (*header).flags = 0;
+        (*header).offset = 0;
+        (*header).pts = pts;
+        (*header).dts_offset = 0;
+        (*header).seq = seq;
+    }
 }
 
 /// Write the pointer into a dequeued `buffer`'s cursor metadata, with its
@@ -1276,9 +1315,16 @@ fn new_stream(
             let cursor_meta = (cursor == CursorMode::Metadata)
                 .then(|| meta_param(spa::sys::SPA_META_Cursor, cursor_meta_size()))
                 .flatten();
+            // When each frame was made, which recorders time them by.
+            let header_meta = meta_param(
+                spa::sys::SPA_META_Header,
+                std::mem::size_of::<spa::sys::spa_meta_header>(),
+            );
             let mut params = vec![pod];
-            if let Some(meta) = cursor_meta.as_deref().and_then(Pod::from_bytes) {
-                params.push(meta);
+            for meta in [&cursor_meta, &header_meta] {
+                if let Some(meta) = meta.as_deref().and_then(Pod::from_bytes) {
+                    params.push(meta);
+                }
             }
             if let Err(err) = stream.update_params(&mut params) {
                 warn!(%err, "portal: can't set the stream's buffers");
