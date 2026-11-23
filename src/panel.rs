@@ -182,6 +182,51 @@ pub fn frame(
     [background, border]
 }
 
+/// One of a panel's solids: its name (its buffer's key), where it is
+/// (global), its color, and its corners.
+pub type Solid = (&'static str, Rectangle<i32, Logical>, [f32; 4], Shape);
+
+/// A panel's buttons, as the cheatsheet's keys: rounded, `primary` (Share,
+/// Save) in the accent, `secondary` (Cancel) with their edge and fill.
+pub fn buttons(
+    primary: Rectangle<i32, Logical>,
+    secondary: Rectangle<i32, Logical>,
+    colors: &Colors,
+) -> [Solid; 3] {
+    let key = Some((f64::from(CAP_RADIUS), Corners::All));
+    let inner = Some((f64::from(CAP_RADIUS - 1), Corners::All));
+    let inset = Rectangle::new(
+        secondary.loc + Point::from((1, 1)),
+        secondary.size - Size::from((2, 2)),
+    );
+    [
+        ("primary", primary, accent(colors), key),
+        ("secondary", inset, opaque(colors.bar), inner),
+        ("secondary-edge", secondary, rgb(colors.hover), key),
+    ]
+}
+
+/// `solids` drawn, front to back, relative to `origin`; their buffers kept
+/// in `buffers` by name.
+pub fn solids(
+    renderer: &mut GlesRenderer,
+    buffers: &mut HashMap<&'static str, SolidColorBuffer>,
+    solids: impl IntoIterator<Item = Solid>,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    solids
+        .into_iter()
+        .map(|(name, rect, color, shape)| {
+            let buffer = buffers
+                .entry(name)
+                .or_insert_with(|| SolidColorBuffer::new(rect.size, color));
+            buffer.update(rect.size, color);
+            crate::render::solid_element(renderer, buffer, rect.loc - origin, shape, 1.0, scale)
+        })
+        .collect()
+}
+
 /// The panel at `rect` with its border: what it covers.
 pub fn with_border(rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
     Rectangle::new(

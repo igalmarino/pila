@@ -1047,3 +1047,44 @@ fn an_app_without_an_app_id_is_named_by_its_window() {
     pila.key("Escape");
     assert_eq!(started.answer().0, 1);
 }
+
+/// With more windows than shown, the selected one's tile is the one on the
+/// accent, scrolled into view.
+#[test]
+fn the_selected_window_is_highlighted_when_scrolled() {
+    const ACCENT: [u8; 4] = [0x44, 0x77, 0xcc, 255];
+    let (mut pila, bus, _pipewire) = start_with("HEADLESS-1:1600x1000");
+    let client = pila.client();
+    for i in 0..12 {
+        let name = format!("w{i:02}");
+        client.window(&name).size(120, 90).color(BLUE).create();
+        pila.wait_focus(&name);
+    }
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_sources("scroll", "org.example.Browser", 1, 2);
+    wait_picker(&mut pila);
+    // To the last window: its row comes into view.
+    for _ in 0..11 {
+        pila.key("Right");
+    }
+    let picker = pila.wait("the last selected", |s| s["share_picker"]["selected"] == 11)
+        ["share_picker"]
+        .clone();
+    pila.wait("its text", |s| s["share_picker"]["text"] == true);
+    let slot = picker["tile_sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|i| i == 11)
+        .expect("the last window shown");
+    let (x, y, _, h) = rect(&picker["tiles"][slot]);
+    pila.settle();
+    assert_eq!(
+        pila.pixel((x - 3) as f64, (y + h / 2) as f64),
+        ACCENT,
+        "the selected tile's margin on the accent"
+    );
+    pila.key("Escape");
+    started.answer();
+}

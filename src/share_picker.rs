@@ -77,8 +77,6 @@ const SECTION_HEADING: i32 = 22;
 const SECTION_GAP: i32 = 28;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
-/// The buttons' corners: the cheatsheet's keys'.
-const KEY_RADIUS: i32 = crate::panel::CAP_RADIUS;
 /// The footer: the buttons, as tall as they are, the hints beside them.
 const BUTTON_HEIGHT: i32 = 36;
 const SHARE_WIDTH: i32 = 120;
@@ -1071,15 +1069,6 @@ fn items(
     items
 }
 
-/// One of the panel's solids: its name (its buffer's key), where it is,
-/// its color, and its corners.
-type PanelSolid = (
-    &'static str,
-    Rectangle<i32, Logical>,
-    [f32; 4],
-    crate::panel::Shape,
-);
-
 /// The picker's elements for the output `output_name`, front to back,
 /// relative to `origin`: the panel on its output, and the dim on every one.
 pub fn elements(
@@ -1140,42 +1129,32 @@ pub fn elements(
         }
     }
 
-    let accent = crate::panel::accent(colors);
-    let hover = crate::panel::rgb(colors.hover);
-    let key_fill = crate::panel::opaque(colors.bar);
-    let inset = |rect: Rectangle<i32, Logical>, by: i32| {
-        Rectangle::new(
-            rect.loc + Point::from((by, by)),
-            rect.size - Size::from((2 * by, 2 * by)),
-        )
-    };
-    // The buttons as the cheatsheet's keys: rounded, Cancel with their
-    // edge and fill, Share in the accent.
-    let key = Some((f64::from(KEY_RADIUS), crate::rounded::Corners::All));
-    let key_inner = Some((f64::from(KEY_RADIUS - 1), crate::rounded::Corners::All));
-    let mut solids: Vec<PanelSolid> = Vec::new();
-    // The selected tile on a block of the accent, as the switcher's.
-    if let Some(tile) = layout.tiles.get(view.selected) {
-        solids.push(("selected", selected_rect(*tile), accent, None));
-    }
-    solids.push(("share", layout.share, accent, key));
-    solids.push(("cancel", inset(layout.cancel, 1), key_fill, key_inner));
-    solids.push(("cancel-edge", layout.cancel, hover, key));
-    for (name, rect, color, rounding) in solids {
-        let buffer = buffers
-            .solids
-            .entry(name)
-            .or_insert_with(|| SolidColorBuffer::new(rect.size, color));
-        buffer.update(rect.size, color);
-        elements.push(crate::render::solid_element(
-            renderer,
-            buffer,
-            rect.loc - origin,
-            rounding,
-            1.0,
-            scale,
-        ));
-    }
+    // The selected tile on a block of the accent, as the switcher's (its
+    // tile, among those shown), and the buttons.
+    let selected = layout
+        .shown
+        .iter()
+        .position(|index| *index == view.selected)
+        .and_then(|slot| layout.tiles.get(slot))
+        .map(|tile| {
+            (
+                "selected",
+                selected_rect(*tile),
+                crate::panel::accent(colors),
+                None,
+            )
+        });
+    let solids =
+        selected
+            .into_iter()
+            .chain(crate::panel::buttons(layout.share, layout.cancel, colors));
+    elements.extend(crate::panel::solids(
+        renderer,
+        &mut buffers.solids,
+        solids,
+        origin,
+        scale,
+    ));
     elements.extend(crate::panel::frame(
         renderer,
         &mut buffers.frame,
