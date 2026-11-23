@@ -364,9 +364,14 @@ it writes that example there.
 Its active values are the defaults, and nowhere else: Pila has it built in and takes from it every
 setting the configuration leaves out.
 .TP
-.IR ~/.config/waybar/ ", " ~/.config/fuzzel/ ", " ~/.config/mako/ ", " ~/.config/swaylock/
-Where Pila writes its own configuration for those tools at startup, if they're installed and
-have none (never over a file);
+.I $XDG_RUNTIME_DIR/pila\-tools/
+Pila's configuration for the tools the default configuration starts (waybar, fuzzel, mako,
+swaylock and swaybg, which gets Pila's wallpaper), written at startup and named on their command
+line where you have none of your own; nothing is written in
+.IR ~/.config .
+Copy one into
+.I ~/.config
+to change it.
 .B tool\-configs = false
 in the configuration turns it off.
 .TP
@@ -404,8 +409,9 @@ makes it start Pila itself instead.
 .TP
 .I /etc/xdg/xdg\-desktop\-portal/pila\-portals.conf
 .TQ
-.I /etc/xdg/xdg\-desktop\-portal\-wlr/pila
-Which portals serve a Pila session, and how xdg\-desktop\-portal\-wlr picks what to share.
+.I /usr/share/xdg\-desktop\-portal/portals/pila.portal
+Which portals serve a Pila session: Pila's own for screen sharing, screenshots and apps' global
+shortcuts, xdg\-desktop\-portal\-gtk for the rest.
 .SH EXIT STATUS
 .B pila
 exits with 2 for a wrong argument and not 0 if it can't start.

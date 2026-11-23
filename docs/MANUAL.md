@@ -761,16 +761,18 @@ do. On a TTY Pila hands the session bus and systemd its environment by itself (`
 
 **Portals.** xdg-desktop-portal picks its backends from `pila-portals.conf` (named after
 `XDG_CURRENT_DESKTOP`). Pila's, in `/etc/xdg/xdg-desktop-portal/`, uses `xdg-desktop-portal-gtk`
-for everything (a GTK file chooser) but screen sharing and screenshots (Pila itself). For GNOME's file chooser, install `xdg-desktop-portal-gnome` and
-Nautilus, and write your own `~/.config/xdg-desktop-portal/pila-portals.conf`. It replaces Pila's
-whole, so keep its `ScreenCast` and `Screenshot` lines, or screen sharing and apps' screenshots
-stop working:
+for everything (a GTK file chooser) but screen sharing, screenshots and apps' global shortcuts
+(Pila itself). For GNOME's file chooser, install `xdg-desktop-portal-gnome` and Nautilus, and
+write your own `~/.config/xdg-desktop-portal/pila-portals.conf`. It replaces Pila's whole, so
+keep its `ScreenCast`, `Screenshot` and `GlobalShortcuts` lines, or screen sharing, apps'
+screenshots and their global shortcuts stop working:
 
 ```ini
 [preferred]
 default=gnome;gtk
 org.freedesktop.impl.portal.ScreenCast=pila
 org.freedesktop.impl.portal.Screenshot=pila
+org.freedesktop.impl.portal.GlobalShortcuts=pila
 # These need GNOME Shell in the GNOME backend.
 org.freedesktop.impl.portal.Access=gtk
 org.freedesktop.impl.portal.Notification=gtk
