@@ -139,6 +139,42 @@ fn with_a_gap_a_maximized_window_keeps_its_shadow_and_corners() {
     assert_ne!(pila.pixel(21.0, 21.0), RED_PIXEL, "its corner is rounded");
 }
 
+/// The shadow of a maximized window with a gap narrower than it reaches the
+/// next output: that output is redrawn as it comes and goes (the tests'
+/// redraw check fails an output that changes unasked).
+#[test]
+fn a_maximized_windows_shadow_on_the_next_output_is_redrawn() {
+    let mut pila = TestPila::start_with(Options {
+        config: "gaps = 4\n\
+                 [shadow]\nsize = 24\ncolor = \"#000000ff\"\ninactive-color = \"#000000ff\"\n\
+                 [colors]\nbackground = \"#ffffff\"\n\
+                 [[window-rule]]\napp-id = \"a\"\ntitle-bar = false\n"
+            .into(),
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    client.window("a").color(RED).create();
+    pila.wait_focus("a");
+    pila.combo("Super+m");
+    pila.wait("maximized inside the gap", |s| {
+        geometry(s, "a") == (4, 4, 1272, 792)
+    });
+    pila.settle();
+    let [shadow, ..] = pila.pixel(1281.0, 400.0);
+    assert!(shadow < 200, "its shadow on B: {shadow}");
+    pila.combo("Super+m");
+    pila.wait("unmaximized", |s| {
+        window_in(s, "a").unwrap()["maximized"] == false
+    });
+    pila.settle();
+    assert_eq!(
+        pila.pixel(1281.0, 400.0),
+        [255, 255, 255, 255],
+        "gone from B"
+    );
+}
+
 /// Without a gap nothing changes: square, no shadow.
 #[test]
 fn without_a_gap_a_maximized_window_is_square() {

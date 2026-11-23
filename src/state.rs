@@ -934,11 +934,8 @@ impl Pila {
         now: Option<std::time::Duration>,
     ) -> Option<SceneWindow> {
         let bar_rect = decoration::title_bar_rect(window, loc);
-        let (maximized, fullscreen) = fill_state(window);
-        // Square and without a shadow when it fills the output to its edges:
-        // maximized with room around it (`gaps`), it looks like a floating
-        // window.
-        let fills_output = fullscreen || (maximized && self.config.gaps == 0);
+        let (_, fullscreen) = fill_state(window);
+        let fills_output = self.fills_output(window);
         // Past its geometry a client draws what a shadow would be (GTK), and
         // its own corners with it: the global radius leaves it to them, or
         // Pila's rounded cut and the client's shadow make a double corner.
@@ -2423,6 +2420,17 @@ pub fn restore_geometry(window: &Window) -> Option<Rectangle<i32, Logical>> {
         .user_data()
         .get::<RestoreGeometry>()
         .and_then(|r| *r.0.borrow())
+}
+
+impl Pila {
+    /// Whether `window` fills its output to the edges (fullscreen, or
+    /// maximized without `gaps`): then it's drawn square and without a
+    /// shadow. Maximized with room around it, it looks like a floating
+    /// window, shadow included.
+    pub fn fills_output(&self, window: &Window) -> bool {
+        let (maximized, fullscreen) = fill_state(window);
+        fullscreen || (maximized && self.config.gaps == 0)
+    }
 }
 
 /// (maximized, fullscreen) as last requested by the compositor.

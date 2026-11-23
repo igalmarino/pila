@@ -432,9 +432,10 @@ Key flows and invariants:
   request for it. `queue_redraw_output` asks one output for something new to show
   (`request_redraw_as` with another `redraw::Content`, see "Bare metal"), `queue_redraw_rect` the outputs a
   global rectangle overlaps, `queue_redraw_window` those a window's frame, title bar, shadow
-  margin and popups touch (`window_visual_rect`; no margin for a maximized or fullscreen window,
-  which has no shadow and reaches its output's edges: each of its frames would redraw the
-  outputs next to it), `queue_redraw_pointer` those of where the
+  margin and popups touch (`window_visual_rect`; no margin for a window that fills its output,
+  `Pila::fills_output`, which has no shadow and reaches its output's edges: each of its frames
+  would redraw the outputs next to it; maximized inside `gaps` it has the margin, its shadow
+  reaching the next output), `queue_redraw_pointer` those of where the
   pointer was and is. `queue_redraw` asks every output, for what's global: the config,
   outputs, the lock, workspaces, focus (`focus_changed`: title bars and shadows show it), a
   key Pila acts on, a click, a gesture's begin and end, an animation starting (its steps ask
@@ -1762,7 +1763,8 @@ Key flows and invariants:
   compiled once per EGL context; on failure corners stay square.
 - **Shadows** (`rounded.rs`, `[shadow]`, on by default): `Pila::scene_window` gives a window a
   `Shadow` (`SceneWindow::shadow`) from its frame and corners, stronger if it's focused. None
-  for a maximized or fullscreen window or an override-redirect one, or for one whose `bbox` goes
+  for a window that fills its output (`Pila::fills_output`: fullscreen, or maximized without
+  `gaps`) or an override-redirect one, or for one whose `bbox` goes
   past its geometry (the client draws its own), unless a rule's `shadow` says otherwise.
   `ShadowElement` is a pixel shader from the distance to the frame: no texture and no pass of
   its own, and clear inside the frame, so it doesn't show through a translucent window or get
