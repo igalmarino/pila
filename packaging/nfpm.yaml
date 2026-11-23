@@ -34,7 +34,6 @@ contents:
   - src: stage/etc/xdg/xdg-desktop-portal/*
     dst: /etc/xdg/xdg-desktop-portal/
     type: config
-    type: config
 
 overrides:
   # Built on the oldest release supported, Ubuntu 24.04: its glibc is the minimum.

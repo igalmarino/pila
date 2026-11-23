@@ -59,8 +59,8 @@ session". A release needs nothing else for it.
 
 - Its `package()` runs `scripts/install --no-build` with `PREFIX=/usr DESTDIR=`, so files added
   to `install_files` need no change there. The docs in `share/doc/pila` are installed apart:
-  one added for the packages goes in `package()`, `packages.yml`'s Package step and
-  `package.nix`'s `postInstall`.
+  one added for the packages goes in `package()`, `packages.yml`'s Package step,
+  `ci.yml`'s Packages build and `package.nix`'s `postInstall`.
 - Keep `depends` in step with the libraries Pila links (`readelf -d`) and docs/INSTALL.md's package
   table.
 - Regenerate `.SRCINFO` (`makepkg --printsrcinfo`) after editing the `PKGBUILD`.
@@ -71,7 +71,8 @@ session". A release needs nothing else for it.
 # Debian and Fedora packages
 
 `packaging/nfpm.yaml` describes the `.deb` and `.rpm`, built by `packages.yml` from what
-`scripts/install` stages with `PREFIX=/usr`. A directory added to `install_files` goes in its
+`scripts/install` stages with `PREFIX=/usr`, and by CI's Packages build at every push (so a
+mistake shows before a release; nfpm's version and checksum are in both workflows). A directory added to `install_files` goes in its
 `contents`, and a newly linked library in its `depends` (Debian's and Fedora's names), as in the
 `PKGBUILD`.
 

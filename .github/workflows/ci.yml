@@ -49,6 +49,28 @@ jobs:
           find "$RUNNER_TEMP/stage" -type f | sort
           grep -F 'ExecStart=/usr/bin/pila-session --service' \
             "$RUNNER_TEMP/stage/usr/lib/systemd/user/pila.service"
+      # The .deb and .rpm built from that install as packages.yml builds them
+      # at a release (nfpm's version and checksum kept in step with it): a
+      # mistake in packaging/ shows here, not once a release is published.
+      - name: Packages build
+        env:
+          NFPM_VERSION: 2.48.0
+          NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/nfpm.tar.gz" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum --check
+          tar xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP" nfpm
+          cp -r "$RUNNER_TEMP/stage" stage
+          install -Dm644 -t stage/usr/share/doc/pila README.md config.example.toml docs/MANUAL.md docs/IPC.md
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          export VERSION
+          for packager in deb rpm; do
+            for config in packaging/nfpm.yaml packaging/nfpm-desktop.yaml; do
+              "$RUNNER_TEMP/nfpm" package --config "$config" --packager "$packager" --target "$RUNNER_TEMP/"
+            done
+          done
+          ls -l "$RUNNER_TEMP"/*.deb "$RUNNER_TEMP"/*.rpm
 
   scripts:
     name: Shell scripts
