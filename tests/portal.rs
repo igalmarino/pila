@@ -591,6 +591,27 @@ fn locking_cancels_the_picker() {
 }
 
 #[test]
+fn locking_cancels_the_requests_waiting_too_and_keys_on_the_lock_share_nothing() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let first = portal.request("first", "org.example.Browser", 1);
+    wait_picker(&mut pila);
+    let second = portal.request("second", "org.example.Other", 1);
+    pila.wait("the second waiting", |s| s["share_picker"]["waiting"] == 1);
+    let locker = pila.client();
+    let _lock = locker.lock_session();
+    pila.wait("locked", |s| s["locked"] == true);
+    // What's typed on the lock screen goes to the locker, never to a picker
+    // nobody sees.
+    pila.key("Return");
+    assert_eq!(answered_with(first), 1, "cancelled");
+    assert_eq!(answered_with(second), 1, "cancelled, not shared");
+    let state = pila.state();
+    assert_eq!(state["share_picker"]["shown"], false);
+    assert_eq!(state["share_picker"]["waiting"], 0);
+}
+
+#[test]
 fn the_picker_dims_the_screen_and_shows_a_live_preview() {
     let (mut pila, bus, _pipewire) = start_with("HEADLESS-1:1280x720");
     let client = pila.client();

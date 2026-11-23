@@ -233,7 +233,12 @@ impl SessionLockHandler for Pila {
 
     fn lock(&mut self, confirmation: SessionLocker) {
         // Nothing is shared without the user's say, and nothing is asked
-        // while locked.
+        // while locked: the requests waiting go first, or cancelling the
+        // picker shown would show the next one (the session isn't locked
+        // yet), unseen but taking the keys typed on the lock screen.
+        for ask in self.screencast.waiting.drain(..) {
+            ask.cancel();
+        }
         self.cancel_share_picker();
         self.cancel_color_pick();
         self.cancel_app_shortcuts();

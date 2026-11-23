@@ -262,10 +262,15 @@ impl Pila {
                         )));
                     }
                 }
+                // Locking closes Pila's panels; were one left open, the
+                // lock screen's keys still wouldn't reach it.
                 // The panel confirming an app's shortcuts takes every press
                 // but a modifier's (they make up the keys it's given): it's
                 // modal (`app_shortcuts.rs`).
-                if key_state == KeyState::Pressed && state.app_shortcuts_open() {
+                if key_state == KeyState::Pressed
+                    && !state.is_locked()
+                    && state.app_shortcuts_open()
+                {
                     state.input.suppressed_keys.insert(keycode);
                     let sym = handle.raw_latin_sym_or_raw_current_sym();
                     if let Some(sym) = sym.filter(|sym| !sym.is_modifier_key()) {
@@ -275,20 +280,24 @@ impl Pila {
                 }
                 // The color picker takes every press while it's on: it's
                 // modal (`color_pick.rs`).
-                if key_state == KeyState::Pressed && state.color_pick_open() {
+                if key_state == KeyState::Pressed && !state.is_locked() && state.color_pick_open() {
                     state.input.suppressed_keys.insert(keycode);
                     pick_key = Some(handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The share picker takes every press while it's shown: it's
                 // modal (`share_picker.rs`).
-                if key_state == KeyState::Pressed && state.share_picker_open() {
+                if key_state == KeyState::Pressed && !state.is_locked() && state.share_picker_open()
+                {
                     state.input.suppressed_keys.insert(keycode);
                     picker_key = Some(handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The window menu takes every press while it's open.
-                if key_state == KeyState::Pressed && state.window_menu.is_some() {
+                if key_state == KeyState::Pressed
+                    && !state.is_locked()
+                    && state.window_menu.is_some()
+                {
                     state.input.suppressed_keys.insert(keycode);
                     menu_key = Some(handle.modified_sym());
                     return FilterResult::Intercept(None);
@@ -865,22 +874,24 @@ impl Pila {
                 at: std::time::Instant::now(),
             });
         }
+        // Locking closes Pila's panels; were one left open, clicks on the
+        // lock screen still wouldn't reach it.
         // The panel confirming an app's shortcuts takes every press, and
         // its release: it's modal.
-        if button_state == ButtonState::Pressed && self.app_shortcuts_open() {
+        if button_state == ButtonState::Pressed && !self.is_locked() && self.app_shortcuts_open() {
             self.input.suppressed_buttons.insert(button);
             self.app_shortcuts_press(pointer.current_location());
             return;
         }
         // The color picker takes every press, and its release: the first
         // picks the color under the pointer.
-        if button_state == ButtonState::Pressed && self.color_pick_open() {
+        if button_state == ButtonState::Pressed && !self.is_locked() && self.color_pick_open() {
             self.input.suppressed_buttons.insert(button);
             self.color_pick_press(pointer.current_location());
             return;
         }
         // The share picker takes every press, and its release: it's modal.
-        if button_state == ButtonState::Pressed && self.share_picker_open() {
+        if button_state == ButtonState::Pressed && !self.is_locked() && self.share_picker_open() {
             self.input.suppressed_buttons.insert(button);
             self.share_picker_press(pointer.current_location());
             return;

@@ -66,6 +66,9 @@ impl Pila {
         target: Option<Target>,
         reply: Reply<Result<String, Refused>>,
     ) {
+        if self.is_locked() {
+            return reply.send(Err(Refused::Cancelled));
+        }
         let Some((size, scale)) = self.screenshot_geometry(target.as_ref()) else {
             return reply.send(Err(Refused::Cancelled));
         };

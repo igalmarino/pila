@@ -1495,6 +1495,11 @@ Key flows and invariants:
   move/resize grabs are refused, bindings, gestures and `pila msg` don't run their actions,
   nor does `run_action` itself, save `runs_while_locked`, a VT switch and Quit in debug
   builds). `lock` ends grabs before the state changes (ending one sends its focus a motion).
+  Pila's own panels (share picker, color picker, app shortcuts, window menu) take input before
+  the focus types see it, so the focus types don't guard them: `lock` closes them, cancelling
+  the portal requests waiting first (else cancelling the shown picker would show the next one,
+  the session not locked yet), the input paths skip them while locked, and `start_cast` and
+  `take_screenshot` refuse while locked.
   `tests/lock.rs::nothing_but_the_lock_gets_input_or_shows_while_locked` tries every action
   (`Action::examples`, a table a new kind of action doesn't build without), gesture,
   activation, taskbar and pager request and the window menu while locked. The lock is confirmed (`confirm_lock`)

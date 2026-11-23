@@ -332,6 +332,10 @@ impl Pila {
             reply,
             ..
         } = share;
+        // Only the user's pick starts a share, and never while locked.
+        if self.is_locked() {
+            return reply.send(Err(Refused::Cancelled));
+        }
         let Some((size, scale)) = self.capture_geometry(&target, None) else {
             return reply.send(Err(Refused::Cancelled));
         };
