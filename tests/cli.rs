@@ -585,8 +585,11 @@ fn scripts_tty_points_the_portal_to_pilas_backend() {
     std::fs::create_dir_all(&installed).unwrap();
     std::fs::write(installed.join("pila.portal"), "installed").unwrap();
     std::fs::write(installed.join("gtk.portal"), "gtk").unwrap();
-    std::fs::set_permissions(installed.join("pila.portal"), std::fs::Permissions::from_mode(0o444))
-        .unwrap();
+    std::fs::set_permissions(
+        installed.join("pila.portal"),
+        std::fs::Permissions::from_mode(0o444),
+    )
+    .unwrap();
     let report = dir.join("fake-pila-report");
     std::fs::write(
         &report,
@@ -606,7 +609,10 @@ fn scripts_tty_points_the_portal_to_pilas_backend() {
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     let ours = std::fs::read_to_string(dir.join("ours")).unwrap();
-    assert!(ours.contains("org.freedesktop.impl.portal.desktop.pila"), "{ours}");
+    assert!(
+        ours.contains("org.freedesktop.impl.portal.desktop.pila"),
+        "{ours}"
+    );
     assert_eq!(
         std::fs::read_to_string(installed.join("pila.portal")).unwrap(),
         "installed"
