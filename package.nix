@@ -112,8 +112,6 @@ rustPlatform.buildRustPackage {
     install -Dm644 resources/portals/pila.portal -t $out/share/xdg-desktop-portal/portals
     install -Dm644 resources/xdg/xdg-desktop-portal/pila-portals.conf \
       -t $out/share/xdg-desktop-portal
-    install -Dm644 resources/xdg/xdg-desktop-portal-wlr/pila \
-      -t $out/etc/xdg/xdg-desktop-portal-wlr
     install -Dm644 README.md config.example.toml docs/MANUAL.md docs/IPC.md -t $out/share/doc/pila
     install -Dm644 docs/pila.1 -t $out/share/man/man1
   ''

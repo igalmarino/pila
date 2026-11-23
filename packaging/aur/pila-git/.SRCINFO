@@ -24,14 +24,12 @@ pkgbase = pila-git
 	optdepends = xorg-xwayland: X11 apps (games, older programs)
 	optdepends = xdg-desktop-portal: screen sharing (Pila serves its own backend) and other portals
 	optdepends = pipewire: screen sharing
-	optdepends = xdg-desktop-portal-wlr: screenshots through the portal
 	optdepends = xdg-desktop-portal-gtk: file chooser and other portals
 	optdepends = xdg-utils: opening links and files from programs such as kitty (xdg-open)
 	provides = pila
 	conflicts = pila
 	options = !strip
 	backup = etc/xdg/xdg-desktop-portal/pila-portals.conf
-	backup = etc/xdg/xdg-desktop-portal-wlr/pila
 	source = pila::git+https://github.com/igalmarino/pila.git
 	sha256sums = SKIP
 

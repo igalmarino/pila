@@ -534,7 +534,7 @@ works the same with another in its place:
 | `fuzzel` | `launcher` | any launcher (`wofi --show drun`, `rofi -show drun`, ...) |
 | `swaybg` (Pila's wallpaper), `waybar`, `mako` | `autostart` | a picture of your own (`swaybg -i FILE -m fill`), any other bar or notification daemon (a list without them) |
 | `wpctl`, `brightnessctl`, `playerctl` | the volume, brightness and media keys' bindings | bindings of your own (`pactl`, `swayosd-client`, ...) |
-| `grim`, `slurp`, `wl-copy` | `Mod+Shift+S` and `Mod+Ctrl+S`; `slurp` picks the screen to share, in xdg-desktop-portal-wlr's settings | bindings of your own; `chooser_cmd` in those settings |
+| `grim`, `slurp`, `wl-copy` | `Mod+Shift+S` and `Mod+Ctrl+S` | bindings of your own |
 
 **A look that matches Pila's.** The tools of the default configuration start with a
 configuration of Pila's where you have none of your own: your `[colors]`, the title bars' font
@@ -994,7 +994,7 @@ does the same in a window of your session, `PILA_CHECK_RENDER_LATE=false pila-ch
 | Clicking a link in the terminal does nothing | Install `xdg-utils`. |
 | No notifications from Pila | Run a notification daemon (mako, or your shell's) on the session bus; the log says once when there's none. |
 | An app's administrator password prompt never shows (`pkexec` fails at once) | No polkit agent runs: start one from `autostart` ([Portals, polkit and the keyring](#portals-polkit-and-the-keyring)). |
-| Screen sharing shows nothing, or no panel asks which screen | Install `xdg-desktop-portal` and `pipewire`, and start Pila from the login screen or `pila-session`. A `~/.config/xdg-desktop-portal/pila-portals.conf` of your own whose `ScreenCast` line says `wlr` hands sharing to `xdg-desktop-portal-wlr` instead (its configuration in `~/.config/xdg-desktop-portal-wlr/pila`, if it's an older copy, runs `pila-shot`, which Pila no longer has: change its `chooser_cmd` to `slurp -f 'Monitor: %o' -or`). |
+| Screen sharing or an app's screenshot shows nothing, or no panel asks what | Install `xdg-desktop-portal` and `pipewire`, and start Pila from the login screen or `pila-session`. A `~/.config/xdg-desktop-portal/pila-portals.conf` of your own must name Pila for both: `org.freedesktop.impl.portal.ScreenCast=pila` and `org.freedesktop.impl.portal.Screenshot=pila` (an older one may still say `wlr`). |
 | The shell doesn't turn the screens off | Some shells run `wlr-randr --off` without a monitor name, which fails; use `pila msg action power-off-monitors` (any input turns them back on). |
 | X11 apps don't start | Install Xwayland; the log says if it couldn't start. |
 | Title bars have no text | Install a font (any TrueType or OpenType font). |

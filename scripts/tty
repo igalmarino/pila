@@ -8,12 +8,11 @@
 # pila-tty.log.old.
 #
 # This pila gets its own D-Bus session bus (dbus-run-session), so the portals
-# it starts (xdg-desktop-portal, and xdg-desktop-portal-wlr for screenshots)
-# are its own and the login session's services are left alone. They find
-# Pila's own backend (screen sharing, resources/portals/pila.portal) next to
-# the installed ones, and resources/xdg/xdg-desktop-portal/pila-portals.conf,
-# through XDG_DESKTOP_PORTAL_DIR, a directory made for the run; xdg-desktop-portal-wlr's settings are copied to ~/.config if missing
-# (and an older copy's pila-shot becomes slurp again).
+# it starts (xdg-desktop-portal and its backends) are its own and the login
+# session's services are left alone. They find Pila's own backend (screen
+# sharing and screenshots, resources/portals/pila.portal) next to the
+# installed ones, and resources/xdg/xdg-desktop-portal/pila-portals.conf,
+# through XDG_DESKTOP_PORTAL_DIR, a directory made for the run.
 #
 #   scripts/tty                        release build, ~/.config/pila/config.toml
 #   scripts/tty <config.toml>          another config
@@ -92,20 +91,6 @@ for dir in "${data_dirs[@]}"; do
 done
 cp resources/portals/pila.portal resources/xdg/xdg-desktop-portal/pila-portals.conf "$portal_dir/"
 export XDG_DESKTOP_PORTAL_DIR="$portal_dir"
-
-# xdg-desktop-portal-wlr only looks in ~/.config (or /etc/xdg) for its config.
-# A copy made by an older scripts/tty picked the screen with pila-shot, which
-# Pila no longer has: it goes back to slurp. One the user changed is left alone.
-xdpw_config="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal-wlr/pila"
-old_chooser="chooser_cmd=pila-shot pick-output"
-if [ ! -e "$xdpw_config" ]; then
-    mkdir -p "$(dirname "$xdpw_config")"
-    cp resources/xdg/xdg-desktop-portal-wlr/pila "$xdpw_config"
-    echo "Installed $xdpw_config (screen sharing picks a screen with slurp)."
-elif grep -qxF "$old_chooser" "$xdpw_config"; then
-    sed -i "s|^chooser_cmd=pila-shot pick-output\$|chooser_cmd=slurp -f 'Monitor: %o' -or|" "$xdpw_config"
-    echo "Updated $xdpw_config: slurp picks the screen to share, not pila-shot."
-fi
 
 # Keep the last run's log: after a crash, it's the one that matters.
 [ -f pila-tty.log ] && mv -f pila-tty.log pila-tty.log.old

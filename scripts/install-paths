@@ -39,7 +39,6 @@ install_files=(
     "resources/icons/pila.svg:$DATADIR/icons/hicolor/scalable/apps/pila.svg:644"
     "resources/portals/pila.portal:$DATADIR/xdg-desktop-portal/portals/pila.portal:644"
     "resources/xdg/xdg-desktop-portal/pila-portals.conf:$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf:644"
-    "resources/xdg/xdg-desktop-portal-wlr/pila:$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila:644"
 )
 
 # What an older install put there and Pila no longer has: scripts/install and
@@ -51,6 +50,9 @@ removed_files=(
     "$BINDIR/pila-shot"
     "$BINDIR/pila-switcher"
     "$BINDIR/pila-wallpaper"
+    # xdg-desktop-portal-wlr's settings: Pila serves screen sharing and
+    # screenshots itself.
+    "$SYSCONFDIR/xdg/xdg-desktop-portal-wlr/pila"
 )
 
 # Directories that may be left empty by an uninstall.

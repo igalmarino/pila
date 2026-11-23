@@ -62,8 +62,8 @@ XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE and PILA_SOCKET to the D-Bus session bus (
 systemd --user when that's the bus), for the screen-sharing portals and shells
 started as services: run it as a login
 session (scripts/install) or under dbus-run-session (scripts/tty), with
-resources/xdg/xdg-desktop-portal/pila-portals.conf and
-resources/xdg/xdg-desktop-portal-wlr/pila installed in /etc/xdg or ~/.config.";
+resources/xdg/xdg-desktop-portal/pila-portals.conf installed in /etc/xdg or
+~/.config.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendKind {

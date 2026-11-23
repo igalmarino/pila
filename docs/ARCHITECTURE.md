@@ -1359,12 +1359,10 @@ Key flows and invariants:
   Other compositors' IPC sockets and markers (`OTHER_COMPOSITORS_ENV`:
   `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`, …) are removed, for a Pila started from inside
   another session: desktop shells pick their compositor backend by them.
-  Screen sharing goes through xdg-desktop-portal to Pila's own backend ("Portal screen
-  sharing", `resources/portals/pila.portal`), screenshots to xdg-desktop-portal-wlr, as
-  `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects; xdpw's own config
-  (`resources/xdg/xdg-desktop-portal-wlr/pila`) must be in
-  `~/.config/xdg-desktop-portal-wlr/` or `/etc/xdg` (xdpw ignores `XDG_CONFIG_DIRS`;
-  `scripts/install` puts both in `/etc/xdg`). `scripts/tty` gives xdg-desktop-portal a
+  Screen sharing and apps' screenshots go through xdg-desktop-portal to Pila's own backend
+  ("Portal screen sharing", "Portal screenshots", `resources/portals/pila.portal`), as
+  `resources/xdg/xdg-desktop-portal/pila-portals.conf` selects (`scripts/install` puts it in
+  `/etc/xdg`). `scripts/tty` gives xdg-desktop-portal a
   directory of its own (`XDG_DESKTOP_PORTAL_DIR`: the installed backends, `pila.portal` and
   the `.conf`, which it then reads from there alone). On a TTY, before the startup programs, Pila
   exports that environment to the D-Bus session bus (`export_environment`, `SESSION_ENV`, with

@@ -247,9 +247,8 @@ same on most distros):
 Apps also want these in any session, so `pila` itself recommends them (Debian and Fedora
 install them with it unless recommends are off; on Arch they're optional dependencies):
 
-- `xdg-desktop-portal` and `pipewire`: screen sharing, which Pila serves itself (it asks which
-  screen to share and streams it over PipeWire)
-- `xdg-desktop-portal-wlr`: screenshots through the portal
+- `xdg-desktop-portal` and `pipewire`: screen sharing and apps' screenshots, which Pila serves
+  itself (it asks what to share or take and streams it over PipeWire)
 - `xdg-desktop-portal-gtk`: the file chooser and other portals
 - `xdg-utils`: `xdg-open`, which programs such as kitty use to open links and files; without it
   a click on a link does nothing, and says nothing
@@ -258,9 +257,9 @@ install them with it unless recommends are off; on Arch they're optional depende
 By hand, without `pila-desktop` (the portals and `xdg-utils` included):
 
 ```bash
-sudo pacman -S kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-wlr xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard   # Arch
-sudo apt install kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-wlr xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard # Debian, Ubuntu
-sudo dnf install kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-wlr xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard  # Fedora
+sudo pacman -S kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard   # Arch
+sudo apt install kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard # Debian, Ubuntu
+sudo dnf install kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard  # Fedora
 ```
 
 The rest of a desktop (notifications, a lock screen, another bar or launcher)

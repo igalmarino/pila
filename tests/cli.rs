@@ -514,17 +514,13 @@ fn scripts_check_and_tty_say_when_the_given_binary_is_missing() {
     }
 }
 
-/// scripts/tty gives xdg-desktop-portal-wlr Pila's settings in ~/.config,
-/// where it reads them: a missing copy is made, a copy of an older one
-/// (pila-shot picking the screen, gone from Pila) goes back to slurp, and one
-/// of the user's own is left alone.
+/// scripts/tty points xdg-desktop-portal at a directory with Pila's own
+/// backend and the portals' config, which the Pila it runs finds.
 #[test]
-fn scripts_tty_keeps_the_screen_sharing_settings_current() {
+fn scripts_tty_points_the_portal_to_pilas_backend() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = scripts_copy("xdpw");
-    let shipped = "resources/xdg/xdg-desktop-portal-wlr/pila";
+    let dir = scripts_copy("portals");
     for file in [
-        shipped,
         "resources/xdg/xdg-desktop-portal/pila-portals.conf",
         "resources/portals/pila.portal",
     ] {
@@ -535,8 +531,6 @@ fn scripts_tty_keeps_the_screen_sharing_settings_current() {
         )
         .unwrap();
     }
-    // Pila's backend and the portals' config, where xdg-desktop-portal is
-    // pointed to: what the fake pila finds there.
     let fake = dir.join("fake-pila");
     std::fs::write(
         &fake,
@@ -546,39 +540,23 @@ fn scripts_tty_keeps_the_screen_sharing_settings_current() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     wait_until_executable(&fake);
     let config = dir.join("config");
-    let settings = config.join("xdg-desktop-portal-wlr/pila");
-    let tty = || {
-        let out = copied_script(&dir, "tty")
-            .env("PILA_BIN", &fake)
-            .env("XDG_CONFIG_HOME", &config)
-            .env("XDG_RUNTIME_DIR", &dir)
-            .env_remove("WAYLAND_DISPLAY")
-            .env_remove("DISPLAY")
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{out:?}");
-        std::fs::read_to_string(&settings).unwrap()
-    };
-    // None yet: Pila's.
-    let ours = std::fs::read_to_string(dir.join(shipped)).unwrap();
-    assert_eq!(tty(), ours);
+    let out = copied_script(&dir, "tty")
+        .env("PILA_BIN", &fake)
+        .env("XDG_CONFIG_HOME", &config)
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
     let portals = std::fs::read_to_string(dir.join("portals")).unwrap();
     assert!(
         portals.lines().any(|l| l == "pila.portal")
             && portals.lines().any(|l| l == "pila-portals.conf"),
         "the portals' directory: {portals}"
     );
-    // An older copy.
-    let older = "[screencast]\nchooser_type=simple\nchooser_cmd=pila-shot pick-output\n";
-    std::fs::write(&settings, older).unwrap();
-    assert_eq!(
-        tty(),
-        "[screencast]\nchooser_type=simple\nchooser_cmd=slurp -f 'Monitor: %o' -or\n"
-    );
-    // The user's own.
-    let own = "[screencast]\nchooser_type=dmenu\nchooser_cmd=fuzzel -d\n";
-    std::fs::write(&settings, own).unwrap();
-    assert_eq!(tty(), own);
+    // xdg-desktop-portal-wlr's settings are no longer made.
+    assert!(!config.join("xdg-desktop-portal-wlr").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

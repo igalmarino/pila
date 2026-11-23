@@ -136,7 +136,6 @@ jobs:
           grep -F 'ExecStart=/usr/bin/pila-session --service' /usr/lib/systemd/user/pila.service
           test -f /usr/lib/systemd/user/pila-shutdown.target
           test -f /etc/xdg/xdg-desktop-portal/pila-portals.conf
-          test -f /etc/xdg/xdg-desktop-portal-wlr/pila
       # If it starts, it's still running when its time is up. Xwayland is only
       # recommended: it starts without, X11 apps aside.
       - name: Smoke test

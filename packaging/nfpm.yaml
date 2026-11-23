@@ -34,8 +34,6 @@ contents:
   - src: stage/etc/xdg/xdg-desktop-portal/*
     dst: /etc/xdg/xdg-desktop-portal/
     type: config
-  - src: stage/etc/xdg/xdg-desktop-portal-wlr/*
-    dst: /etc/xdg/xdg-desktop-portal-wlr/
     type: config
 
 overrides:
@@ -54,13 +52,11 @@ overrides:
       - libxkbcommon0
     # X11 apps: Pila runs without (and with [xwayland] enabled = false).
     # The rest is how apps work with any compositor: portals (screen sharing
-    # through Pila's own backend, over PipeWire; screenshots through
-    # xdg-desktop-portal-wlr) and xdg-open.
+    # and screenshots through Pila's own backend, over PipeWire) and xdg-open.
     recommends:
       - xwayland
       - xdg-desktop-portal
       - pipewire
-      - xdg-desktop-portal-wlr
       - xdg-desktop-portal-gtk
       - xdg-utils
     # The desktop's tools (bar, launcher, notifications, lock, the keys'
@@ -84,7 +80,6 @@ overrides:
       - xorg-x11-server-Xwayland
       - xdg-desktop-portal
       - pipewire
-      - xdg-desktop-portal-wlr
       - xdg-desktop-portal-gtk
       - xdg-utils
     suggests:

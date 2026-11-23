@@ -16,6 +16,11 @@
   `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten kept) and handed to the app. Pila's portal
   configuration now names Pila for screenshots instead of xdg-desktop-portal-wlr; an own
   `pila-portals.conf` should say `org.freedesktop.impl.portal.Screenshot=pila`.
+- **No more xdg-desktop-portal-wlr:** with screen sharing, single windows and apps' screenshots
+  Pila's own, the packages no longer recommend it and Pila no longer installs its settings
+  (`/etc/xdg/xdg-desktop-portal-wlr/pila` is removed; `scripts/tty` no longer writes
+  `~/.config/xdg-desktop-portal-wlr/pila`, and leaves an older copy alone). It can still be used
+  through a `pila-portals.conf` of your own.
 - **Pick a color from the screen:** apps that ask the portal for one (GTK's color chooser, GIMP,
   Inkscape) get a crosshair and a panel saying what to do; a click answers with the color under
   it, Escape gives up, and no app gets the click.
