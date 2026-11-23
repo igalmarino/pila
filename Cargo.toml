@@ -75,13 +75,17 @@ pipewire = "0.10"
 # - shm buffers uploaded to their textures in strips of at most 128 KiB: a
 #   whole 1920x1080 buffer in one call took radeonsi's slow path, 10 to 22 ms
 #   of the event loop (`scripts/check`'s shm copies within 8 ms each fails
-#   without, on bare metal).
+#   without, on bare metal);
+# - `XdgForeignState::exported_surface`: the surface exported as a handle, so
+#   the share picker names an app without an app id by the window it asks
+#   from (`portal::an_app_without_an_app_id_is_named_by_its_window` doesn't
+#   build without).
 # On a bump: tag the rev `main` pins (`rev-<sha>`: released versions pin older
 # ones, kept by their tags), rebase that branch on the new rev, or go back to
 # `https://github.com/Smithay/smithay.git` once it has them.
 [dependencies.smithay]
 git = "https://github.com/igalmarino/smithay.git"
-rev = "432098edac106abb393811fcc94006f9dc4f17da"
+rev = "81119da564c84a1ce161c6f0a18188c1184dbdf2"
 default-features = false
 features = [
     "backend_winit",
@@ -113,3 +117,4 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # No `[profile.release]`: LTO measured on 2026-11-16 (`scripts/check --nested`, three runs
 # each) gave no gain with "thin" and about 3% less CPU per frame with "fat" and one codegen
 # unit, for 2.3 times the clean build (184 s against 81) in every package build.
+

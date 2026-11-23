@@ -564,6 +564,9 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
 pub struct Portal {
     bus: Connection,
     serial: usize,
+    /// The app's window its requests say they come from (`parent_window`,
+    /// `wayland:<xdg-foreign handle>`); none by default.
+    pub parent_window: String,
 }
 
 pub type Vardict = HashMap<String, OwnedVariant>;
@@ -588,7 +591,11 @@ impl Portal {
             assert!(started.elapsed() < TIMEOUT, "Pila didn't serve the portal");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        Portal { bus, serial: 0 }
+        Portal {
+            bus,
+            serial: 0,
+            parent_window: String::new(),
+        }
     }
 
     fn call(
@@ -640,13 +647,20 @@ impl Portal {
         let handle = self.handle();
         let bus = self.bus.clone();
         let app_id = app_id.to_string();
+        let parent = self.parent_window.clone();
         let thread = std::thread::spawn(move || {
             let reply = zbus::block_on(bus.call_method(
                 Some(NAME),
                 PATH,
                 Some(SCREENCAST),
                 "Start",
-                &(handle, &session, app_id.as_str(), "", Vardict::new()),
+                &(
+                    handle,
+                    &session,
+                    app_id.as_str(),
+                    parent.as_str(),
+                    Vardict::new(),
+                ),
             ))
             .unwrap_or_else(|err| panic!("Start: {err}"));
             let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
@@ -676,6 +690,7 @@ impl Portal {
         let handle = self.handle();
         let bus = self.bus.clone();
         let app_id = app_id.to_string();
+        let parent = self.parent_window.clone();
         std::thread::spawn(move || {
             let options = HashMap::from([
                 ("interactive".to_string(), OwnedVariant::from(interactive)),
@@ -689,7 +704,7 @@ impl Portal {
                 PATH,
                 Some("org.freedesktop.impl.portal.Screenshot"),
                 "Screenshot",
-                &(handle, app_id.as_str(), "", options),
+                &(handle, app_id.as_str(), parent.as_str(), options),
             ))
             .unwrap_or_else(|err| panic!("Screenshot: {err}"));
             let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();

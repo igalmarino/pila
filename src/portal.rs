@@ -111,6 +111,9 @@ pub enum Request {
         /// Who asks, as the picker names it: its desktop entry's name, else
         /// its app id; `None` if the portal didn't say (`app_name`).
         app: Option<String>,
+        /// The app's window the request came from, by its xdg-foreign
+        /// handle (`parent_handle`).
+        parent: Option<String>,
         reply: Reply<Result<Vec<Stream>, Refused>>,
     },
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
@@ -121,6 +124,7 @@ pub enum Request {
     Screenshot {
         ask: bool,
         app: Option<String>,
+        parent: Option<String>,
         reply: Reply<Result<String, Refused>>,
     },
     /// A color the user picks on the screen (`color_pick.rs`).
@@ -286,7 +290,7 @@ impl ScreenCast {
         _handle: OwnedObjectPath,
         session_handle: OwnedObjectPath,
         app_id: String,
-        _parent_window: String,
+        parent_window: String,
         _options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
         let session = session_handle.to_string();
@@ -299,6 +303,7 @@ impl ScreenCast {
             cursor: selection.cursor,
             sources: selection.sources,
             app: app_name(&app_id, &data_dirs()),
+            parent: parent_handle(&parent_window),
             reply,
         };
         if self.send.send(request).is_err() {
@@ -345,7 +350,7 @@ impl Screenshot {
         &self,
         _handle: OwnedObjectPath,
         app_id: String,
-        _parent_window: String,
+        parent_window: String,
         options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
         let flag = |key: &str| {
@@ -362,6 +367,7 @@ impl Screenshot {
         let request = Request::Screenshot {
             ask,
             app: app_name(&app_id, &data_dirs()),
+            parent: parent_handle(&parent_window),
             reply,
         };
         if self.send.send(request).is_err() {
@@ -408,10 +414,20 @@ impl Screenshot {
     }
 }
 
+/// A portal request's parent window, `wayland:<handle>` (an xdg-foreign
+/// handle the app exported its window as): the handle.
+fn parent_handle(parent_window: &str) -> Option<String> {
+    parent_window
+        .strip_prefix("wayland:")
+        .map(str::trim)
+        .filter(|handle| !handle.is_empty())
+        .map(str::to_string)
+}
+
 /// Where desktop entries are looked for: `$XDG_DATA_HOME` (or
 /// `~/.local/share`), then `$XDG_DATA_DIRS` (or `/usr/local/share` and
 /// `/usr/share`), each's `applications`.
-fn data_dirs() -> Vec<std::path::PathBuf> {
+pub(crate) fn data_dirs() -> Vec<std::path::PathBuf> {
     let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     let home = env("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
@@ -429,7 +445,7 @@ fn data_dirs() -> Vec<std::path::PathBuf> {
 /// `<app_id>.desktop` in `dirs`), else the app id itself; `None` for no app
 /// id (apps outside a sandbox often have none). Reads files: on the bus's
 /// thread, never the event loop.
-fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
+pub(crate) fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         return None;

@@ -105,6 +105,10 @@ pub struct SharePicker {
 
 struct Shown {
     ask: Ask,
+    /// Who asks, as the panel names it: the portal's name for the app, else
+    /// the app id of the window it asked from (`Ask::parent`), then its
+    /// desktop entry's name once read (`Pila::name_share_picker_app`).
+    app: Option<String>,
     /// The output the panel is on, by name.
     output: String,
     /// What there is to pick: the outputs, left to right, then the windows.
@@ -126,6 +130,14 @@ impl Ask {
         match self {
             Ask::Cast(share) => share.app.as_deref(),
             Ask::Screenshot(shot) => shot.app.as_deref(),
+        }
+    }
+
+    /// The xdg-foreign handle of the window it was asked from.
+    fn parent(&self) -> Option<&str> {
+        match self {
+            Ask::Cast(share) => share.parent.as_deref(),
+            Ask::Screenshot(shot) => shot.parent.as_deref(),
         }
     }
 
@@ -485,13 +497,31 @@ impl Pila {
         self.hide_shortcuts();
         self.close_overview();
         self.close_window_menu();
+        // An app the portal doesn't name (one outside a sandbox) goes by the
+        // window it asked from, if it said which.
+        let mut app = ask.app().map(str::to_string);
+        let mut look_up = None;
+        if app.is_none() {
+            let window = ask
+                .parent()
+                .and_then(|handle| self.globals.xdg_foreign.exported_surface(handle))
+                .and_then(|surface| self.window_for_surface(surface));
+            if let Some(window) = window {
+                let app_id = crate::foreign_toplevel::app_id(&window);
+                if !app_id.is_empty() {
+                    app = Some(app_id.clone());
+                    look_up = Some(app_id);
+                }
+            }
+        }
         info!(
-            app = ask.app().unwrap_or("?"),
+            app = app.as_deref().unwrap_or("?"),
             screenshot = matches!(ask, Ask::Screenshot(_)),
             "portal: asking what to share"
         );
         self.share_picker.shown = Some(Shown {
             ask,
+            app,
             output,
             sources,
             selected,
@@ -503,6 +533,44 @@ impl Pila {
         self.wake.ping();
         self.queue_redraw();
         self.draw_share_picker_text();
+        if let Some(app_id) = look_up {
+            self.name_share_picker_app(app_id);
+        }
+    }
+
+    /// Name the app asking by `app_id`'s desktop entry, read on a thread
+    /// (files aren't read on the event loop): the panel says it once it's
+    /// there, if it still asks for that app.
+    fn name_share_picker_app(&mut self, app_id: String) {
+        let (sender, channel) = calloop::channel::channel();
+        let looked_up = app_id.clone();
+        let spawned = std::thread::Builder::new()
+            .name("pila-app-name".into())
+            .spawn(move || {
+                let name = crate::portal::app_name(&looked_up, &crate::portal::data_dirs());
+                let _ = sender.send(name);
+            });
+        if let Err(err) = spawned {
+            warn!(?err, "portal: can't look up the app's name");
+            return;
+        }
+        let inserted = self
+            .loop_handle
+            .insert_source(channel, move |event, _, state| {
+                let calloop::channel::Event::Msg(Some(name)) = event else {
+                    return;
+                };
+                let Some(shown) = state.share_picker.shown.as_mut() else {
+                    return;
+                };
+                if shown.app.as_deref() == Some(app_id.as_str()) && name != app_id {
+                    shown.app = Some(name);
+                    state.draw_share_picker_text();
+                }
+            });
+        if let Err(err) = inserted {
+            warn!(?err, "portal: can't wait for the app's name");
+        }
     }
 
     pub fn share_picker_open(&self) -> bool {
@@ -808,7 +876,7 @@ impl Pila {
         let key = TextKey {
             items: items(
                 &view.layout,
-                shown.ask.app(),
+                shown.app.as_deref(),
                 shown.ask.sources(),
                 matches!(shown.ask, Ask::Screenshot(_)),
                 &labels,
@@ -872,7 +940,7 @@ impl Pila {
         };
         serde_json::json!({
             "shown": true,
-            "app": shown.ask.app(),
+            "app": shown.app,
             "screenshot": matches!(shown.ask, Ask::Screenshot(_)),
             "output": view.output,
             // Outputs by name, windows by app id.

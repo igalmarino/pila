@@ -127,8 +127,9 @@ pub struct Share {
     pub session: String,
     /// How the pointer shows in the stream.
     pub cursor: CursorMode,
-    /// Who asks (`portal::Request::Start`).
+    /// Who asks (`portal::Request::Start`), and the window it asks from.
     pub app: Option<String>,
+    pub parent: Option<String>,
     /// What it may share: the picker offers these.
     pub sources: portal::Sources,
     pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,
@@ -256,6 +257,7 @@ impl Pila {
                 cursor,
                 sources,
                 app,
+                parent,
                 reply,
             } => {
                 // Connected at startup; again if the connection went.
@@ -268,14 +270,20 @@ impl Pila {
                         session,
                         cursor,
                         app,
+                        parent,
                         sources,
                         reply,
                     }));
                 self.show_share_picker();
             }
             Request::PickColor { reply } => self.start_color_pick(reply),
-            Request::Screenshot { ask, app, reply } => {
-                self.portal_screenshot(ask, crate::screenshot::Shot { app, reply });
+            Request::Screenshot {
+                ask,
+                app,
+                parent,
+                reply,
+            } => {
+                self.portal_screenshot(ask, crate::screenshot::Shot { app, parent, reply });
             }
             Request::Close { session } => {
                 debug!(session, "portal: session closed");

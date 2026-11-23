@@ -1006,3 +1006,44 @@ fn color_picking_is_cancelled_by_escape_or_the_lock() {
     assert_eq!(asked.join().unwrap(), (1, None), "cancelled by the lock");
     assert!(!color_pick_open(&pila.state()));
 }
+
+/// An app the portal doesn't name (outside a sandbox: no app id) is named by
+/// the window it asks from (`parent_window`, its xdg-foreign handle): its
+/// app id, then its desktop entry's name.
+#[test]
+fn an_app_without_an_app_id_is_named_by_its_window() {
+    use wayland_protocols::xdg::foreign::zv2::client::zxdg_exporter_v2::ZxdgExporterV2;
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    let window = client.window("org.example.Browser").size(200, 150).create();
+    pila.wait_focus("org.example.Browser");
+    let exporter: ZxdgExporterV2 = client.bind("zxdg_exporter_v2", 1);
+    let _exported =
+        exporter.export_toplevel(&client.surface(window), &client.qh, "exported".into());
+    client.flush();
+    client.wait_logged("exported", "Handle");
+    let event = client.logged("exported").join(" ");
+    let handle = event
+        .split('"')
+        .nth(1)
+        .unwrap_or_else(|| panic!("no handle in {event}"))
+        .to_string();
+
+    let mut portal = Portal::connect(&bus.address);
+    portal.parent_window = format!("wayland:{handle}");
+    let started = portal.request("named", "", 1);
+    // Its desktop entry's name ("Web Browser"), read on a thread.
+    pila.wait("the app named", |s| {
+        s["share_picker"]["app"] == "Web Browser"
+    });
+    pila.key("Escape");
+    assert_eq!(started.answer().0, 1);
+
+    // A handle no window was exported as names nothing.
+    portal.parent_window = "wayland:nothing-exported-as-this".into();
+    let started = portal.request("unnamed", "", 1);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(picker["app"], Value::Null);
+    pila.key("Escape");
+    assert_eq!(started.answer().0, 1);
+}

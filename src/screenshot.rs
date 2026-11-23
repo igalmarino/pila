@@ -35,8 +35,10 @@ const SCREENSHOTS_KEPT: usize = 10;
 
 /// A screenshot asked for, waiting for the picker.
 pub struct Shot {
-    /// Who asks (`portal::Request::Screenshot`).
+    /// Who asks (`portal::Request::Screenshot`), and the window it asks
+    /// from.
     pub app: Option<String>,
+    pub parent: Option<String>,
     pub reply: Reply<Result<String, Refused>>,
 }
 

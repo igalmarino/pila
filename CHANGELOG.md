@@ -16,6 +16,8 @@
   `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten kept) and handed to the app. Pila's portal
   configuration now names Pila for screenshots instead of xdg-desktop-portal-wlr; an own
   `pila-portals.conf` should say `org.freedesktop.impl.portal.Screenshot=pila`.
+- **The share panel names apps outside a sandbox** by the window they ask from (most browsers
+  say which): its app's name instead of "An app asks to share a screen".
 - **No more xdg-desktop-portal-wlr:** with screen sharing, single windows and apps' screenshots
   Pila's own, the packages no longer recommend it and Pila no longer installs its settings
   (`/etc/xdg/xdg-desktop-portal-wlr/pila` is removed; `scripts/tty` no longer writes
