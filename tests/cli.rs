@@ -574,7 +574,8 @@ fn scripts_tty_points_the_portal_to_pilas_backend() {
         .env_remove("DISPLAY")
         .output()
         .unwrap();
-    std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // As root (CI) the script could remove it, as it does what's its own.
+    let _ = std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o700));
     assert!(out.status.success(), "{out:?}");
     let portals = std::fs::read_to_string(dir.join("portals")).unwrap();
     assert!(portals.lines().any(|l| l == "pila.portal"), "{portals}");
