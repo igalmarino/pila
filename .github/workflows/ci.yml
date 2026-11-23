@@ -71,6 +71,23 @@ jobs:
             done
           done
           ls -l "$RUNNER_TEMP"/*.deb "$RUNNER_TEMP"/*.rpm
+      # The AUR package built as its users build it, with makepkg's defaults
+      # (its LTO flags too), from this commit rather than GitHub's main. makepkg
+      # doesn't run as root; the dependencies are the Packages step's.
+      - name: AUR package build
+        run: |
+          pacman -S --noconfirm --needed base-devel
+          git branch -f ci-package HEAD
+          useradd --create-home builder
+          runuser -u builder -- git config --global --add safe.directory '*'
+          dir=/home/builder/pila-git
+          mkdir "$dir"
+          sed "s|^source=.*|source=(\"pila::git+file://$GITHUB_WORKSPACE#branch=ci-package\")|" \
+            packaging/aur/pila-git/PKGBUILD > "$dir/PKGBUILD"
+          grep -q '^source=("pila::git+file://' "$dir/PKGBUILD"
+          chown -R builder "$dir"
+          (cd "$dir" && runuser -u builder -- makepkg --nodeps)
+          ls -l "$dir"/*.pkg.tar.zst
 
   scripts:
     name: Shell scripts
