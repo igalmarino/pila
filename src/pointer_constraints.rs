@@ -156,7 +156,7 @@ impl Pila {
         let window = self
             .space
             .elements()
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
+            .find(|w| w.wl_surface().is_some_and(|s| *s == *surface));
         if let Some(window) = window {
             let geometry = window.geometry();
             let loc = self.space.element_location(window)? - geometry.loc;

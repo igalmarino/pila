@@ -18,6 +18,7 @@ use smithay::{
     wayland::{
         idle_inhibit::IdleInhibitHandler,
         idle_notify::{IdleNotifierHandler, IdleNotifierState},
+        seat::WaylandFocus,
     },
 };
 
@@ -54,7 +55,7 @@ impl Pila {
         let mapped_window = self
             .space
             .elements()
-            .any(|w| w.toplevel().is_some_and(|t| *t.wl_surface() == root));
+            .any(|w| w.wl_surface().is_some_and(|s| *s == root));
         mapped_window || self.layer_for_surface(&root).is_some()
     }
 }
