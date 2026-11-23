@@ -78,9 +78,14 @@ fi
 # xdg-desktop-portal reads its backends from one directory: the installed ones
 # (each data directory's) and Pila's own, together in one made for this run.
 # Given that directory, it reads its configuration from there alone too.
-portal_dir="${XDG_RUNTIME_DIR:-/tmp}/pila-tty-portals"
-rm -rf "$portal_dir"
-mkdir -p "$portal_dir"
+# A new one each run: an earlier run's may not be ours to clear (one run
+# with sudo leaves it root's), and those that are go.
+runtime="${XDG_RUNTIME_DIR:-/tmp}"
+rm -rf "$runtime"/pila-tty-portals "$runtime"/pila-tty-portals.* 2>/dev/null || true
+portal_dir="$(mktemp -d "$runtime/pila-tty-portals.XXXXXX")"
+# The checkout's own first: an installed Pila's pila.portal is among the
+# system's, and linked first it had the copy written through the link.
+cp resources/portals/pila.portal resources/xdg/xdg-desktop-portal/pila-portals.conf "$portal_dir/"
 IFS=: read -r -a data_dirs <<<"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 for dir in "${data_dirs[@]}"; do
     for portal in "$dir"/xdg-desktop-portal/portals/*.portal; do
@@ -89,7 +94,6 @@ for dir in "${data_dirs[@]}"; do
         fi
     done
 done
-cp resources/portals/pila.portal resources/xdg/xdg-desktop-portal/pila-portals.conf "$portal_dir/"
 export XDG_DESKTOP_PORTAL_DIR="$portal_dir"
 
 # Keep the last run's log: after a crash, it's the one that matters.

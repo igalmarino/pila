@@ -557,6 +557,62 @@ fn scripts_tty_points_the_portal_to_pilas_backend() {
     );
     // xdg-desktop-portal-wlr's settings are no longer made.
     assert!(!config.join("xdg-desktop-portal-wlr").exists());
+
+    // A directory of an earlier run it can't write into (one run with sudo
+    // left it root's) doesn't stop it.
+    let stale = dir.join("pila-tty-portals");
+    let _ = std::fs::remove_dir_all(&stale);
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("pila.portal"), "old").unwrap();
+    std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let _ = std::fs::remove_file(dir.join("portals"));
+    let out = copied_script(&dir, "tty")
+        .env("PILA_BIN", &fake)
+        .env("XDG_CONFIG_HOME", &config)
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let portals = std::fs::read_to_string(dir.join("portals")).unwrap();
+    assert!(portals.lines().any(|l| l == "pila.portal"), "{portals}");
+
+    // With Pila installed, its pila.portal (read-only, root's) is among the
+    // system's: the checkout's is used, and the installed one left alone.
+    let installed = dir.join("share/xdg-desktop-portal/portals");
+    std::fs::create_dir_all(&installed).unwrap();
+    std::fs::write(installed.join("pila.portal"), "installed").unwrap();
+    std::fs::write(installed.join("gtk.portal"), "gtk").unwrap();
+    std::fs::set_permissions(installed.join("pila.portal"), std::fs::Permissions::from_mode(0o444))
+        .unwrap();
+    let report = dir.join("fake-pila-report");
+    std::fs::write(
+        &report,
+        "#!/bin/sh\ncat \"$XDG_DESKTOP_PORTAL_DIR/pila.portal\" > \"$XDG_RUNTIME_DIR/ours\"\nls \"$XDG_DESKTOP_PORTAL_DIR\" > \"$XDG_RUNTIME_DIR/portals\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&report, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_until_executable(&report);
+    let out = copied_script(&dir, "tty")
+        .env("PILA_BIN", &report)
+        .env("XDG_CONFIG_HOME", &config)
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env("XDG_DATA_DIRS", dir.join("share"))
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let ours = std::fs::read_to_string(dir.join("ours")).unwrap();
+    assert!(ours.contains("org.freedesktop.impl.portal.desktop.pila"), "{ours}");
+    assert_eq!(
+        std::fs::read_to_string(installed.join("pila.portal")).unwrap(),
+        "installed"
+    );
+    let portals = std::fs::read_to_string(dir.join("portals")).unwrap();
+    assert!(portals.lines().any(|l| l == "gtk.portal"), "{portals}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -4,6 +4,8 @@
 
 - **Fixed:** started without `XDG_RUNTIME_DIR` (with sudo, say, or outside a login session), Pila
   crashed with a backtrace; it now says what's missing and how to start it.
+- **Fixed:** `scripts/tty` didn't start Pila where Pila is installed too ("Permission denied" writing
+  the installed `pila.portal`).
 - **The share panel names X11 apps too** by the window they ask from (Chrome, Discord or OBS
   running through Xwayland), as it names Wayland apps that say theirs.
 
