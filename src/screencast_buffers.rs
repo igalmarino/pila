@@ -129,10 +129,17 @@ impl Drop for Shm {
 }
 
 impl Shm {
-    /// `len` bytes of shared memory, mapped.
+    /// `len` bytes of shared memory, mapped, sealed at that size: the app
+    /// sharing gets the fd, and shrinking it under the mapping Pila writes
+    /// into would end Pila with SIGBUS.
     fn new(len: usize) -> Option<(Self, i64)> {
         // SAFETY: a plain syscall with a valid name.
-        let fd = unsafe { libc::memfd_create(c"pila-screencast".as_ptr(), libc::MFD_CLOEXEC) };
+        let fd = unsafe {
+            libc::memfd_create(
+                c"pila-screencast".as_ptr(),
+                libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+            )
+        };
         if fd < 0 {
             return None;
         }
@@ -141,6 +148,10 @@ impl Shm {
         // SAFETY: plain syscalls on that fd.
         let ptr = unsafe {
             if libc::ftruncate(fd.as_raw_fd(), len as libc::off_t) != 0 {
+                return None;
+            }
+            let seals = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
+            if libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) != 0 {
                 return None;
             }
             libc::mmap(
@@ -309,5 +320,27 @@ pub fn format_modifiers(format: &spa::pod::Pod) -> Option<(bool, Vec<u64>)> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Shm;
+
+    /// The app sharing gets the memfd: shrinking it under Pila, still
+    /// writing frames into its mapping, would end Pila with SIGBUS.
+    #[test]
+    fn a_shared_memory_buffer_cant_be_shrunk_or_grown() {
+        let (shm, raw) = Shm::new(4096).expect("a memfd");
+        let fd = raw as libc::c_int;
+        // SAFETY: plain syscalls on a fd `shm` keeps open.
+        let (shrunk, grown) = unsafe { (libc::ftruncate(fd, 0), libc::ftruncate(fd, 8192)) };
+        assert_eq!(shrunk, -1, "shrunk");
+        assert_eq!(grown, -1, "grown");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM)
+        );
+        drop(shm);
     }
 }
