@@ -20,13 +20,6 @@ Nothing open: 0.9.2 took what was here.
 
 A feature users ask for goes here first.
 
-- **The first frames after a game tears cost the GPU 3.5-4.8 ms** (bare metal, amdgpu): when a
-  fullscreen game with vsync off (`vkcube`) closes or leaves fullscreen, Pila's next frames take
-  that long on the GPU, against about 1 ms after the same game with vsync; asked for 4-5.5 ms
-  before a vblank, one misses it (about one `scripts/check` in ten, on either monitor). Not the
-  wallpaper, the animations, the game's process ending, nor waiting behind its work (a
-  high-priority GPU context changed nothing): what's left is in the driver or the switch back
-  from asynchronous flips, which needs a GPU trace (amdgpu tracepoints) to tell.
 - **More of the desktop portal inside Pila** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
   screen sharing is Pila's own since 0.9.0; windows, apps' screenshots, the color picker and apps'
   global shortcuts too since 0.9.1. Next, if apps ask for them: a region of the screen to share
@@ -62,6 +55,13 @@ to say so.
   scanout tranche of dmabuf feedback), so Pila draws its frames instead of showing them as they
   are. Seen on a Renoir laptop with Mesa 26.3.1; Pila's part is logged (`direct scanout
   refused`, `dmabuf feedback` on `pila::frames`).
+- **A frame after a game that tore closes, waiting on the kernel's memory work** (bare metal,
+  amdgpu, an APU): when a fullscreen game with vsync off (`vkcube`) closes, Pila's next frame
+  waits about 2.4 ms on the GPU's copy engine (sdma0) before it runs: the kernel moves or clears
+  memory the game was using, and the frame's page tables wait for that (a GPU trace of 8 closes;
+  the frame itself then takes about 1 ms). With the GPU's clocks at their highest it's half as
+  long; with vsync, none. About one close in ten, that lands just before a vblank and one refresh
+  is missed. Nothing in Pila's own work: up to the driver.
 - **A maintained font parser in cosmic-text**: `cargo audit` reports `ttf-parser`, which
   cosmic-text uses, unmaintained (RUSTSEC-2026-0192; no vulnerability). Moving up with
   cosmic-text's next release.
