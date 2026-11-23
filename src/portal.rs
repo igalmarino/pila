@@ -19,7 +19,8 @@ use std::{
 
 use tracing::{debug, warn};
 use zbus::{
-    fdo, object_server::SignalEmitter, ObjectServer, OwnedObjectPath, OwnedVariant, Variant,
+    fdo, object_server::SignalEmitter, ObjectPath, ObjectServer, OwnedObjectPath, OwnedVariant,
+    Variant,
 };
 
 use crate::sync::Locked;
@@ -131,6 +132,26 @@ pub enum Request {
     PickColor {
         reply: Reply<Result<crate::color_pick::Color, Refused>>,
     },
+    /// What apps' shortcuts were confirmed before, read from their file
+    /// (`app_shortcuts.rs`).
+    ShortcutsStore(crate::app_shortcuts::Store),
+    /// An app's global shortcuts session began.
+    ShortcutsSession { session: String, app_id: String },
+    /// A session binds its shortcuts: answered once they are.
+    BindShortcuts {
+        session: String,
+        app: Option<String>,
+        parent: Option<String>,
+        shortcuts: Vec<crate::app_shortcuts::Asked>,
+        reply: Reply<Result<Vec<crate::app_shortcuts::Bound>, Refused>>,
+    },
+    /// The shortcuts a session has bound.
+    ListShortcuts {
+        session: String,
+        reply: Reply<Vec<crate::app_shortcuts::Bound>>,
+    },
+    /// Show the panel for a session's shortcuts again.
+    ConfigureShortcuts { session: String },
 }
 
 /// A stream started for a session, as `Start` answers it.
@@ -166,12 +187,16 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
                 selections: Mutex::default(),
             };
             let screenshot = Screenshot { send: send.clone() };
+            let shortcuts = GlobalShortcuts { send: send.clone() };
+            // What was confirmed before, read here: off the event loop.
+            let _ = send.send(Request::ShortcutsStore(crate::app_shortcuts::read_store()));
             let built = zbus::block_on(
                 zbus::connection::Builder::address(address.as_str())
                     .method_timeout(std::time::Duration::from_secs(5))
                     .name(BUS_NAME)
                     .serve_at(PATH, screencast)
                     .serve_at(PATH, screenshot)
+                    .serve_at(PATH, shortcuts)
                     .build(),
             );
             // Off the event loop, what its connection to PipeWire would
@@ -336,6 +361,240 @@ impl ScreenCast {
     #[zbus(property, name = "version")]
     fn version(&self) -> u32 {
         5
+    }
+}
+
+/// `org.freedesktop.impl.portal.GlobalShortcuts`.
+struct GlobalShortcuts {
+    send: calloop::channel::Sender<Request>,
+}
+
+/// A shortcut as the portal describes it (`a(sa{sv})`).
+type ShortcutEntry = (String, HashMap<String, OwnedVariant>);
+
+/// `shortcuts` as `BindShortcuts`' results and `ShortcutsChanged` give them.
+fn shortcut_entries(shortcuts: &[crate::app_shortcuts::Bound]) -> Vec<ShortcutEntry> {
+    shortcuts
+        .iter()
+        .map(|bound| {
+            let mut properties = HashMap::new();
+            if let Ok(description) =
+                OwnedVariant::try_from(Variant::from(bound.description.as_str()))
+            {
+                properties.insert("description".to_string(), description);
+            }
+            let trigger = bound.trigger_description().unwrap_or_default();
+            if let Ok(trigger) = OwnedVariant::try_from(Variant::from(trigger)) {
+                properties.insert("trigger_description".to_string(), trigger);
+            }
+            (bound.id.clone(), properties)
+        })
+        .collect()
+}
+
+#[zbus::interface(name = "org.freedesktop.impl.portal.GlobalShortcuts")]
+impl GlobalShortcuts {
+    async fn create_session(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        app_id: String,
+        _options: HashMap<String, OwnedVariant>,
+        #[zbus(object_server)] server: &ObjectServer,
+    ) -> (u32, Results) {
+        let path = session_handle.to_string();
+        let session = Session {
+            send: self.send.clone(),
+            path: path.clone(),
+        };
+        if let Err(err) = server.at(session_handle.as_ref(), session).await {
+            warn!(%err, "portal: can't serve a session");
+            return (RESPONSE_OTHER, Results::new());
+        }
+        let request = Request::ShortcutsSession {
+            session: path,
+            app_id,
+        };
+        if self.send.send(request).is_err() {
+            return (RESPONSE_OTHER, Results::new());
+        }
+        (RESPONSE_SUCCESS, Results::new())
+    }
+
+    async fn bind_shortcuts(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        shortcuts: Vec<ShortcutEntry>,
+        parent_window: String,
+        _options: HashMap<String, OwnedVariant>,
+    ) -> (u32, Results) {
+        let text = |properties: &HashMap<String, OwnedVariant>, key: &str| {
+            properties
+                .get(key)
+                .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+        };
+        let asked = shortcuts
+            .iter()
+            .map(|(id, properties)| crate::app_shortcuts::Asked {
+                id: id.clone(),
+                description: text(properties, "description").unwrap_or_else(|| id.clone()),
+                preferred: text(properties, "preferred_trigger"),
+            })
+            .collect();
+        let (reply, answer) = reply_channel();
+        let request = Request::BindShortcuts {
+            session: session_handle.to_string(),
+            app: None,
+            parent: parent_handle(&parent_window),
+            shortcuts: asked,
+            reply,
+        };
+        if self.send.send(request).is_err() {
+            return (RESPONSE_OTHER, Results::new());
+        }
+        match answer.await {
+            Some(Ok(bound)) => {
+                match OwnedVariant::try_from(Variant::from(shortcut_entries(&bound))) {
+                    Ok(entries) => (
+                        RESPONSE_SUCCESS,
+                        Results::from([("shortcuts".to_string(), entries)]),
+                    ),
+                    Err(_) => (RESPONSE_OTHER, Results::new()),
+                }
+            }
+            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
+            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        }
+    }
+
+    async fn list_shortcuts(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+    ) -> (u32, Results) {
+        let (reply, answer) = reply_channel();
+        let request = Request::ListShortcuts {
+            session: session_handle.to_string(),
+            reply,
+        };
+        if self.send.send(request).is_err() {
+            return (RESPONSE_OTHER, Results::new());
+        }
+        let Some(bound) = answer.await else {
+            return (RESPONSE_OTHER, Results::new());
+        };
+        match OwnedVariant::try_from(Variant::from(shortcut_entries(&bound))) {
+            Ok(entries) => (
+                RESPONSE_SUCCESS,
+                Results::from([("shortcuts".to_string(), entries)]),
+            ),
+            Err(_) => (RESPONSE_OTHER, Results::new()),
+        }
+    }
+
+    async fn configure_shortcuts(
+        &self,
+        session_handle: OwnedObjectPath,
+        _parent_window: String,
+        _options: HashMap<String, OwnedVariant>,
+    ) {
+        let _ = self.send.send(Request::ConfigureShortcuts {
+            session: session_handle.to_string(),
+        });
+    }
+
+    #[zbus(signal)]
+    async fn activated(
+        emitter: &SignalEmitter<'_>,
+        session_handle: ObjectPath<'_>,
+        shortcut_id: &str,
+        timestamp: u64,
+        options: HashMap<String, OwnedVariant>,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn deactivated(
+        emitter: &SignalEmitter<'_>,
+        session_handle: ObjectPath<'_>,
+        shortcut_id: &str,
+        timestamp: u64,
+        options: HashMap<String, OwnedVariant>,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn shortcuts_changed(
+        emitter: &SignalEmitter<'_>,
+        session_handle: ObjectPath<'_>,
+        shortcuts: Vec<ShortcutEntry>,
+    ) -> zbus::Result<()>;
+
+    #[zbus(property, name = "version")]
+    fn version(&self) -> u32 {
+        2
+    }
+}
+
+/// Send a session's shortcut signal (`Activated`, `Deactivated`): blocks
+/// on the bus, so from a thread (`app_shortcuts.rs`).
+pub fn emit_shortcut(
+    connection: &zbus::Connection,
+    session: &str,
+    id: &str,
+    signal: crate::app_shortcuts::Signal,
+    millis: u64,
+) {
+    let emitted = zbus::block_on(async {
+        let iface = connection
+            .object_server()
+            .interface::<_, GlobalShortcuts>(PATH)
+            .await?;
+        let emitter = iface.signal_emitter();
+        let session = ObjectPath::try_from(session)?;
+        match signal {
+            crate::app_shortcuts::Signal::Activated => {
+                GlobalShortcuts::activated(emitter, session, id, millis, HashMap::new()).await
+            }
+            crate::app_shortcuts::Signal::Deactivated => {
+                GlobalShortcuts::deactivated(emitter, session, id, millis, HashMap::new()).await
+            }
+        }
+    });
+    if let Err(err) = emitted {
+        debug!(%err, session, id, "portal: can't send a shortcut's signal");
+    }
+}
+
+/// Tell a session its shortcuts changed (`ConfigureShortcuts` saved), on a
+/// thread.
+pub fn shortcuts_changed(
+    connection: &zbus::Connection,
+    session: String,
+    shortcuts: Vec<crate::app_shortcuts::Bound>,
+) {
+    let connection = connection.clone();
+    let spawned = std::thread::Builder::new()
+        .name("pila-portal-shortcuts".into())
+        .spawn(move || {
+            let sent = zbus::block_on(async {
+                let iface = connection
+                    .object_server()
+                    .interface::<_, GlobalShortcuts>(PATH)
+                    .await?;
+                let session = ObjectPath::try_from(session.as_str())?;
+                GlobalShortcuts::shortcuts_changed(
+                    iface.signal_emitter(),
+                    session,
+                    shortcut_entries(&shortcuts),
+                )
+                .await
+            });
+            if let Err(err) = sent {
+                debug!(%err, "portal: can't send ShortcutsChanged");
+            }
+        });
+    if let Err(err) = spawned {
+        warn!(?err, "portal: can't send ShortcutsChanged");
     }
 }
 

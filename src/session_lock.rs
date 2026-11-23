@@ -236,6 +236,7 @@ impl SessionLockHandler for Pila {
         // while locked.
         self.cancel_share_picker();
         self.cancel_color_pick();
+        self.cancel_app_shortcuts();
         self.close_window_menu();
         self.hide_shortcuts();
         self.close_overview();

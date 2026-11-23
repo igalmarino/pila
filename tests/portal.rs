@@ -1088,3 +1088,158 @@ fn the_selected_window_is_highlighted_when_scrolled() {
     pila.key("Escape");
     started.answer();
 }
+
+/// The next shortcut signal within the timeout.
+fn next_signal(signals: &std::sync::mpsc::Receiver<(String, String, String)>) -> (String, String) {
+    let (signal, _, id) = signals
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("a shortcut's signal");
+    (signal, id)
+}
+
+/// An app binds a shortcut: the panel asks, with the keys it would like;
+/// saved, its press goes to the app's session (Activated, then Deactivated
+/// at its release) and to no window; a session of the same app later binds
+/// it at once, as confirmed, and the store keeps it.
+#[test]
+fn an_apps_global_shortcut_is_confirmed_then_sent_to_it() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("editor").size(200, 150).create();
+    pila.wait_focus("editor");
+    pila.settle();
+    client.roundtrip();
+    let mut portal = Portal::connect(&bus.address);
+    let signals = portal.shortcut_signals();
+    portal.shortcuts_session("s1", "org.example.Talk");
+    let bound = portal.bind_shortcuts("s1", &[("talk", "Push to talk", "CTRL+F12")]);
+    let state = pila.wait("the panel", |s| s["app_shortcuts"]["panel"]["text"] == true);
+    let panel = &state["app_shortcuts"]["panel"];
+    assert_eq!(panel["app"], "org.example.Talk");
+    assert_eq!(panel["rows"][0]["keys"], "Ctrl+F12");
+    pila.key("Return");
+    let (response, shortcuts) = bound.join().unwrap();
+    assert_eq!(response, 0, "BindShortcuts");
+    assert_eq!(shortcuts, [("talk".to_string(), "Ctrl+F12".to_string())]);
+
+    pila.combo("Ctrl+F12");
+    assert_eq!(next_signal(&signals), ("Activated".into(), "talk".into()));
+    assert_eq!(next_signal(&signals), ("Deactivated".into(), "talk".into()));
+    client.roundtrip();
+    let keys = client
+        .lock()
+        .events
+        .iter()
+        .filter(|e| matches!(e, common::client::Ev::Key { key: 88, .. }))
+        .count();
+    assert_eq!(keys, 0, "F12 reached the window");
+    assert_eq!(
+        portal.list_shortcuts("s1"),
+        [("talk".to_string(), "Ctrl+F12".to_string())]
+    );
+
+    // Remembered: on disk, and bound at once next time.
+    let stored = pila.wait_file("state/pila/app-shortcuts.json");
+    assert!(
+        stored.contains("org.example.Talk") && stored.contains("CTRL+F12"),
+        "{stored}"
+    );
+    portal.close("s1");
+    pila.wait("the session gone", |s| {
+        s["app_shortcuts"]["sessions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    });
+    portal.shortcuts_session("s2", "org.example.Talk");
+    let (response, shortcuts) = portal
+        .bind_shortcuts("s2", &[("talk", "Push to talk", "CTRL+F11")])
+        .join()
+        .unwrap();
+    assert_eq!(response, 0);
+    assert_eq!(
+        shortcuts,
+        [("talk".to_string(), "Ctrl+F12".to_string())],
+        "as confirmed"
+    );
+    assert!(
+        pila.state()["app_shortcuts"]["panel"].is_null(),
+        "not asked again"
+    );
+}
+
+/// In the panel: keys Pila binds aren't offered (the row starts unset) nor
+/// taken, typing isn't a shortcut, the keys pressed become the selected
+/// row's, Backspace clears it; Escape binds nothing.
+#[test]
+fn the_shortcuts_panel_takes_the_keys_pressed() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    portal.shortcuts_session("s3", "org.example.Rec");
+    // Super+Return is Pila's (the terminal).
+    let bound = portal.bind_shortcuts(
+        "s3",
+        &[
+            ("start", "Start recording", "LOGO+Return"),
+            ("stop", "Stop recording", ""),
+        ],
+    );
+    let state = pila.wait("the panel", |s| !s["app_shortcuts"]["panel"].is_null());
+    let rows = |s: &Value| s["app_shortcuts"]["panel"]["rows"].clone();
+    assert_eq!(
+        rows(&state)[0]["keys"],
+        Value::Null,
+        "Pila's keys, not offered"
+    );
+    assert_eq!(rows(&state)[1]["keys"], Value::Null);
+
+    pila.combo("Super+Return");
+    let state = pila.wait("refused", |s| {
+        !s["app_shortcuts"]["panel"]["refused"].is_null()
+    });
+    assert_eq!(
+        rows(&state)[0]["keys"],
+        Value::Null,
+        "Pila's keys, not taken"
+    );
+    pila.key("a");
+    pila.combo("Ctrl+Alt+r");
+    let state = pila.wait("taken", |s| rows(s)[0]["keys"] == "Ctrl+Alt+R");
+    assert_eq!(state["app_shortcuts"]["panel"]["refused"], Value::Null);
+    pila.key("Down");
+    pila.key("F9");
+    pila.wait("the second's", |s| rows(s)[1]["keys"] == "F9");
+    pila.key("BackSpace");
+    pila.wait("cleared", |s| rows(s)[1]["keys"] == Value::Null);
+    pila.key("Escape");
+    let (response, _) = bound.join().unwrap();
+    assert_eq!(response, 1, "cancelled");
+    assert!(pila.state()["app_shortcuts"]["sessions"][0]["shortcuts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+/// A bound shortcut does nothing while the screen is locked.
+#[test]
+fn an_apps_global_shortcut_waits_while_locked() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let signals = portal.shortcut_signals();
+    portal.shortcuts_session("s4", "org.example.Talk");
+    let bound = portal.bind_shortcuts("s4", &[("talk", "Push to talk", "CTRL+F12")]);
+    pila.wait("the panel", |s| !s["app_shortcuts"]["panel"].is_null());
+    pila.key("Return");
+    assert_eq!(bound.join().unwrap().0, 0);
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    locker.lock_surface(&lock, "HEADLESS-1", [255, 0, 0, 0]);
+    locker.wait_logged("lock", "Locked");
+    pila.combo("Ctrl+F12");
+    assert!(
+        signals
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err(),
+        "a shortcut sent while locked"
+    );
+}

@@ -709,6 +709,17 @@ covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** 
 pointer isn't in it. The picture is saved in `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten
 are kept; it goes at logout) and handed to the app.
 
+**An app's global shortcuts** (push-to-talk in a voice chat, a recorder's start and stop: apps
+that ask the desktop portal for them) work whichever window has the keyboard. The first time an
+app asks, a panel lists its shortcuts with the keys it would like: pick one with the arrows (or a
+click) and press the keys you want for it (with Ctrl, Alt or Super, or a key that types nothing,
+such as F1 to F12 or a media key), Backspace leaves it unset; **Save** (Enter) or **Cancel**
+(Escape). Keys Pila already binds aren't offered, nor those another app has. What you save is
+remembered for that app (in `~/.local/state/pila/app-shortcuts.json`), so it isn't asked again;
+an app with a "configure shortcuts" button shows the panel again. A shortcut's key goes to the
+app alone, not to the window you're typing in, and does nothing while the screen is locked or
+an app inhibits shortcuts.
+
 **Picking a color** from the screen (GTK's color chooser, GIMP, Inkscape: anything that asks the
 portal) turns the pointer into a crosshair, with a panel at the top of the screen: click the
 pixel whose color you want, or Escape to give up. No app gets that click or any key meanwhile.

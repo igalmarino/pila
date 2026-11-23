@@ -182,6 +182,9 @@ pub struct Pila {
     pub share_picker: crate::share_picker::SharePicker,
     /// The portal's color picker, while it's on (`color_pick.rs`).
     pub color_pick: crate::color_pick::ColorPick,
+    /// Apps' global shortcuts and the panel that confirms them
+    /// (`app_shortcuts.rs`).
+    pub app_shortcuts: crate::app_shortcuts::AppShortcuts,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -585,6 +588,7 @@ impl Pila {
             screencast: Default::default(),
             share_picker: Default::default(),
             color_pick: Default::default(),
+            app_shortcuts: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -716,6 +720,7 @@ impl Pila {
         // share picker is modal: nothing is hit while it's shown.
         if self.share_picker_open()
             || self.color_pick_open()
+            || self.app_shortcuts_open()
             || self.switcher_view_covers(pos)
             || self.shortcuts_view_covers(pos)
         {
@@ -866,6 +871,7 @@ impl Pila {
             shortcuts: self.scene_shortcuts(),
             share_picker: self.scene_share_picker(),
             color_pick: self.scene_color_pick(),
+            app_shortcuts: self.scene_app_shortcuts(),
             overview,
             ..Scene::blank(self.config.colors)
         }

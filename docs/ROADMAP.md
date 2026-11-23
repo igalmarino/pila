@@ -28,9 +28,9 @@ A feature users ask for goes here first.
   high-priority GPU context changed nothing): what's left is in the driver or the switch back
   from asynchronous flips, which needs a GPU trace (amdgpu tracepoints) to tell.
 - **More of the desktop portal inside Pila** ([discussion #12](https://github.com/igalmarino/pila/discussions/12)):
-  screen sharing is Pila's own since 0.9.0, windows, apps' screenshots and the color picker too
-  (unreleased); next, GlobalShortcuts, which xdg-desktop-portal-wlr lacks, for apps' global
-  shortcuts (push-to-talk).
+  screen sharing is Pila's own since 0.9.0; windows, apps' screenshots, the color picker and apps'
+  global shortcuts too (unreleased). Next, if apps ask for them: a region of the screen to share
+  or take, and the RemoteDesktop portal.
 
 ## Waiting for hardware and testers
 

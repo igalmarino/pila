@@ -12,6 +12,7 @@
 //! (`winit.rs`).
 
 pub mod animation;
+pub mod app_shortcuts;
 pub mod backend;
 pub mod bell;
 pub mod blur;

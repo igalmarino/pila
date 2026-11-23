@@ -71,7 +71,7 @@ pub struct ScreenCasts {
     casts: Vec<Cast>,
     pipewire: Option<PipeWire>,
     /// Pila's connection to the session bus, serving the portal.
-    portal: Option<zbus::Connection>,
+    pub(crate) portal: Option<zbus::Connection>,
     /// Requests to share waiting for the picker, first come first asked:
     /// it shows one at a time (`share_picker.rs`).
     pub(crate) waiting: std::collections::VecDeque<crate::share_picker::Ask>,
@@ -277,6 +277,21 @@ impl Pila {
                 self.show_share_picker();
             }
             Request::PickColor { reply } => self.start_color_pick(reply),
+            Request::ShortcutsStore(store) => self.app_shortcuts_store(store),
+            Request::ShortcutsSession { session, app_id } => {
+                self.app_shortcuts_session(session, app_id)
+            }
+            Request::BindShortcuts {
+                session,
+                app,
+                parent,
+                shortcuts,
+                reply,
+            } => self.bind_app_shortcuts(session, app, parent, shortcuts, reply),
+            Request::ListShortcuts { session, reply } => {
+                reply.send(self.list_app_shortcuts(&session))
+            }
+            Request::ConfigureShortcuts { session } => self.configure_app_shortcuts(session),
             Request::Screenshot {
                 ask,
                 app,
@@ -291,6 +306,7 @@ impl Pila {
                     .waiting
                     .retain(|ask| ask.session() != Some(session.as_str()));
                 self.close_share_picker_of(&session);
+                self.app_shortcuts_closed(&session);
                 self.screencast.casts.retain(|cast| cast.session != session);
                 self.trim_after_casts();
             }

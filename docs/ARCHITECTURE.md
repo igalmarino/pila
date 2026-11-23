@@ -1170,6 +1170,25 @@ Key flows and invariants:
   `when_copied`), then encoded as a PNG and written on a thread into
   `$XDG_RUNTIME_DIR/pila-screenshots` (private; the oldest past `SCREENSHOTS_KEPT` go); the app
   gets its `file://` URI.
+- **Apps' global shortcuts** (`app_shortcuts.rs`, the portal's GlobalShortcuts interface, version 2):
+  each `CreateSession` is a `Session` object on the bus and an entry of `Pila::app_shortcuts`
+  (its app: the app id, else the app id of the window `BindShortcuts` comes from, by its
+  xdg-foreign handle). `BindShortcuts` binds at once what the store confirmed before for that
+  app (`Store`, `$XDG_STATE_HOME/pila/app-shortcuts.json`, read by the portal's thread at startup,
+  `Request::ShortcutsStore`, and written whole by a thread at each save); otherwise a modal panel
+  (`ask_app_shortcuts`; refused while locked or another panel asks) lists them with the keys asked
+  for (`parse_trigger`, the shortcuts XDG specification's text; only `assignable` ones: with Ctrl,
+  Alt or Super, or a key that types nothing), none where Pila's bindings or another session have
+  them (`keys_taken`). The keyboard filter gives the panel every press but a modifier's
+  (`app_shortcuts_key`: arrows pick, Backspace clears, Enter saves, Escape cancels, other keys
+  become the selected row's, unless taken: `refused` says by whom); `pointer_button` every press
+  (rows, Save, Cancel); `Pila::under` hits nothing; every output is dimmed. Saving answers
+  `BindShortcuts` (or, from `ConfigureShortcuts`, sends `ShortcutsChanged`) and stores the keys
+  (`format_trigger`; empty for unset). A bound shortcut's press, after Pila's own bindings and
+  unless the screen is locked, a client inhibits shortcuts or a panel is modal
+  (`app_shortcut_for`), is suppressed and sends its session `Activated`; its release
+  `Deactivated` (`held`, by keycode). Signals go out from a thread of their own, fed by a channel
+  (`emit_app_shortcut`, `portal::emit_shortcut`). Closing a session drops its shortcuts.
 - **Color picker** (`color_pick.rs`, the portal's `PickColor`, `portal::Request::PickColor`):
   `Pila::color_pick` holds the answer while it's on (one at a time; refused while locked or while
   the share picker asks). Modal: the keyboard filter gives it every press (Escape cancels),

@@ -23,6 +23,12 @@
   (`/etc/xdg/xdg-desktop-portal-wlr/pila` is removed; `scripts/tty` no longer writes
   `~/.config/xdg-desktop-portal-wlr/pila`, and leaves an older copy alone). It can still be used
   through a `pila-portals.conf` of your own.
+- **Apps' global shortcuts:** apps that ask the desktop portal for global shortcuts (push-to-talk,
+  a recorder's start and stop) get them from Pila, so they work whichever window has the
+  keyboard. The first time, a panel lists the app's shortcuts with the keys it would like; pick
+  one and press the keys you want, Backspace leaves it unset, Save or Cancel. Keys Pila binds or
+  another app has aren't given; what's saved is remembered for the app. A shortcut's key goes to
+  the app alone, and does nothing while the screen is locked.
 - **Pick a color from the screen:** apps that ask the portal for one (GTK's color chooser, GIMP,
   Inkscape) get a crosshair and a panel saying what to do; a click answers with the color under
   it, Escape gives up, and no app gets the click.

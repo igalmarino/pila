@@ -208,6 +208,9 @@ pub struct Scene {
     /// The color picker's panel, in front of everything of Pila's
     /// (`color_pick.rs`).
     pub color_pick: Option<crate::color_pick::ScenePick>,
+    /// The panel confirming an app's shortcuts' keys, modal: the dim over
+    /// every output (`app_shortcuts.rs`).
+    pub app_shortcuts: Option<crate::app_shortcuts::ScenePanel>,
     pub colors: Colors,
 }
 
@@ -234,6 +237,7 @@ impl Scene {
             overview: None,
             share_picker: None,
             color_pick: None,
+            app_shortcuts: None,
             colors,
         }
     }
@@ -250,6 +254,7 @@ impl Scene {
             || self.overview.is_some()
             || self.share_picker.is_some()
             || self.color_pick.is_some()
+            || self.app_shortcuts.is_some()
         {
             return false;
         }
@@ -1890,6 +1895,19 @@ pub fn output_elements(
     if let Some(view) = scene.share_picker.as_ref().filter(|_| !scene.locked) {
         // In front of everything of Pila's: it's modal.
         let mut front = crate::share_picker::elements(
+            renderer,
+            view,
+            &scene.colors,
+            output_name,
+            Rectangle::new(origin, output_geo.size),
+            scale,
+        );
+        front.append(&mut elements);
+        elements = front;
+    }
+    if let Some(view) = scene.app_shortcuts.as_ref().filter(|_| !scene.locked) {
+        // In front of everything of Pila's: it's modal.
+        let mut front = crate::app_shortcuts::elements(
             renderer,
             view,
             &scene.colors,

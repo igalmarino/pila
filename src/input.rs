@@ -215,6 +215,7 @@ impl Pila {
         let mut hide_shortcuts = false;
         let mut picker_key = None;
         let mut pick_key = None;
+        let mut shortcuts_key = None;
         let mut overview_key = None;
         let mut repeat_next = None;
         let mut tap_action = None;
@@ -260,6 +261,17 @@ impl Pila {
                             (raw - first + 1) as i32,
                         )));
                     }
+                }
+                // The panel confirming an app's shortcuts takes every press
+                // but a modifier's (they make up the keys it's given): it's
+                // modal (`app_shortcuts.rs`).
+                if key_state == KeyState::Pressed && state.app_shortcuts_open() {
+                    state.input.suppressed_keys.insert(keycode);
+                    let sym = handle.raw_latin_sym_or_raw_current_sym();
+                    if let Some(sym) = sym.filter(|sym| !sym.is_modifier_key()) {
+                        shortcuts_key = Some((sym, *mods));
+                    }
+                    return FilterResult::Intercept(None);
                 }
                 // The color picker takes every press while it's on: it's
                 // modal (`color_pick.rs`).
@@ -336,9 +348,23 @@ impl Pila {
                             }
                             return FilterResult::Intercept(Some(action));
                         }
+                        // An app's global shortcut goes to its session, not
+                        // to the window with the keyboard; Pila's bindings
+                        // came first, and an app inhibiting shortcuts keeps
+                        // them (`app_shortcuts.rs`).
+                        let shortcut = sym
+                            .filter(|_| !inhibited)
+                            .and_then(|sym| state.app_shortcut_for(sym, mods));
+                        if let Some(shortcut) = shortcut {
+                            state.input.suppressed_keys.insert(keycode);
+                            state.app_shortcut_pressed(keycode.raw(), shortcut);
+                            return FilterResult::Intercept(None);
+                        }
                     }
-                    // Don't send the client a release for a press it never saw.
+                    // Don't send the client a release for a press it never saw
+                    // (an app's shortcut's ends with it).
                     KeyState::Released if state.input.suppressed_keys.remove(&keycode) => {
+                        state.app_shortcut_released(keycode.raw());
                         return FilterResult::Intercept(None);
                     }
                     // A modifier released with nothing since its press: its
@@ -381,6 +407,9 @@ impl Pila {
         }
         if let Some(sym) = pick_key {
             self.color_pick_key(sym);
+        }
+        if let Some((sym, mods)) = shortcuts_key {
+            self.app_shortcuts_key(sym, &mods);
         }
         if hide_shortcuts {
             self.hide_shortcuts();
@@ -824,6 +853,13 @@ impl Pila {
                 client,
                 at: std::time::Instant::now(),
             });
+        }
+        // The panel confirming an app's shortcuts takes every press, and
+        // its release: it's modal.
+        if button_state == ButtonState::Pressed && self.app_shortcuts_open() {
+            self.input.suppressed_buttons.insert(button);
+            self.app_shortcuts_press(pointer.current_location());
+            return;
         }
         // The color picker takes every press, and its release: the first
         // picks the color under the pointer.

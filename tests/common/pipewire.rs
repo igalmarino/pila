@@ -576,6 +576,26 @@ pub type Rgb = (f64, f64, f64);
 const NAME: &str = "org.freedesktop.impl.portal.desktop.pila";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 const SCREENCAST: &str = "org.freedesktop.impl.portal.ScreenCast";
+const SHORTCUTS: &str = "org.freedesktop.impl.portal.GlobalShortcuts";
+
+/// `BindShortcuts`' and `ListShortcuts`' shortcuts: each id and trigger
+/// description.
+fn bound_shortcuts(results: &Vardict) -> Vec<(String, String)> {
+    let Some(shortcuts) = results.get("shortcuts") else {
+        return Vec::new();
+    };
+    let shortcuts: Vec<(String, Vardict)> = shortcuts.try_clone().unwrap().try_into().unwrap();
+    shortcuts
+        .into_iter()
+        .map(|(id, properties)| {
+            let trigger = properties
+                .get("trigger_description")
+                .map(|v| String::try_from(v.try_clone().unwrap()).unwrap())
+                .unwrap_or_default();
+            (id, trigger)
+        })
+        .collect()
+}
 
 impl Portal {
     /// Connect to the bus at `address` once Pila serves the portal there.
@@ -736,6 +756,123 @@ impl Portal {
                 .map(|color| Rgb::try_from(color.try_clone().unwrap()).unwrap());
             (response, color)
         })
+    }
+
+    /// Create a global shortcuts session `name` for app `app_id`.
+    pub fn shortcuts_session(&mut self, name: &str, app_id: &str) {
+        let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
+        let handle = self.handle();
+        let reply = zbus::block_on(self.bus.call_method(
+            Some(NAME),
+            PATH,
+            Some(SHORTCUTS),
+            "CreateSession",
+            &(handle, &session, app_id, Vardict::new()),
+        ))
+        .unwrap_or_else(|err| panic!("CreateSession: {err}"));
+        let (response, _): (u32, Vardict) = reply.body().deserialize().unwrap();
+        assert_eq!(response, 0, "CreateSession");
+    }
+
+    /// Bind session `name`'s `shortcuts` (id, description, preferred
+    /// trigger): the answer comes on a thread, the response and each bound
+    /// shortcut's id and trigger description.
+    pub fn bind_shortcuts(
+        &mut self,
+        name: &str,
+        shortcuts: &[(&str, &str, &str)],
+    ) -> std::thread::JoinHandle<(u32, Vec<(String, String)>)> {
+        let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
+        let handle = self.handle();
+        let bus = self.bus.clone();
+        let parent = self.parent_window.clone();
+        let shortcuts: Vec<(String, Vardict)> = shortcuts
+            .iter()
+            .map(|(id, description, trigger)| {
+                (
+                    id.to_string(),
+                    HashMap::from([
+                        (
+                            "description".to_string(),
+                            OwnedVariant::try_from(zbus::Variant::from(*description)).unwrap(),
+                        ),
+                        (
+                            "preferred_trigger".to_string(),
+                            OwnedVariant::try_from(zbus::Variant::from(*trigger)).unwrap(),
+                        ),
+                    ]),
+                )
+            })
+            .collect();
+        std::thread::spawn(move || {
+            let reply = zbus::block_on(bus.call_method(
+                Some(NAME),
+                PATH,
+                Some(SHORTCUTS),
+                "BindShortcuts",
+                &(handle, &session, shortcuts, parent.as_str(), Vardict::new()),
+            ))
+            .unwrap_or_else(|err| panic!("BindShortcuts: {err}"));
+            let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
+            (response, bound_shortcuts(&results))
+        })
+    }
+
+    /// The shortcuts session `name` has bound: each id and trigger
+    /// description.
+    pub fn list_shortcuts(&mut self, name: &str) -> Vec<(String, String)> {
+        let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
+        let handle = self.handle();
+        let reply = zbus::block_on(self.bus.call_method(
+            Some(NAME),
+            PATH,
+            Some(SHORTCUTS),
+            "ListShortcuts",
+            &(handle, &session),
+        ))
+        .unwrap_or_else(|err| panic!("ListShortcuts: {err}"));
+        let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
+        assert_eq!(response, 0, "ListShortcuts");
+        bound_shortcuts(&results)
+    }
+
+    /// The shortcuts' signals Pila sends from now on, as they come: the
+    /// signal's name, the session's object path and the shortcut's id.
+    pub fn shortcut_signals(&self) -> mpsc::Receiver<(String, String, String)> {
+        let rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface(SHORTCUTS)
+            .build()
+            .unwrap();
+        let stream =
+            zbus::block_on(zbus::MessageStream::for_match_rule(rule, &self.bus, None)).unwrap();
+        let (send, receive) = mpsc::channel();
+        std::thread::spawn(move || {
+            zbus::block_on(async move {
+                use zbus::export::futures_core::Stream;
+                let mut stream = stream;
+                while let Some(Ok(message)) =
+                    std::future::poll_fn(|cx| std::pin::Pin::new(&mut stream).poll_next(cx)).await
+                {
+                    let header = message.header();
+                    let member = header.member().map(|m| m.to_string()).unwrap_or_default();
+                    if member != "Activated" && member != "Deactivated" {
+                        continue;
+                    }
+                    let Ok((session, id, _, _)) =
+                        message
+                            .body()
+                            .deserialize::<(OwnedObjectPath, String, u64, Vardict)>()
+                    else {
+                        continue;
+                    };
+                    if send.send((member, session.to_string(), id)).is_err() {
+                        break;
+                    }
+                }
+            });
+        });
+        receive
     }
 
     /// Close the session `name`, as xdg-desktop-portal does when the app
