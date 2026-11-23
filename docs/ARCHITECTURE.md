@@ -1483,7 +1483,9 @@ Key flows and invariants:
   that don't use it open centered.
 - **Foreign toplevels** (`foreign_toplevel.rs`, ext-foreign-toplevel-list, read-only): a
   window's handle is created in `place_new_window`, kept in its user data, updated on
-  commit (X11: `property_notify`) and closed in `forget_window` (a toplevel destroyed, an X11
+  commit and as its title or app id is set (`title_changed`, `app_id_changed`: a window off the
+  screen may not commit for a while; X11: `property_notify`), on the screen or off it
+  (`window_for_surface`), and closed in `forget_window` (a toplevel destroyed, an X11
   window unmapped, Xwayland gone).
 - **Session lock** (`session_lock.rs`, ext-session-lock): guaranteed where input reaches
   clients, not by each path. While `is_locked()`, `scene()` holds only lock surfaces (on

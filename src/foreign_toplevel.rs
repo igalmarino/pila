@@ -113,14 +113,12 @@ impl Pila {
         window.user_data().insert_if_missing_threadsafe(|| handle);
     }
 
-    /// Send title and app id changes. Called on every commit.
+    /// Send title and app id changes, of windows on the screen or off it
+    /// (minimized, on another workspace). Called on every commit and as
+    /// either is set.
     pub fn update_foreign_toplevel(&self, surface: &WlSurface) {
-        let window = self
-            .space
-            .elements()
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface));
-        if let Some(window) = window {
-            update(window);
+        if let Some(window) = self.window_for_surface(surface) {
+            update(&window);
         }
     }
 

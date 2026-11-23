@@ -248,6 +248,26 @@ fn a_new_title_and_app_id_reach_the_taskbar() {
     assert_eq!(titles, 2, "{:?}", taskbar.events_of(&handle));
 }
 
+/// A window off the screen (minimized, or on another workspace) still tells
+/// the taskbars of ext-foreign-toplevel-list its new title.
+#[test]
+fn a_minimized_windows_new_title_reaches_the_toplevel_list() {
+    use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
+    let mut pila = TestPila::start();
+    let app = pila.client();
+    let a = app.window("a").create();
+    pila.wait_focus("a");
+    let taskbar = pila.client();
+    let _list: ExtForeignToplevelListV1 = taskbar.bind("ext_foreign_toplevel_list_v1", 1);
+    taskbar.wait_logged("ext_toplevel", "AppId { app_id: \"a\" }");
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    app.request(a, |t| t.set_title("a page".into()));
+    taskbar.wait_logged("ext_toplevel", "Title { title: \"a page\" }");
+}
+
 #[test]
 fn activate_focuses_a_window() {
     let (mut pila, _app, taskbar) = taskbar_with(&["a", "b"]);

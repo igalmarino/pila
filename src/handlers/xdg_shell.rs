@@ -81,17 +81,21 @@ impl XdgShellHandler for Pila {
 
     // A rule may match the new title or app id (`rules.rs`); the title bar
     // shows the title.
+    // A title or app id applies as it's set, not at a commit: a window off
+    // the screen may not commit for a while.
     fn title_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.queue_redraw_window(&window);
             self.rules_maybe_changed(&window);
         }
+        self.update_foreign_toplevel(surface.wl_surface());
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.rules_maybe_changed(&window);
         }
+        self.update_foreign_toplevel(surface.wl_surface());
     }
 
     fn parent_changed(&mut self, surface: ToplevelSurface) {
