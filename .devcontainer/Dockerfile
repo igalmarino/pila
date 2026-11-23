@@ -30,6 +30,9 @@ ENV TZ="${TZ}" \
 #   - ffmpeg: scripts/demo-video encodes the demo videos
 #   - otf-font-awesome: the symbols in the waybar config Pila writes
 #     (tool-configs), to see them in screenshots
+#   - GStreamer's PipeWire source and the elements after it in Kooha's
+#     recording pipeline (videoflip, videorate): to take a portal share as
+#     GStreamer recorders do (discussion #12: Kooha recorded 0 seconds)
 #   - swayidle, ironbar and nwg-panel: desktop tools to try on Pila for the
 #     manual's list of what works ("Building your desktop")
 RUN pacman -Syu --noconfirm --needed \
@@ -42,6 +45,7 @@ RUN pacman -Syu --noconfirm --needed \
         ironbar nwg-panel \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
         grim slurp wtype wlopm wlsunset ffmpeg \
+        gst-plugin-pipewire gst-plugins-base gst-plugins-good \
         fcitx5 fcitx5-rime rime-luna-pinyin wqy-microhei noto-fonts-cjk \
     && rm -rf /var/cache/pacman/pkg/* \
     && dbus-uuidgen --ensure=/etc/machine-id
