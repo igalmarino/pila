@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2 (2026-11-22)
+
+- **The .deb and .rpm are back:** 0.9.1's weren't built (a mistake in their description, from
+  dropping xdg-desktop-portal-wlr). 0.9.2 is 0.9.1 with its packages: what's new is in 0.9.1's
+  notes below. CI now builds the packages at every change, so such a mistake shows before a
+  release.
+
 ## 0.9.1 (2026-11-22)
 
 - **Share a window:** an app that may share windows (browsers, video calls, OBS) gets them in
