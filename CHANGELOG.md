@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.4 (2026-11-23)
+
+- **Share a region of the screen:** the share panel offers **Region** after the monitors, for
+  screen sharing and apps' screenshots alike. Pick it and the panel hides: the pointer becomes a
+  crosshair, drag a rectangle over what to share (it stays on the monitor where you start) and let
+  go to share it, or Escape to go back to the panel; a guide at the top gives its size. The app
+  gets it as a monitor of that size: a fixed part of the screen, showing whatever is drawn there.
+  While it's shared, a thin line in the accent color marks it on the screen, never in what's
+  shared.
+- **The share panel on two tabs:** when an app may share windows too (and for every screenshot),
+  monitors and the region are under **Screens**, windows under **Windows**, one at a time instead
+  of all at once. Tab, Shift+Tab or a click on a tab switches, each tab keeps what you selected on
+  it, and the panel doesn't move between them.
+- **Fixed:** recorders built on GStreamer (Kooha) recorded 0 seconds of a screen share: Pila's
+  frames now carry when they were made (`SPA_META_Header`).
+- **Fixed:** the AUR's `pila-git` failed to link with makepkg's default LTO option (undefined
+  `spa_*` symbols); it now builds without it.
+
 ## 0.9.3 (2026-11-22)
 
 - **Fixed:** started without `XDG_RUNTIME_DIR` (with sudo, say, or outside a login session), Pila
