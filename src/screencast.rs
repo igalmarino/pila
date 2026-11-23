@@ -1194,7 +1194,7 @@ unsafe fn fill(
     // SAFETY: per this function's contract.
     let data = unsafe {
         let spa_buffer = (*buffer).buffer;
-        if spa_buffer.is_null() || (*spa_buffer).n_datas == 0 {
+        if spa_buffer.is_null() || (*spa_buffer).datas.is_null() || (*spa_buffer).n_datas == 0 {
             return Err(CopyError::Constraints);
         }
         &mut *(*spa_buffer).datas
@@ -1223,7 +1223,7 @@ unsafe fn mark_empty(buffer: *mut pw::sys::pw_buffer) {
     // SAFETY: per this function's contract.
     unsafe {
         let spa_buffer = (*buffer).buffer;
-        if spa_buffer.is_null() || (*spa_buffer).n_datas == 0 {
+        if spa_buffer.is_null() || (*spa_buffer).datas.is_null() || (*spa_buffer).n_datas == 0 {
             return;
         }
         let data = &mut *(*spa_buffer).datas;

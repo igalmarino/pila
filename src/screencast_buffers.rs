@@ -212,7 +212,9 @@ impl Buffers {
         let stride = width * 4;
         // SAFETY: per this function's contract.
         let spa_buffer = unsafe { (*buffer).buffer };
-        if spa_buffer.is_null() {
+        // A slice is never made of a null pointer, even an empty one.
+        // SAFETY: `spa_buffer` is checked non-null first; PipeWire's.
+        if spa_buffer.is_null() || unsafe { (*spa_buffer).datas.is_null() } {
             return;
         }
         // SAFETY: as above; `datas` has `n_datas` entries.
