@@ -37,9 +37,8 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
   X11 app needs it and, with `[xwayland] idle-timeout`, stops when none is left.
 - **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
   idle notification and inhibition (swayidle, video players), clipboard managers
-  (ext-data-control), screenshots (grim; ext-image-copy-capture and wlr-screencopy) and screen sharing
-  (Pila's own desktop-portal backend over PipeWire, with a picker it draws, for browsers and
-  OBS), taskbars that act on windows
+  (ext-data-control), screenshots (grim; ext-image-copy-capture and wlr-screencopy), taskbars
+  that act on windows
   (foreign-toplevel-management), night light (gamma control), screen off and monitor
   settings (output power and management), blur behind panels and windows (background-effect),
   workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay
@@ -52,6 +51,15 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
   (linux-drm-syncobj), virtual keyboards (`wtype`, on-screen keyboards). Enough for a full
   desktop shell. Sandboxed apps (Flatpak) don't see the protocols that read the
   screen or act on other windows and input (wp-security-context).
+- **The desktop portal, served by Pila** (its own backend: no xdg-desktop-portal-wlr): screen
+  sharing for browsers, video calls and OBS over PipeWire, of a monitor or a single window (kept
+  updating while it's covered, minimized or on another workspace), picked in a panel Pila draws
+  with live previews; apps' screenshots, of every monitor when the portal lets the app take one
+  unasked, else of the monitor or window you pick; a color picked from the screen (GTK's color
+  chooser, GIMP); and apps' global shortcuts (push-to-talk, a recorder's start and stop), whose
+  keys you confirm or change in a panel and Pila remembers for each app. Nothing is shared or
+  taken without your say, a shared window shows nothing new while the screen is locked, and
+  shortcuts do nothing then.
 - **Input:** keyboard layout, repeat and Num Lock at startup, touchpad and mouse settings (tap, natural scrolling,
   speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
   four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
