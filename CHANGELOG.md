@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (2026-11-22)
 
 - **Share a window:** an app that may share windows (browsers, video calls, OBS) gets them in
   Pila's panel too, under the monitors: every window, most recently used first, minimized ones
@@ -16,8 +16,8 @@
   `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten kept) and handed to the app. Pila's portal
   configuration now names Pila for screenshots instead of xdg-desktop-portal-wlr; an own
   `pila-portals.conf` should say `org.freedesktop.impl.portal.Screenshot=pila`.
-- **The share panel names apps outside a sandbox** by the window they ask from (most browsers
-  say which): its app's name instead of "An app asks to share a screen".
+- **The share panel names apps outside a sandbox** by the window they ask from, for those that
+  say which (Firefox doesn't): its app's name instead of "An app asks to share a screen".
 - **No more xdg-desktop-portal-wlr:** with screen sharing, single windows and apps' screenshots
   Pila's own, the packages no longer recommend it and Pila no longer installs its settings
   (`/etc/xdg/xdg-desktop-portal-wlr/pila` is removed; `scripts/tty` no longer writes
@@ -28,7 +28,8 @@
   keyboard. The first time, a panel lists the app's shortcuts with the keys it would like; pick
   one and press the keys you want, Backspace leaves it unset, Save or Cancel. Keys Pila binds or
   another app has aren't given; what's saved is remembered for the app. A shortcut's key goes to
-  the app alone, and does nothing while the screen is locked.
+  the app alone, and does nothing while the screen is locked. An own `pila-portals.conf` should
+  say `org.freedesktop.impl.portal.GlobalShortcuts=pila` too.
 - **Pick a color from the screen:** apps that ask the portal for one (GTK's color chooser, GIMP,
   Inkscape) get a crosshair and a panel saying what to do; a click answers with the color under
   it, Escape gives up, and no app gets the click.
