@@ -719,9 +719,12 @@ pub(crate) fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<Stri
     if app_id.is_empty() {
         return None;
     }
+    // An app id may come from the window an app names: it's a file name,
+    // never a path.
+    let plain = !app_id.starts_with('.') && !app_id.contains(['/', '\0']);
     let file = format!("{app_id}.desktop");
-    let name = dirs.iter().find_map(|dir| {
-        let text = std::fs::read_to_string(dir.join(&file)).ok()?;
+    let name = dirs.iter().filter(|_| plain).find_map(|dir| {
+        let text = read_desktop_entry(&dir.join(&file))?;
         let mut in_entry = false;
         for line in text.lines() {
             let line = line.trim();
@@ -736,6 +739,24 @@ pub(crate) fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<Stri
         None
     });
     Some(name.unwrap_or_else(|| app_id.to_string()))
+}
+
+/// A desktop entry's text: a plain file's (never a FIFO's, which would block),
+/// its first 64 KiB.
+fn read_desktop_entry(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(64 * 1024).read_to_string(&mut text).ok()?;
+    Some(text)
 }
 
 /// `Start`'s results: `streams`, `a(ua{sv})`.
@@ -873,6 +894,36 @@ mod tests {
             Some("org.example.Other")
         );
         assert_eq!(app_name("", &dirs), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The app id may come from the window an app names (`share_picker.rs`):
+    /// it's no path, and a desktop entry that's no plain file isn't read.
+    #[test]
+    fn an_app_id_reads_no_file_but_its_desktop_entry() {
+        let dir = std::env::temp_dir().join(format!("pila-app-path-{}", std::process::id()));
+        let apps = dir.join("applications");
+        std::fs::create_dir_all(&apps).unwrap();
+        std::fs::write(dir.join("secret.desktop"), "[Desktop Entry]\nName=Secret\n").unwrap();
+        std::fs::write(
+            apps.join(".hidden.desktop"),
+            "[Desktop Entry]\nName=Hidden\n",
+        )
+        .unwrap();
+        use std::os::unix::ffi::OsStringExt;
+        let fifo =
+            std::ffi::CString::new(apps.join("fifo.desktop").into_os_string().into_vec()).unwrap();
+        // SAFETY: a plain syscall with a valid path.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let dirs = vec![apps];
+        for id in ["../secret", "a/../../secret", ".hidden"] {
+            assert_eq!(app_name(id, &dirs).as_deref(), Some(id));
+        }
+        // A FIFO would block the reader until someone writes into it.
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || send.send(app_name("fifo", &dirs)));
+        let name = receive.recv_timeout(std::time::Duration::from_secs(2));
+        assert_eq!(name, Ok(Some("fifo".to_string())), "blocked on the FIFO");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
