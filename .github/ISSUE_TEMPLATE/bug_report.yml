@@ -1,5 +1,5 @@
 name: Bug report
-description: Something doesn't work, looks wrong or crashes
+description: Something doesn't work, looks wrong, or crashes
 labels: [bug]
 body:
   - type: textarea
@@ -13,8 +13,8 @@ body:
     id: version
     attributes:
       label: Pila version
-      description: The output of `pila --version` (or the commit, for a source build).
-      placeholder: pila 0.7.0 (v0.7.0)
+      description: Output of `pila --version` (or the git commit for a source build).
+      placeholder: pila 0.9.4 (v0.9.4)
     validations:
       required: true
   - type: dropdown
@@ -23,15 +23,15 @@ body:
       label: How Pila was started
       options:
         - Login session (display manager)
-        - By hand on a TTY (scripts/tty or pila)
-        - Nested, in another desktop
+        - Manually on a TTY (scripts/tty or pila)
+        - Nested inside another desktop
     validations:
       required: true
   - type: input
     id: system
     attributes:
-      label: Distro, GPU and driver
-      description: For example "Fedora 43, Intel Iris Xe (i915)". `pila-report` names the GPU and driver.
+      label: Distro, GPU, and driver
+      description: For example, "Fedora 44, Intel Iris Xe (i915)". `pila-report` detects the GPU and driver automatically.
     validations:
       required: true
   - type: textarea
@@ -39,11 +39,13 @@ body:
     attributes:
       label: Log
       description: |
-        `pila-report` (`scripts/report` in a checkout) gathers it, with your system details, into a file to attach.
-        Login session: `~/.local/state/pila/pila.log` (`pila.log.old` is the previous run; with systemd also `journalctl -t pila -b`).
-        scripts/tty: `pila-tty.log`. Nested: the terminal output.
-        `RUST_LOG=debug` gives more detail. After a crash, the log has "pila crashed" and a backtrace: include them.
-        Look through it first: logs can hold window titles, commands and file paths.
+        Run `pila-report` (or `scripts/report` from a source checkout) to gather system info and logs into a file you can attach.
+        Log locations:
+        - Login session: `~/.local/state/pila/pila.log` (`pila.log.old` is the previous run; on systemd, also `journalctl -t pila -b`).
+        - `scripts/tty`: `pila-tty.log`.
+        - Nested: terminal output.
+        Set `RUST_LOG=debug` for more detail. After a crash, include the "pila crashed" line and the backtrace that follows.
+        Review the file before posting: logs can contain window titles, commands, and file paths.
       render: text
   - type: textarea
     id: config
@@ -55,4 +57,4 @@ body:
     id: more
     attributes:
       label: Anything else
-      description: Apps or desktop tools involved (bar, launcher, shell), monitors, screenshots.
+      description: Involved apps or desktop tools (bar, launcher, shell), monitor setup, or screenshots.

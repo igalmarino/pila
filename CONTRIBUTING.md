@@ -1,128 +1,123 @@
 # Contributing to Pila
 
-Bug reports, testing on other hardware and distros, and patches are welcome. For a bug,
-open an issue with the bug report form; it asks for what helps most (Pila's version, your
-GPU and distro, how Pila was started, and the log). Changes made with AI help are welcome
-too; see [Use of AI](README.md#use-of-ai) for the terms.
+Bug reports, testing on different hardware and distros, and code patches are all welcome. To report
+a bug, open an issue using the bug report template, which asks for the details that help most (Pila
+version, GPU and distro, how Pila was launched, and logs). AI-assisted contributions are welcome
+too; see [Use of AI](README.md#use-of-ai) for the guidelines.
 
 ## Conventions
 
-- **English** everywhere in the repository: code, comments, docs, log messages, commit
-  messages.
-- **Standard protocols first**: Wayland core and the official `wayland-protocols`. A
-  wlroots protocol is accepted only where no standard one exists yet and a desktop tool
-  needs it; other vendor protocols (KDE, GNOME, Hyprland, ...) aren't added. See the
-  protocol policy in [`CLAUDE.md`](CLAUDE.md).
-- **No distro assumptions**: the code and the host-side scripts must work without systemd
-  (elogind or seatd), on any distro, with configurable install paths.
-- Before sending a change: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and
-  `cargo test` (CI runs them too, plus `shellcheck` on the scripts; builds on Debian, Ubuntu,
-  Fedora and Nix, with the oldest supported Rust, and `cargo audit` run when dependencies, the
-  Nix files, `scripts/install` or `resources/` change, and weekly). Every feature gets
-  integration tests (`tests/*.rs`, on a headless Pila; a new test goes into `tests/FEATURES.md`), and unit tests cover pure
-  logic. What those can't reach is tried by hand: how things look nested (`cargo run`),
-  and the DRM/KMS backend on a TTY (`scripts/tty`). `scripts/check` is a smoke and
-  performance run with real programs, judged from Pila's log, frame statistics included:
-  `--nested` from the dev container, plain from a TTY. A feature adds a scenario there
-  only if it's bare-metal only or puts load on rendering.
-- A bug fix starts with a test that reproduces it, seen failing (or says why it can't be
-  tested: bare metal, looks); the test stays in the suite.
-- Small commits, each one building and passing the tests. A setting's default goes in
-  `config.example.toml`, as an active line, and nowhere in the code (a test checks). Keep
-  `config.example.toml`, the user manual (`docs/MANUAL.md`), the man page (`docs/pila.1`) and the `USAGE` text in
-  `src/main.rs` in step with new settings, bindings and flags (tests check the bindings and
-  flags).
+- **English everywhere:** Code, comments, docs, log messages, and commit messages are all in
+  English.
+- **Standard protocols first:** Prefer Wayland core and official `wayland-protocols`. wlroots
+  protocols are accepted only when no standard equivalent exists yet and a desktop tool needs them;
+  other vendor protocols (KDE, GNOME, Hyprland, etc.) are not added. See the protocol policy in
+  [`CLAUDE.md`](CLAUDE.md).
+- **No distro assumptions:** Code and host-side scripts must work on any Linux distribution,
+  without assuming systemd (elogind and seatd are supported), and with configurable install paths.
+- **Checks before submitting:** Run `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and
+  `cargo test`. CI runs these plus `shellcheck` on scripts, and also runs distro/Nix/MSRV builds
+  and `cargo audit` weekly and whenever dependencies, Nix files, `scripts/install`, or `resources/`
+  change.
+- **Testing:** Every new feature needs integration tests (`tests/*.rs` on a headless Pila; add new
+  tests to `tests/FEATURES.md`), plus unit tests for pure logic. Visual behavior is checked nested
+  (`cargo run`), and DRM/KMS behavior on a TTY (`scripts/tty`). `scripts/check` runs a smoke and
+  performance workload with real programs (`--nested` in the dev container, or plain on a TTY); add
+  a scenario there only for bare-metal-only behavior or features that add rendering load.
+- **Regression tests first:** Bug fixes should start with a failing test that reproduces the bug
+  (or explain why it can't be automated, such as bare-metal or purely visual bugs). Keep the test
+  in the suite.
+- **Small commits and synced docs:** Keep commits small, with each one building and passing tests.
+  Every setting's default lives as an active line in `config.example.toml` and nowhere else in code
+  (verified by a test). Keep `config.example.toml`, `docs/MANUAL.md`, `docs/pila.1`, and `USAGE` in
+  `src/main.rs` in sync when adding settings, bindings, or flags (tests check bindings and flags).
 
 ## Compatibility
 
-Users' config files and the programs that talk to `pila msg` must keep working across
-versions:
+Existing user configs and `pila msg` scripts must continue to work across upgrades:
 
-- **Adding** a config key, a value form, an action or an IPC field is free. A new key or
-  action also goes into `tests/fixtures/every-key.toml` (`tests/compat.rs` fails until it's
-  there).
-- **Renaming** keeps the old name working: a serde `alias`, or a second spelling in
-  `Action::parse`; the changelog says what the new name is.
-- **Removing** or changing what something means is a breaking change: only when nothing
-  else works, under its own heading in the changelog with how to update the config, and, for
-  `pila msg`, by raising `protocol` (`docs/IPC.md`, "What's guaranteed").
-- `tests/fixtures/every-key.toml` and the field lists in `tests/compat.rs` only grow: a line
-  taken out there is a config or a script that stops working.
+- **Adding** a config key, value form, action, or IPC field is always fine. Add new keys and
+  actions to `tests/fixtures/every-key.toml` (`tests/compat.rs` fails otherwise).
+- **Renaming** must keep the old name working via a serde `alias` or a secondary spelling in
+  `Action::parse`, and note the new name in `CHANGELOG.md`.
+- **Removing** a key or changing its behavior is a breaking change. Avoid it unless strictly necessary,
+  document it under its own heading in `CHANGELOG.md` with migration steps, and bump `protocol` for
+  IPC changes (`docs/IPC.md`, *Stability guarantees*).
+- `tests/fixtures/every-key.toml` and the field lists in `tests/compat.rs` are append-only:
+  removing a line there means breaking a real config or script.
 
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the architecture: the state struct, the backends, the
-render loop, and how each protocol and feature is wired.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internals: the `Pila` state struct,
+backends, render loop, and how protocols and features are wired up.
 
 ## Fuzzing
 
-`fuzz/` has [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets for what Pila reads
-from outside. It's a workspace of its own, built with nightly Rust; Pila's own builds never see
-it. Pila is a library (`src/lib.rs`) plus the `pila` command (`src/main.rs`), so the targets call
-its functions directly.
+`fuzz/` contains [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) targets for untrusted input
+paths. It's a separate nightly-only workspace, invisible to normal builds. Because Pila is split
+into a library (`src/lib.rs`) and a binary (`src/main.rs`), fuzz targets call internal parsers
+directly.
 
-| Target | What it feeds |
+| Target | Input exercised |
 |---|---|
-| `ipc_request` | a line of `pila msg`'s protocol (`ipc::parse_request`) |
-| `config` | a config file and the `PILA_*` overrides (`Config::from_toml`, rules included) |
-| `edid` | a monitor's EDID (`edid::parse`) |
-| `gamma_ramp` | a client's gamma ramp, from a file or a pipe it may keep open (`gamma_control::read_ramp`) |
-| `protocol` | sequences of requests (surfaces, buffers, scales, offsets, subsurfaces, viewports, windows, popups) to a headless Pila it starts once |
+| `ipc_request` | A line of `pila msg` IPC input (`ipc::parse_request`) |
+| `config` | A TOML config file with `PILA_*` overrides (`Config::from_toml`, including rules) |
+| `edid` | Monitor EDID bytes (`edid::parse`) |
+| `gamma_ramp` | A client gamma ramp from a file or open pipe (`gamma_control::read_ramp`) |
+| `protocol` | Wayland request sequences (surfaces, buffers, scales, offsets, subsurfaces, viewports, windows, popups) against a running headless Pila |
 
 ```sh
 rustup toolchain install nightly --profile minimal
 cargo install cargo-fuzz
 cargo +nightly fuzz list
 cargo +nightly fuzz run -O config -- -max_total_time=300
-# protocol runs target/debug/pila (or $PILA_BIN): build it first
+# `protocol` runs target/debug/pila (or $PILA_BIN), so build it first:
 cargo build && cargo +nightly fuzz run -O protocol -- -max_total_time=300
 ```
 
-What crashes goes to `fuzz/artifacts/<target>/`; `cargo +nightly fuzz run -O <target>
-<artifact>` replays it and `cargo +nightly fuzz tmin` shrinks it. A crash becomes a test that
-reproduces it (or a `#[ignore = "bug: ..."]` one, if the fix isn't Pila's), then the fix. The
-`protocol` target's coverage is its own, not Pila's (a process of its own), so it explores less
-cleverly than the others: give it time. The `Fuzz` workflow (`.github/workflows/fuzz.yml`, run
-by hand) runs every target for a few minutes and keeps what crashed.
+Crash inputs are saved to `fuzz/artifacts/<target>/`. Replay with
+`cargo +nightly fuzz run -O <target> <artifact>` and minimize with `cargo +nightly fuzz tmin`. Turn
+every crash into a regression test (or an `#[ignore = "bug: ..."]` test if the root cause is
+upstream) before fixing it. Note that the `protocol` target only tracks coverage in the fuzzer
+process itself rather than the Pila subprocess, so it explores more slowly; give it extra time. The
+manual `Fuzz` workflow (`.github/workflows/fuzz.yml`) runs every target for a few minutes and saves
+any crash artifacts.
 
 ## Development environment
 
-Pila is developed in a dev container on any Linux host with Docker, from inside Pila itself
-(or another desktop, kept as a fallback session), with **Claude Code** running inside the
-container.
+Pila is developed inside a Docker dev container on Linux, running from within Pila (or another
+desktop kept as a fallback), with **Claude Code** inside the container.
 
-- An Arch Linux image with Rust stable (rust-analyzer, clippy, rustfmt), mold, gdb, and
-  every library Pila needs (winit, DRM/KMS, libinput)
-- Pila runs **nested** as a window on your desktop: the host's Wayland socket and GPU
-  (`/dev/dri`) are passed into the container, and the login session's log is mounted at
-  `/run/host-pila` so Claude can read it
-- Test clients inside: `foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
-  `gtk4-widget-factory` (menus and popovers), `xterm` (X11), and desktop tools to test
-  against (`kitty`, `fuzzel`, `waybar`, `swaybg`, `mako`, `swaylock`, `wl-clipboard`, `grim`,
-  `slurp`, `wtype`, `wlr-randr`, `wlopm`, `wlsunset`, `fcitx5`)
-- Claude Code (native install) with auth and history persisted across rebuilds
+- **Image:** Arch Linux with stable Rust (`rust-analyzer`, `clippy`, `rustfmt`), `mold`, `gdb`, and
+  all build dependencies (winit, DRM/KMS, libinput, PipeWire).
+- **Nested rendering:** The host Wayland socket and `/dev/dri` are passed into the container so
+  Pila opens as a nested window on your desktop. The login session log is mounted read-only at
+  `/run/host-pila`.
+- **Included tools:** Test clients (`foot`, `weston-terminal`, `weston-simple-egl`, `wayland-info`,
+  `gtk4-widget-factory`, `xterm`) and desktop tools (`kitty`, `fuzzel`, `waybar`, `swaybg`, `mako`,
+  `swaylock`, `wl-clipboard`, `grim`, `slurp`, `wtype`, `wlr-randr`, `wlopm`, `wlsunset`, `fcitx5`).
+- **Claude Code:** Native install with credentials and history persisted across container rebuilds.
 
-The container follows the session it's entered from: entered from a Pila session
-(`scripts/dev` in a terminal there), nested Pila opens inside that Pila; from GNOME (or any
-other desktop), on that desktop.
-Changes to the compositor itself are tried with `scripts/tty` on a spare VT, or installed
-with `scripts/install` and a new login (which ends the container's Claude session too). See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architecture.
+The container connects to whichever desktop session you invoke `scripts/dev` from: run it inside
+Pila and nested Pila opens there; run it inside GNOME and it opens on GNOME. Bare-metal changes are
+tested on a spare VT with `scripts/tty`, or installed via `scripts/install` and tested in a new
+login session (which also ends any running container session). See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for architectural details.
 
 ### 1. Host setup
 
 #### Docker
 
-Install Docker from your distro (Arch: `docker docker-buildx`; Debian, Ubuntu:
-`docker.io docker-buildx`; Fedora: `moby-engine`, or Docker's own repository), start its
-service, and join the `docker` group:
+Install Docker from your distro (`docker docker-buildx` on Arch; `docker.io docker-buildx` on Debian
+and Ubuntu; `moby-engine` or Docker's repo on Fedora), start the service, and add your user to the
+`docker` group:
 
 ```bash
-sudo systemctl enable --now docker.socket   # with systemd; e.g. OpenRC: rc-update add docker
-sudo usermod -aG docker "$USER"             # log out and back in afterwards
+sudo systemctl enable --now docker.socket   # systemd; e.g. OpenRC: rc-update add docker
+sudo usermod -aG docker "$USER"             # log out and back in afterward
 ```
 
-Use regular (rootful) Docker. Rootless Docker remaps UIDs, so the container can't connect
-to your Wayland socket. Note that membership in the `docker` group is root-equivalent on the
-host.
+Use standard (rootful) Docker. Rootless Docker remaps UIDs and prevents the container from
+connecting to your host Wayland socket. Keep in mind that `docker` group membership is effectively
+root-equivalent on the host.
 
 #### GPU check
 
@@ -130,42 +125,37 @@ host.
 ls -l /dev/dri
 ```
 
-You should see `renderD128` with mode `crw-rw-rw-` (the default udev rules on most
-systemd distros). If it's `crw-rw----` with group `render`, add
-`"--group-add=<that group's GID>"` (`getent group render`) to `runArgs` in
-`.devcontainer/devcontainer.json`. Intel and AMD work through Mesa with no extra setup. NVIDIA with the proprietary driver needs the
-`nvidia-container-toolkit` package and `--gpus=all` added to `runArgs` in
-`.devcontainer/devcontainer.json`.
+Look for `renderD128` with mode `crw-rw-rw-` (the default on most systemd distros). If it's
+`crw-rw----` owned by group `render`, add `"--group-add=<GID>"` (check with `getent group render`)
+to `runArgs` in `.devcontainer/devcontainer.json`. Intel and AMD GPUs work out of the box through
+Mesa. Proprietary NVIDIA requires `nvidia-container-toolkit` and `--gpus=all` in `runArgs`.
 
 #### The Dev Containers CLI
 
-The container is driven from a terminal with the `scripts/dev` helper, which needs the Dev
-Containers CLI, an npm package (Node.js and npm come from your distro: `nodejs npm` on Arch,
-Debian, Ubuntu and Fedora):
+`scripts/dev` uses the Dev Containers CLI (`npm`), which requires Node.js and npm from your distro
+(`nodejs npm` on Arch, Debian, Ubuntu, and Fedora):
 
 ```bash
-npm config set prefix ~/.local     # avoid sudo for global installs; ~/.local/bin must be on PATH
+npm config set prefix ~/.local     # avoid sudo for global installs; ensure ~/.local/bin is in PATH
 npm install -g @devcontainers/cli
 ```
 
-Any editor works on the checkout as usual. Distro builds of VS Code (Code - OSS) can't
-install Microsoft's *Dev Containers* extension, so the container itself is started and used
-from the terminal.
+You can edit files on the host with any editor. Open-source VS Code builds (`Code - OSS`) can't
+install Microsoft's *Dev Containers* extension, so the container is driven from the terminal.
 
 ### 2. Start the container
 
-Always launch from inside your desktop session (Pila, or any other), so `WAYLAND_DISPLAY` and
-`XDG_RUNTIME_DIR` are set on the host.
+Always launch from inside your graphical session so `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` are
+set:
 
 ```bash
-scripts/dev up        # first build takes a few minutes
-scripts/dev shell     # shell inside the container
-scripts/dev claude    # Claude Code inside the container
+scripts/dev up        # initial build takes a few minutes
+scripts/dev shell     # open a shell in the container
+scripts/dev claude    # start Claude Code in the container
 scripts/dev cargo build
 ```
 
-The startup log should show `OK: host Wayland socket mounted` and `OK: GPU render node
-available`.
+Startup should print `OK: host Wayland socket mounted` and `OK: GPU render node available`.
 
 ### 3. Smoke test
 
@@ -174,17 +164,17 @@ Inside the container:
 ```bash
 wayland-info | head        # talks to the host session through the mounted socket
 eglinfo -B                 # should list your GPU, not llvmpipe
-weston-simple-egl          # a spinning triangle window appears on your desktop
-cargo run                  # nested Pila, with a terminal inside
+weston-simple-egl          # opens a spinning triangle window on your desktop
+cargo run                  # opens a nested Pila window
 ```
 
 ### 4. Claude Code
 
-Run `claude` (or `scripts/dev claude`) and sign in. If the browser login completes but the
-terminal never notices, paste the code shown in the browser at the prompt.
+Run `claude` (or `scripts/dev claude`) and sign in. If browser authentication finishes without the
+terminal noticing, paste the code shown in the browser into the prompt.
 
-`CLAUDE.md` gives Claude the project context: nested development, no root, and the
-commands to use. To pre-approve routine commands, create `.claude/settings.json`:
+`CLAUDE.md` documents the project context, constraints, and commands. To pre-approve routine
+commands, create `.claude/settings.json`:
 
 ```json
 {
@@ -203,41 +193,40 @@ commands to use. To pre-approve routine commands, create `.claude/settings.json`
 }
 ```
 
-The container is non-root, but its network access is unrestricted. With
-`claude --dangerously-skip-permissions` Claude can edit anything in this folder (it's your real
-checkout) and reach any host, so only do this with code you trust and commit often.
+The container runs as a non-root user, but has unrestricted network access. With
+`claude --dangerously-skip-permissions`, Claude can edit any file in your checkout and connect to
+any network host, so only use it on trusted code and commit frequently.
 
 ### Container configuration
 
-| What | Where |
-| - | - |
-| Add system packages | `pacman` line in `.devcontainer/Dockerfile`, then `scripts/dev rebuild` |
-| Full passwordless sudo | `FULL_SUDO` build arg in `devcontainer.json` (lets anything in the container act as root) |
+| Goal | How |
+|---|---|
+| Add system packages | Edit the `pacman` line in `.devcontainer/Dockerfile`, then run `scripts/dev rebuild` |
+| Enable passwordless sudo | Set the `FULL_SUDO` build arg in `devcontainer.json` (gives container processes root access) |
 
-The `dev` user has no `sudo` unless `FULL_SUDO` is set.
+By default, the `dev` user has no `sudo` privileges.
 
 ### Troubleshooting
 
-- **`Cannot connect to Wayland display` / socket missing.** The host compositor restarted
-  (you logged out and back in, or restarted Pila), so its socket is new. Run any
-  `scripts/dev` command from the session to make it again (`scripts/link-wayland`).
-- **A tool in the container can't find a protocol of the host session.** On Pila, the
-  container's socket is sandboxed through wp-security-context, as a Flatpak's is: no screen
-  capture, virtual keyboard, layer shell or the like, so that nothing in the container can
-  read the screen or type into your windows. Nested Pila needs none of that, and tools run
-  inside it see all of its protocols. With `PILA_DEV_PRIVILEGED=1` exported in the terminal you
-  run `scripts/dev` from (it makes the socket again on every command), e.g.
-  `PILA_DEV_PRIVILEGED=1 scripts/dev shell`, the container shares the session's own socket
-  instead, and everything in it gets those powers.
-- **Nested Pila opens on the wrong desktop.** The container uses the session `scripts/dev`
-  last ran from. Run `scripts/dev` in a terminal of the session you want.
-- **Nested Pila opens over your work.** On a Pila host, a window rule for its app id, `pila`,
-  sends it to another monitor and leaves the keyboard where it was (`open-on-output`,
-  `open-focused = false`; `docs/MANUAL.md`, "Window and layer rules").
-- **`Permission denied` on the socket.** Your host UID isn't the one the container user got.
-  Check `id -u` on the host and inside; they must match. Make sure you're not using rootless
+- **`Cannot connect to Wayland display` / missing socket:** The host compositor restarted (after a
+  logout or Pila restart), replacing its Wayland socket. Run any `scripts/dev` command from the
+  active session to recreate the link (`scripts/link-wayland`).
+- **A tool in the container can't access a host protocol:** When the host is Pila, the mounted
+  socket is sandboxed with `wp-security-context` (just like Flatpak), hiding screen capture,
+  virtual keyboards, layer shell, and other privileged protocols so container processes can't read
+  your screen or inject input. Nested Pila doesn't need those host protocols, and clients running
+  inside nested Pila still see all of nested Pila's protocols. If you need direct access to the
+  host socket, run with `PILA_DEV_PRIVILEGED=1` (e.g. `PILA_DEV_PRIVILEGED=1 scripts/dev shell`),
+  which mounts the unsandboxed session socket instead.
+- **Nested Pila opens on the wrong desktop:** The container attaches to whichever session last ran
+  `scripts/dev`. Run `scripts/dev` from a terminal in the target session.
+- **Nested Pila steals focus or covers your work:** On a Pila host, add a window rule for app ID
+  `pila` with `open-on-output` and `open-focused = false` (see *Window and layer rules* in
+  `docs/MANUAL.md`).
+- **`Permission denied` on the Wayland socket:** Your host UID doesn't match the container user's
+  UID. Compare `id -u` on the host and inside the container, and make sure you aren't using rootless
   Docker.
-- **`eglinfo` shows llvmpipe.** `/dev/dri` isn't passed through, or (NVIDIA) the container
-  toolkit isn't set up.
-- **Super-key shortcuts go to GNOME.** When testing Pila nested on GNOME, GNOME grabs Super.
-  Nested Pila uses Alt as Mod by default for that reason.
+- **`eglinfo` reports `llvmpipe`:** `/dev/dri` isn't mounted into the container, or (on NVIDIA)
+  `nvidia-container-toolkit` isn't configured.
+- **Super shortcuts go to GNOME:** When running nested under GNOME, GNOME intercepts Super. Nested
+  Pila defaults to Alt as Mod for this reason.

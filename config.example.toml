@@ -1,55 +1,58 @@
 # Pila configuration. Copy to ~/.config/pila/config.toml (or
 # $XDG_CONFIG_HOME/pila/config.toml, or pass --config FILE) and edit.
-# This file holds Pila's defaults: every active (uncommented) value here is
-# the default, and Pila has a copy of this file built in, which a setting left
-# out of your own file is taken from. So every setting is optional, and a
-# file with only the lines you changed works too. Commented-out values are
-# examples (marked "e.g.") or depend on the machine (mod, terminal, the
-# keymap), and come before the active value they'd replace; take the `#` off
-# one to use it.
-# PILA_MOD, PILA_TERMINAL and PILA_LAUNCHER override the matching settings.
-# An invalid file is reported in the log and in a notification, and Pila starts
-# with the defaults.
-# Saved changes apply right away (except autostart); if the edited file is
-# invalid, Pila keeps the running config and says why in a notification.
-# `pila --check-config` checks the file (keymap included) without starting.
+#
+# Every uncommented setting in this file is Pila's built-in default. Any option
+# you omit from your own config falls back to its value here, so you can keep
+# only the lines you want to override. Commented lines are examples (marked
+# "e.g.") or machine-dependent settings (mod, terminal, keymap), placed above
+# the active default they would replace; remove the `#` to enable one.
+#
+# Environment variables PILA_MOD, PILA_TERMINAL, and PILA_LAUNCHER override
+# their matching settings. Changes reload automatically on save (except
+# autostart). Invalid edits keep the active config and show a notification; an
+# invalid file at startup falls back to defaults. Run `pila --check-config` to
+# validate your config and XKB keymap without starting Pila.
 
-# The modifier in "Mod+..." bindings and for Mod+drag (Mod+left drag moves a
-# window, Mod+right drag resizes it from the nearest corner): alt, super or
-# ctrl. Unset, it's super on a TTY and alt nested (a host desktop such as
-# GNOME grabs Super while Pila runs inside it).
+# Modifier key for "Mod+..." bindings and Mod+drag (Mod+left drag moves a
+# window; Mod+right drag resizes from the nearest corner): "alt", "super", or
+# "ctrl". Defaults to "super" on a TTY and "alt" when nested (so host desktops
+# like GNOME keep Super).
 # mod = "super"                  # (default on a TTY; alt nested)
 
-# Mod+Return. Unset, kitty, or where it isn't installed the first installed
-# of foot, alacritty, ghostty, wezterm, konsole, gnome-terminal and xterm.
+# Terminal launched by Mod+Return. When unset, Pila uses kitty, or falls back
+# to the first installed of foot, alacritty, ghostty, wezterm, konsole,
+# gnome-terminal, and xterm.
 # terminal = "foot"                # e.g.
 
-# Mod+D and tapping Mod alone; "" for none (they then do nothing). fuzzel
-# lists the installed apps, searched as you type; any other launcher works too.
+# App launcher for Mod+D and tapping Mod alone (set "" to disable). Any Wayland
+# launcher works.
 # launcher = "wofi --show drun"    # e.g.
 launcher = "fuzzel"
 
-# Commands run at startup (`pila -c` replaces them); [] for none. X11 apps
-# among them start Xwayland as they connect. No terminal starts unless it's
-# listed (Mod+Return opens one). waybar is a bar on every monitor and mako
-# shows notifications. swayidle locks the screen (swaylock) after 5 minutes
-# without input and before the computer sleeps, and turns the monitors off
-# after 10: any input turns them back on, and that first key or click does
-# nothing else; not while a shown window asks to stay awake (a video playing).
-# Without the lock: "swayidle -w timeout 600 'pila msg action power-off-monitors'".
-# swaybg draws Pila's wallpaper, in [colors]; for a picture of your own, give
-# it one ("swaybg -i ~/Pictures/wallpaper.jpg -m fill"). Without a wallpaper
-# program, [colors] background shows. These four, as written here, are skipped
-# where they aren't installed (package pila-desktop brings them); a command of
-# your own that isn't says so in a notification. Any others work too. Only one
-# `autostart` can be active: to use the longer example, put it in place of the
-# active one.
+# Commands run once at startup (`pila -c` replaces this list; [] runs nothing).
+# X11 apps here trigger Xwayland automatically. No terminal opens at startup
+# unless listed (press Mod+Return to open one).
+#
+# Defaults:
+#   - swaybg: draws Pila's generated wallpaper in [colors]. For your own image,
+#     use "swaybg -i ~/Pictures/wallpaper.jpg -m fill". Without swaybg, Pila
+#     shows [colors] background.
+#   - waybar: top bar on every monitor.
+#   - mako: notification daemon.
+#   - swayidle: locks with swaylock after 5 min idle and before sleep, and
+#     powers off monitors after 10 min (any input wakes them; visible videos
+#     inhibit idling). For monitor power-off without locking:
+#     "swayidle -w timeout 600 'pila msg action power-off-monitors'".
+#
+# Missing programs from these four defaults are skipped quietly (install
+# `pila-desktop` to get them all); missing programs in custom commands trigger
+# a notification. Keep only one active `autostart` key.
 # autostart = [                    # e.g.
 #     "waybar",
 #     "mako",
 #     "swayidle -w timeout 300 'swaylock -f' timeout 600 'pila msg action power-off-monitors' before-sleep 'swaylock -f'",
 #     "swaybg -i ~/Pictures/wallpaper.jpg -m fill",  # fill, fit, center, ...
-#     "fcitx5 -d",                 # an input method (Chinese, Japanese, ...)
+#     "fcitx5 -d",                 # input method (Chinese, Japanese, Korean, ...)
 #     "kitty",
 # ]
 autostart = [
@@ -59,249 +62,224 @@ autostart = [
     "swayidle -w timeout 300 'swaylock -f' timeout 600 'pila msg action power-off-monitors' before-sleep 'swaylock -f'",
 ]
 
-# The tools of the defaults above, as written (swaybg, waybar, mako, fuzzel,
-# and swaylock in the swayidle line), start with a configuration of Pila's in
-# [colors] and the title bars' font (swaybg with Pila's wallpaper), where you
-# have none of your own: by their command line, from
-# $XDG_RUNTIME_DIR/pila-tools, so nothing is written in ~/.config and other
-# sessions' tools look as before (a change to [colors] reaches each at its
-# next start). Copy one to ~/.config to change it. false: they keep their own
-# looks.
+# Generate matching configs (using [colors] and the title bar font) in
+# $XDG_RUNTIME_DIR/pila-tools for unmodified default commands (swaybg, waybar,
+# mako, fuzzel, and swaylock in swayidle) whenever you don't have your own
+# config for that tool. Nothing is written to ~/.config, so other sessions are
+# unaffected. Copy a generated file to ~/.config to customize it, or set false
+# to use each tool's upstream defaults.
 tool-configs = true
 
-# How many workspaces (virtual desktops) there are, 1 to 32. They span all
-# screens; Mod+1..N goes to one, Mod+Shift+1..N moves the window there.
+# Number of workspaces (1 to 32). Workspaces span all monitors; Mod+1..N switch
+# workspaces and Mod+Shift+1..N move the focused window.
 workspaces = 4
 
-# Rounded window corners: the radius in logical pixels, 0 (square) to 64, and
-# which corners: "top" (as GTK apps round their own windows) or "all".
-# Maximized and fullscreen windows stay square, and so do apps that draw their
-# own shadow and corners (GTK apps; a window rule's corner-radius rounds them).
-# The radius is at most half the window's shorter side, and with a title bar at
-# most the bar's height (28).
+# Rounded window corners: radius in logical pixels (0 = square, up to 64) and
+# which corners to round ("top" to match GTK windows, or "all"). Maximized and
+# fullscreen windows stay square (unless `gaps` is set), and apps that draw
+# their own shadow and corners (such as GTK) are left to round themselves
+# unless overridden by a window rule. Clamped to half the shorter side and (for
+# server-side decorated windows) the 28 px title bar height.
 # corner-radius = 0                # square, e.g.
 # rounded-corners = "all"          # e.g.
 corner-radius = 8
 rounded-corners = "top"
 
-# Room around maximized windows and windows snapped to a half or quarter (Mod+
-# arrows), and between snapped ones, in logical pixels, 0 to 128. With room
-# around it a maximized window keeps its shadow and rounded corners;
-# fullscreen windows still take the whole monitor.
+# Outer and inner gaps (logical pixels, 0 to 128) around maximized and snapped
+# windows. When non-zero, maximized windows keep their shadow and rounded
+# corners; fullscreen windows still cover the entire monitor.
 # gaps = 12                        # e.g.
 gaps = 0
 
-# Monitors on the seat's other GPUs (a laptop's HDMI or DisplayPort wired to
-# its dedicated GPU, a dock with a GPU of its own): drawn with the main GPU
-# and copied to theirs. Off by default while it's new: untried on real
-# hardware. Turned on or off as soon as the file is saved.
+# Enable monitors wired to secondary GPUs (such as dGPU ports on hybrid laptops
+# or DisplayLink/GPU docks). Rendered on the primary GPU and copied across.
+# Experimental and off by default until tested on dual-GPU hardware; reloads on
+# save.
 other-gpus = false
 
-# A window that is all a monitor shows (a fullscreen video or game, with
-# nothing over it) goes to the screen as its app drew it, and Pila draws
-# nothing: less work for the GPU. On a TTY, on the main GPU's monitors. Turn
-# it off if such a window flickers or shows wrong colors. Read as soon as the
-# file is saved.
+# Direct scanout (bare metal, primary GPU): bypass compositing when a single
+# fullscreen game or video covers an entire monitor, saving GPU work and
+# battery. Set false if fullscreen windows flicker or show wrong colors;
+# reloads on save.
 direct-scanout = true
 
-# A game with vsync off asks for its frames to be shown at once, torn
-# mid-refresh, for the least latency: Pila does so while it's fullscreen and
-# nothing but it changes on the monitor. On a TTY. False shows every frame at
-# the next refresh, as with vsync on. Read as soon as the file is saved.
+# Screen tearing (bare metal): allow fullscreen games with vsync off to present
+# immediately for lower latency when nothing else changes on that monitor. Set
+# false to always wait for vblank; reloads on save.
 tearing = true
 
-# Each frame is drawn as close to the monitor's refresh as it safely can be,
-# rather than right after the last one: what apps and the pointer bring in the
-# meantime shows a refresh sooner. How close follows how long recent frames
-# took, and backs off for a while if a frame comes late. On a TTY. Read as
-# soon as the file is saved.
+# Late rendering (bare metal): delay compositing each frame until just before
+# the upcoming vblank so recent client commits and pointer motion land one
+# refresh sooner. Adapts automatically to recent frame times and backs off if a
+# frame misses; reloads on save.
 render-late = true
 
-# false: none of the bindings and gestures under [bindings] and [gestures]
-# here, only your own file's (a greeter's compositor, a scheme of your own).
-# In a copy of this file they're your own file's too: delete those you don't
-# want.
-# Switching to another VT (Ctrl+Alt+F1...) isn't a binding: it stays.
+# Set false to drop all built-in bindings and gestures so only those in your
+# config apply (useful for custom schemes or greetd greeter sessions). In a
+# copied starter config, remove individual lines instead. Ctrl+Alt+F1..F12 VT
+# switching is always active.
 default-bindings = true
 
-# Environment variables for everything Pila starts (autostart, bindings,
-# the terminal and the launcher), as NAME = "value"; NAME = false removes one
-# Pila was started with. A saved change reaches what starts from then on. On a
-# TTY they also go to the D-Bus session bus and systemd's user manager, for
-# the services they start. Pila's own (WAYLAND_DISPLAY, DISPLAY,
-# XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE, PILA_SOCKET, PILA_OUTPUT) stay as
-# Pila sets them, and so do XCURSOR_THEME and XCURSOR_SIZE when [cursor] sets
-# them. The defaults below have apps that can run on Wayland do so (X11
-# through Xwayland as the fallback); your file's own value for one replaces it,
-# and NAME = false drops it.
+# Environment variables passed to everything Pila starts (autostart, bindings,
+# terminal, launcher). Use NAME = "value" to set, or NAME = false to unset.
+# Changes apply to newly launched programs; on a TTY they are also exported to
+# D-Bus and systemd --user. Pila-managed variables (WAYLAND_DISPLAY, DISPLAY,
+# XAUTHORITY, XDG_CURRENT_DESKTOP, XDG_SESSION_TYPE, PILA_SOCKET, PILA_OUTPUT,
+# plus XCURSOR_THEME/XCURSOR_SIZE when set in [cursor]) cannot be overridden.
+# Defaults below prefer Wayland with Xwayland fallback; override or set false
+# to drop any entry.
 [environment]
-# SDL_VIDEODRIVER = "wayland,x11"  # e.g.: SDL 2 games; older SDLs (games that
-#                                  # bring their own) then fail to start
-# GDK_BACKEND = "wayland,x11"      # e.g.: GTK picks Wayland by itself already
+# SDL_VIDEODRIVER = "wayland,x11"  # e.g.: SDL 2 (may break games with older bundled SDL)
+# GDK_BACKEND = "wayland,x11"      # e.g.: GTK already defaults to Wayland
 # LANGUAGE = "zh_CN:zh_Hans:zh"    # e.g.
 # XMODIFIERS = "@im=fcitx"         # e.g.: fcitx5 in X11 apps (XIM)
-# QT_QPA_PLATFORMTHEME = false     # e.g.: removed
-QT_QPA_PLATFORM = "wayland;xcb"    # Qt: Wayland, X11 without its plugin
+# QT_QPA_PLATFORMTHEME = false     # e.g.: remove variable
+QT_QPA_PLATFORM = "wayland;xcb"    # Qt: Wayland, falling back to X11
 ELECTRON_OZONE_PLATFORM_HINT = "auto"  # Electron (VS Code, Discord, ...)
 MOZ_ENABLE_WAYLAND = "1"           # older Firefox and Thunderbird
-_JAVA_AWT_WM_NONREPARENTING = "1"  # Java's X11 windows, blank without it
+_JAVA_AWT_WM_NONREPARENTING = "1"  # fixes blank Java X11 windows
 
-# The shadow under each window, stronger for the focused one. None for a
-# maximized or fullscreen window, or one whose app draws its own (past its
-# geometry, as GTK's do); a window rule's `shadow` can say otherwise, except
-# for a maximized or fullscreen window.
+# Window drop shadows (darker under the focused window). Skipped for maximized
+# windows (when gaps = 0), fullscreen windows, and apps that draw their own
+# shadows (GTK); override per app with a window rule's `shadow` field.
 [shadow]
 enabled = true
-size = 24                          # how far it reaches, in logical pixels: 0 to 64
-offset = [0, 6]                    # right and down, -64 to 64
-color = "#00000066"                # #rrggbb or #rrggbbaa
-inactive-color = "#00000033"       # under the other windows
+size = 24                          # blur radius in logical pixels (0 to 64)
+offset = [0, 6]                    # horizontal and vertical offset (-64 to 64)
+color = "#00000066"                # focused window (#rrggbb or #rrggbbaa)
+inactive-color = "#00000033"       # unfocused windows
 
-# The colors of what Pila draws, as #rrggbb.
+# Colors used by Pila's title bars, switcher, overview, and panels (#rrggbb).
 [colors]
-bar = "#2f3136"                  # title bar of the focused window
-bar-inactive = "#26272b"         # title bar of the others
-bar-urgent = "#8a5712"           # of one asking for attention
-icon = "#dfe1e5"                 # its title and buttons
-icon-inactive = "#80838a"
-hover = "#3f4249"                # a button under the pointer
-hover-icon = "#f2f3f5"
-close-hover = "#c42b1c"          # the close button under the pointer
-close-hover-icon = "#ffffff"
-background = "#1f2126"           # behind everything, without a wallpaper
-snap-preview = "#4477cc4d"       # where a dragged window would snap; #rrggbbaa too
+bar = "#2f3136"                  # focused title bar
+bar-inactive = "#26272b"         # unfocused title bar
+bar-urgent = "#8a5712"           # urgent window title bar
+icon = "#dfe1e5"                 # focused title text and buttons
+icon-inactive = "#80838a"        # unfocused title text and buttons
+hover = "#3f4249"                # hovered button background
+hover-icon = "#f2f3f5"           # hovered button icon
+close-hover = "#c42b1c"          # hovered close button background
+close-hover-icon = "#ffffff"     # hovered close button icon
+background = "#1f2126"           # solid fallback background (without swaybg)
+snap-preview = "#4477cc4d"       # drag-snap overlay (supports #rrggbbaa)
 
-# Short, subtle animations. `enabled = false` turns them all off; `speed`
-# multiplies every duration (0.25 to 4: 2 is twice as slow). Each one takes
-# its duration in ms (1 to 1000), or false to turn it off (true: the duration
-# here).
+# Short, subtle animations. Set `enabled = false` to disable all animations,
+# or adjust `speed` (0.25 to 4.0; 2.0 = twice as slow). Individual animations
+# accept a duration in ms (1 to 1000), false (off), or true (default duration).
 [animations]
 enabled = true
 speed = 1.0
 window-open = 200                # rise and fade in
-window-close = 180               # shrink, drop and fade out
-minimize = 200                   # and restoring
-maximize = 220                   # also fullscreen and snapping
-layer = 150                      # launchers, notifications
-workspace = 250                  # slide sideways
-overview = 250                   # windows glide to their places and back
+window-close = 180               # shrink, drop, and fade out
+minimize = 200                   # minimize and restore
+maximize = 220                   # maximize, fullscreen, and snap
+layer = 150                      # launchers and notifications
+workspace = 250                  # horizontal workspace slide
+overview = 250                   # windows glide to and from overview positions
 
-# The cursor's theme and size, and shake to find it: the cursor grows while
-# it's shaken, and shrinks back a moment after. All read as soon as the file
-# is saved. Unset, the theme and size are XCURSOR_THEME's and XCURSOR_SIZE's
-# (else "default" and 24); set, they're also the XCURSOR_THEME and
-# XCURSOR_SIZE of the apps Pila starts from then on (those that draw their own
-# cursor read them).
+# Cursor theme, size, and shake-to-find magnification (reloads on save).
+# When unset, theme and size fall back to XCURSOR_THEME / XCURSOR_SIZE
+# (defaults: "default" and 24). When set here, they are also exported to newly
+# launched apps.
 [cursor]
-# theme = "Adwaita"                # e.g. a directory in ~/.icons or /usr/share/icons
-# size = 32                        # e.g. in logical pixels: 8 to 256
-shake-to-find = true             # false: never grow it
-shake-magnification = 3.0        # how much bigger at most: 1.5 to 5
+# theme = "Adwaita"                # e.g.: directory in ~/.icons or /usr/share/icons
+# size = 32                        # e.g.: logical pixels (8 to 256)
+shake-to-find = true             # temporarily enlarge cursor when shaken
+shake-magnification = 3.0        # maximum scale factor (1.5 to 5.0)
 
-# The overview (the `overview` action, Mod+W): the workspace's windows spread
-# out under a strip of every workspace. hot-corner: pushing the pointer into
-# the top-left corner of a monitor opens it, or closes it (not over a
-# fullscreen window).
+# Overview settings (opened with `overview` / Mod+W).
 [overview]
-hot-corner = true
+hot-corner = true                # push pointer into top-left corner to toggle (disabled over fullscreen)
 
-# X11 apps run through Xwayland, which Pila starts when the first one
-# connects. Unset, it then runs until Pila exits; with idle-timeout, it stops
-# that many seconds (1 to 3600) after its last X11 client leaves, and starts
-# again with the next one. Stopping it loses what was set in X (xrdb,
-# setxkbmap, xmodmap). enabled = false: no X11 apps at all, no X display and
-# no DISPLAY; turned off while Xwayland runs, it stays for its apps until it
-# stops. Read as soon as the file is saved.
+# Xwayland starts on demand when the first X11 app connects. Set idle-timeout
+# (1 to 3600 seconds) to shut it down after the last X11 client exits (note:
+# resets xrdb/setxkbmap/xmodmap state). Set enabled = false for an X11-free
+# session (no DISPLAY or XAUTHORITY). Reloads on save.
 [xwayland]
 # idle-timeout = 10                # e.g.
 enabled = true
 
-# The keymap, passed to xkbcommon. Unset (or empty), xkbcommon's defaults or
-# the XKB_DEFAULT_* variables. `localectl list-x11-keymap-layouts` (and
-# -variants, -models, -options) lists the names where systemd is installed;
-# `pila --check-config` says if xkbcommon can't build the keymap.
+# XKB keyboard layout. When unset or empty, uses xkbcommon defaults or
+# XKB_DEFAULT_* env vars. On systemd distros, `localectl list-x11-keymap-layouts`
+# (and -variants, -models, -options) lists valid values; `pila --check-config`
+# validates the keymap.
 [keyboard]
-# layout = "us,es"                 # e.g.: a list switches between them
-# variant = ",dvorak"              # e.g.: one per layout
-# model = "pc105"                  # e.g.: the keyboard's physical model
+# layout = "us,es"                 # e.g.: comma-separated layouts
+# variant = ",dvorak"              # e.g.: one variant per layout
+# model = "pc105"                  # e.g.: physical keyboard model
 # options = "grp:alt_shift_toggle,caps:escape"   # e.g.
-repeat-delay = 200               # ms before a held key repeats
+repeat-delay = 200               # ms before a held key begins repeating
 repeat-rate = 25                 # repeats per second
-numlock = false                    # true: Num Lock on at startup
+numlock = false                  # enable Num Lock at startup and on keymap reload
 
-# Touchpad and mouse (libinput, on a TTY; nested, the host handles input).
-# Mouse wheel bindings (Mod+wheel switches workspaces): the least time in
-# ms (0 to 1000) between two runs of one. The notches of a quick turn of the
-# wheel inside it are dropped, so it goes one workspace; 0 runs it each notch.
+# Input device settings (bare metal via libinput; nested mode uses host input).
+# wheel-binding-cooldown: minimum ms (0 to 1000) between mouse-wheel binding
+# triggers so a quick flick switches one workspace instead of several (0 = no
+# cooldown).
 [input]
 wheel-binding-cooldown = 150
 
-# Unset options keep libinput's defaults for the device; tap is on. Options a
-# device doesn't support are skipped.
+# Omitted device options keep libinput defaults; unsupported options are
+# ignored.
 [input.touchpad]
-# natural-scroll = true            # e.g.: content follows the fingers
-# accel-speed = 0.3                # e.g.: -1 (slowest) to 1 (fastest)
-# accel-profile = "flat"           # e.g.: "adaptive" or "flat" (no acceleration)
-# disable-while-typing = true      # e.g.: ignore the touchpad briefly while typing
-# click-method = "clickfinger"     # e.g.: 1/2/3 fingers = left/right/middle; or "button-areas"
-# middle-emulation = true          # e.g.: left + right together = middle
+# natural-scroll = true            # e.g.: content follows finger direction
+# accel-speed = 0.3                # e.g.: -1.0 (slowest) to 1.0 (fastest)
+# accel-profile = "flat"           # e.g.: "adaptive" or "flat"
+# disable-while-typing = true      # e.g.: ignore palm touches while typing
+# click-method = "clickfinger"     # e.g.: "clickfinger" or "button-areas"
+# middle-emulation = true          # e.g.: left + right click = middle click
 tap = true                       # tap to click
 
-# The same options as the touchpad's, for mice and trackballs.
+# Same libinput options for mice and trackballs.
 [input.mouse]
 # natural-scroll = true            # e.g.
 # accel-speed = -0.5               # e.g.
-# accel-profile = "flat"           # e.g.: no acceleration, as many players prefer
+# accel-profile = "flat"           # e.g.: disable pointer acceleration
 # middle-emulation = true          # e.g.
 
 [bindings]
-# Key bindings: add new ones, replace these, or remove them with "none".
-# Modifiers: Mod, Shift, Ctrl, Alt, Super; they must match exactly. Keys are
-# xkb keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...), or a mouse
-# wheel's notch: WheelScrollUp, WheelScrollDown, WheelScrollLeft,
-# WheelScrollRight (once a notch; the app under the pointer doesn't get it). A
-# modifier alone ("Mod", "Super", "Alt", "Ctrl") is a tap: it runs when the key
-# is released with no other key, click, scroll or gesture since it was pressed.
-# A binding runs once a press; written { action = "...", repeat = true } it runs
-# again while the key is held, at [keyboard]'s repeat-delay and repeat-rate.
-# Commands get PILA_OUTPUT, the name of the screen under the pointer (e.g.
-# "spawn grim -o \"$PILA_OUTPUT\" ~/shot.png" captures just that screen).
-# Actions: spawn <command>, terminal, launcher, close, cycle-focus (switch to
-# the previous window; hold the modifiers and repeat for older ones),
-# cycle-focus-back, minimize (Mod+Tab brings the window back), maximize,
-# fullscreen, snap-left, snap-right, snap-top, snap-bottom, snap-top-left,
-# snap-top-right, snap-bottom-left, snap-bottom-right,
-# snap <left|right|up|down> (one step from where the window is: a half, then a
-# quarter; toward the side it's against restores, up from a top quarter
-# maximizes), restore, move-left, move-right, move-up, move-down, grow-width,
-# shrink-width, grow-height, shrink-height, center,
-# toggle-always-on-top (above the others), toggle-all-workspaces,
-# show-desktop (minimize the workspace's windows; again, bring them back),
-# show-shortcuts (all the shortcuts, in sections; on its first run Pila
-# shows the few to get going; any key or click hides it),
-# overview (the workspace's windows spread out, none over another: click one,
-# or pick it with the arrows and Enter; Escape closes it; again, close it),
-# overview <open|close> (only open it, only close it),
-# focus-output <next|prev>, move-to-output <next|prev>,
-# workspace <n|next|prev> (go to a workspace; next/prev don't wrap around),
-# move-to-workspace <n|next|prev> (move the window there; "workspace-next" and
-# "move-to-workspace-prev" work too), switch-layout <n|next|prev> (the keyboard
-# layout, among [keyboard]'s; next/prev wrap around), power-off-monitors
-# (every display off until any input; the key or click that wakes them does
-# nothing else), power-on-monitors, quit, none.
-# Dragging a window to the left/right edge of a screen snaps it to that half,
-# near a corner to that quarter; the top edge maximizes it.
+# Add, override, or remove bindings (set to "none" to unbind).
+# Modifiers: Mod, Shift, Ctrl, Alt, Super (must match exactly).
+# Keys: XKB keysym names (Return, Tab, q, F5, XF86AudioRaiseVolume, ...), or
+# mouse wheel notches (WheelScrollUp, WheelScrollDown, WheelScrollLeft,
+# WheelScrollRight; consumed by Pila, not forwarded to apps). A lone modifier
+# ("Mod", "Super", "Alt", "Ctrl") triggers on tap-and-release if no other key,
+# click, scroll, or gesture occurred while held.
 #
-# Your own file's bindings come after these: one for the same keys replaces
-# the one here, and "none" removes it. Mod+1 .. Mod+N go to workspace 1 .. N,
-# and Mod+Shift+1 .. Mod+Shift+N move the window there, for each workspace up
-# to 9 (N = workspaces; the other digits reach the apps).
+# By default a binding runs once per press. Use { action = "...", repeat = true }
+# to repeat while held (at [keyboard]'s repeat-delay/repeat-rate).
+# `spawn` commands receive PILA_OUTPUT naming the monitor under the pointer
+# (e.g. "spawn grim -o \"$PILA_OUTPUT\" ~/shot.png").
+#
+# Available actions:
+#   spawn <command>, terminal, launcher, close,
+#   cycle-focus, cycle-focus-back, minimize, maximize, fullscreen, restore,
+#   snap-left, snap-right, snap-top, snap-bottom,
+#   snap-top-left, snap-top-right, snap-bottom-left, snap-bottom-right,
+#   snap <left|right|up|down> (step through halves, quarters, maximize, restore),
+#   move-left, move-right, move-up, move-down,
+#   grow-width, shrink-width, grow-height, shrink-height, center,
+#   toggle-always-on-top, toggle-all-workspaces, show-desktop, show-shortcuts,
+#   overview, overview <open|close>,
+#   focus-output <next|prev>, move-to-output <next|prev>,
+#   workspace <n|next|prev>, move-to-workspace <n|next|prev>
+#   ("workspace-next", "workspace-prev", "move-to-workspace-next", and
+#   "move-to-workspace-prev" also work; next/prev stop at the ends),
+#   switch-layout <n|next|prev> (wraps around),
+#   power-off-monitors, power-on-monitors, quit, none.
+#
+# Mouse snapping: drag a window to the left/right edge for a half, near a
+# corner for a quarter, or to the top edge to maximize.
+#
+# Your config's bindings apply after defaults, overriding matching keys.
+# Mod+1..N and Mod+Shift+1..N (up to `workspaces`, max 9) are also bound
+# automatically; unused digits pass through to apps.
 #
 # Examples:
 # "Mod+Shift+Return" = "spawn kitty -e htop"
-# "XF86AudioPlay" = "none"         # to the app, as a key of its own
-# "Mod+J" = "none"
-# "Mod" = "none"                   # tapping Mod alone opens nothing
+# "XF86AudioPlay" = "none"         # pass key through to apps
+# "Mod+J" = "none"                 # remove a default binding
+# "Mod" = "none"                   # disable tapping Mod to open launcher
 #
 "Mod+Return" = "terminal"
 "Mod+D" = "launcher"
@@ -309,16 +287,16 @@ tap = true                       # tap to click
 "Mod+Tab" = "cycle-focus"
 "Mod+J" = "cycle-focus"
 "Mod+Shift+Tab" = "cycle-focus-back"
-"Alt+Tab" = "cycle-focus"          # as on other desktops, whatever Mod is
+"Alt+Tab" = "cycle-focus"          # works regardless of `mod`
 "Alt+Shift+Tab" = "cycle-focus-back"
 "Mod+W" = "overview"
 "Mod+M" = "maximize"
 "Mod+N" = "minimize"
 "Mod+F" = "fullscreen"
-"Mod+Left" = "snap left"           # a half; with Mod+Up/Down a quarter
+"Mod+Left" = "snap left"           # left half; combine with Mod+Up/Down for quarters
 "Mod+Right" = "snap right"
-"Mod+Up" = "snap up"               # floating: maximize
-"Mod+Down" = "snap down"           # maximized: restore
+"Mod+Up" = "snap up"               # floating -> maximize
+"Mod+Down" = "snap down"           # maximized -> restore
 "Mod+Shift+Left" = "move-left"     # 40 px
 "Mod+Shift+Right" = "move-right"
 "Mod+Shift+Up" = "move-up"
@@ -333,17 +311,13 @@ tap = true                       # tap to click
 "Mod+H" = "show-desktop"
 "Mod+O" = "focus-output next"
 "Mod+Shift+O" = "move-to-output next"
-# A region to the clipboard (needs grim, slurp and wl-clipboard), and the
-# screen under the pointer to a file (needs grim). Any other screenshot tool
-# works too, in place of these lines.
+# Region screenshot to clipboard (grim, slurp, wl-clipboard) and active monitor
+# screenshot to ~/Pictures (grim). Replace with any screenshot tool you prefer.
 "Mod+Shift+S" = "spawn grim -g \"$(slurp)\" - | wl-copy"
 "Mod+Ctrl+S" = "spawn mkdir -p ~/Pictures && grim -o \"$PILA_OUTPUT\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png"
-# The volume and brightness keys, held to go on: the volume with wpctl
-# (PipeWire's WirePlumber), up to 100%, the brightness with brightnessctl,
-# never quite off. The media keys control the player that's playing
-# (playerctl). Without the program a key does nothing. Other tools work too,
-# in place of these lines: pactl on PulseAudio, or swayosd to see each change
-# on screen, for instance.
+# Volume (wpctl/WirePlumber, capped at 100%), brightness (brightnessctl, never
+# fully dark), and media playback (playerctl). Missing tools do nothing.
+# Swap for pactl (PulseAudio) or swayosd-client (on-screen display) if desired.
 # "XF86AudioRaiseVolume" = { action = "spawn pactl set-sink-volume @DEFAULT_SINK@ +5%", repeat = true }  # e.g.
 # "XF86AudioRaiseVolume" = { action = "spawn swayosd-client --output-volume raise", repeat = true }  # e.g.
 "XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+", repeat = true }
@@ -370,14 +344,12 @@ tap = true                       # tap to click
 "Mod+Shift+slash" = "show-shortcuts"  # Mod+?
 
 [gestures]
-# Touchpad swipes Pila handles itself (on a TTY), as "swipe-<fingers>-<way>"
-# with 3 to 5 fingers and left, right, up or down (the way the fingers move).
-# Values are the same actions as [bindings]. Pila keeps every swipe with a
-# finger count used here from the apps; other gestures (pinch, unused finger
-# counts) reach them. Window switching steps once more for every further
-# stretch of the same swipe and ends when the fingers lift.
-#
-# Your own file's gestures come after these, as for [bindings].
+# Touchpad swipes (bare metal): "swipe-<fingers>-<direction>", where fingers is
+# 3, 4, or 5 and direction is left, right, up, or down (finger movement
+# direction). Values use the same actions as [bindings]. Any finger count bound
+# here is intercepted by Pila; pinch gestures and unbound finger counts pass
+# through to apps. Continuous window-switching swipes step again as you keep
+# sliding and confirm when you lift your fingers.
 #
 # Examples:
 # "swipe-3-down" = "minimize"
@@ -393,111 +365,97 @@ tap = true                       # tap to click
 "swipe-4-up" = "overview open"
 "swipe-4-down" = "overview close"
 
-# Monitors, matched by connector name (shown in the log as "output connected",
-# e.g. eDP-1, DP-1, HDMI-A-1). Without an entry, a monitor uses its preferred
-# mode at scale 1, unrotated, right of the others. Nested, the only output is
-# "winit", and only its scale applies. Tools using wlr-output-management
-# (wlr-randr, a shell's display settings) change these at runtime; editing a
-# monitor's entry here puts the file back in charge of that monitor.
-# A section names a connector or a monitor: its make and model ("GSM 27GL850"),
-# for any monitor of that model on any connector, or with its serial too ("GSM
-# 27GL850 ABC123"), for that one monitor. The most specific section wins, and
-# only that one applies. wlr-randr lists them; `pila.log` has the make and model
-# ("monitor"). Without an EDID a monitor only answers to its connector.
-# The entries below are examples: take the `#` off a whole one, header included.
+# Monitor configuration (`[[output]]`). Unconfigured monitors use their
+# preferred mode at scale 1, unrotated, placed to the right of existing
+# outputs. In nested mode, the single output is named "winit" (only `scale`
+# applies). Runtime tools using wlr-output-management (such as wlr-randr)
+# override these until you edit the monitor's section here.
+#
+# Match by connector name ("eDP-1", "DP-1", "HDMI-A-1"), by EDID make and model
+# ("GSM 27GL850", matching that model on any port), or with serial number too
+# ("GSM 27GL850 ABC123"). Only the single most specific matching section
+# applies. Find names via `wlr-randr` or Pila's log. Monitors without EDID
+# match by connector only.
+#
+# Examples (uncomment an entire block, including `[[output]]`):
 #
 # [[output]]
 # name = "eDP-1"
-# scale = 1.25              # 0.5 to 8, may be fractional (in 1/120 steps); default 1
+# scale = 1.25              # 0.5 to 8.0, supports fractional 1/120 steps (default: 1)
 #
 # [[output]]
 # name = "DP-1"
-# mode = "2560x1440@143.9"  # WIDTHxHEIGHT[@HZ]; the closest refresh is used
-# position = [1536, 0]      # top-left in logical pixels (size / scale), each
-#                           # within -1000000..1000000
-# transform = "90"          # rotated a quarter turn counter-clockwise (a monitor
-#                           # standing on its side): normal, 90, 180, 270, or
+# mode = "2560x1440@143.9"  # WIDTHxHEIGHT[@HZ]; picks closest available refresh rate
+# position = [1536, 0]      # top-left in logical pixels (size / scale), within -1000000..1000000
+# transform = "90"          # counter-clockwise rotation: normal, 90, 180, 270,
 #                           # flipped, flipped-90, flipped-180, flipped-270
-# adaptive-sync = true      # variable refresh rate, if the monitor supports it
-# enabled = false           # leave the monitor off (no windows go there); a
-#                           # built-in screen comes back if no other is left
+# adaptive-sync = true      # enable VRR if supported by the monitor
+# enabled = false           # disable output (built-in screen re-enables if no other remains)
 
-# Window and layer rules. A window rule matches windows by `app-id` (the
-# class of WM_CLASS for X11 apps), `title` and `tag` (the name an app gives a
-# kind of window of its own, such as "settings"; few apps set one); a layer
-# rule matches layer surfaces (panels, launchers, notifications) by
-# `namespace`. `*` stands for
-# any run of characters; a rule's matchers must all match, and a rule without
-# any matches everything. Every matching rule applies, in order, a later one
-# overriding an earlier one field by field. `RUST_LOG=pila=debug` logs each
-# new window's app id ("mapping window") and layer surface's namespace ("new
-# layer surface"). Rules are matched when a window or layer surface appears,
-# again for all of them when this file is saved, and again for a window whose
-# title or app id changes. The open-* properties, size, position,
-# always-on-top and all-workspaces only apply when a window opens.
-# The rules below are examples: take the `#` off a whole one, header included.
+# Window and layer rules.
+# `[[window-rule]]` matches by `app-id` (WM_CLASS class for X11), `title`, and
+# `tag` (xdg-toplevel-tag). `[[layer-rule]]` matches bars, launchers, and
+# notifications by `namespace`. Wildcards (`*`) match any characters; all
+# specified matchers must match (a rule with no matchers matches everything).
+# Matching rules apply in order, with later rules overriding earlier fields.
+#
+# Find IDs with `pila msg windows` or `RUST_LOG=pila=debug` (logs "mapping
+# window" and "new layer surface"). Rules re-evaluate on reload and when a
+# window's title or app-id changes, except open-time properties (open-*, size,
+# position, always-on-top, all-workspaces).
+#
+# Examples (uncomment an entire block, including the header):
 #
 # [[window-rule]]
-# app-id = "steam_app_*"           # games: no window animations
-# animations = false               # or per animation: { open = false,
-#                                  #   close = false, minimize = false,
-#                                  #   maximize = false }
+# app-id = "steam_app_*"           # disable animations for Steam games
+# animations = false               # or per type: { open = false, close = false,
+#                                  #   minimize = false, maximize = false }
 #
 # [[window-rule]]
 # app-id = "firefox"
 # title = "*Picture-in-Picture*"
 # animations = { open = false }
-# size = [480, 270]                # logical pixels, 1 to 16384 each; the app
-#                                  # may round it
-# position = [20, 20]              # top-left (title bar included) from the
-#                                  # top-left of the output's free area
+# size = [480, 270]                # logical pixels (1 to 16384); app may adjust
+# position = [20, 20]              # top-left (including title bar) relative to output's usable area
 #
 # [[window-rule]]
 # app-id = "kitty"
-# title-bar = false                # Pila draws no title bar (the app neither)
-# corner-radius = 12               # instead of the one above
-# opacity = 0.95                   # 0.1 to 1, title bar included
-#                                  # (only lowers what the app draws: a translucent
-#                                  # terminal stays so with opacity = 1)
-# blur = true                      # blur what's seen through it, title bar
-#                                  # included (false: never; unset: where the
-#                                  # app asks for it)
-# shadow = false                   # (true: even if the app draws its own)
+# title-bar = false                # hide server-side title bar (no client-side bar either)
+# corner-radius = 12               # override global corner-radius
+# opacity = 0.95                   # 0.1 to 1.0, including title bar
+#                                  # (caps opacity; a translucent app stays translucent at 1.0)
+# blur = true                      # blur behind window and title bar (false: disable;
+#                                  # unset: honor app's ext-background-effect request)
+# shadow = false                   # override [shadow] (true forces shadow even on CSD apps)
 #
 # [[window-rule]]
 # app-id = "org.gnome.Nautilus"
-# opacity = 0.9                    # its menus too
-# popup-blur = true                # blur behind its menus, which don't ask for
-#                                  # it, in their shape where the app gives it
-#                                  # (GTK does; false: never; unset: where they
-#                                  # ask, unless blur = false)
-# popup-corner-radius = 8          # rounds it where the app doesn't (unset:
-#                                  # square)
+# opacity = 0.9                    # applies to menus too
+# popup-blur = true                # blur behind menus even if the app doesn't ask (uses menu
+#                                  # shape when provided, as in GTK; false: disable;
+#                                  # unset: honor popup requests unless blur = false)
+# popup-corner-radius = 8          # corner radius for blurred menus without an explicit shape
 #
 # [[window-rule]]
 # app-id = "thunderbird"
-# open-on-workspace = 3            # opens there, without switching to it
-# open-on-output = "eDP-1"         # opens on that monitor (its connector, or
-#                                  # "Make Model" as in [[output]]) instead of
-#                                  # the pointer's, if it's there and on
-# open-focused = false             # opens without taking the keyboard focus
+# open-on-workspace = 3            # open on workspace 3 without switching to it
+# open-on-output = "eDP-1"         # target monitor (connector or "Make Model"), falls back to pointer's
+# open-focused = false             # open without stealing keyboard focus
 # open-maximized = true            # or open-fullscreen = true
-# always-on-top = true             # above the others, from when it opens
-# all-workspaces = true            # on every workspace, from when it opens
+# always-on-top = true             # keep above other windows on open
+# all-workspaces = true            # show on every workspace on open
 #
 # [[window-rule]]
-# app-id = "pila"                  # Pila run nested (development) opens on
-# open-on-output = "eDP-1"         # the laptop's panel, leaving the keyboard
-# open-focused = false             # with what you're working on
+# app-id = "pila"                  # keep nested Pila out of the way during development
+# open-on-output = "eDP-1"
+# open-focused = false
 #
-# # A layer surface's namespace: the `RUST_LOG` line above logs it; in Pila's
-# # source, scripts/layer-namespaces lists those of what you run.
+# # Find layer namespaces with `RUST_LOG=pila=debug` or `scripts/layer-namespaces`.
 #
 # [[layer-rule]]
-# namespace = "my-shell-*"         # a shell that animates its own surfaces
+# namespace = "my-shell-*"         # desktop shell that animates its own panels
 # animations = false
 #
 # [[layer-rule]]
 # namespace = "waybar"
-# blur = true                      # blur behind all of it (false: never;
-#                                  # unset: where the app asks for it)
+# blur = true                      # blur behind panel (false: disable; unset: honor app request)

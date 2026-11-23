@@ -18,18 +18,19 @@
 </head>
 <body>
 <h1>Pila packages</h1>
-<p>APT and DNF repositories of <a href="https://github.com/igalmarino/pila">Pila</a>, a stacking
-Wayland compositor, for x86_64. They hold the packages attached to its last releases, and updates
-come with the system's.</p>
-<h2>Debian 13 or newer, Ubuntu 24.04 or newer</h2>
+<p>Signed APT and DNF repositories for <a href="https://github.com/igalmarino/pila">Pila</a>, a
+stacking Wayland compositor (x86_64). Install <code>pila-desktop</code> for Pila with its default
+desktop tools, or <code>pila</code> for the compositor alone. Updates arrive through normal system
+upgrades.</p>
+<h2>Debian 13+ and Ubuntu 24.04+</h2>
 <pre><code>sudo curl --create-dirs -fsSLo /etc/apt/keyrings/pila.asc https://igalmarino.github.io/pila/pila.asc
 printf 'Types: deb\nURIs: https://igalmarino.github.io/pila/deb\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/pila.asc\n' \
   | sudo tee /etc/apt/sources.list.d/pila.sources
-sudo apt update &amp;&amp; sudo apt install pila</code></pre>
-<h2>Fedora 44 or newer</h2>
+sudo apt update &amp;&amp; sudo apt install pila-desktop   # or: pila</code></pre>
+<h2>Fedora 44+</h2>
 <pre><code>sudo curl -fsSLo /etc/yum.repos.d/pila.repo https://igalmarino.github.io/pila/rpm/pila.repo
-sudo dnf install pila</code></pre>
-<p>The packages and the repositories are signed with the key <a href="pila.asc"><code>pila.asc</code></a>,
+sudo dnf install pila-desktop   # or: pila</code></pre>
+<p>Both repositories and their packages are signed with <a href="pila.asc"><code>pila.asc</code></a>,
 fingerprint <code>67A0 F1D1 96AE C2CB B156 0ECA 2413 E5C5 5410 73F3</code>.</p>
 </body>
 </html>

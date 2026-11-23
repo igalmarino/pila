@@ -1,42 +1,52 @@
 # IPC
 
-`pila msg` asks a running Pila about its windows, monitors, workspaces, keyboard layouts and
-colors and runs actions. Other programs can talk to the same socket directly.
+`pila msg` queries a running Pila instance for windows, monitors, workspaces, keyboard layouts, and
+colors, and runs compositor actions. External programs can also talk directly to the underlying
+Unix socket.
 
 ## `pila msg`
 
 ```
-pila msg [--json] windows            The windows, on all workspaces
-pila msg [--json] outputs            The monitors
-pila msg [--json] workspaces         The workspaces
-pila msg [--json] keyboard           The keyboard layouts, and which is in use
-pila msg [--json] colors             The colors of [colors]
-pila msg [--json] focused            The focused window
-pila msg [--json] version            Pila's version
-pila msg [--json] subscribe [EVENTS] Events as they happen, until Pila quits
-pila msg action <action>             Run an action, as in [bindings]
-pila msg focus <id>                  Focus a window, on whichever workspace
+pila msg [--json] windows            List all windows across all workspaces
+pila msg [--json] outputs            List enabled monitors
+pila msg [--json] workspaces         List workspaces
+pila msg [--json] keyboard           List keyboard layouts and the active one
+pila msg [--json] colors             Show current [colors] values
+pila msg [--json] focused            Show the focused window
+pila msg [--json] version            Show Pila's version
+pila msg [--json] subscribe [EVENTS] Stream events as they happen until Pila exits
+pila msg action <action>             Run an action (same syntax as [bindings])
+pila msg focus <id>                  Focus a window on any workspace
 pila msg close <id>                  Ask a window to close
-pila msg minimize <id>               Minimize a window (focus brings it back)
+pila msg minimize <id>               Minimize a window (use focus to restore it)
 ```
 
-For example: `pila msg action workspace 2`, `pila msg --json windows | jq`,
-`pila msg --json subscribe workspaces`.
+Examples:
 
-Without `--json` the output is for people, and may change. Scripts should use `--json`.
+```bash
+pila msg action workspace 2
+pila msg --json windows | jq
+pila msg --json subscribe workspaces
+```
 
-Exit status: 0 on success, 1 if Pila refused the request (it says why on stderr), 2 for wrong
-arguments, 3 if it can't talk to Pila.
+Without `--json`, output is formatted for human reading and may change between releases. Scripts
+should always pass `--json`.
+
+**Exit codes:**
+- `0`: success
+- `1`: Pila refused the request (reason printed to stderr)
+- `2`: invalid command-line arguments
+- `3`: could not connect to Pila
 
 ## The socket
 
-A Unix stream socket, for the same user only (mode 0600). Programs Pila starts have its path in
-`PILA_SOCKET`, and a login session exports it to the D-Bus session bus (and to systemd's user
-manager, where that's the bus) too, for programs started as services; otherwise it's
-`$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
+Pila listens on a Unix stream socket accessible only to your user (mode `0600`). Programs launched
+by Pila receive the path in `PILA_SOCKET`. Login sessions also export `PILA_SOCKET` to the D-Bus
+session bus (and `systemd --user` when present) so user services can find it. Otherwise, the path
+is `$XDG_RUNTIME_DIR/pila-<WAYLAND_DISPLAY>.sock`.
 
-Each request is one line of JSON and gets one line of JSON back, in order. A connection can be
-kept open for more than one.
+The protocol is newline-delimited JSON: each request is one line of JSON and receives one JSON
+response line in order. A single connection can send multiple requests.
 
 ```
 → {"request": "action", "action": "workspace 2"}
@@ -45,78 +55,103 @@ kept open for more than one.
 ← {"ok": false, "error": "unknown request \"nothing\""}
 ```
 
-Limits: a request is at most 64 KiB, 32 clients at once, and a client that leaves more than
-1 MiB of answers unread is disconnected.
+**Limits:** Requests are capped at 64 KiB, up to 32 concurrent clients are accepted, and clients
+that leave more than 1 MiB of unread responses buffered are disconnected.
 
-## What's guaranteed
+## Stability guarantees
 
-Answers to queries carry `protocol`, now 1. New requests and new fields can appear at any time, so
-ignore what you don't know. Removing a field or changing what one means raises `protocol`. The
-actions are those of `config.example.toml`.
+Query responses include a `protocol` integer (currently `1`). New requests and fields may be added
+at any time, so clients should ignore unknown fields. Removing a field or changing its meaning will
+increment `protocol`. Available actions match those documented in `config.example.toml`.
 
 ## Requests
 
-| `request` | Fields | Answer |
+| `request` | Parameters | Response fields (besides `ok`) |
 |---|---|---|
-| `version` | | `protocol`, `version` |
-| `windows` | | `protocol`, `windows`: mapped windows back to front, then those minimized or on other workspaces |
-| `outputs` | | `protocol`, `outputs` |
-| `workspaces` | | `protocol`, `workspaces` |
-| `keyboard` | | `protocol`, `layouts` |
-| `colors` | | `protocol`, `colors` |
-| `switch` | | `protocol`, `switch`: the window switch in progress, or null |
-| `focused` | | `protocol`, `window`: a window, or null |
-| `subscribe` | `events`: a list of `windows`, `workspaces`, `outputs`, `keyboard`, `colors`, `switch` (all if left out) | `protocol`; then events (below) |
-| `action` | `action`: as in `[bindings]` | nothing more |
-| `focus` | `id` | nothing more |
-| `close` | `id` | nothing more |
-| `minimize` | `id` | nothing more (also when it's minimized already; `focus` brings it back) |
+| `version` | — | `protocol`, `version` |
+| `windows` | — | `protocol`, `windows` (mapped windows back to front, followed by minimized and other-workspace windows) |
+| `outputs` | — | `protocol`, `outputs` |
+| `workspaces` | — | `protocol`, `workspaces` |
+| `keyboard` | — | `protocol`, `layouts` |
+| `colors` | — | `protocol`, `colors` |
+| `switch` | — | `protocol`, `switch` (active window-switch state, or `null`) |
+| `focused` | — | `protocol`, `window` (focused window object, or `null`) |
+| `subscribe` | `events`: array of `windows`, `workspaces`, `outputs`, `keyboard`, `colors`, `switch` (defaults to all) | `protocol`, followed by event lines (see below) |
+| `action` | `action`: string, as in `[bindings]` | — |
+| `focus` | `id` | — |
+| `close` | `id` | — |
+| `minimize` | `id` | — (succeeds even if already minimized; `focus` restores it) |
 
-While the session is locked, `action`, `focus`, `close` and `minimize` are refused, `quit` included, and
-queries still answer. Only the actions `power-off-monitors`, `power-on-monitors` and
-`switch-layout` still run: idling locks first and then turns the monitors off, and a lock screen
-may switch the keyboard layout to type the password. An action with `spawn` runs a command as your user; any program of yours can
-do that anyway.
+While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
+`quit`), while queries continue to work. The only actions allowed while locked are
+`power-off-monitors`, `power-on-monitors`, and `switch-layout`, so idle daemons can turn off
+monitors after locking and lock screens can switch keyboard layouts. Note that `spawn` actions run
+commands as your user, which any process running under your account can already do.
 
-**A window:** `id` (string, for as long as the window lives; the same identifier as
-ext-foreign-toplevel-list), `app_id`, `title`, `workspace` (from 1), `output` (a name, or null off
-screen), `focused`, `x`, `y`, `width`, `height` (logical pixels; where it comes back to if it's off
-screen; the title bar isn't included), `minimized`, `maximized`, `fullscreen`, `snapped` (`left`,
-`right`, `top`, `bottom`, `top-left`, `top-right`, `bottom-left`, `bottom-right` or null), `always_on_top`,
-`all_workspaces`, `urgent` (asking for attention), `x11`. Titles and app ids are what programs set: they can hold anything,
-terminal escapes included. Text from `pila msg` without `--json` has control characters replaced.
+### Object schemas
 
-**An output:** `name`, `make`, `model`, `x`, `y`, `width`, `height` (logical pixels), `refresh`
-(mHz, or null), `scale`, `transform` (as in `[[output]]`), `focused` (the pointer is on it), `power` (its display is on: off
-after `power-off-monitors` or a tool such as `wlopm`). Only enabled monitors are listed (not those
-with `enabled = false` or turned off through output management); one whose display is powered off
-is listed with `power: false`.
+**Window:**
+- `id`: string unique for the window's lifetime (matches `ext-foreign-toplevel-list`)
+- `app_id`, `title`: strings set by the application (may contain arbitrary characters, including
+  terminal escapes; plain-text `pila msg` output replaces control characters)
+- `workspace`: 1-based workspace index
+- `output`: monitor name, or `null` if off-screen
+- `focused`: boolean
+- `x`, `y`, `width`, `height`: logical pixels excluding the title bar (for off-screen windows, the
+  geometry they will restore to)
+- `minimized`, `maximized`, `fullscreen`, `always_on_top`, `all_workspaces`, `urgent`, `x11`:
+  booleans
+- `snapped`: `"left"`, `"right"`, `"top"`, `"bottom"`, `"top-left"`, `"top-right"`,
+  `"bottom-left"`, `"bottom-right"`, or `null`
 
-**A workspace:** `index` (from 1), `active`, `windows` (how many, minimized included; a window on
-all workspaces counts for the active one).
+**Output:**
+- `name`, `make`, `model`: strings
+- `x`, `y`, `width`, `height`: logical pixels
+- `refresh`: refresh rate in mHz, or `null`
+- `scale`: number
+- `transform`: same values as `[[output]]`
+- `focused`: `true` if the pointer is on this monitor
+- `power`: `true` if the display is powered on (`false` after `power-off-monitors` or `wlopm`)
 
-**A keyboard layout:** `index` (from 1, in the order of `[keyboard]`'s `layout`), `name` (xkb's,
-such as `English (US)`), `active` (in use). While a virtual keyboard (`wtype`, an on-screen
-keyboard) types with a keymap of its own, these are still the physical keyboard's. The action
-`switch-layout <n|next|prev>` changes the layout.
+Only enabled monitors are included (monitors with `enabled = false` or disabled via output
+management are omitted). Powered-off monitors remain listed with `"power": false`.
 
-**The colors:** an object with `[colors]`' settings, named with `_` for `-` (`bar`,
+**Workspace:**
+- `index`: 1-based index
+- `active`: boolean
+- `windows`: window count, including minimized windows (a window on all workspaces counts toward
+  the active workspace)
+
+**Keyboard layout:**
+- `index`: 1-based index matching the order in `[keyboard]` `layout`
+- `name`: XKB layout name (for example, `"English (US)"`)
+- `active`: boolean
+
+Even while a virtual keyboard (`wtype` or an on-screen keyboard) temporarily uses its own keymap,
+these entries still reflect the physical keyboard. Use `switch-layout <n|next|prev>` to change the
+active layout.
+
+**Colors:**
+An object containing every `[colors]` key with underscores instead of hyphens (`bar`,
 `bar_inactive`, `bar_urgent`, `icon`, `icon_inactive`, `hover`, `hover_icon`, `close_hover`,
-`close_hover_icon`, `background`, `snap_preview`), each `#rrggbb`, or `#rrggbbaa` when
-translucent: those of the configuration file, the example's where it leaves one out. For
-programs that want to look like Pila's title bars (a bar's or launcher's theme).
+`close_hover_icon`, `background`, `snap_preview`), formatted as `#rrggbb` (or `#rrggbbaa` when
+translucent). Values reflect the active config, falling back to defaults for omitted keys. Useful
+for bars or launchers that want to match Pila's theme.
 
-**The window switch:** while Mod+Tab or Alt+Tab is held (or a switching swipe goes on), an object:
-`windows`, the ids of the windows it goes through, most recently used first (minimized ones
-included); `selected`, the id of the one it's on; `output`, the name of the monitor the pointer
-was on when it started (null if none). Null when no switch is going on. Pila does the switching
-(the keys, the order, the end when the modifiers are let go) and shows it itself; this is for
-another program that shows it too. A `focus` request ends the switch on that window.
+**Window switch (`switch`):**
+While `Mod+Tab`, `Alt+Tab`, or a window-switching swipe is active, an object with:
+- `windows`: array of window IDs in most-recently-used order (including minimized windows)
+- `selected`: ID of the currently highlighted window
+- `output`: name of the monitor the pointer was on when switching started, or `null`
+
+Returns `null` when no window switch is in progress. Pila handles the switching logic and renders
+its own switcher UI; this field exists for external tools that also want to display switcher state.
+Sending a `focus` request ends the active switch on that window.
 
 ## Events
 
-After `subscribe`, the connection gets an event line for each kind asked for, with how things are
-now, and then one whenever that kind changes:
+After a `subscribe` request succeeds, Pila immediately sends one snapshot event for each subscribed
+category, followed by a new event whenever that category changes:
 
 ```
 → {"request": "subscribe", "events": ["workspaces"]}
@@ -125,13 +160,19 @@ now, and then one whenever that kind changes:
 ← {"event": "workspaces", "workspaces": [{"index": 1, "active": false, ...}, {"index": 2, "active": true, ...}, ...]}
 ```
 
-Each event is the whole list, as the request of the same name answers it (`keyboard` events carry
-`layouts`; `colors` events the `colors` object, `switch` events the `switch` object or null):
-replace what you had. The switch's events come at once, at each step of it. Colors change when a
-saved configuration changes them.
-A window being moved or resized with the pointer keeps, in events, the `x`, `y`, `width` and
-`height` it had before, until it's let go: a drag sends one event, when it ends, rather than one
-a frame (`windows` answers with where it is now). Events come once things settle on screen, as taskbars hear about them
-(the keyboard's right away, and the monitors' power even when none is on to draw). A
-subscribed connection still answers requests (answers have `ok`, events `event`); subscribing
-again replaces the list. A subscriber that leaves more than 1 MiB unread is disconnected.
+Each event carries the full current state in the same shape as the matching query (`keyboard`
+events carry `layouts`, `colors` events carry `colors`, and `switch` events carry `switch` or
+`null`), so subscribers can simply replace their cached state.
+
+Timing details:
+- `switch` events fire immediately on each step.
+- `colors` events fire when a reloaded configuration changes colors.
+- While a window is being dragged or resized with the pointer, events keep its pre-drag `x`, `y`,
+  `width`, and `height` and emit a single update when the drag ends (avoiding per-frame chatter).
+  Querying `windows` directly still returns the live coordinates.
+- Most events are sent once changes settle on screen (matching when taskbars are notified);
+  `keyboard` events fire immediately, and monitor power events fire even when all monitors are off.
+
+A subscribed connection can still send regular requests (responses carry `ok`, while events carry
+`event`). Calling `subscribe` again replaces the active event filter. Subscribers that let more
+than 1 MiB of events pile up unread are disconnected.

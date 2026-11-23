@@ -1,20 +1,20 @@
 name: Test report
-description: How Pila did on your machine, whether it worked or not
+description: Share how Pila ran on your hardware, whether it worked or not
 labels: [test report]
 body:
   - type: markdown
     attributes:
-      value: Reports where everything worked are welcome. They show which setups are known to be good.
+      value: Reports where everything worked are just as helpful; they tell us which hardware and distros are known to work.
   - type: markdown
     attributes:
-      value: "`pila-report` (`scripts/report` in a checkout) gathers your system details into a file you can read and attach."
+      value: "Run `pila-report` (or `scripts/report` in a checkout) to collect your system details into a file you can review and attach."
   - type: dropdown
     id: result
     attributes:
-      label: Overall
+      label: Overall result
       options:
-        - Works, I could use it day to day
-        - Works, with problems (listed below)
+        - Works, usable day to day
+        - Works, with some issues (listed below)
         - Doesn't start or isn't usable
     validations:
       required: true
@@ -22,56 +22,56 @@ body:
     id: version
     attributes:
       label: Pila version
-      description: The output of `pila --version`.
-      placeholder: pila 0.7.0 (v0.7.0)
+      description: Output of `pila --version`.
+      placeholder: pila 0.9.4 (v0.9.4)
     validations:
       required: true
   - type: dropdown
     id: started
     attributes:
       label: How Pila was started
-      description: "A nested run doesn't test your GPU's real path (DRM/KMS). For a GPU report, run `pila-check` (`scripts/check` in a checkout) on a TTY too."
+      description: "Nested runs don't exercise your GPU's DRM/KMS path. For a GPU test report, also run `pila-check` (`scripts/check` in a checkout) from a TTY."
       multiple: true
       options:
-        - Nested, in another desktop
-        - By hand on a TTY (scripts/tty or pila)
+        - Nested inside another desktop
+        - Manually on a TTY (scripts/tty or pila)
         - Login session (display manager)
     validations:
       required: true
   - type: input
     id: system
     attributes:
-      label: Distro, init system and session
-      description: For example "Void, runit, seatd". Add the display manager if you used one.
+      label: Distro, init system, and session
+      description: For example, "Void, runit, seatd". Include your display manager if you used one.
     validations:
       required: true
   - type: input
     id: gpu
     attributes:
       label: GPU and driver
-      description: '`pila-report` names them. For example "NVIDIA RTX 3060, nvidia 570".'
+      description: '`pila-report` prints both. For example, "NVIDIA RTX 3060, nvidia 570".'
     validations:
       required: true
   - type: input
     id: monitors
     attributes:
       label: Monitors
-      description: Resolution, refresh rate and scale of each.
+      description: Resolution, refresh rate, and scale of each monitor.
   - type: textarea
     id: tried
     attributes:
       label: What you tried
-      description: Shell or bar, apps, games, screen sharing, suspend, hotplug, ...
+      description: Bar or shell, apps, games, screen sharing, suspend/resume, monitor hotplug, etc.
     validations:
       required: true
   - type: textarea
     id: problems
     attributes:
       label: What didn't work
-      description: In short; a separate bug report for anything serious helps.
+      description: Short summary; please open a separate bug report for anything serious.
   - type: textarea
     id: check
     attributes:
       label: pila-check output
-      description: The PASS and FAIL lines, if you ran it on a TTY.
+      description: Paste the PASS and FAIL lines if you ran it from a TTY.
       render: text

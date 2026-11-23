@@ -1,283 +1,277 @@
 # What sets Pila apart
 
-Pila is a stacking Wayland compositor in Rust, on Smithay's main branch, made to host
-layer-shell desktops: standard tools for the bar, launcher and notifications (waybar,
-fuzzel and mako by default), or a full desktop shell. This page
-lists its features, then covers its design choices and how it differs from other compositors.
-Usage is in the [manual](MANUAL.md), and each flow and invariant in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+Pila is a stacking Wayland compositor written in Rust on Smithay's main branch, designed to host
+layer-shell desktops, whether assembled from standard tools (waybar, fuzzel, and mako by default) or
+a full desktop shell. This page covers its features, design choices, and how it differs from other
+compositors. For usage instructions, see the [user manual](MANUAL.md); for internal flows and
+invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Features
 
-- **Windows:** server-side title bars (minimize, maximize, close) and resize borders, or
-  client-side decorations for apps that draw their own; Mod+drag to move and resize;
-  maximize and fullscreen; snapping to screen halves and quarters by keyboard or by dragging to
-  an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
-  desktop; keeping a window above the others or on all workspaces; moving windows and focus
-  between monitors; switching by recent use (Mod+Tab, Alt+Tab), the windows shown as live
-  previews while it's held; the overview (Mod+W, the top-left corner or a four-finger swipe up),
-  the workspace's windows spread out live, none over another, to pick one; tapping Mod alone opens the
-  launcher (fuzzel by default); workspaces spanning all monitors (Mod+1..N, Mod and the mouse wheel,
-  four-finger swipes); a window menu on the title bar (right click); windows asking for
-  attention marked with an amber title bar; volume, brightness, media and screenshot keys bound
-  by default (wpctl, brightnessctl, playerctl, grim and slurp); the screen locked and the
-  monitors off after a while without input, by default (swayidle and swaylock); a shadow under each window (`[shadow]`); optional
-  rounded corners (`corner-radius`, `rounded-corners`: GTK's by default); your own colors (`[colors]`);
-  every shortcut, with your own keys, on Mod+? (`show-shortcuts`), and the few to get going shown
-  on the first run.
-- **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
-  snapping; launchers and notifications; workspaces sliding. Configurable, or off.
-- **Window and layer rules** by app id, title or namespace: animations, workspace, size,
-  position, maximized or fullscreen, always on top, on all workspaces, title bar, corner radius,
-  opacity, blur and shadow per app; blur and animations per panel or launcher.
-- **Monitors:** several at once, hotplugged, each with its own mode, position, rotation,
-  (fractional) scale and adaptive sync; a fullscreen app's frames sent to the screen as it drew
-  them (direct scanout, `direct-scanout`); each frame drawn as close to the refresh as it safely
-  can be, for less latency (`render-late`).
-- **Apps get their windows back:** place, size, maximized or fullscreen, for apps that ask
-  (xdg-session-management), even after Pila restarts.
-- **X11 apps** through Xwayland, with the clipboard shared both ways. Xwayland starts when an
-  X11 app needs it and, with `[xwayland] idle-timeout`, stops when none is left.
-- **Desktop tools:** layer shell (waybar, fuzzel, mako, swaybg), session lock (swaylock),
-  idle notification and inhibition (swayidle, video players), clipboard managers
-  (ext-data-control), screenshots (grim; ext-image-copy-capture and wlr-screencopy), taskbars
-  that act on windows
-  (foreign-toplevel-management), night light (gamma control), screen off and monitor
-  settings (output power and management), blur behind panels and windows (background-effect),
-  workspace indicators and switchers (ext-workspace), a visual system bell, dialogs that stay
-  above their window and modal ones that keep the focus (xdg-dialog, and X11's), window rules by tag
-  (xdg-toplevel-tag), games with vsync off shown at once, torn (wp-tearing-control), surfaces an
-  app fades without drawing them again (wp-alpha-modifier),
-  the pointer moved by the app it's on (wp-pointer-warp: games, SDL 3), X11 apps that grab the
-  keyboard (xwayland-keyboard-grab: virtual machines, remote desktops),
-  Vulkan's FIFO presentation (wp-fifo, wp-commit-timing), explicit sync
-  (linux-drm-syncobj), virtual keyboards (`wtype`, on-screen keyboards). Enough for a full
-  desktop shell. Sandboxed apps (Flatpak) don't see the protocols that read the
-  screen or act on other windows and input (wp-security-context).
-- **The desktop portal, served by Pila** (its own backend: no xdg-desktop-portal-wlr): screen
-  sharing for browsers, video calls and OBS over PipeWire, of a monitor, a region of one you drag
-  out (marked on the screen in the accent color while it's shared) or a single window (kept
-  updating while it's covered, minimized or on another workspace), picked in a panel Pila draws
-  with live previews; apps' screenshots, of every monitor when the portal lets the app take one
-  unasked, else of the monitor, region or window you pick; a color picked from the screen (GTK's color
-  chooser, GIMP); and apps' global shortcuts (push-to-talk, a recorder's start and stop), whose
-  keys you confirm or change in a panel and Pila remembers for each app. Nothing is shared or
-  taken without your say, a shared window shows nothing new while the screen is locked, and
-  shortcuts do nothing then.
-- **Input:** keyboard layout, repeat and Num Lock at startup, touchpad and mouse settings (tap, natural scrolling,
-  speed, disable while typing, ...), three-finger swipes to switch windows and maximize,
-  four-finger swipes to switch workspaces (configurable), other touchpad gestures for apps,
-  pointer lock and confinement for games, shaking the pointer to find it (`[cursor]`), any key
-  bindable (media keys included, repeating while held if asked), and the mouse wheel with
-  modifiers; input methods such as fcitx5 for Chinese, Japanese and Korean (input-method-v2,
-  text-input-v3).
-- **Configuration** in one TOML file, applied live when saved.
-- **Scripting:** `pila msg` lists windows, monitors and workspaces as text or JSON and runs any
-  action ([IPC.md](IPC.md)).
+### Windows and workspaces
+- **Decorations and resizing:** Server-side title bars (minimize, maximize, close) and resize
+  borders, while respecting client-side decorations for apps that draw their own. Right-clicking a
+  title bar opens a window menu.
+- **Mouse and keyboard management:** `Mod` + drag to move or resize from anywhere in a window;
+  maximize, fullscreen, minimize, and show desktop; center, move, and resize from the keyboard;
+  keep a window always on top or visible on all workspaces; move windows and focus across monitors.
+- **Snapping:** Snap windows to screen halves and quarters via keyboard shortcuts or by dragging to
+  an edge or corner, with optional gaps (`gaps`).
+- **Window switcher and overview:** Recent-use window switching (`Mod+Tab`, `Alt+Tab`) with live
+  previews while held; an overview (`Mod+W`, top-left hot corner, or four-finger swipe up) that
+  spreads all workspace windows out live without overlap, plus a live workspace strip.
+- **Workspaces:** Shared workspaces spanning all monitors (`Mod+1..N`, `Mod` + scroll wheel, or
+  four-finger swipes).
+- **Launcher and shortcuts:** Tap `Mod` alone to open the launcher (fuzzel by default). Built-in
+  default bindings for volume, brightness, media, and screenshots (`wpctl`, `brightnessctl`,
+  `playerctl`, `grim`, `slurp`), plus automatic idle locking and monitor power-off via `swayidle`
+  and `swaylock`. Press `Mod+?` (`show-shortcuts`) to view your current shortcuts at any time; a
+  short welcome cheatsheet appears on first run.
+- **Visual styling:** Window shadows (`[shadow]`), rounded corners (`corner-radius`,
+  `rounded-corners`, top-only like GTK by default), custom color schemes (`[colors]`), amber title
+  bars for urgent windows, and subtle configurable animations for windows, layers, and workspace
+  slides.
+
+### Rules, monitors, and sessions
+- **Window and layer rules:** Match by app ID, title, tag, or layer namespace to control
+  animations, initial workspace or output, size, position, maximized/fullscreen state,
+  always-on-top, all-workspaces, title bar, corner radius, opacity, blur, and shadow.
+- **Multi-monitor support:** Hotplugging, per-monitor modes, positions, rotations, fractional
+  scaling, and adaptive sync (VRR). Supports direct scanout (`direct-scanout`) for fullscreen apps
+  and late rendering (`render-late`) to cut display latency.
+- **Session restore:** Restores window position, size, and maximized/fullscreen state for apps that
+  support `xdg-session-management`, even across compositor restarts.
+- **X11 compatibility:** On-demand Xwayland with bidirectional clipboard sharing. Optionally shuts
+  down when idle (`[xwayland] idle-timeout`).
+
+### Desktop tools, portals, and input
+- **Desktop protocols:** Layer shell (`waybar`, `fuzzel`, `mako`, `swaybg`), session lock
+  (`swaylock`), idle notification and inhibition (`swayidle`, video players), clipboard managers
+  (`ext-data-control`), screenshots (`ext-image-copy-capture`, `wlr-screencopy`), taskbars
+  (`foreign-toplevel-management`), night light (gamma control), output power and management,
+  background blur (`ext-background-effect`), workspace indicators (`ext-workspace`), visual system
+  bell, transient/modal dialogs (`xdg-dialog` and X11), window tags (`xdg-toplevel-tag`), tearing
+  control (`wp-tearing-control`), surface alpha (`wp-alpha-modifier`), pointer warping
+  (`wp-pointer-warp`), Xwayland keyboard grabs (`xwayland-keyboard-grab`), Vulkan FIFO and commit
+  timing (`wp-fifo`, `wp-commit-timing`), explicit sync (`linux-drm-syncobj`), and virtual keyboards
+  (`wtype`). Sandboxed apps (Flatpak) are hidden from privileged protocols via
+  `wp-security-context`.
+- **Built-in desktop portal:** Pila implements its own `xdg-desktop-portal` backend (no
+  `xdg-desktop-portal-wlr` required):
+  - *Screen sharing* over PipeWire for browsers, video calls, and OBS: pick a monitor, a custom
+    screen region (outlined in the accent color while shared), or a single window (kept live even
+    when covered, minimized, or on another workspace) from a picker with live previews.
+  - *App screenshots* (either all monitors when permitted without prompting, or chosen via the same
+    picker).
+  - *Color picker* for GTK, GIMP, Inkscape, and similar apps.
+  - *Global shortcuts* (such as push-to-talk or recording hotkeys), confirmed and persisted per app.
+  Nothing is shared or captured without your approval, shared windows pause updates while locked,
+  and global shortcuts are disabled on the lock screen.
+- **Input:** Keyboard layouts, repeat rate, and startup Num Lock; libinput touchpad and mouse
+  settings; configurable 3-, 4-, and 5-finger touchpad swipes (other gestures pass through to
+  apps); pointer lock and confinement for games; shake-to-find cursor (`[cursor]`); bindable media
+  keys (with optional key repeat) and `Mod` + scroll wheel; CJK input methods such as `fcitx5`
+  (`input-method-v2`, `text-input-v3`).
+- **Configuration and IPC:** Single TOML config file with live reload on save, and `pila msg` for
+  querying state (text or JSON), subscribing to events, and running actions ([IPC.md](IPC.md)).
 
 ## Where it fits
 
-- **Stacking, with server-side decorations:** overlapping windows, xdg-decoration with Pila's
-  own title bars and resize borders (client-side ones honored), snapping, workspaces spanning
-  all outputs. Shells built on layer shell usually run on tiling compositors (Hyprland,
-  sway); Pila gives them a floating desktop.
-- **A compositor, not a desktop environment:** bar, launcher, notifications, wallpaper and lock
-  screen are external clients (layer shell, ext-session-lock, ...): standard tools such as
-  waybar and fuzzel by default, any other one in their place. Pila draws only what a
-  compositor must or does best itself: title bars, and the window switcher and the overview, with
-  live previews (its IPC tells another switcher what to show). The floating modes of KDE
-  Plasma, GNOME and COSMIC come with their own shell; labwc keeps Openbox's model and XML
-  config; Wayfire is built around Compiz-style plugins. Pila has one TOML file and an IPC
-  socket.
+- **Stacking with server-side decorations:** Overlapping windows, `xdg-decoration` with built-in
+  title bars and resize borders (while honoring client-side decorations), snapping, and workspaces
+  that span all monitors. Layer-shell desktop setups usually target tiling compositors like
+  Hyprland or sway; Pila brings the same ecosystem to a floating desktop.
+- **A compositor, not a desktop environment:** The bar, launcher, notifications, wallpaper, and
+  lock screen are separate Wayland clients (waybar and fuzzel by default, easily swapped for
+  anything else). Pila only draws what belongs in the compositor: title bars, the window switcher,
+  and the overview with live previews (and its IPC exposes switcher state for external switchers).
+  Compared to alternatives: KDE Plasma, GNOME, and COSMIC bundle their own desktop shells; labwc
+  follows Openbox's model and XML configuration; Wayfire centers on Compiz-style plugins. Pila
+  stays small: one TOML file and a Unix IPC socket.
 
 ## Performance model
 
-One invariant: **Pila never makes an output miss a refresh while there is something new to
-show** (an animation, a drag, a client's frame), at the output's own rate, with a CPU budget of
-4 ms per frame and output (release build, integrated AMD GPU). And it draws nothing when
-nothing changed.
+Pila's main performance goal is simple: **never drop a frame when there is something new to show**
+(an animation, a window drag, or a client commit) at each monitor's refresh rate, keeping CPU work
+under 4 ms per frame per output (release build on an integrated AMD GPU). When nothing changes,
+Pila doesn't redraw.
 
-- **Per-output, on-demand redraws:** every change asks for a redraw of the outputs it touches
-  (a window's visual rect, a surface's outputs before and after a commit, the pointer's old and
-  new output); nothing is redrawn by a timer. Each output's element list leaves out windows
-  that don't intersect it. In the test suite, an output whose content changed without a redraw
-  being requested is a panic, so a missing request can't slip in.
-- **Damage tracking everywhere:** per output, per capture session and per blurred region;
-  nested, buffer age for partial repaints.
-- **Idle-redraw throttling:** a redraw that finds nothing new (a client committing without new
-  content in a loop of frame callbacks or FIFO barriers, the pointer moving with no cursor
-  drawn) makes the next one on that output wait until half a period before its vblank. A
-  client can't make Pila redraw faster than the refresh rate; Pila's own changes never wait.
-- **Hidden surfaces throttled:** frame callbacks go only to surfaces on the output being
-  drawn; surfaces shown nowhere get one per second, so a covered client doesn't spin.
-- **Blur proportional to change:** dual-Kawase blur (ext-background-effect, or per window by
-  rule) renders only the windows and layer surfaces that reach the region, through a damage
-  tracker of its own, and reruns the passes only when what's behind changed. A window covered
-  by an opaque one isn't processed; one on another workspace or minimized keeps its backdrop,
-  so showing it again allocates nothing.
-- **Nothing blocking on the event loop:** font loading and shaping, the cursor theme, D-Bus
-  environment export and GPU waits for captures run on threads or behind fences. One-time
-  costs (shader compilation, offscreen textures for workspace slides, common glyphs) are paid at
-  startup, not in the first frame that needs them. Title bars are cached textures that survive
-  resizes and focus changes.
-- **Direct scanout:** on the DRM backend, a frame that is a single client buffer (a fullscreen
-  game or video, an unobscured surface covering the output) goes on the primary plane with
-  nothing composited. Such surfaces get per-surface dmabuf feedback with a scanout tranche of the
-  plane's formats, so the client allocates buffers the plane accepts. On by default, on the
-  primary GPU's outputs; `direct-scanout = false` turns it off.
-- **Rendering late:** on the DRM backend, while the scene is steady, a frame is drawn as close to
-  its vblank as the output's recent frames allow (the worst of the last 128, CPU and GPU, plus
-  the other outputs' and a slack, never under half a period), so commits and pointer motion
-  that arrive meanwhile make that vblank. Not during Pila's animations or for 300 ms after a
-  window or layer surface appears or a window changes size (apps busy on the GPU then), nor
-  with tearing or adaptive sync; a held frame is let go at once if the scene stops being
-  steady, and one that still comes late turns it off on that output for two seconds. On the
-  development laptop: 25.8 to 21.3 ms and 28.5 to 21.7 ms from a redraw asked for to the vblank
-  that showed it, no refresh missed with two monitors or the laptop's screen alone on battery.
-  `render-late = false` turns it off.
-- **Measured, not assumed:** `RUST_LOG=pila::frames=debug` logs, per output every 5 s, frame
-  count, mean and worst CPU time, the GPU's time (from submission to the native fence's signal,
-  stamped by the kernel and read without waiting), missed refreshes, idle redraws and
-  direct-scanout frames. On bare metal, missed refreshes are counted from the DRM vblank
-  sequence, and each late frame is attributed: held back by the idle wait, drawn late, or shown
-  late after being submitted in time; the frames' latency (from a redraw asked for to the
-  vblank that showed it) and, for frames rendered late, their margin and how long before the
-  vblank they were ready are logged too. Captures and the event loop's own housekeeping are
-  logged apart.
-  `scripts/check` runs real clients through scenarios on a TTY and judges these numbers;
-  changes to rendering, input or the event loop are checked with it before they're committed.
+- **Per-output, on-demand redraws:** Changes only request redraws on the outputs they actually
+  affect (a window's bounding box, the outputs a committed surface touches, or the pointer's old
+  and new output). Nothing redraws on a fixed timer, and each output's render list skips windows
+  that don't intersect it. In the test suite, if an output's visual content changes without a
+  matching redraw request, Pila panics, preventing missed redraws from slipping in.
+- **Damage tracking everywhere:** Per output, per capture session, and per blurred region, plus
+  buffer-age partial repaints when running nested.
+- **Idle-redraw throttling:** If a redraw finds nothing new (for instance, a client committing
+  unchanged buffers in a frame-callback or FIFO loop, or pointer movement with no visible cursor),
+  the next redraw on that output waits until half a refresh period before the next vblank. Clients
+  cannot force Pila to spin faster than the refresh rate, while compositor-initiated changes never
+  wait.
+- **Hidden surfaces throttled:** Frame callbacks go only to surfaces visible on the output being
+  drawn. Completely hidden surfaces get one callback per second so covered apps don't spin.
+- **Change-driven blur:** Dual-Kawase blur (`ext-background-effect` or per-window rules) renders
+  only the windows and layers intersecting the blurred region, tracks damage independently, and
+  re-runs blur passes only when the backdrop changes. Covered windows are skipped, and windows on
+  other workspaces or minimized keep their cached backdrop so switching back doesn't reallocate.
+- **Non-blocking event loop:** Font loading and shaping, cursor theme loading, D-Bus environment
+  exports, and GPU capture waits all run on background threads or behind fences. One-time costs
+  (shader compilation, workspace-slide offscreen textures, common glyphs) are paid at startup.
+  Title bar textures are cached across resizes and focus changes.
+- **Direct scanout:** On the DRM backend, when a single unobscured client buffer covers a monitor
+  (such as a fullscreen game or video), Pila puts it straight on the primary plane without
+  compositing. Eligible surfaces receive per-surface dmabuf feedback advertising the plane's
+  scanout formats so clients can allocate compatible buffers. Enabled by default on primary-GPU
+  outputs (`direct-scanout = false` disables it).
+- **Late rendering:** On the DRM backend, when the scene is steady, Pila holds each frame and draws
+  it as close to the vblank as recent frame timings safely allow (using the worst CPU + GPU time
+  from the last 128 frames, plus other outputs and safety slack, capped at half a refresh period).
+  This lets commits and pointer motion that arrive mid-frame hit the upcoming refresh instead of
+  waiting for the next one. Late rendering pauses during animations, for 300 ms after windows or
+  layers open or resize, and during tearing or adaptive sync. If the scene becomes busy, a held
+  frame is submitted immediately; if a frame still arrives late, late rendering backs off on that
+  output for two seconds. On the development laptop, this cut redraw-to-vblank latency from 25.8 ms
+  to 21.3 ms on the internal panel and from 28.5 ms to 21.7 ms on the external monitor with zero
+  dropped refreshes (both plugged in with two monitors and on battery with one). Disable with
+  `render-late = false`.
+- **Measured continuously:** `RUST_LOG=pila::frames=debug` logs per-output stats every 5 seconds:
+  frame count, mean and worst CPU time, kernel-timestamped GPU time (via native fences without
+  blocking), missed refreshes, idle redraws, and direct-scanout counts. On bare metal, missed
+  refreshes are measured directly from DRM vblank sequences, with late frames categorized by cause
+  (idle wait, late draw, or late presentation) alongside latency and late-render margins. Captures
+  and event-loop housekeeping are logged separately. `scripts/check` runs real apps on a TTY and
+  validates these metrics before rendering, input, or event-loop changes are committed.
 
 ## Client pacing and buffers
 
-- **Slow clients delay only themselves:** a commit with a dmabuf the client's GPU is still
-  writing is held (a pre-commit blocker on its implicit fence, or the linux-drm-syncobj acquire
-  point) and applies when it signals; Pila never waits on it to build a frame.
-- **wp-fifo:** barriers are signaled by the frame that shows the surface, so a FIFO client
-  gets one content update per refresh; barriers of hidden surfaces or surfaces on an output
-  that's off are released once a second.
-- **wp-commit-timing:** a timestamped commit is applied for the frame that will be presented
-  at that time, computed from the kernel's vblank timestamps.
-- **Presentation feedback** with the kernel's timestamps, CLOCK_MONOTONIC throughout.
-- **Bounded geometry:** every client-supplied size and offset (buffers, subsurface positions,
-  viewport destinations, window geometry, layer-shell sizes, margins and exclusive zones, popup
-  positioners) is checked against a 32768 logical-pixel limit before any arithmetic, so no
-  client can overflow Pila's or Smithay's layout code; violations are protocol errors.
+- **Slow clients only delay themselves:** A commit carrying a dmabuf that the client GPU is still
+  rendering is held by a pre-commit blocker (via its implicit fence or `linux-drm-syncobj` acquire
+  point) and applied once signaled. Pila never stalls a frame waiting on a slow client.
+- **wp-fifo:** Barriers signal on the frame that displays the surface, pacing FIFO clients to one
+  update per refresh. Barriers on hidden surfaces or powered-off outputs release once per second.
+- **wp-commit-timing:** Timestamped commits are applied for the frame predicted to scan out at that
+  time, calculated from kernel vblank timestamps.
+- **Presentation feedback:** Uses kernel timestamps on `CLOCK_MONOTONIC` throughout.
+- **Bounded geometry:** Every client-provided size and offset (buffers, subsurface positions,
+  viewport destinations, window geometry, layer-shell dimensions, margins, exclusive zones, and
+  popup positioners) is validated against a 32,768 logical-pixel limit before arithmetic to prevent
+  overflows in Pila or Smithay; out-of-range values raise protocol errors.
 
 ## Screen capture
 
-- **ext-image-copy-capture** (implemented in Pila on the `wayland-protocols` bindings, output
-  and toplevel sources) and wlr-screencopy for older clients such as xdg-desktop-portal-wlr.
-- **No second composite on bare metal:** on the primary GPU's outputs, an output capture is a
-  GPU blit of the frame the DRM compositor just composited for that output, with the session's damage over the same
-  elements.
-- **Zero copy, asynchronous:** frames are rendered straight into the client's dmabuf, only when
-  the session's damage tracker sees a change; completion is signaled from a native fence fd on
-  the event loop, never by blocking on the GPU. Shm falls back to read-back.
-- **A/V sync:** each frame's presentation time is when its content is scanned out (the
-  output's next vblank), not when it was copied.
-- **Hidden toplevels stay live:** a captured window that is covered, minimized or on another
-  workspace receives frame callbacks at the capture client's rate, so a window share doesn't
-  freeze at one frame per second.
+- **Protocols:** Implements `ext-image-copy-capture` (output and toplevel sources) on the official
+  `wayland-protocols` bindings, plus `wlr-screencopy` for older clients.
+- **No double compositing on bare metal:** On primary-GPU outputs, an output capture blits the frame
+  the DRM compositor just rendered, reusing the session's damage over the same elements.
+- **Zero-copy and asynchronous:** Frames render directly into the client's dmabuf only when the
+  capture session detects damage. Completion signals via a native fence fd on the event loop
+  without blocking on the GPU. Shared-memory clients fall back to read-back.
+- **A/V sync:** Frame timestamps report when the content actually scans out (the next vblank), not
+  when the copy was triggered.
+- **Live hidden windows:** A captured window that is covered, minimized, or on another workspace
+  receives frame callbacks at the capture client's rate so window shares don't stall at 1 fps.
 
 ## DRM/KMS backend
 
-- **Per-output failure isolation:** a frame that fails at the DRM level (render, commit, no
-  DRM master after a VT switch) blocks only that output, retried with exponential backoff; the
-  others keep running.
-- **Mode fallback:** a mode the link can't carry falls back to the same size at a lower
-  refresh rate, then smaller sizes, tested with atomic test commits.
-- **DisplayPort link retraining:** outputs whose `link-status` the kernel set to bad (after a
-  resume, through a dock) are retrained, which Smithay doesn't handle.
-- **Safe hotplug:** a removed output's `wl_output` global is disabled first and destroyed later,
-  so clients binding it as it disappears don't hit a protocol error.
-- **Lock confirmed on scanout:** ext-session-lock is confirmed only once every enabled output
-  has shown a locked frame at its vblank, so no unlocked frame can appear after the locker is
-  told it's locked.
-- **Multi-GPU** (`other-gpus = true`, experimental): outputs on a secondary GPU are rendered by
-  the primary (Smithay's `MultiRenderer`) and copied through a dmabuf it imports, or through
-  system memory; software renderers (llvmpipe on a KMS device) are detected and kept off the
-  dmabuf path. See [MULTI_GPU.md](MULTI_GPU.md).
-- **Gamma without stalls:** wlr-gamma-control ramps go out as a non-blocking atomic commit of
-  `GAMMA_LUT` alone, taking a vblank like a frame, instead of the legacy ioctl, which atomic
-  drivers serve with a blocking commit (a night light's fade would stutter).
-- Adaptive sync per output; output power (wlr-output-power-management) by clearing and
-  restoring the CRTC.
+- **Per-output failure isolation:** If a DRM render or commit fails (or DRM master is lost during a
+  VT switch), only that output backs off and retries exponentially; other monitors keep running.
+- **Mode fallback:** If a monitor's preferred mode exceeds link bandwidth, Pila tests lower refresh
+  rates at the same resolution and then smaller resolutions using atomic test commits.
+- **DisplayPort link retraining:** Automatically retrains outputs when the kernel marks
+  `link-status` as bad (common after resume or through docks), which Smithay does not handle on its
+  own.
+- **Safe hotplug:** Removing an output disables its `wl_output` global first and destroys it later,
+  preventing protocol errors from clients binding it mid-removal.
+- **Scanout-confirmed screen lock:** `ext-session-lock` is confirmed only after every enabled
+  output has scanned out a locked frame at vblank, guaranteeing no unlocked frame can appear after
+  the locker is notified.
+- **Multi-GPU (experimental):** With `other-gpus = true`, outputs on secondary GPUs are rendered on
+  the primary GPU via Smithay's `MultiRenderer` and copied across via dmabuf import or system
+  memory. Software renderers (`llvmpipe` on KMS) are detected and kept off the dmabuf path. See
+  [MULTI_GPU.md](MULTI_GPU.md).
+- **Stall-free gamma:** `wlr-gamma-control` ramps submit as non-blocking atomic commits of
+  `GAMMA_LUT` alone (taking one vblank like a regular frame), avoiding the blocking legacy ioctl
+  that makes night-light fades stutter on atomic drivers.
+- **VRR and output power:** Per-output adaptive sync, and output power (`wlr-output-power-management`)
+  implemented by clearing and restoring the CRTC.
 
 ## Protocols
 
-Standard `wayland-protocols` first (stable, staging, then unstable where nothing newer
-exists), implemented in Pila when Smithay lacks them. wlroots protocols only where shells or
-input methods need them and no `ext-` replacement exists yet (layer-shell, screencopy,
-foreign-toplevel-management, gamma-control, output-management, output-power-management,
-virtual-keyboard, input-method-v2), each to be dropped when one lands. No KDE, GNOME or Hyprland protocols.
+Pila prioritizes standard `wayland-protocols` (stable, staging, then unstable when no newer
+equivalent exists), implementing them directly when Smithay doesn't yet provide them. wlroots
+protocols are included only when desktop shells or input methods require them and no `ext-`
+replacement exists (`layer-shell`, `screencopy`, `foreign-toplevel-management`, `gamma-control`,
+`output-management`, `output-power-management`, `virtual-keyboard`, and `input-method-v2`), and
+will be replaced as standard equivalents land. Vendor protocols (KDE, GNOME, Hyprland) are not
+added.
 
-Among the less common ones: xdg-session-management (window placement and state restored across
-client and compositor restarts), ext-background-effect, ext-workspace, ext-image-copy-capture,
-ext-data-control, xdg-dialog, xdg-toplevel-tag, xdg-system-bell, wp-fifo, wp-commit-timing,
-wp-alpha-modifier, wp-pointer-warp, wp-tearing-control, xwayland-keyboard-grab, linux-drm-syncobj, wp-security-context, cursor-shape, pointer-constraints and
-relative-pointer, idle-notify and idle-inhibit, text-input-v3. Xwayland runs through Smithay's X11 window
-manager, restarted if it dies, with selections bridged both ways.
+Beyond the basics, supported protocols include `xdg-session-management`, `ext-background-effect`,
+`ext-workspace`, `ext-image-copy-capture`, `ext-data-control`, `xdg-dialog`, `xdg-toplevel-tag`,
+`xdg-system-bell`, `wp-fifo`, `wp-commit-timing`, `wp-alpha-modifier`, `wp-pointer-warp`,
+`wp-tearing-control`, `xwayland-keyboard-grab`, `linux-drm-syncobj`, `wp-security-context`,
+`cursor-shape`, `pointer-constraints`, `relative-pointer`, `idle-notify`, `idle-inhibit`, and
+`text-input-v3`. Xwayland runs through Smithay's X11 window manager, restarts automatically if it
+crashes, and bridges clipboards in both directions.
 
 ## Security model
 
-- **Privileged globals filtered by security context:** clients connected through
-  wp-security-context (Flatpak) can't see screen capture (both protocols), data-control,
-  layer shell, session lock, foreign-toplevel list and management, gamma, output management and
-  power, ext-workspace, virtual keyboard, input method, keyboard-shortcuts-inhibit, idle-notify or
-  security-context itself. Any new global that exposes or controls other clients, input or
-  outputs is filtered too, by policy.
-- **Session lock enforced at the focus types:** while locked, the keyboard and pointer focus
-  types themselves refuse any target but a lock surface, so input can't reach another client
-  through any path, Pila's or a Smithay grab's; a path that tries is a panic in debug builds.
-  Hit testing and the scene contain only lock surfaces, and a test runs every action, gesture,
-  activation and taskbar request while locked.
-- **xdg-activation tokens** only for a serial newer than the client's keyboard focus, or a
-  click on it since the focus last moved (a clicked notification; hovering alone doesn't count),
-  single-use and short-lived; one from before a lock activates nothing.
+- **Security-context filtering:** Clients connected via `wp-security-context` (such as Flatpak
+  apps) cannot see privileged globals: screen capture (both protocols), data-control, layer shell,
+  session lock, foreign-toplevel list and management, gamma, output management and power,
+  `ext-workspace`, virtual keyboard, input method, keyboard-shortcuts-inhibit, idle-notify, or
+  security-context itself. Any new global that observes or controls other clients, input, or
+  outputs must be filtered the same way.
+- **Type-level session lock enforcement:** While locked, the keyboard and pointer focus types
+  themselves reject any target other than a lock surface, blocking input leaks across both Pila and
+  Smithay grabs (and panicking in debug builds if any code path tries). Hit testing and the render
+  scene include only lock surfaces, and an integration test runs every action, gesture, activation,
+  and taskbar request while locked.
+- **Strict activation tokens:** `xdg-activation` tokens require a serial newer than the client's
+  keyboard focus, or a click on the client since focus last changed (hovering alone does not
+  qualify). Tokens are single-use, short-lived, and invalidated by locking the screen.
 
 ## Configuration and IPC
 
-- **TOML, hot-reloaded** via inotify on the config's directory (symlinked dotfiles included).
-  An invalid file keeps the running configuration and raises a notification with the line and
-  the error.
-- **`pila --check-config`** validates a file as Pila reads it, compiling the XKB keymap too,
-  and exits 0 or 1: usable in a dotfiles CI or a pre-commit hook.
-- **Window and layer rules** matched on app id, title or xdg-toplevel-tag (layer namespace for
-  panels), re-evaluated on title changes and reloads: workspace, geometry, maximized or
-  fullscreen, always on top, sticky, decorations, corner radius, opacity, blur, shadow,
-  animations.
-- **IPC:** a Unix socket served on the event loop; `pila msg` queries windows, outputs,
-  workspaces and keyboard layouts as text or JSON, runs any action a binding can, and
-  `subscribe` streams events. The format is documented in [IPC.md](IPC.md).
+- **Live-reloaded TOML:** Watched via `inotify` on the config directory (including symlinked
+  dotfiles). Invalid edits keep the running config active and trigger a notification pointing to
+  the line and error.
+- **Offline validation:** `pila --check-config` validates the config file and compiles the XKB
+  keymap, exiting `0` or `1` (useful in dotfiles CI or pre-commit hooks).
+- **Dynamic rules:** Window rules match on app ID, title, or `xdg-toplevel-tag`, and layer rules
+  match on namespace. Rules re-evaluate on title changes and config reloads.
+- **Unix socket IPC:** Served on the event loop. `pila msg` queries windows, outputs, workspaces,
+  colors, and keyboard layouts in plain text or JSON, runs any bindable action, and streams live
+  changes via `subscribe`. See [IPC.md](IPC.md).
 
 ## Testing and reliability
 
-- **Integration tests on a headless backend:** each test starts a real Pila on virtual outputs
-  (GPU rendering, or llvmpipe in CI) and drives it with Wayland clients and injected input
-  through a control socket; no fixed sleeps, only polled conditions.
-- **A feature inventory that can't rot:** [`tests/FEATURES.md`](../tests/FEATURES.md) maps
-  every feature and invariant to its tests, and a test checks that every test named there exists
-  and every integration test is named there. Other tests check that the docs name only code that
-  exists and that the manual and man page list every default binding and flag.
-- **Regression tests first:** a bug fix starts with a test that reproduces it.
-- **Fuzzing** (cargo-fuzz): the config, IPC request, EDID and gamma-ramp parsers, and arbitrary
-  protocol request sequences against a running Pila.
-- **The DRM backend in CI:** a workflow runs it on the kernel's vkms driver: frames, gamma,
-  output hotplug, and a second vkms device as a second GPU added and removed.
-- **No panics past startup** except on stated local invariants; poisoned mutexes and missing
-  user data are handled, and a crash logs its backtrace.
+- **Headless integration suite:** Each test launches a real Pila instance on virtual outputs (GPU
+  or `llvmpipe` in CI), connects Wayland clients, and injects input over a control socket, polling
+  conditions rather than relying on fixed sleeps.
+- **Synced feature inventory:** [`tests/FEATURES.md`](../tests/FEATURES.md) maps every feature and
+  invariant to its tests. A test verifies that every listed test exists and every integration test
+  is listed. Additional tests check that docs only reference existing code symbols and that the
+  manual and man page cover every default binding and CLI flag.
+- **Regression tests first:** Bug fixes begin with a failing test that reproduces the issue.
+- **Fuzzing (`cargo-fuzz`):** Targets for the config, IPC request, EDID, and gamma-ramp parsers,
+  plus arbitrary protocol request sequences against a live Pila instance.
+- **DRM backend in CI:** A workflow tests the udev backend on the Linux kernel's `vkms` virtual
+  display driver, covering frames, gamma, output hotplug, and hotplugging a second `vkms` GPU.
+- **No unexpected panics:** After startup, the code avoids unchecked `unwrap`/`expect` calls;
+  poisoned mutexes and missing user data are handled gracefully, and any crash logs a backtrace.
 
 ## Portability
 
-No assumptions about distro, init system or display manager: logind, elogind or seatd for the
-session; optional tools (`systemd-cat`, `logger`, `dbus-run-session`, a per-user bus) are
-detected, and the install paths are configurable. Packages for Arch (AUR), Debian, Ubuntu,
-Fedora and Nix; CI builds on each of them, and apart with the oldest supported Rust
-(`rust-version`).
+Pila makes no assumptions about distro, init system, or display manager. It supports logind,
+elogind, and seatd, detects optional tools (`systemd-cat`, `logger`, `dbus-run-session`, per-user
+D-Bus) at runtime, and uses configurable install paths. Packages exist for Arch (AUR), Debian,
+Ubuntu, Fedora, and Nix, and CI builds across all of them as well as with the minimum supported
+Rust version (`rust-version`).
 
 ## Not there yet
 
-Pila is alpha. Missing: touchscreens and tablets (tablet-v2). NVIDIA has been tried on one card
-(a GTX 1060 with the proprietary driver); secondary-GPU outputs are off by default and untested on
-real hardware. See [Status](../README.md#status), the [roadmap](ROADMAP.md) and, if you can, [help test
-it](../README.md#help-test-pila).
+Pila is still alpha. Missing features include touchscreens and drawing tablets (`tablet-v2`).
+NVIDIA has only been tested on one GTX 1060 with the proprietary driver, and secondary-GPU outputs
+remain off by default until tested on real multi-GPU hardware. See
+[Status](../README.md#status), the [roadmap](ROADMAP.md), and
+[Help test Pila](../README.md#help-test-pila) if you can test on other hardware.

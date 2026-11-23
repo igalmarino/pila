@@ -1,51 +1,52 @@
 # Installing Pila
 
-Pila runs on a TTY of any Linux machine (DRM/KMS, libinput, and a session from logind,
-elogind or seatd; systemd isn't required), or nested as a window inside another Wayland or
-X11 session. Once it runs, how to use and set it up is in the [user manual](MANUAL.md).
+Pila runs natively on a Linux TTY (using DRM/KMS, libinput, and logind, elogind, or seatd; systemd
+is not required) or nested inside a window on an existing Wayland or X11 desktop. Once Pila is
+running, see the [user manual](MANUAL.md) for usage and configuration.
 
 - [Try it nested first](#try-it-nested-first)
 - [Getting out](#getting-out)
-- [Building](#building)
-- [Debian, Ubuntu and Fedora](#debian-ubuntu-and-fedora)
+- [Building from source](#building-from-source)
+- [Debian, Ubuntu, and Fedora](#debian-ubuntu-and-fedora)
 - [Nix and NixOS](#nix-and-nixos)
 - [Arch Linux (AUR)](#arch-linux-aur)
-- [As a login session](#as-a-login-session)
-- [By hand, on a TTY](#by-hand-on-a-tty)
+- [Installing as a login session](#installing-as-a-login-session)
+- [Running manually on a TTY](#running-manually-on-a-tty)
 - [Packages for a full session](#packages-for-a-full-session)
 
 ## Try it nested first
 
-The safest first run: build it (below) and start it from your current desktop. It opens
-as a window, and nothing else on your system changes (the window starts with the default bar,
-waybar, where it's installed):
+The safest way to try Pila is to build it (see below) and launch it from your current desktop. It
+opens inside a normal window without changing anything else on your system (and launches `waybar`
+if installed):
 
 ```bash
 cargo run --release
 ```
 
-Nested, Mod is **Alt** (your desktop keeps Super). Mod+Return opens a terminal, Mod+Shift+E
-quits. Closing the window works too.
+When running nested, Mod is **Alt** (so your host desktop keeps Super). Press `Mod+Return` to open
+a terminal, and `Mod+Shift+E` (or simply closing the window) to quit.
 
 ## Getting out
 
-On a TTY or as a login session, Mod is **Super**:
+On a TTY or in a login session, Mod is **Super**:
 
-- **Super+Shift+E** quits Pila (back to the login screen or the TTY).
-- **Ctrl+Alt+F1..F12** switch to another virtual terminal, where you can log in and
-  `pkill pila` if the screen stops responding.
-- If the Pila session doesn't start, pick your usual session at the login screen and
-  look at the log (see [Reporting bugs](../README.md#reporting-bugs)); `scripts/uninstall` (or
-  removing the package) takes the session entry away.
+- **Super+Shift+E** quits Pila and returns to your display manager or TTY.
+- **Ctrl+Alt+F1..F12** switches to another virtual terminal, where you can log in and run
+  `pkill pila` if the screen ever stops responding.
+- If the Pila login session fails to start, pick your usual desktop at the login screen and inspect
+  the log (see [Reporting bugs](../README.md#reporting-bugs)). Run `scripts/uninstall` (or remove
+  the package) to remove the session entry.
 
-## Building
+## Building from source
 
-Pila needs Rust 1.89 or newer. If your distro's Rust is older, install it with
-[rustup](https://rustup.rs). It also needs `pkg-config` and the development files of
-`libseat`, `libinput`, `libudev`, `gbm` (Mesa), `xkbcommon` and `libpipewire`, and libclang
-(its PipeWire bindings are generated at build time). At runtime it loads EGL
-(Mesa) and, for X11 apps, starts `Xwayland` if it's installed (optional). Package names on common distros (they may
-differ between releases):
+Pila requires **Rust 1.89 or newer** (install via [rustup](https://rustup.rs) if your distro ships
+an older version). Build dependencies are `pkg-config`, `libclang` (needed to generate PipeWire
+bindings at build time), and the development headers for `libseat`, `libinput`, `libudev`, `gbm`
+(Mesa), `xkbcommon`, and `libpipewire`. At runtime, Pila loads EGL (Mesa) and optionally launches
+`Xwayland` for X11 apps.
+
+Package names on common distros (names may vary slightly between releases):
 
 | Distro | Packages |
 | - | - |
@@ -56,17 +57,18 @@ differ between releases):
 | Void | `libseat-devel libinput-devel eudev-libudev-devel libgbm-devel libxkbcommon-devel pipewire-devel clang mesa xorg-server-xwayland pkg-config` |
 | Alpine | `libseat-dev libinput-dev eudev-dev mesa-dev libxkbcommon-dev pipewire-dev clang-dev xwayland pkgconf` |
 
-Then `cargo build --release`; `scripts/install` builds and installs it, and checks first that
-these are there (it names the ones missing; a libclang elsewhere: `LIBCLANG_PATH`).
+Build with `cargo build --release`, or run `scripts/install` to build and install everything.
+`scripts/install` checks for these dependencies before compiling and prints any missing ones (set
+`LIBCLANG_PATH` if your `libclang` lives in a non-standard directory).
 
-## Debian, Ubuntu and Fedora
+## Debian, Ubuntu, and Fedora
 
-Pila has an APT repository (Ubuntu 24.04 or newer, Debian 13 or newer) and a DNF repository
-(Fedora 44 or newer), for x86_64. Add one once and install `pila-desktop` (Pila with the
-[tools of a full session](#packages-for-a-full-session)) or `pila` (the compositor alone);
-updates then come with the system's (`apt upgrade`, `dnf upgrade`).
+Signed x86_64 repositories are available for **Ubuntu 24.04+**, **Debian 13+**, and
+**Fedora 44+**. Add the repository once and install either `pila-desktop` (Pila plus the
+[default session tools](#packages-for-a-full-session)) or `pila` (the compositor only). Updates
+then arrive through normal `apt upgrade` or `dnf upgrade`.
 
-Debian, Ubuntu:
+**Debian and Ubuntu:**
 
 ```bash
 sudo curl --create-dirs -fsSLo /etc/apt/keyrings/pila.asc https://igalmarino.github.io/pila/pila.asc
@@ -75,41 +77,42 @@ printf 'Types: deb\nURIs: https://igalmarino.github.io/pila/deb\nSuites: stable\
 sudo apt update && sudo apt install pila-desktop    # or: pila
 ```
 
-Fedora (`dnf` asks to import the key the first time: compare its fingerprint with the one below):
+**Fedora** (`dnf` will prompt to import the signing key on first install; verify its fingerprint
+against the one below):
 
 ```bash
 sudo curl -fsSLo /etc/yum.repos.d/pila.repo https://igalmarino.github.io/pila/rpm/pila.repo
 sudo dnf install pila-desktop    # or: pila
 ```
 
-The repositories and their packages are signed with the key
-[`packaging/pila.asc`](../packaging/pila.asc), fingerprint
-`67A0 F1D1 96AE C2CB B156 0ECA 2413 E5C5 5410 73F3`. They hold the packages of the last three
-releases; every release since 0.2.2 also has its `.deb` and `.rpm` attached
-([releases](https://github.com/igalmarino/pila/releases)), to install by hand
-(`sudo apt install ./pila_*.deb`, `sudo dnf install ./pila-*.rpm`) with no updates.
+Repositories and packages are signed with [`packaging/pila.asc`](../packaging/pila.asc),
+fingerprint `67A0 F1D1 96AE C2CB B156 0ECA 2413 E5C5 5410 73F3`. The repositories keep the last
+three releases. Standalone `.deb` and `.rpm` packages are also attached to every release since
+0.2.2 ([GitHub Releases](https://github.com/igalmarino/pila/releases)) for manual installation
+(`sudo apt install ./pila_*.deb` or `sudo dnf install ./pila-*.rpm`), though manual installs don't
+receive automatic updates.
 
-They install the same files as `scripts/install` in `/usr`. Each package is installed on a clean
-system and started headless before it's attached to a release, and installed again from the
-repositories once they're published, with `pila-desktop` and its tools. A tester reports a real session working on Debian, with
-SDDM; on Ubuntu and Fedora it hasn't been tried yet: please [report](../README.md#help-test-pila) how it goes.
+These packages install the same files as `scripts/install` under `/usr`. Every release package is
+tested on a clean system (installed, started headless, and re-verified after publishing with
+`pila-desktop`). A tester has confirmed a full login session on Debian with SDDM; Ubuntu and
+Fedora still need real-world testing; please [report](../README.md#help-test-pila) how they behave.
 
 ## Nix and NixOS
 
-The repository is a flake, which builds the latest `main`, like the AUR package. It needs
-[flakes enabled](https://wiki.nixos.org/wiki/Flakes) and, on NixOS, graphics drivers on the
-system (`hardware.graphics.enable = true`).
+This repository provides a Nix flake tracking `main` (similar to the AUR package). Enable
+[flakes](https://wiki.nixos.org/wiki/Flakes) and ensure graphics drivers are enabled on NixOS
+(`hardware.graphics.enable = true`).
 
 ```bash
-nix run github:igalmarino/pila           # try it: nested from your desktop, or from a TTY
+nix run github:igalmarino/pila                             # try nested or from a TTY
 nix profile install github:igalmarino/pila#pila-desktop    # or: github:igalmarino/pila
 ```
 
-`pila-desktop` is Pila with the [tools of a full session](#packages-for-a-full-session),
-`pila` (the default) the compositor alone.
+`pila-desktop` includes Pila and the [default session tools](#packages-for-a-full-session);
+`pila` (the default output) provides only the compositor.
 
-As a login session on NixOS, add the flake to your system's inputs
-(`inputs.pila.url = "github:igalmarino/pila";`) and to its configuration:
+To configure Pila as a NixOS login session, add the flake input
+(`inputs.pila.url = "github:igalmarino/pila";`) and add the following to your NixOS configuration:
 
 ```nix
 { inputs, pkgs, ... }:
@@ -119,149 +122,149 @@ in
 {
   environment.systemPackages = [ pila ];
   services.displayManager.sessionPackages = [ pila ];
-  # swaylock (in pila-desktop) needs it to unlock.
+  # Required for swaylock (included in pila-desktop) to unlock the screen.
   security.pam.services.swaylock = { };
-  # Screen sharing.
+  # Desktop portals (screen sharing, screenshots, global shortcuts, file chooser).
   xdg.portal = {
     enable = true;
-    wlr.enable = true;
+    extraPortals = [
+      pila
+      pkgs.xdg-desktop-portal-gtk
+    ];
     configPackages = [ pila ];
   };
 }
 ```
 
-From a checkout, `nix develop` gives a shell with everything to build it (`cargo build
---release`). `scripts/install` isn't for NixOS: it writes to paths NixOS doesn't read its session
-entries from.
+From a local checkout, `nix develop` drops you into a dev shell with everything needed to run
+`cargo build --release`. Don't use `scripts/install` on NixOS, as it installs to FHS paths that
+NixOS display managers don't read.
 
-`nix run` has been confirmed on a NixOS system. The login session above hasn't been tried yet:
-please [report](../README.md#help-test-pila) how it goes.
+`nix run` has been verified on NixOS, while the full login session config above hasn't been tested
+yet. Please [report](../README.md#help-test-pila) your results.
 
 ## Arch Linux (AUR)
 
-[`pila-git`](https://aur.archlinux.org/packages/pila-git) builds the latest `main` from
-GitHub and installs the same files as `scripts/install` with `PREFIX=/usr` (plus the README,
-`config.example.toml`, the user manual and `docs/IPC.md` in `/usr/share/doc/pila`):
+[`pila-git`](https://aur.archlinux.org/packages/pila-git) builds `main` from GitHub and installs
+the same files as `scripts/install` with `PREFIX=/usr` (plus `README.md`, `config.example.toml`,
+`MANUAL.md`, and `IPC.md` in `/usr/share/doc/pila`):
 
 ```bash
 git clone https://aur.archlinux.org/pila-git.git
 cd pila-git
-less PKGBUILD    # read what you're about to build and install
+less PKGBUILD    # review before building
 makepkg -si
 ```
 
-That's the compositor alone. [`pila-desktop`](https://aur.archlinux.org/packages/pila-desktop)
-adds the [tools of a full session](#packages-for-a-full-session), all from Arch's own
-repositories: after `pila-git`, the same steps with `pila-desktop` (or an AUR helper:
-`yay -S pila-git pila-desktop`).
+That installs the compositor alone. [`pila-desktop`](https://aur.archlinux.org/packages/pila-desktop)
+pulls in the [default session tools](#packages-for-a-full-session) from the official Arch repos. Repeat
+the steps above for `pila-desktop`, or use an AUR helper (`yay -S pila-git pila-desktop`).
 
-To update it, `git pull` there and run `makepkg -si` again. `makepkg -si` in
-`packaging/aur/pila-git` builds it too. Remove a hand install first
-(`scripts/uninstall`). To publish a new version of an AUR package, regenerate its `.SRCINFO`
-(`makepkg --printsrcinfo > .SRCINFO`) and commit both files: a workflow (`aur.yml`) checks them
-and, once the maintainer approves it, publishes them.
+To update later, run `git pull && makepkg -si`. You can also build directly from
+`packaging/aur/pila-git` in a source checkout. If you previously installed Pila manually with
+`scripts/install`, run `scripts/uninstall` first so you don't end up with duplicate installs.
 
-A `-git` package only needs updating when the `PKGBUILD` changes (dependencies, files);
-`makepkg` picks up new commits by itself. Their `PKGBUILD`s are kept in `packaging/aur`, one
-directory for each.
+For maintainers publishing AUR updates: regenerate `.SRCINFO`
+(`makepkg --printsrcinfo > .SRCINFO`) and commit both files in `packaging/aur/<pkg>/`. The
+`aur.yml` workflow validates them and publishes after maintainer approval. Because `pila-git` tracks
+`main`, its `PKGBUILD` only needs updating when dependencies or installed files change.
 
-## As a login session
+## Installing as a login session
 
-From Pila's source:
+From a source checkout (run on the host, not inside the dev container):
 
 ```bash
-scripts/install                # builds the release binary and installs it
-PREFIX=/usr scripts/install    # for display managers that only read /usr/share
+scripts/install                # build release binary and install to /usr/local
+PREFIX=/usr scripts/install    # for display managers that only search /usr/share
 ```
 
-This installs the binary, a session wrapper, `pila-report` and `pila-check` in `$PREFIX/bin`
-(`pila-check`'s helpers in `$PREFIX/share/pila/check`), the man page,
-a `pila` entry in `$PREFIX/share/wayland-sessions` for the display manager, and Pila's desktop
-portal (`pila.portal` in `$PREFIX/share/xdg-desktop-portal/portals`, `pila-portals.conf` in
-`$SYSCONFDIR/xdg`) for screen sharing, apps' screenshots and their global shortcuts. `PREFIX` defaults to `/usr/local` and `SYSCONFDIR`
-to `/etc`; `DESTDIR` stages the files for a distro package (see `scripts/install-paths`).
-GDM reads `/usr/local`; LightDM and some SDDM setups need `PREFIX=/usr`.
+This installs:
+- `pila`, `pila-session`, `pila-report`, and `pila-check` in `$PREFIX/bin` (with `pila-check`
+  helpers in `$PREFIX/share/pila/check`)
+- the `pila(1)` man page
+- the Wayland session entry in `$PREFIX/share/wayland-sessions/pila.desktop`
+- Pila's desktop portal backend (`$PREFIX/share/xdg-desktop-portal/portals/pila.portal` and
+  `$SYSCONFDIR/xdg/xdg-desktop-portal/pila-portals.conf`)
 
-The build uses the host's `cargo`. Without one, it falls back to the dev container
-(`--container`), whose binary is linked against Arch's libraries and may not run
-elsewhere. `--no-build` installs what's already in `target/release`. Before installing, it
-checks that the binary runs on this system (a container build may need a newer glibc than
-the host's), and warns if another Pila session entry (e.g. a distro package's) is installed
-too. Run it on the host, not inside the dev container.
+`PREFIX` defaults to `/usr/local` and `SYSCONFDIR` defaults to `/etc`; set `DESTDIR` to stage files
+for packaging (see `scripts/install-paths`). GDM searches `/usr/local`, whereas LightDM and some
+SDDM setups require `PREFIX=/usr`.
 
-This is the way to install your working tree while developing. The AUR package builds
-what's on GitHub, so use it for a published version, and don't keep both installed.
+`scripts/install` uses the host's `cargo` by default, falling back to the dev container
+(`--container`) if none is found. Note that a container-built binary links against Arch's libraries
+and may fail on distros with an older glibc. Pass `--no-build` to install an existing
+`target/release` binary. Before copying files, the script verifies the binary runs on your host and
+warns if another Pila session entry (such as a distro package) is already installed.
 
-Log out, pick *Pila* (on GDM, the gear icon on the password screen), log in. The session
-uses the user's D-Bus bus (and `systemd --user` where there is one) like any other
-desktop, so portals, PipeWire and the keyring (unlocked by the display manager's PAM setup)
-just work. With systemd, Pila runs as the user service `pila.service`, bound to
-`graphical-session.target`, so the user services of the graphical session and the XDG
-autostart entries start with it and stop when it quits. Without a per-user bus (e.g. elogind
-or seatd without systemd), the wrapper starts one for the session with `dbus-run-session`.
+Use `scripts/install` when developing from your working tree; use a distro package or the AUR for
+published versions, and avoid keeping both installed at once.
 
-The log goes to `~/.local/state/pila/pila.log` (`$XDG_STATE_HOME/pila` if that's set; the
-previous run's is in `pila.log.old`).
-A copy goes to the journal with systemd (`journalctl -t pila -b`), or otherwise to syslog
-through `logger`. After changing Pila, run `scripts/install` again and log out and back
-in. `scripts/uninstall`, given the same variables, removes what it installed. Mod+Shift+E
-ends the session (back to the login screen).
+**Logging in:** Log out, select *Pila* at your display manager (on GDM, click the gear icon on the
+password screen), and log in. The session integrates with your user D-Bus session (and
+`systemd --user` if available), so portals, PipeWire, and PAM-unlocked keyrings work normally.
+Under systemd, Pila runs as `pila.service` bound to `graphical-session.target`, starting your user
+services and XDG autostart entries automatically and stopping them on exit. Without a per-user bus
+(for example, elogind or seatd without systemd), `pila-session` starts one with `dbus-run-session`.
 
-## By hand, on a TTY
+Logs go to `~/.local/state/pila/pila.log` (or `$XDG_STATE_HOME/pila/pila.log`; the previous run is
+saved as `pila.log.old`), and are also mirrored to the systemd journal (`journalctl -t pila -b`) or
+syslog via `logger`. After rebuilding Pila, re-run `scripts/install` and log out and back in.
+`scripts/uninstall` (with the same `PREFIX`/`SYSCONFDIR` variables) removes all installed files.
+Press `Mod+Shift+E` to end the session.
 
-On a free TTY (Ctrl+Alt+F3), from Pila's source:
+## Running manually on a TTY
+
+Switch to a spare TTY (`Ctrl+Alt+F3`) and run from a source checkout:
 
 ```bash
-scripts/tty                        # the release build with ~/.config/pila/config.toml
-scripts/tty my-test.toml           # another config; --debug for the debug build
+scripts/tty                        # release build with ~/.config/pila/config.toml
+scripts/tty my-test.toml           # custom config file (add --debug for debug build)
 ```
 
-This lets you try a build or a config while another session (Pila or anything else) keeps
-running on another VT. This Pila gets a D-Bus bus of its own (`dbus-run-session`), so its
-portals don't touch the other session's services. The log (portals included) goes to
-`pila-tty.log`, the previous run's to `pila-tty.log.old`. Ctrl+Alt+F1..F12 switch TTYs;
-Mod+Shift+E quits.
+This lets you test a new build or config while your main desktop stays running on another VT.
+`scripts/tty` creates an isolated D-Bus session via `dbus-run-session` so portals don't interfere
+with your other session. Logs go to `pila-tty.log` (previous run in `pila-tty.log.old`). Switch
+TTYs with `Ctrl+Alt+F1..F12` and quit with `Mod+Shift+E`.
 
 ## Packages for a full session
 
-Pila is a compositor alone: its default configuration runs standard tools for the rest of a
-desktop, and skips those that aren't installed, so you install only the ones you want. The
-package `pila-desktop` (APT, DNF, the AUR and the flake) brings them all at once; it has no files
-of its own, so removing it, or any of them, leaves Pila as it was. The programs (names are the
-same on most distros):
+Pila is just a compositor. Its default configuration launches standard Wayland tools and quietly
+skips any that aren't installed, so you only need to install the ones you want. The `pila-desktop`
+metapackage (APT, DNF, AUR, Nix flake) installs all of them together and owns no files of its own,
+so removing `pila-desktop` or swapping out individual tools won't disturb Pila.
 
-- `kitty`: the default terminal (or set `terminal`; foot, alacritty and others are found
-  too)
-- `waybar`, `fuzzel` and `mako`: the default bar, launcher and notification daemon (or set
-  `autostart` and `launcher` to others); Font Awesome for the symbols in the waybar
-  configuration Pila writes
-- `swayidle` and `swaylock`: locking the screen and turning the monitors off after a while
-  without input, and locking before the computer sleeps (the default `autostart`); a shell
-  with its own lock screen and idle settings doesn't need them
-- `wireplumber` (PipeWire's session manager, which most distros install with PipeWire):
-  `wpctl`, which the volume and mute keys use; `brightnessctl` for the brightness keys and
-  `playerctl` for the media keys; without them the keys do nothing
-- `grim`, `slurp` and `wl-clipboard`: the screenshot keys
-- `swaybg`: the wallpaper, Pila's in your `[colors]` or a picture of yours (without it,
-  `[colors] background` shows)
+Default tools (package names are similar across most distros):
 
-Apps also want these in any session, so `pila` itself recommends them (Debian and Fedora
-install them with it unless recommends are off; on Arch they're optional dependencies):
+- `kitty`: default terminal (change via `terminal`; Pila also auto-detects `foot`, `alacritty`, and
+  others if `kitty` isn't installed)
+- `waybar`, `fuzzel`, `mako`: default bar, launcher, and notification daemon (plus Font Awesome for
+  icons in Pila's default waybar config)
+- `swayidle`, `swaylock`: automatic screen locking, idle monitor power-off, and lock-before-sleep
+  (unnecessary if you use a desktop shell with its own idle/lock handling)
+- `wireplumber` (`wpctl`), `brightnessctl`, `playerctl`: volume, brightness, and media key bindings
+- `grim`, `slurp`, `wl-clipboard`: screenshot keybindings
+- `swaybg`: wallpaper rendering (without it, Pila displays the solid `[colors] background`)
 
-- `xdg-desktop-portal` and `pipewire`: screen sharing and apps' screenshots, which Pila serves
-  itself (it asks what to share or take and streams it over PipeWire)
-- `xdg-desktop-portal-gtk`: the file chooser and other portals
-- `xdg-utils`: `xdg-open`, which programs such as kitty use to open links and files; without it
-  a click on a link does nothing, and says nothing
-- Xwayland: X11 apps
+Recommended session packages (pulled in as Recommends on Debian/Fedora and optional dependencies on
+Arch by the `pila` package itself):
 
-By hand, without `pila-desktop` (the portals and `xdg-utils` included):
+- `xdg-desktop-portal` and `pipewire`: screen sharing, app screenshots, and global shortcuts
+- `xdg-desktop-portal-gtk`: file chooser and general desktop portal dialogs
+- `xdg-utils`: provides `xdg-open` so apps like `kitty` can open links and files
+- `Xwayland`: support for X11 applications
+
+To install all of these manually without `pila-desktop`:
 
 ```bash
-sudo pacman -S swaybg kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard   # Arch
-sudo apt install swaybg kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard # Debian, Ubuntu
-sudo dnf install swaybg kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard  # Fedora
+# Arch
+sudo pacman -S swaybg kitty waybar fuzzel mako otf-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard
+
+# Debian, Ubuntu
+sudo apt install swaybg kitty waybar fuzzel mako-notifier fonts-font-awesome xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard
+
+# Fedora
+sudo dnf install swaybg kitty waybar fuzzel mako fontawesome-6-free-fonts xdg-desktop-portal-gtk xdg-utils swayidle swaylock wireplumber brightnessctl playerctl grim slurp wl-clipboard
 ```
 
-The rest of a desktop (notifications, a lock screen, another bar or launcher)
-is in the manual's [Building your desktop](MANUAL.md#building-your-desktop).
+For customizing or replacing these tools with your own setup or a full desktop shell, see
+[Building your desktop](MANUAL.md#building-your-desktop) in the user manual.
