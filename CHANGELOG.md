@@ -16,6 +16,9 @@
   `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten kept) and handed to the app. Pila's portal
   configuration now names Pila for screenshots instead of xdg-desktop-portal-wlr; an own
   `pila-portals.conf` should say `org.freedesktop.impl.portal.Screenshot=pila`.
+- **Pick a color from the screen:** apps that ask the portal for one (GTK's color chooser, GIMP,
+  Inkscape) get a crosshair and a panel saying what to do; a click answers with the color under
+  it, Escape gives up, and no app gets the click.
 - **`scripts/install` names what a source build is missing:** it checks that pkg-config, the
   libraries' development files and libclang are there before it builds, and lists what to
   install, instead of a build script's panic deep in the build (bindgen's, for libclang).

@@ -1170,6 +1170,15 @@ Key flows and invariants:
   `when_copied`), then encoded as a PNG and written on a thread into
   `$XDG_RUNTIME_DIR/pila-screenshots` (private; the oldest past `SCREENSHOTS_KEPT` go); the app
   gets its `file://` URI.
+- **Color picker** (`color_pick.rs`, the portal's `PickColor`, `portal::Request::PickColor`):
+  `Pila::color_pick` holds the answer while it's on (one at a time; refused while locked or while
+  the share picker asks). Modal: the keyboard filter gives it every press (Escape cancels),
+  `pointer_button` every press (the first picks), `Pila::under` hits nothing; the pointer is a
+  crosshair (`update_decoration_cursor`), the hot corner is off, and a panel at the top of the
+  output under the pointer says what to do (`scene_color_pick`, front of `output_elements`; it
+  follows the pointer to another output, `color_pick_moved`). The color is the output's
+  elements drawn into a 1x1 texture with the pointer's pixel at its origin, read back
+  (`Captures::read_back`, `when_copied`). Locking cancels it (`SessionLockHandler::lock`).
 - **Share picker** (`share_picker.rs`): the consent to share, or to take a screenshot (`Ask`:
   either kind waits in `ScreenCasts::waiting`; a screenshot's panel offers both kinds of source,
   says Take). A panel on the output under the

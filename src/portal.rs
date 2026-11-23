@@ -123,6 +123,10 @@ pub enum Request {
         app: Option<String>,
         reply: Reply<Result<String, Refused>>,
     },
+    /// A color the user picks on the screen (`color_pick.rs`).
+    PickColor {
+        reply: Reply<Result<crate::color_pick::Color, Refused>>,
+    },
 }
 
 /// A stream started for a session, as `Start` answers it.
@@ -366,6 +370,31 @@ impl Screenshot {
         match answer.await {
             Some(Ok(uri)) => match OwnedVariant::try_from(Variant::from(uri)) {
                 Ok(uri) => (RESPONSE_SUCCESS, Results::from([("uri".to_string(), uri)])),
+                Err(_) => (RESPONSE_OTHER, Results::new()),
+            },
+            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
+            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        }
+    }
+
+    async fn pick_color(
+        &self,
+        _handle: OwnedObjectPath,
+        app_id: String,
+        _parent_window: String,
+        _options: HashMap<String, OwnedVariant>,
+    ) -> (u32, Results) {
+        debug!(app_id, "portal: pick a color");
+        let (reply, answer) = reply_channel();
+        if self.send.send(Request::PickColor { reply }).is_err() {
+            return (RESPONSE_OTHER, Results::new());
+        }
+        match answer.await {
+            Some(Ok([r, g, b])) => match OwnedVariant::try_from(Variant::from((r, g, b))) {
+                Ok(color) => (
+                    RESPONSE_SUCCESS,
+                    Results::from([("color".to_string(), color)]),
+                ),
                 Err(_) => (RESPONSE_OTHER, Results::new()),
             },
             Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),

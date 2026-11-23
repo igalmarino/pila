@@ -214,6 +214,7 @@ impl Pila {
         // A key that hides the shortcuts cheatsheet (`shortcuts_view.rs`).
         let mut hide_shortcuts = false;
         let mut picker_key = None;
+        let mut pick_key = None;
         let mut overview_key = None;
         let mut repeat_next = None;
         let mut tap_action = None;
@@ -259,6 +260,13 @@ impl Pila {
                             (raw - first + 1) as i32,
                         )));
                     }
+                }
+                // The color picker takes every press while it's on: it's
+                // modal (`color_pick.rs`).
+                if key_state == KeyState::Pressed && state.color_pick_open() {
+                    state.input.suppressed_keys.insert(keycode);
+                    pick_key = Some(handle.modified_sym());
+                    return FilterResult::Intercept(None);
                 }
                 // The share picker takes every press while it's shown: it's
                 // modal (`share_picker.rs`).
@@ -370,6 +378,9 @@ impl Pila {
         }
         if let Some(sym) = picker_key {
             self.share_picker_key(sym);
+        }
+        if let Some(sym) = pick_key {
+            self.color_pick_key(sym);
         }
         if hide_shortcuts {
             self.hide_shortcuts();
@@ -663,7 +674,11 @@ impl Pila {
         pointer.frame(self);
         self.shake_cursor_motion(location);
         self.overview_pointer_moved(location);
-        self.hot_corner(location, pointer.is_grabbed());
+        self.color_pick_moved();
+        // Picking a color, the pointer goes to every corner of the screen.
+        if !self.color_pick_open() {
+            self.hot_corner(location, pointer.is_grabbed());
+        }
 
         if !pointer.is_grabbed() {
             // Over pila's own decorations no client sets the cursor, so pila does.
@@ -713,6 +728,7 @@ impl Pila {
             return;
         }
         let icon = match self.under(pos) {
+            _ if self.color_pick_open() => CursorIcon::Crosshair,
             Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..) | Under::Lock(..)) => return,
             Some(Under::Window(_, Hit::Decoration(Decoration::Border(edges)))) => {
                 edges.cursor_icon()
@@ -808,6 +824,13 @@ impl Pila {
                 client,
                 at: std::time::Instant::now(),
             });
+        }
+        // The color picker takes every press, and its release: the first
+        // picks the color under the pointer.
+        if button_state == ButtonState::Pressed && self.color_pick_open() {
+            self.input.suppressed_buttons.insert(button);
+            self.color_pick_press(pointer.current_location());
+            return;
         }
         // The share picker takes every press, and its release: it's modal.
         if button_state == ButtonState::Pressed && self.share_picker_open() {

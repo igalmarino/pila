@@ -918,3 +918,91 @@ fn a_screenshot_taken_unasked_covers_every_output() {
     assert_eq!(png.0, (1280, 480), "both outputs");
     assert_eq!(png_pixel(&png, x, y), expected, "the window on B in it");
 }
+
+fn color_pick_open(state: &Value) -> bool {
+    state["color_pick"]["open"] == true
+}
+
+/// PickColor: the pointer is a crosshair over everything, a panel says what
+/// to do, and a click answers with the color under it; the window under it
+/// gets no click.
+#[test]
+fn a_color_is_picked_with_a_click() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("colors").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "colors");
+    pila.move_to(x as f64, y as f64);
+    pila.settle();
+    client.roundtrip();
+    let mut portal = Portal::connect(&bus.address);
+    let asked = portal.pick_color("org.example.Paint");
+    let state = pila.wait("the color picker", |s| {
+        color_pick_open(s) && s["color_pick"]["text"] == true
+    });
+    assert_eq!(state["pointer"]["cursor"], "crosshair");
+    // Its panel drawn, at the top of the output.
+    let (px, py, pw, _) = rect(&state["color_pick"]["rect"]);
+    let desktop = pila.pixel(5.0, 5.0);
+    pila.wait_pixel_is((px + pw - 3) as f64, (py + 3) as f64, "its panel", |p| {
+        p != desktop
+    });
+
+    pila.click("left");
+    let (response, color) = asked.join().unwrap();
+    assert_eq!(response, 0, "PickColor");
+    let [_, r, g, b] = BLUE;
+    let expected = [r, g, b].map(|c| f64::from(c) / 255.0);
+    let (cr, cg, cb) = color.expect("a color");
+    for (got, want) in [cr, cg, cb].iter().zip(expected) {
+        assert!(
+            (got - want).abs() < 0.01,
+            "{:?} for {expected:?}",
+            (cr, cg, cb)
+        );
+    }
+    let state = pila.wait("the picker gone", |s| !color_pick_open(s));
+    assert_ne!(state["pointer"]["cursor"], "crosshair");
+    client.roundtrip();
+    let buttons = client
+        .lock()
+        .events
+        .iter()
+        .filter(|e| matches!(e, common::client::Ev::Button { .. }))
+        .count();
+    assert_eq!(buttons, 0, "the window got the click");
+}
+
+/// Escape cancels it, and so does locking the screen; while it's on keys
+/// reach no app.
+#[test]
+fn color_picking_is_cancelled_by_escape_or_the_lock() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("app").size(200, 150).create();
+    pila.wait_focus("app");
+    let mut portal = Portal::connect(&bus.address);
+
+    let asked = portal.pick_color("org.example.Paint");
+    pila.wait("the color picker", color_pick_open);
+    pila.key("a");
+    pila.key("Escape");
+    assert_eq!(asked.join().unwrap(), (1, None), "cancelled");
+    client.roundtrip();
+    let keys = client
+        .lock()
+        .events
+        .iter()
+        .filter(|e| matches!(e, common::client::Ev::Key { .. }))
+        .count();
+    assert_eq!(keys, 0, "the app got keys");
+
+    let asked = portal.pick_color("org.example.Paint");
+    pila.wait("the color picker", color_pick_open);
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    locker.lock_surface(&lock, "HEADLESS-1", [255, 0, 0, 0]);
+    locker.wait_logged("lock", "Locked");
+    assert_eq!(asked.join().unwrap(), (1, None), "cancelled by the lock");
+    assert!(!color_pick_open(&pila.state()));
+}

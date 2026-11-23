@@ -235,6 +235,7 @@ impl SessionLockHandler for Pila {
         // Nothing is shared without the user's say, and nothing is asked
         // while locked.
         self.cancel_share_picker();
+        self.cancel_color_pick();
         self.close_window_menu();
         self.hide_shortcuts();
         self.close_overview();

@@ -567,6 +567,8 @@ pub struct Portal {
 }
 
 pub type Vardict = HashMap<String, OwnedVariant>;
+/// A color as the portal answers it: red, green, blue, from 0 to 1.
+pub type Rgb = (f64, f64, f64);
 
 const NAME: &str = "org.freedesktop.impl.portal.desktop.pila";
 const PATH: &str = "/org/freedesktop/portal/desktop";
@@ -695,6 +697,29 @@ impl Portal {
                 .get("uri")
                 .map(|uri| String::try_from(uri.try_clone().unwrap()).unwrap());
             (response, uri)
+        })
+    }
+
+    /// Ask for a color picked on the screen, as app `app_id`: the response
+    /// and the color (each channel 0 to 1), on a thread.
+    pub fn pick_color(&mut self, app_id: &str) -> std::thread::JoinHandle<(u32, Option<Rgb>)> {
+        let handle = self.handle();
+        let bus = self.bus.clone();
+        let app_id = app_id.to_string();
+        std::thread::spawn(move || {
+            let reply = zbus::block_on(bus.call_method(
+                Some(NAME),
+                PATH,
+                Some("org.freedesktop.impl.portal.Screenshot"),
+                "PickColor",
+                &(handle, app_id.as_str(), "", Vardict::new()),
+            ))
+            .unwrap_or_else(|err| panic!("PickColor: {err}"));
+            let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
+            let color = results
+                .get("color")
+                .map(|color| Rgb::try_from(color.try_clone().unwrap()).unwrap());
+            (response, color)
         })
     }
 

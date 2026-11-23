@@ -709,6 +709,10 @@ covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** 
 pointer isn't in it. The picture is saved in `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten
 are kept; it goes at logout) and handed to the app.
 
+**Picking a color** from the screen (GTK's color chooser, GIMP, Inkscape: anything that asks the
+portal) turns the pointer into a crosshair, with a panel at the top of the screen: click the
+pixel whose color you want, or Escape to give up. No app gets that click or any key meanwhile.
+
 **Screen sharing** in browsers, OBS and video calls goes through the desktop portal
 (`xdg-desktop-portal`), which hands it to Pila: Pila asks what to share and streams it over
 PipeWire, with no other program. When an app asks to share, a panel in the middle of the screen

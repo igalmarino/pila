@@ -273,6 +273,7 @@ impl Pila {
                     }));
                 self.show_share_picker();
             }
+            Request::PickColor { reply } => self.start_color_pick(reply),
             Request::Screenshot { ask, app, reply } => {
                 self.portal_screenshot(ask, crate::screenshot::Shot { app, reply });
             }

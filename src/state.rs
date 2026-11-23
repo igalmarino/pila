@@ -180,6 +180,8 @@ pub struct Pila {
     pub screencast: crate::screencast::ScreenCasts,
     /// The picker that asks which screen to share (`share_picker.rs`).
     pub share_picker: crate::share_picker::SharePicker,
+    /// The portal's color picker, while it's on (`color_pick.rs`).
+    pub color_pick: crate::color_pick::ColorPick,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -582,6 +584,7 @@ impl Pila {
             capture: Default::default(),
             screencast: Default::default(),
             share_picker: Default::default(),
+            color_pick: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -712,6 +715,7 @@ impl Pila {
         // Pila's switcher is in front of everything, and no client's; the
         // share picker is modal: nothing is hit while it's shown.
         if self.share_picker_open()
+            || self.color_pick_open()
             || self.switcher_view_covers(pos)
             || self.shortcuts_view_covers(pos)
         {
@@ -861,6 +865,7 @@ impl Pila {
             switcher: self.scene_switcher(),
             shortcuts: self.scene_shortcuts(),
             share_picker: self.scene_share_picker(),
+            color_pick: self.scene_color_pick(),
             overview,
             ..Scene::blank(self.config.colors)
         }

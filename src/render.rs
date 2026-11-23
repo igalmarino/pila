@@ -205,6 +205,9 @@ pub struct Scene {
     /// The screen-share picker, in front of everything but the cursor, its
     /// dim over every output (`share_picker.rs`).
     pub share_picker: Option<crate::share_picker::ScenePicker>,
+    /// The color picker's panel, in front of everything of Pila's
+    /// (`color_pick.rs`).
+    pub color_pick: Option<crate::color_pick::ScenePick>,
     pub colors: Colors,
 }
 
@@ -230,6 +233,7 @@ impl Scene {
             shortcuts: None,
             overview: None,
             share_picker: None,
+            color_pick: None,
             colors,
         }
     }
@@ -245,6 +249,7 @@ impl Scene {
             || self.shortcuts.is_some()
             || self.overview.is_some()
             || self.share_picker.is_some()
+            || self.color_pick.is_some()
         {
             return false;
         }
@@ -1892,6 +1897,15 @@ pub fn output_elements(
             Rectangle::new(origin, output_geo.size),
             scale,
         );
+        front.append(&mut elements);
+        elements = front;
+    }
+    if let Some(view) = scene
+        .color_pick
+        .as_ref()
+        .filter(|view| !scene.locked && view.output == output_name)
+    {
+        let mut front = crate::color_pick::elements(renderer, view, &scene.colors, origin, scale);
         front.append(&mut elements);
         elements = front;
     }

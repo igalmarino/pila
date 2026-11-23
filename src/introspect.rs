@@ -307,6 +307,7 @@ impl Pila {
             "switcher_view": self.switcher_view_json(),
             "shortcuts_view": self.shortcuts_view_json(),
             "share_picker": self.share_picker_json(),
+            "color_pick": self.color_pick_json(),
             "screencast": {
                 "casts": self.screencast.cast_count(),
                 "pipewire": self.screencast.connected(),
