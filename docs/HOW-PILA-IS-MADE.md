@@ -58,7 +58,7 @@ arriving this fast, I can't afford to skip any of it.
 
 Every feature has them. A test starts a real Pila on a headless backend, connects real Wayland
 clients (a synthetic one, and Xwayland for X11), injects input and checks the result through a
-control socket. There are about 750 integration tests in 36 files and about 170 unit tests, and
+control socket. There are about 950 integration tests in 43 files and about 280 unit tests, and
 CI runs them on every push. [tests/FEATURES.md](../tests/FEATURES.md) lists every feature with
 its tests, or the reason it has none (it needs bare metal, or only eyes can judge it). A test
 fails if that list and the suite disagree.
@@ -121,7 +121,7 @@ job that runs the DRM/KMS backend on vkms, the kernel's virtual KMS driver.
 
 [docs/ARCHITECTURE.md](ARCHITECTURE.md) has a section per subsystem with its flows and
 invariants. A change to a flow updates its section in the same commit. I need it as much as the
-AI does: nobody keeps nearly 40,000 lines in their head.
+AI does: nobody keeps more than 50,000 lines in their head.
 
 ## About the speed
 
