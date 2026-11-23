@@ -84,6 +84,14 @@ impl ScreenCasts {
         self.casts.iter().any(|cast| cast.streaming)
     }
 
+    /// What the casts of regions share (`share_region.rs` outlines them).
+    pub(crate) fn region_targets(&self) -> impl Iterator<Item = &Target> {
+        self.casts
+            .iter()
+            .map(|cast| &cast.target)
+            .filter(|target| matches!(target, Target::Region(..)))
+    }
+
     /// How many casts there are, for tests (`Pila::state_json`).
     pub fn cast_count(&self) -> usize {
         self.casts.len()
@@ -331,20 +339,30 @@ impl Pila {
             return reply.send(Err(Refused::Cancelled));
         }
         let (source_type, position, logical_size, name) = match &target {
-            Target::Output(output) => {
-                let Some((output, geo)) = output
-                    .upgrade()
-                    .and_then(|o| Some((self.space.output_geometry(&o)?, o)))
-                    .map(|(geo, o)| (o, geo))
+            // A region goes as a monitor of its size, where it is (the
+            // portal has no other kind for it).
+            Target::Output(_) | Target::Region(..) => {
+                let Some(crate::capture::TargetArea { output, area, .. }) =
+                    self.target_area(&target)
                 else {
                     return reply.send(Err(Refused::Cancelled));
                 };
-                let position = (geo.loc.x, geo.loc.y);
+                let name = match target {
+                    Target::Region(..) => format!(
+                        "{} {}x{}+{}+{}",
+                        output.name(),
+                        area.size.w,
+                        area.size.h,
+                        area.loc.x,
+                        area.loc.y
+                    ),
+                    _ => output.name(),
+                };
                 (
                     portal::SourceType::Monitor,
-                    position,
-                    (geo.size.w, geo.size.h),
-                    output.name(),
+                    (area.loc.x, area.loc.y),
+                    (area.size.w, area.size.h),
+                    name,
                 )
             }
             Target::Toplevel(identifier) => {
@@ -406,6 +424,8 @@ impl Pila {
             ended: false,
             seq: 0,
         });
+        // A region shared is outlined on the screen.
+        self.update_region_outlines();
         // Callbacks may have run while connecting.
         self.handle_cast_events();
     }
@@ -414,7 +434,7 @@ impl Pila {
     /// (a window's: the output it's drawn for, else the first output's).
     fn cast_fps(&self, target: &Target) -> u32 {
         let output = match target {
-            Target::Output(output) => output.upgrade(),
+            Target::Output(output) | Target::Region(output, _) => output.upgrade(),
             Target::Toplevel(identifier) => self
                 .window_for_identifier(identifier)
                 .and_then(|window| self.window_output(&window)),
@@ -589,6 +609,7 @@ impl Pila {
     /// them: now, not at the next frame drawn (a still screen has none).
     /// PipeWire's connection stays for the next.
     fn trim_after_casts(&mut self) {
+        self.update_region_outlines();
         if self.screencast.casts.is_empty() {
             self.capture.trim_textures(false);
         }
@@ -673,16 +694,14 @@ impl Pila {
         // captures draw it). A window's contents stay private while the
         // screen is locked.
         let (origin, output, window) = match &cast.target {
-            Target::Output(output) => {
-                let Some(output) = output.upgrade() else {
+            Target::Output(_) | Target::Region(..) => {
+                let Some(crate::capture::TargetArea { output, area, geo }) =
+                    self.target_area(&cast.target)
+                else {
                     cast.ended = true;
                     return;
                 };
-                let Some(geo) = self.space.output_geometry(&output) else {
-                    cast.ended = true;
-                    return;
-                };
-                (geo.loc, Some((output.name(), geo)), None)
+                (area.loc, Some((output.name(), geo, area)), None)
             }
             Target::Toplevel(identifier) => {
                 if self.is_locked() {
@@ -701,11 +720,13 @@ impl Pila {
             }
         };
         let input = &*input.get_or_insert_with(|| self.frame_input());
-        // The pointer shows over an output's stream, and over a window's
-        // where it's over the window (and the window on the screen).
-        let pointer_over = match &window {
-            None => true,
-            Some(window) => self.space.element_location(window).is_some_and(|loc| {
+        // The pointer shows over an output's stream, over a region's where
+        // it's in it, and over a window's where it's over the window (and
+        // the window on the screen).
+        let pointer_over = match (&window, &output) {
+            (None, Some((_, _, area))) => area.to_f64().contains(input.pointer),
+            (None, None) => true,
+            (Some(window), _) => self.space.element_location(window).is_some_and(|loc| {
                 Rectangle::new(loc, window.geometry().size)
                     .to_f64()
                     .contains(input.pointer)
@@ -752,13 +773,13 @@ impl Pila {
                     PilaRenderElement,
                 >(window, renderer, loc, scale, 1.0));
             }
-            (None, Some((name, geo))) => elements.extend(render::output_elements(
+            (None, Some((name, geo, area))) => elements.extend(render::output_elements(
                 renderer,
                 blur,
                 &input.scene,
                 name,
                 *geo,
-                geo.loc,
+                area.loc,
                 scale,
             )),
             (None, None) => return,

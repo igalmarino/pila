@@ -211,6 +211,11 @@ pub struct Scene {
     /// The panel confirming an app's shortcuts' keys, modal: the dim over
     /// every output (`app_shortcuts.rs`).
     pub app_shortcuts: Option<crate::app_shortcuts::ScenePanel>,
+    /// The regions shared, by output, global: outlined on the screen alone
+    /// (`screen_elements`), never in a capture (`share_region.rs`).
+    pub shared_regions: Vec<(String, Rectangle<i32, Logical>)>,
+    pub outline_buffers:
+        std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, SolidColorBuffer>>>,
     pub colors: Colors,
 }
 
@@ -238,6 +243,8 @@ impl Scene {
             share_picker: None,
             color_pick: None,
             app_shortcuts: None,
+            shared_regions: Vec::new(),
+            outline_buffers: Default::default(),
             colors,
         }
     }
@@ -255,6 +262,10 @@ impl Scene {
             || self.share_picker.is_some()
             || self.color_pick.is_some()
             || self.app_shortcuts.is_some()
+            || self
+                .shared_regions
+                .iter()
+                .any(|(_, region)| region.overlaps(output))
         {
             return false;
         }
@@ -1800,6 +1811,28 @@ impl FrameInput {
     pub fn cursor_wl_surface(&self) -> Option<&WlSurface> {
         self.cursor_surface.as_ref().map(|(surface, _)| surface)
     }
+}
+
+/// What the screen of `output_name` shows that no capture of it does, front
+/// to back, relative to `origin`: the outlines of the regions shared there
+/// (`share_region.rs`). The backends add them beside the pointer.
+pub fn screen_elements(
+    scene: &Scene,
+    output_name: &str,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    if scene.locked || scene.shared_regions.is_empty() {
+        return Vec::new();
+    }
+    crate::share_region::outline_elements(
+        &scene.outline_buffers,
+        &scene.shared_regions,
+        &scene.colors,
+        output_name,
+        origin,
+        scale,
+    )
 }
 
 /// The cursor's elements, relative to `origin`: the client's cursor surface,

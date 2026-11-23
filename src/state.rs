@@ -872,6 +872,8 @@ impl Pila {
             share_picker: self.scene_share_picker(),
             color_pick: self.scene_color_pick(),
             app_shortcuts: self.scene_app_shortcuts(),
+            shared_regions: self.share_picker.outlined.clone(),
+            outline_buffers: self.share_picker.outline_buffers.clone(),
             overview,
             ..Scene::blank(self.config.colors)
         }

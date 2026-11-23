@@ -1127,11 +1127,14 @@ Key flows and invariants:
   warms it up first (`screencast::warm_pipewire`: a connection made and dropped, so libraries,
   plugins and configuration are loaded off the event loop). A lost connection (the daemon went)
   ends the casts and is dropped (`disconnect_pipewire`), made again at the next request. What's shared is the user's pick: a request waits in `ScreenCasts::waiting` and the picker
-  asks for one at a time (below). What a cast shares is a `capture::Target`, an output or a
-  window, sized as screen captures size it (`Pila::capture_geometry`). Frames are made from
+  asks for one at a time (below). What a cast shares is a `capture::Target`, an output, a
+  region of one or a window, sized as screen captures size it (`Pila::capture_geometry`; an
+  output's and a region's part of it: `Pila::target_area`, a region clipped to its output as it
+  is now). A region's stream is described as a monitor's of its size, where it is. Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
-  output's elements, or the window's alone, its geometry's top-left the buffer's (and the
-  pointer's, cursor embedded, over a window only while it's over it; its metadata is hidden
+  output's elements (from the region's top-left for a region), or the window's alone, its
+  geometry's top-left the buffer's (and the pointer's, cursor embedded, over a region or a window
+  only while it's over it; its metadata is hidden
   there otherwise). A window's frames wait while the screen is locked; each one sent brings the
   window's surfaces shown on no output their frame callbacks (`Pila::send_capture_frames`), so an
   app drawing on them keeps drawing for the share while minimized or covered; a change and a free buffer draw it:
@@ -1233,6 +1236,25 @@ Key flows and invariants:
   blur backdrops) drawn small into an `OffscreenWindow` from `after_frames`
   (`Pila::update_share_previews`, with the captures' scene), over a kept background solid:
   damage only where the output changed, and the picker's output is redrawn only then.
+- **Share region** (`share_region.rs`): the picker's Region (a source after the outputs, where
+  monitors may be shared; its tile a selection drawn on a plain screen) hides the panel
+  (`SharePicker::region`, `Pila::start_region_select`): still the picker's, so still modal, its
+  keys, presses, motion and releases come here first (`share_picker_key`, `share_picker_press`,
+  `share_picker_moved`, `share_picker_release` in `input.rs`; a press the picker took has its
+  release go to it, not dropped). The pointer is a crosshair (`update_decoration_cursor`). A press
+  starts a rectangle on the output under it, the motion while held moves its other corner, kept
+  inside that output; letting go with one at least `MIN_SIDE` either way finishes the pick
+  (`Pila::finish_share_pick` with a `capture::Target::Region`, local to its output), a click leaves
+  none; Enter finishes it too, Escape goes back to the panel. Every output is dimmed but the
+  rectangle, outlined in the accent outside it (`share_region::elements`, instead of the panel's),
+  and a guide at the top of the output under the pointer (the drag's while held) says what to do
+  and the rectangle's size in the stream's pixels: its text drawn on a thread, one at a time, the
+  latest asked for drawn when the one drawing is done. Only the outputs it was and is on redraw
+  (`redraw_region`). The picker answered, cancelled or locked ends it (`take_share_picker`). While
+  a region is shared, its outline stays on the screen: `Scene::shared_regions`, set from the casts
+  when one starts or ends (`update_region_outlines`, which redraws the outputs whose outlines come
+  or go), drawn by the backends beside the pointer (`render::screen_elements`), never by a capture;
+  an outline over a fullscreen window keeps it from tearing (`Scene::tears`).
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

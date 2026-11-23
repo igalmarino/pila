@@ -901,6 +901,12 @@ fn check_redraws(state: &mut Pila) {
             elements =
                 render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
         }
+        elements.extend(render::screen_elements(
+            &input.scene,
+            &output.name(),
+            output_geo.loc,
+            scale,
+        ));
         elements.extend(render::output_elements(
             renderer,
             blur,
@@ -1020,6 +1026,12 @@ fn render_output(
     if pointer_here {
         elements = render::pointer_elements(renderer, input, cursor_theme, output_geo.loc, scale);
     }
+    elements.extend(render::screen_elements(
+        scene,
+        &output.name(),
+        output_geo.loc,
+        scale,
+    ));
     elements.extend(render::output_elements(
         renderer,
         blur,

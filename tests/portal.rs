@@ -444,8 +444,8 @@ fn the_picker_names_the_app_and_offers_every_output() {
     assert_eq!(picker["app"], "Web Browser", "its desktop entry's name");
     assert_eq!(
         picker["sources"],
-        serde_json::json!(["A", "B"]),
-        "left to right"
+        serde_json::json!(["A", "B", "region"]),
+        "left to right, then a region of one"
     );
     assert_eq!(picker["output"], "B", "on the output under the pointer");
     assert_eq!(picker["selected"], 1, "that output selected first");
@@ -692,11 +692,11 @@ fn an_app_can_share_a_window() {
     let picker = wait_picker(&mut pila);
     assert_eq!(
         picker["kinds"],
-        serde_json::json!(["output", "window", "window"])
+        serde_json::json!(["output", "region", "window", "window"])
     );
     assert_eq!(
         picker["sources"],
-        serde_json::json!(["HEADLESS-1", "newer", "older"])
+        serde_json::json!(["HEADLESS-1", "region", "newer", "older"])
     );
     assert_eq!(
         picker["headings"],
@@ -708,9 +708,9 @@ fn an_app_can_share_a_window() {
         s["share_picker"]["window_previews"] == 2
     });
 
-    let (x, y) = tile_of(&picker, 2);
+    let (x, y) = tile_of(&picker, 3);
     pila.click_at(x, y);
-    pila.wait("older selected", |s| s["share_picker"]["selected"] == 2);
+    pila.wait("older selected", |s| s["share_picker"]["selected"] == 3);
     pila.key("Return");
     let (response, streams) = started.answer_streams();
     assert_eq!(response, 0, "Start");
@@ -928,12 +928,12 @@ fn a_screenshot_of_what_the_user_picks() {
     assert_eq!(picker["screenshot"], true);
     assert_eq!(
         picker["kinds"],
-        serde_json::json!(["output", "window", "window"])
+        serde_json::json!(["output", "region", "window", "window"])
     );
-    assert_eq!(picker["sources"][2], "under");
-    let (x, y) = tile_of(&picker, 2);
+    assert_eq!(picker["sources"][3], "under");
+    let (x, y) = tile_of(&picker, 3);
     pila.click_at(x, y);
-    pila.wait("under selected", |s| s["share_picker"]["selected"] == 2);
+    pila.wait("under selected", |s| s["share_picker"]["selected"] == 3);
     pila.key("Return");
     let (response, uri) = asked.join().unwrap();
     assert_eq!(response, 0, "Screenshot");
@@ -1294,4 +1294,193 @@ fn an_apps_global_shortcut_waits_while_locked() {
             .is_err(),
         "a shortcut sent while locked"
     );
+}
+
+/// The picker's index of its Region.
+fn region_index(picker: &Value) -> usize {
+    picker["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|kind| kind == "region")
+        .unwrap_or_else(|| panic!("no region offered: {picker}"))
+}
+
+/// Pick Region in the picker shown: the panel hides for a drag.
+fn pick_region(pila: &mut TestPila) {
+    let picker = wait_picker(pila);
+    let index = region_index(&picker);
+    let (x, y) = tile_of(&picker, index);
+    pila.click_at(x, y);
+    pila.wait("Region selected", |s| {
+        s["share_picker"]["selected"] == index
+    });
+    pila.key("Return");
+    pila.wait("selecting a region", |s| {
+        s["share_picker"]["region"]["selecting"] == true
+            && s["share_picker"]["region"]["text"] == true
+    });
+}
+
+/// Drag the left button from `from` to `to`, and let go.
+fn drag(pila: &mut TestPila, from: (f64, f64), to: (f64, f64)) {
+    pila.move_to(from.0, from.1);
+    pila.press("left");
+    pila.move_to(to.0, to.1);
+    pila.release("left");
+}
+
+#[test]
+fn a_region_dragged_is_shared_at_its_size() {
+    let (mut pila, bus, pipewire) = start();
+    let client = pila.client();
+    client.window("shared").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "shared");
+    pila.settle();
+    let expected = pila.pixel(x as f64, y as f64);
+    let mut portal = Portal::connect(&bus.address);
+
+    let started = portal.request("region", "org.example.Browser", 1);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(
+        picker["kinds"],
+        serde_json::json!(["output", "region"]),
+        "a region after the outputs"
+    );
+    pick_region(&mut pila);
+
+    // Escape goes back to the panel, and Region again to the drag.
+    pila.key("Escape");
+    pila.wait("back to the panel", |s| {
+        s["share_picker"]["shown"] == true && s["share_picker"]["region"]["selecting"] == false
+    });
+    assert!(!started.answered(), "still asking");
+    pila.key("Return");
+    pila.wait("selecting again", |s| {
+        s["share_picker"]["region"]["selecting"] == true
+    });
+
+    // A click alone selects nothing.
+    pila.click_at(50.0, 50.0);
+    pila.settle();
+    assert!(!started.answered(), "a click shares nothing");
+
+    // Dragged up and to the left, as well as down and to the right.
+    let (left, top) = (x as f64 - 150.0, y as f64 - 100.0);
+    pila.move_to(left + 300.0, top + 200.0);
+    pila.press("left");
+    pila.move_to(left, top);
+    let region = pila.wait("the rectangle dragged", |s| {
+        s["share_picker"]["region"]["size"] == serde_json::json!([300, 200])
+    })["share_picker"]["region"]
+        .clone();
+    assert_eq!(
+        common::rect(&region["rect"]),
+        (left as i64, top as i64, 300, 200)
+    );
+    pila.release("left");
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    let (node, properties) = &streams[0];
+    assert_eq!(
+        described(properties),
+        (1, (300, 200), true),
+        "a monitor's stream of the region's size, where it is"
+    );
+    let consumer = pipewire.consume(*node);
+    let frame = consumer.wait_frame("of the region", |f| (f.width, f.height) == (300, 200));
+    assert_eq!(frame.rgba(150, 100), expected, "the window in its middle");
+    assert_eq!(
+        pila.state()["share_picker"]["shown"],
+        false,
+        "the picker's gone"
+    );
+}
+
+#[test]
+fn a_region_stays_on_the_output_it_starts_on() {
+    let (mut pila, bus, pipewire) = start_with("A:640x480,B:800x600");
+    pila.move_to(100.0, 100.0);
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("clipped", "org.example.Browser", 1);
+    pick_region(&mut pila);
+    drag(&mut pila, (600.0, 400.0), (900.0, 550.0));
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    assert_eq!(described(&streams[0].1), (1, (40, 80), true), "A's corner");
+    let consumer = pipewire.consume(streams[0].0);
+    consumer.wait_frame("of A's corner", |f| (f.width, f.height) == (40, 80));
+}
+
+/// While a region is shared it's outlined on the screen, outside it, and
+/// not in what's captured; the outline goes with the share.
+#[test]
+fn a_region_shared_is_outlined_on_the_screen_alone() {
+    let (mut pila, bus, _pipewire) = start();
+    pila.settle();
+    let outside = (99.0, 150.0);
+    let before = pila.pixel(outside.0, outside.1);
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("outlined", "org.example.Browser", 1);
+    pick_region(&mut pila);
+    drag(&mut pila, (100.0, 100.0), (300.0, 250.0));
+    assert_eq!(started.answer().0, 0, "Start");
+    pila.move_to(600.0, 450.0);
+    pila.wait_pixel_is(outside.0, outside.1, "the outline", |p| p != before);
+
+    // Not in a screenshot of the whole screen.
+    let png = screenshot_png(
+        &portal
+            .screenshot("org.example.Browser", false, true)
+            .join()
+            .unwrap()
+            .1
+            .expect("its URI"),
+    );
+    assert_eq!(png_pixel(&png, 99, 150), before, "no outline captured");
+
+    portal.close("outlined");
+    pila.wait_pixel(outside.0, outside.1, before);
+}
+
+#[test]
+fn a_screenshot_of_a_region() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("taken").size(200, 150).color(GREEN).create();
+    let (x, y) = window_center(&mut pila, "taken");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let asked = portal.screenshot("org.example.Browser", true, true);
+    pick_region(&mut pila);
+    let (x, y) = (x as f64, y as f64);
+    drag(&mut pila, (x - 50.0, y - 40.0), (x + 50.0, y + 40.0));
+    let (response, uri) = asked.join().unwrap();
+    assert_eq!(response, 0, "Screenshot");
+    let png = screenshot_png(&uri.expect("its URI"));
+    assert_eq!(png.0, (100, 80), "the region's size");
+    assert_eq!(png_pixel(&png, 50, 40), rgba(GREEN), "the window in it");
+}
+
+/// Locking while a region is dragged cancels the request, drag and all.
+#[test]
+fn locking_cancels_a_region_being_dragged() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("locked", "org.example.Browser", 1);
+    pick_region(&mut pila);
+    pila.move_to(100.0, 100.0);
+    pila.press("left");
+    pila.move_to(300.0, 200.0);
+    pila.wait("dragging", |s| {
+        s["share_picker"]["region"]["rect"].is_object()
+    });
+    let locker = pila.client();
+    let _lock = locker.lock_session();
+    pila.wait("locked", |s| s["locked"] == true);
+    pila.release("left");
+    assert_eq!(answered_with(started), 1, "cancelled");
+    let picker = &pila.state()["share_picker"];
+    assert_eq!(picker["shown"], false);
+    assert_eq!(picker["region"]["selecting"], false);
 }

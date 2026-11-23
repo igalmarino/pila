@@ -704,8 +704,10 @@ impl Pila {
         self.shake_cursor_motion(location);
         self.overview_pointer_moved(location);
         self.color_pick_moved();
-        // Picking a color, the pointer goes to every corner of the screen.
-        if !self.color_pick_open() {
+        self.share_picker_moved(location);
+        // Picking a color or a region, the pointer goes to every corner of
+        // the screen.
+        if !self.color_pick_open() && !self.region_selecting() {
             self.hot_corner(location, pointer.is_grabbed());
         }
 
@@ -757,7 +759,7 @@ impl Pila {
             return;
         }
         let icon = match self.under(pos) {
-            _ if self.color_pick_open() => CursorIcon::Crosshair,
+            _ if self.color_pick_open() || self.region_selecting() => CursorIcon::Crosshair,
             Some(Under::Window(_, Hit::Surface(..)) | Under::Layer(..) | Under::Lock(..)) => return,
             Some(Under::Window(_, Hit::Decoration(Decoration::Border(edges)))) => {
                 edges.cursor_icon()
@@ -826,6 +828,15 @@ impl Pila {
             && self.overview_release(pointer.current_location(), button)
         {
             self.input.suppressed_buttons.remove(&button);
+            return;
+        }
+        // The release of a press the share picker took: a region dragged
+        // is let go.
+        if button_state == ButtonState::Released
+            && self.share_picker_open()
+            && self.input.suppressed_buttons.remove(&button)
+        {
+            self.share_picker_release();
             return;
         }
         // A click that wakes the monitors does only that, release included.

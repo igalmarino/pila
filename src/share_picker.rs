@@ -7,6 +7,10 @@
 //! it (Share, Enter), or cancels (Cancel, Escape). Nothing is shared without
 //! it: this is the consent.
 //!
+//! Where it may share a screen, it offers a region of one too (Region,
+//! after the outputs): picking it hides the panel for the user to drag one
+//! (`share_region.rs`).
+//!
 //! While it's shown it's modal: every key goes to it (`input.rs`), a click
 //! does nothing but on its controls, and every output is dimmed under it.
 //! Requests wait their turn in `ScreenCasts::waiting`; locking the screen
@@ -96,6 +100,12 @@ const HINTS_WIDTH: i32 = crate::panel::hints_width(HINTS.len());
 #[derive(Default)]
 pub struct SharePicker {
     shown: Option<Shown>,
+    /// Selecting a region (Region picked), the panel hidden meanwhile.
+    pub(crate) region: Option<crate::share_region::Selecting>,
+    /// The regions shared whose outlines are drawn (`Pila::shared_regions`),
+    /// and their buffers.
+    pub(crate) outlined: Vec<(String, Rectangle<i32, Logical>)>,
+    pub(crate) outline_buffers: Rc<RefCell<HashMap<String, SolidColorBuffer>>>,
     /// The content being drawn on a thread (`Pila::draw_share_picker_text`).
     pending: Option<TextKey>,
     buffers: Rc<RefCell<Buffers>>,
@@ -109,7 +119,8 @@ struct Shown {
     app: Option<String>,
     /// The output the panel is on, by name.
     output: String,
-    /// What there is to pick: the outputs, left to right, then the windows.
+    /// What there is to pick: the outputs, left to right, a region of one,
+    /// then the windows.
     sources: Vec<Source>,
     selected: usize,
 }
@@ -172,16 +183,19 @@ impl Ask {
 enum Source {
     /// An output, by name.
     Output(String),
+    /// A region of an output, to drag once picked (`share_region.rs`).
+    Region,
     Window(Window),
 }
 
 impl Shown {
-    /// How many outputs, then windows, it offers.
+    /// How many screens (the outputs and the region), then windows, it
+    /// offers.
     fn counts(&self) -> (usize, usize) {
         let outputs = self
             .sources
             .iter()
-            .filter(|s| matches!(s, Source::Output(_)))
+            .filter(|s| matches!(s, Source::Output(_) | Source::Region))
             .count();
         (outputs, self.sources.len() - outputs)
     }
@@ -212,6 +226,8 @@ struct Buffers {
     /// the background drawn behind it (kept: a new one would be damage).
     previews: HashMap<String, OffscreenWindow>,
     backgrounds: HashMap<String, SolidColorBuffer>,
+    /// The region tile's picture: a selection on a plain screen.
+    region: HashMap<&'static str, SolidColorBuffer>,
     /// Each window's preview shown (`switcher_view::preview`).
     windows: Vec<(Window, OffscreenWindow)>,
 }
@@ -426,13 +442,21 @@ pub struct ScenePicker {
     /// The windows' corners (`corner-radius`, `rounded-corners`); `None`:
     /// square.
     pub rounding: Option<(f64, crate::rounded::Corners)>,
+    /// Selecting a region: drawn instead of the panel.
+    pub region: Option<crate::share_region::SceneRegion>,
+    /// The region tile shown, if it is.
+    pub region_tile: Option<Rectangle<i32, Logical>>,
     buffers: Rc<RefCell<Buffers>>,
 }
 
 impl ScenePicker {
     /// The windows it shows: they draw for its output while it's shown.
     pub fn windows(&self) -> impl Iterator<Item = &Window> {
-        self.windows.iter().map(|(window, _)| window)
+        // None draw for it while a region is selected: the panel's hidden.
+        self.windows
+            .iter()
+            .filter(|_| self.region.is_none())
+            .map(|(window, _)| window)
     }
 }
 
@@ -473,6 +497,7 @@ impl Pila {
         let mut sources: Vec<Source> = Vec::new();
         if wanted.monitors {
             sources.extend(outputs.iter().map(|(_, name)| Source::Output(name.clone())));
+            sources.push(Source::Region);
         }
         if wanted.windows {
             let windows = self.windows.focus_history.iter().filter(|window| {
@@ -597,6 +622,7 @@ impl Pila {
     /// shown by the caller.
     fn take_share_picker(&mut self) -> Option<Shown> {
         let shown = self.share_picker.shown.take()?;
+        self.end_region_select();
         self.share_picker.pending = None;
         *self.share_picker.buffers.borrow_mut() = Buffers::default();
         self.queue_redraw();
@@ -628,12 +654,13 @@ impl Pila {
         }
     }
 
-    /// Share what's selected (Share, Enter).
+    /// Share what's selected (Share, Enter); the region, once dragged.
     fn pick_share(&mut self) {
-        let Some(shown) = self.take_share_picker() else {
+        let Some(shown) = self.share_picker.shown.as_ref() else {
             return;
         };
         let target = match shown.sources.get(shown.selected) {
+            Some(Source::Region) => return self.start_region_select(),
             Some(Source::Output(name)) => self
                 .space
                 .outputs()
@@ -643,6 +670,15 @@ impl Pila {
                 .filter(|_| window.alive())
                 .map(crate::capture::Target::Toplevel),
             None => None,
+        };
+        self.finish_share_pick(target);
+    }
+
+    /// Share or take `target`, picked (`None`: it went meanwhile, and the
+    /// app is told it was cancelled), and ask the next request.
+    pub(crate) fn finish_share_pick(&mut self, target: Option<crate::capture::Target>) {
+        let Some(shown) = self.take_share_picker() else {
+            return;
         };
         match (target, shown.ask) {
             (Some(target), Ask::Cast(share)) => self.start_cast(share, target),
@@ -665,8 +701,19 @@ impl Pila {
         }
     }
 
+    /// Whether what it asks for is a screenshot.
+    pub(crate) fn share_picker_screenshot(&self) -> bool {
+        self.share_picker
+            .shown
+            .as_ref()
+            .is_some_and(|shown| matches!(shown.ask, Ask::Screenshot(_)))
+    }
+
     /// A key pressed while it's shown (it takes them all: `input.rs`).
     pub fn share_picker_key(&mut self, sym: Keysym) {
+        if self.region_selecting() {
+            return self.region_key(sym);
+        }
         let Some(shown) = self.share_picker.shown.as_ref() else {
             return;
         };
@@ -683,6 +730,9 @@ impl Pila {
     /// A press at `location` while it's shown (it takes them all): a tile
     /// selects its output, the buttons share or cancel, elsewhere nothing.
     pub fn share_picker_press(&mut self, location: Point<f64, Logical>) {
+        if self.region_selecting() {
+            return self.region_press(location);
+        }
         let Some(view) = self.scene_share_picker() else {
             return;
         };
@@ -699,6 +749,21 @@ impl Pila {
             .map(|(_, index)| *index)
         {
             self.select_share(index);
+        }
+    }
+
+    /// The pointer moved while it's shown: a region being selected follows
+    /// it.
+    pub(crate) fn share_picker_moved(&mut self, location: Point<f64, Logical>) {
+        if self.region_selecting() {
+            self.region_moved(location);
+        }
+    }
+
+    /// A button let go while it's shown (its press was the picker's).
+    pub(crate) fn share_picker_release(&mut self) {
+        if self.region_selecting() {
+            self.region_release();
         }
     }
 
@@ -722,8 +787,10 @@ impl Pila {
         let layout = layout(area, outputs, windows, shown.first_window_row());
         let mut previews = Vec::new();
         let mut shown_windows = Vec::new();
+        let mut region_tile = None;
         for (tile, index) in layout.tiles.iter().zip(&layout.shown) {
             match shown.sources.get(*index) {
+                Some(Source::Region) => region_tile = Some(*tile),
                 Some(Source::Output(name)) => {
                     let Some(source) = self.space.outputs().find(|o| &o.name() == name) else {
                         continue;
@@ -746,6 +813,8 @@ impl Pila {
             windows: shown_windows,
             selected: shown.selected,
             rounding: crate::panel::rounding(&self.config),
+            region: self.scene_region(),
+            region_tile,
             buffers: self.share_picker.buffers.clone(),
         })
     }
@@ -882,6 +951,7 @@ impl Pila {
                         .unwrap_or_default();
                     format!("{name}{size}")
                 }
+                Some(Source::Region) => "Region".to_string(),
                 Some(Source::Window(window)) => crate::switcher_view::caption(
                     &crate::foreign_toplevel::title(window),
                     &crate::foreign_toplevel::app_id(window),
@@ -952,7 +1022,11 @@ impl Pila {
         let (Some(view), Some(shown)) =
             (self.scene_share_picker(), self.share_picker.shown.as_ref())
         else {
-            return serde_json::json!({ "shown": false, "waiting": self.screencast.waiting.len() });
+            return serde_json::json!({
+                "shown": false,
+                "waiting": self.screencast.waiting.len(),
+                "region": self.region_json(),
+            });
         };
         serde_json::json!({
             "shown": true,
@@ -962,12 +1036,15 @@ impl Pila {
             // Outputs by name, windows by app id.
             "sources": shown.sources.iter().map(|source| match source {
                 Source::Output(name) => name.clone(),
+                Source::Region => "region".to_string(),
                 Source::Window(window) => crate::foreign_toplevel::app_id(window),
             }).collect::<Vec<_>>(),
             "kinds": shown.sources.iter().map(|source| match source {
                 Source::Output(_) => "output",
+                Source::Region => "region",
                 Source::Window(_) => "window",
             }).collect::<Vec<_>>(),
+            "region": self.region_json(),
             "selected": view.selected,
             "panel": rect(view.layout.panel),
             "tiles": view.layout.tiles.iter().map(|t| rect(*t)).collect::<Vec<_>>(),
@@ -1097,6 +1174,16 @@ pub fn elements(
     output_geo: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
+    if let Some(region) = &view.region {
+        return crate::share_region::elements(
+            renderer,
+            region,
+            colors,
+            output_name,
+            output_geo,
+            scale,
+        );
+    }
     let origin = output_geo.loc;
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
@@ -1127,6 +1214,58 @@ pub fn elements(
                 scale,
             ));
         }
+    }
+
+    // The region's tile: a selection outlined in the accent on a plain
+    // screen of the output's shape.
+    if let Some(tile) = view.region_tile {
+        let screen = preview_rect(tile, output_geo.size);
+        let selection = Rectangle::new(
+            screen.loc + Point::from((screen.size.w / 4, screen.size.h / 4)),
+            screen.size / 2,
+        );
+        let accent = crate::panel::accent(colors);
+        let edge = 2;
+        let sides = [
+            (
+                "region-top",
+                Rectangle::new(selection.loc, (selection.size.w, edge).into()),
+            ),
+            (
+                "region-bottom",
+                Rectangle::new(
+                    selection.loc + Point::from((0, selection.size.h - edge)),
+                    (selection.size.w, edge).into(),
+                ),
+            ),
+            (
+                "region-left",
+                Rectangle::new(selection.loc, (edge, selection.size.h).into()),
+            ),
+            (
+                "region-right",
+                Rectangle::new(
+                    selection.loc + Point::from((selection.size.w - edge, 0)),
+                    (edge, selection.size.h).into(),
+                ),
+            ),
+        ];
+        let solids = sides
+            .into_iter()
+            .map(|(name, rect)| (name, rect, accent, None))
+            .chain([(
+                "region-screen",
+                screen,
+                crate::panel::opaque(colors.bar),
+                None,
+            )]);
+        elements.extend(crate::panel::solids(
+            renderer,
+            &mut buffers.region,
+            solids,
+            origin,
+            scale,
+        ));
     }
 
     // The windows' previews, drawn now, each fitted in its tile; those no

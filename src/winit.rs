@@ -307,6 +307,12 @@ fn redraw(
             // Nested, the host draws named cursors unless they're magnified.
             let mut elements =
                 render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
+            elements.extend(render::screen_elements(
+                scene,
+                &output.name(),
+                output_geo.loc,
+                scale,
+            ));
             elements.extend(render::output_elements(
                 renderer,
                 blur,

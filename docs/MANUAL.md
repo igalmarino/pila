@@ -704,8 +704,9 @@ screenshot features.
 **An app's screenshot** (a browser's, a Flatpak's, anything that asks the desktop portal) is
 Pila's too. An app the portal lets take one without asking (its permission store) gets every
 monitor at once, as they're laid out; otherwise, or when the app wants you to choose, the same
-panel as for screen sharing asks what to take, a monitor or a window (the window alone, even
-covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** (or Escape). The
+panel as for screen sharing asks what to take, a monitor, a region of one or a window (the window
+alone, even covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** (or
+Escape). The
 pointer isn't in it. The picture is saved in `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten
 are kept; it goes at logout) and handed to the app.
 
@@ -732,7 +733,12 @@ windows too, every window, most recently used first (minimized ones and those on
 too), under **Screens** and **Windows**. The monitor under the pointer is selected first (the
 window you used last, for an app that shares only windows): click a preview or use the arrows
 to pick one, then **Share** (or Enter) to share it, or **Cancel** (or Escape). Nothing is shared
-until then, and while the panel is shown no key or click reaches an app. A shared window is
+until then, and while the panel is shown no key or click reaches an app. **Region**, after the
+monitors, shares part of one: the panel hides and the pointer becomes a crosshair; drag a
+rectangle over what to share (it stays on the monitor where you start) and let go to share it, or
+Escape to go back to the panel. A guide at the top of the screen gives its size. While a region
+is shared, a thin line in the accent color marks it on the screen (not in what's shared); it
+stays where it is, whatever moves under it. A shared window is
 streamed alone, at its size, and keeps updating while it's covered, minimized or on another
 workspace; while the screen is locked its stream shows nothing new, and closing the window ends
 the share. The pointer shows in the share as the app asks (browsers draw it themselves), over a

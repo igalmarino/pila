@@ -97,14 +97,28 @@ impl Pila {
                     .cloned()
                     .collect()
             }
+            // A region: its output, drawn from the region's corner.
+            Some(region @ Target::Region(..)) => {
+                let Some(crate::capture::TargetArea { output, geo, .. }) = self.target_area(region)
+                else {
+                    return reply.send(Err(Refused::Cancelled));
+                };
+                vec![(output.name(), geo)]
+            }
             _ => Vec::new(),
         };
-        let origin = shown
-            .iter()
-            .map(|(_, geo)| *geo)
-            .reduce(|a, b| a.merge(b))
-            .map(|r| r.loc)
-            .unwrap_or_default();
+        let origin = match &target {
+            Some(region @ Target::Region(..)) => self
+                .target_area(region)
+                .map(|a| a.area.loc)
+                .unwrap_or_default(),
+            _ => shown
+                .iter()
+                .map(|(_, geo)| *geo)
+                .reduce(|a, b| a.merge(b))
+                .map(|r| r.loc)
+                .unwrap_or_default(),
+        };
         let clear = match window {
             Some(_) => crate::capture::TRANSPARENT,
             None => render::clear_color(&input.scene),

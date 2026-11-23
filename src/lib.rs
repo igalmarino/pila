@@ -68,6 +68,7 @@ pub mod session_management;
 pub mod session_protocol;
 pub mod shake_cursor;
 pub mod share_picker;
+pub mod share_region;
 pub mod shortcuts_view;
 pub mod snap;
 pub mod stacking;

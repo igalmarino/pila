@@ -96,7 +96,7 @@ use smithay::{
             Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
         },
     },
-    utils::{Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform},
+    utils::{Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform},
     wayland::{
         compositor::with_states,
         dmabuf::get_dmabuf,
@@ -171,6 +171,15 @@ impl DmabufTarget {
     }
 }
 
+/// What of an output a `Target` shows (`Pila::target_area`).
+pub(crate) struct TargetArea {
+    pub output: Output,
+    /// What's shown, global.
+    pub area: Rectangle<i32, Logical>,
+    /// The output's geometry.
+    pub geo: Rectangle<i32, Logical>,
+}
+
 /// Behind a captured window's (possibly translucent) surfaces.
 pub(crate) const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
@@ -178,6 +187,10 @@ pub(crate) const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 #[derive(Debug, Clone)]
 pub enum Target {
     Output(WeakOutput),
+    /// A part of an output: a rectangle of it, from its top-left (logical),
+    /// that the user picked to share or take (`share_picker.rs`). Clipped to
+    /// the output as it is: one that shrank shows what's left of it.
+    Region(WeakOutput, Rectangle<i32, Logical>),
     /// A window, by its foreign-toplevel identifier (`foreign_toplevel.rs`).
     Toplevel(String),
     /// The output or window was already gone when the source was created.
@@ -427,6 +440,12 @@ impl Pila {
                     .transform_size(output.current_mode()?.size);
                 Some((size, output_scale(&output)))
             }
+            Target::Region(..) => {
+                let TargetArea { output, area, .. } = self.target_area(target)?;
+                let scale = output_scale(&output);
+                let size = area.size.to_f64().to_physical(scale).to_i32_round();
+                Some((size, scale))
+            }
             Target::Toplevel(identifier) => {
                 let window = self.window_for_identifier(identifier)?;
                 let scale = self.window_capture_scale(&window, last.map(|(_, scale)| scale));
@@ -440,6 +459,30 @@ impl Pila {
             }
             Target::Gone => None,
         }
+    }
+
+    /// What of an output `target` shows, global: an output's whole
+    /// geometry, a region's rectangle on it (clipped to the output as it is
+    /// now), with the output and its geometry; `None` for a window, or if
+    /// it's gone (unplugged, or nothing of the region left on it).
+    pub(crate) fn target_area(&self, target: &Target) -> Option<TargetArea> {
+        let (output, region) = match target {
+            Target::Output(output) => (output.upgrade()?, None),
+            Target::Region(output, region) => (output.upgrade()?, Some(*region)),
+            Target::Toplevel(_) | Target::Gone => return None,
+        };
+        let geo = self.space.output_geometry(&output)?;
+        let area = match region {
+            None => geo,
+            Some(region) => {
+                let area = Rectangle::new(geo.loc + region.loc, region.size).intersection(geo)?;
+                if area.is_empty() {
+                    return None;
+                }
+                area
+            }
+        };
+        Some(TargetArea { output, area, geo })
     }
 
     /// The scale a window is captured at: its output's (`window_output`, the
@@ -524,10 +567,9 @@ impl Pila {
         let input = &*input.get_or_insert_with(|| self.frame_input());
         let scene = &input.scene;
         let (origin, window) = match &session.target {
-            Target::Output(output) => {
-                let output = output.upgrade();
-                let geo = output.and_then(|o| self.space.output_geometry(&o));
-                (geo.map(|g| g.loc).unwrap_or_default(), None)
+            Target::Output(_) | Target::Region(..) => {
+                let area = self.target_area(&session.target);
+                (area.map(|a| a.area.loc).unwrap_or_default(), None)
             }
             Target::Toplevel(identifier) => {
                 let window = self.window_for_identifier(identifier);
@@ -541,7 +583,7 @@ impl Pila {
         };
         // Where the frame's content shows, for its presentation time.
         let shown_on = match &session.target {
-            Target::Output(output) => output.upgrade(),
+            Target::Output(output) | Target::Region(output, _) => output.upgrade(),
             _ => window.as_ref().and_then(|w| self.window_output(w)),
         };
         let clear = match window {
@@ -549,12 +591,9 @@ impl Pila {
             None => render::clear_color(scene),
         };
 
-        let output_for_blur = match &session.target {
-            Target::Output(output) => output
-                .upgrade()
-                .and_then(|o| self.space.output_geometry(&o).map(|geo| (o.name(), geo))),
-            _ => None,
-        };
+        let output_for_blur = self
+            .target_area(&session.target)
+            .map(|a| (a.output.name(), a.geo));
         let Pila {
             backend,
             blur,
@@ -744,7 +783,7 @@ impl Pila {
     /// Stop the sessions of an output that went away.
     pub fn stop_captures_of(&mut self, output: &Output) {
         for session in &mut self.capture.sessions {
-            if matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output))
+            if matches!(&session.target, Target::Output(o) | Target::Region(o, _) if o.upgrade().as_ref() == Some(output))
             {
                 session.stop();
             }
