@@ -61,16 +61,26 @@ jobs:
         id: packages
         env:
           GH_TOKEN: ${{ github.token }}
+        # The last $KEEP releases that have packages: one whose weren't built
+        # (0.9.1) is passed over.
         run: |
           gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
-            --limit "$KEEP" --json tagName --jq '.[].tagName' > tags
+            --limit 20 --json tagName --jq '.[].tagName' > all-tags
+          : > tags
+          while read -r tag && [ "$(wc -l < tags)" -lt "$KEEP" ]; do
+            packages="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '[.assets[].name | select(endswith(".deb") or endswith(".rpm"))] | length' < /dev/null)"
+            if [ "$packages" -eq 0 ]; then
+              echo "$tag has no packages: passed over"
+              continue
+            fi
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "releases/$tag" \
+              --pattern '*.deb' --pattern '*.rpm' --pattern SHA256SUMS < /dev/null
+            (cd "releases/$tag" && sha256sum --check SHA256SUMS)
+            echo "$tag" >> tags
+          done < all-tags
           test -s tags
           echo "version=$(head -n 1 tags | sed 's/^v//')" >> "$GITHUB_OUTPUT"
-          while read -r tag; do
-            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "releases/$tag" \
-              --pattern '*.deb' --pattern '*.rpm' --pattern SHA256SUMS
-            (cd "releases/$tag" && sha256sum --check SHA256SUMS)
-          done < tags
       - name: APT repository
         run: |
           mkdir -p site/deb/pool/main site/deb/dists/stable/main/binary-amd64
