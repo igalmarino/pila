@@ -74,7 +74,7 @@ pub struct ScreenCasts {
     portal: Option<zbus::Connection>,
     /// Requests to share waiting for the picker, first come first asked:
     /// it shows one at a time (`share_picker.rs`).
-    pub(crate) waiting: std::collections::VecDeque<Share>,
+    pub(crate) waiting: std::collections::VecDeque<crate::share_picker::Ask>,
     next_id: u64,
 }
 
@@ -262,20 +262,25 @@ impl Pila {
                 if let Err(err) = self.connect_pipewire() {
                     warn!(err, "portal: can't connect to PipeWire");
                 }
-                self.screencast.waiting.push_back(Share {
-                    session,
-                    cursor,
-                    app,
-                    sources,
-                    reply,
-                });
+                self.screencast
+                    .waiting
+                    .push_back(crate::share_picker::Ask::Cast(Share {
+                        session,
+                        cursor,
+                        app,
+                        sources,
+                        reply,
+                    }));
                 self.show_share_picker();
+            }
+            Request::Screenshot { ask, app, reply } => {
+                self.portal_screenshot(ask, crate::screenshot::Shot { app, reply });
             }
             Request::Close { session } => {
                 debug!(session, "portal: session closed");
                 self.screencast
                     .waiting
-                    .retain(|share| share.session != session);
+                    .retain(|ask| ask.session() != Some(session.as_str()));
                 self.close_share_picker_of(&session);
                 self.screencast.casts.retain(|cast| cast.session != session);
                 self.trim_after_casts();

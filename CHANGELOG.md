@@ -8,6 +8,14 @@
   size, keeps updating while it's covered, minimized or on another workspace, follows its size,
   shows nothing new while the screen is locked, and its share ends when it closes. No more need
   of xdg-desktop-portal-wlr to share a single window.
+- **Apps' screenshots served by Pila:** an app that asks the desktop portal for a screenshot (a
+  browser's, a Flatpak's) gets it from Pila. With the portal's permission to take one unasked it
+  gets every monitor at once, as they're laid out; otherwise, or when it wants you to choose, the
+  share panel asks what to take, a monitor or a window (the window alone, even covered or
+  minimized), with Take. The picture, without the pointer, is saved in
+  `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten kept) and handed to the app. Pila's portal
+  configuration now names Pila for screenshots instead of xdg-desktop-portal-wlr; an own
+  `pila-portals.conf` should say `org.freedesktop.impl.portal.Screenshot=pila`.
 - **`scripts/install` names what a source build is missing:** it checks that pkg-config, the
   libraries' development files and libclang are there before it builds, and lists what to
   install, instead of a build script's panic deep in the build (bindgen's, for libclang).

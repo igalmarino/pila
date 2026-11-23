@@ -814,3 +814,107 @@ fn a_shared_window_sends_nothing_while_locked() {
     pila.wait("unlocked", |s| s["locked"] == false);
     consumer.wait_frame("with its change", |f| f.rgba(100, 75) == rgba(BLUE));
 }
+
+/// The PNG a screenshot's URI names: its size and RGBA pixels.
+fn screenshot_png(uri: &str) -> ((u32, u32), Vec<u8>) {
+    let path = uri.strip_prefix("file://").expect("a file URI");
+    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    let mut reader = decoder.read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut pixels).unwrap();
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    ((info.width, info.height), pixels)
+}
+
+fn png_pixel(((width, _), pixels): &((u32, u32), Vec<u8>), x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * width + x) * 4) as usize;
+    [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+}
+
+/// An app its permission store lets take one unasked gets every output at
+/// once, as it shows, without a question.
+#[test]
+fn a_screenshot_taken_unasked_is_the_whole_screen() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("shot").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "shot");
+    pila.settle();
+    let expected = pila.pixel(x as f64, y as f64);
+    let mut portal = Portal::connect(&bus.address);
+    let (response, uri) = portal
+        .screenshot("org.example.Browser", false, true)
+        .join()
+        .unwrap();
+    assert_eq!(response, 0, "Screenshot");
+    assert_eq!(
+        pila.state()["share_picker"]["shown"],
+        false,
+        "nothing asked"
+    );
+    let png = screenshot_png(&uri.expect("its URI"));
+    assert_eq!(png.0, (640, 480), "the output's size");
+    assert_eq!(png_pixel(&png, x, y), expected, "the window in it");
+}
+
+/// An app that wants to choose, or that its permission store doesn't let
+/// take one unasked, gets the picker: what's picked is taken (a window
+/// alone, at its size); Escape takes nothing.
+#[test]
+fn a_screenshot_of_what_the_user_picks() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("under").size(300, 200).color(GREEN).create();
+    pila.wait_focus("under");
+    client.window("over").size(200, 150).color(BLUE).create();
+    pila.wait_focus("over");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+
+    let asked = portal.screenshot("org.example.Browser", true, true);
+    let picker = wait_picker(&mut pila);
+    assert_eq!(picker["screenshot"], true);
+    assert_eq!(
+        picker["kinds"],
+        serde_json::json!(["output", "window", "window"])
+    );
+    assert_eq!(picker["sources"][2], "under");
+    let (x, y) = tile_of(&picker, 2);
+    pila.click_at(x, y);
+    pila.wait("under selected", |s| s["share_picker"]["selected"] == 2);
+    pila.key("Return");
+    let (response, uri) = asked.join().unwrap();
+    assert_eq!(response, 0, "Screenshot");
+    let png = screenshot_png(&uri.expect("its URI"));
+    assert_eq!(png.0, (300, 200), "the window's size");
+    assert_eq!(png_pixel(&png, 150, 100), rgba(GREEN), "the window alone");
+
+    // Not allowed to take one unasked: asked, and cancelled.
+    let asked = portal.screenshot("org.example.Browser", false, false);
+    wait_picker(&mut pila);
+    pila.key("Escape");
+    assert_eq!(asked.join().unwrap(), (1, None), "cancelled");
+}
+
+/// With two outputs side by side, a screenshot taken unasked is both, as
+/// they're laid out.
+#[test]
+fn a_screenshot_taken_unasked_covers_every_output() {
+    let (mut pila, bus, _pipewire) = start_with("A:640x480,B:640x480");
+    let client = pila.client();
+    pila.move_to(960.0, 240.0);
+    client.window("right").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "right");
+    assert!(x >= 640, "the window on B: {x}");
+    pila.settle();
+    let expected = pila.pixel(x as f64, y as f64);
+    let mut portal = Portal::connect(&bus.address);
+    let (response, uri) = portal
+        .screenshot("org.example.Browser", false, true)
+        .join()
+        .unwrap();
+    assert_eq!(response, 0, "Screenshot");
+    let png = screenshot_png(&uri.expect("its URI"));
+    assert_eq!(png.0, (1280, 480), "both outputs");
+    assert_eq!(png_pixel(&png, x, y), expected, "the window on B in it");
+}

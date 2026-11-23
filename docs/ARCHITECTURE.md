@@ -1159,7 +1159,20 @@ Key flows and invariants:
   only starts the damage tracker over; a window resized does the same as a new output size. A
   cast ends with its output or window, a stream error or PipeWire's connection; the app is told
   (`portal::end_session`: `Closed`).
-- **Share picker** (`share_picker.rs`): the consent to share. A panel on the output under the
+- **Portal screenshots** (`screenshot.rs`, the portal's Screenshot interface beside ScreenCast,
+  `portal::Request::Screenshot`): taken unasked (`portal_screenshot`) only when the app doesn't
+  want to choose and xdg-desktop-portal says its permission store allows it
+  (`permission_store_checked`): every output's layout at once, at the largest output scale
+  (`screenshot_geometry`, each output's elements drawn at its place); otherwise the request
+  waits for the share picker as an `Ask::Screenshot`, and what's picked is taken
+  (`take_screenshot`: an output, or a window alone as screen captures draw it). Never while
+  locked. No pointer. Drawn offscreen and read back as RGBA (`Captures::read_back`, finished by
+  `when_copied`), then encoded as a PNG and written on a thread into
+  `$XDG_RUNTIME_DIR/pila-screenshots` (private; the oldest past `SCREENSHOTS_KEPT` go); the app
+  gets its `file://` URI.
+- **Share picker** (`share_picker.rs`): the consent to share, or to take a screenshot (`Ask`:
+  either kind waits in `ScreenCasts::waiting`; a screenshot's panel offers both kinds of source,
+  says Take). A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id) and shows what it may share as live previews: every output,
   left to right, then, if it shares windows, every window with a foreign-toplevel identifier and

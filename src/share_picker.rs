@@ -91,6 +91,7 @@ const MIN_WIDTH: i32 =
     2 * PADDING + HINTS_WIDTH + FOOTER_SPACE + CANCEL_WIDTH + BUTTON_GAP + SHARE_WIDTH;
 /// The key hints in the footer, and their width.
 const HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "share"), ("Esc", "cancel")];
+const SCREENSHOT_HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "take"), ("Esc", "cancel")];
 const HINTS_WIDTH: i32 = crate::panel::hints_width(HINTS.len());
 
 /// The picker while it's shown (`Pila::share_picker`).
@@ -103,12 +104,57 @@ pub struct SharePicker {
 }
 
 struct Shown {
-    share: Share,
+    ask: Ask,
     /// The output the panel is on, by name.
     output: String,
     /// What there is to pick: the outputs, left to right, then the windows.
     sources: Vec<Source>,
     selected: usize,
+}
+
+/// What the picker asks about: a share, or a screenshot.
+pub enum Ask {
+    /// To share (`screencast.rs`).
+    Cast(Share),
+    /// To take a screenshot (`screenshot.rs`).
+    Screenshot(crate::screenshot::Shot),
+}
+
+impl Ask {
+    /// Who asks, as the picker names it.
+    fn app(&self) -> Option<&str> {
+        match self {
+            Ask::Cast(share) => share.app.as_deref(),
+            Ask::Screenshot(shot) => shot.app.as_deref(),
+        }
+    }
+
+    /// What may be picked: a screenshot may be of either.
+    fn sources(&self) -> crate::portal::Sources {
+        match self {
+            Ask::Cast(share) => share.sources,
+            Ask::Screenshot(_) => crate::portal::Sources {
+                monitors: true,
+                windows: true,
+            },
+        }
+    }
+
+    /// The portal session it's for (a share's).
+    pub(crate) fn session(&self) -> Option<&str> {
+        match self {
+            Ask::Cast(share) => Some(&share.session),
+            Ask::Screenshot(_) => None,
+        }
+    }
+
+    /// Nothing was picked: the app is told.
+    pub(crate) fn cancel(self) {
+        match self {
+            Ask::Cast(share) => share.reply.send(Err(Refused::Cancelled)),
+            Ask::Screenshot(shot) => shot.reply.send(Err(Refused::Cancelled)),
+        }
+    }
 }
 
 /// Something the picker offers.
@@ -388,8 +434,8 @@ impl Pila {
             return;
         }
         if self.is_locked() {
-            for share in self.screencast.waiting.drain(..) {
-                share.reply.send(Err(Refused::Cancelled));
+            for ask in self.screencast.waiting.drain(..) {
+                ask.cancel();
             }
             return;
         }
@@ -399,13 +445,13 @@ impl Pila {
             .filter_map(|o| Some((self.space.output_geometry(o)?, o.name())))
             .collect();
         outputs.sort_by_key(|(geo, _)| (geo.loc.x, geo.loc.y));
-        let Some(share) = self.screencast.waiting.pop_front() else {
+        let Some(ask) = self.screencast.waiting.pop_front() else {
             return;
         };
         if outputs.is_empty() {
-            share.reply.send(Err(Refused::Cancelled));
-            return;
+            return ask.cancel();
         }
+        let wanted = ask.sources();
         let pointer = self.pointer_location();
         let under = outputs
             .iter()
@@ -415,10 +461,10 @@ impl Pila {
         // What it may share: the outputs, then the windows that can be
         // (a foreign-toplevel identifier, a size), most recently used first.
         let mut sources: Vec<Source> = Vec::new();
-        if share.sources.monitors {
+        if wanted.monitors {
             sources.extend(outputs.iter().map(|(_, name)| Source::Output(name.clone())));
         }
-        if share.sources.windows {
+        if wanted.windows {
             let windows = self.windows.focus_history.iter().filter(|window| {
                 window.alive()
                     && crate::foreign_toplevel::identifier(window).is_some()
@@ -427,24 +473,25 @@ impl Pila {
             sources.extend(windows.cloned().map(Source::Window));
         }
         if sources.is_empty() {
-            info!("portal: nothing the app may share");
-            share.reply.send(Err(Refused::Cancelled));
+            info!("portal: nothing the app may pick");
+            ask.cancel();
             return self.show_share_picker();
         }
         // The output under the pointer selected first, else the window used
         // last.
-        let selected = if share.sources.monitors { under } else { 0 };
+        let selected = if wanted.monitors { under } else { 0 };
         // Modal, in front of everything: nothing else of Pila's stays open.
         self.end_switch();
         self.hide_shortcuts();
         self.close_overview();
         self.close_window_menu();
         info!(
-            app = share.app.as_deref().unwrap_or("?"),
+            app = ask.app().unwrap_or("?"),
+            screenshot = matches!(ask, Ask::Screenshot(_)),
             "portal: asking what to share"
         );
         self.share_picker.shown = Some(Shown {
-            share,
+            ask,
             output,
             sources,
             selected,
@@ -479,7 +526,7 @@ impl Pila {
             return;
         };
         info!("portal: sharing cancelled");
-        shown.share.reply.send(Err(Refused::Cancelled));
+        shown.ask.cancel();
         self.show_share_picker();
     }
 
@@ -490,7 +537,7 @@ impl Pila {
             .share_picker
             .shown
             .as_ref()
-            .is_some_and(|shown| shown.share.session == session)
+            .is_some_and(|shown| shown.ask.session() == Some(session))
         {
             self.take_share_picker();
             self.show_share_picker();
@@ -513,9 +560,10 @@ impl Pila {
                 .map(crate::capture::Target::Toplevel),
             None => None,
         };
-        match target {
-            Some(target) => self.start_cast(shown.share, target),
-            None => shown.share.reply.send(Err(Refused::Cancelled)),
+        match (target, shown.ask) {
+            (Some(target), Ask::Cast(share)) => self.start_cast(share, target),
+            (Some(target), Ask::Screenshot(shot)) => self.take_screenshot(Some(target), shot.reply),
+            (None, ask) => ask.cancel(),
         }
         self.show_share_picker();
     }
@@ -760,8 +808,9 @@ impl Pila {
         let key = TextKey {
             items: items(
                 &view.layout,
-                shown.share.app.as_deref(),
-                shown.share.sources,
+                shown.ask.app(),
+                shown.ask.sources(),
+                matches!(shown.ask, Ask::Screenshot(_)),
                 &labels,
                 &self.config.colors,
             ),
@@ -823,7 +872,8 @@ impl Pila {
         };
         serde_json::json!({
             "shown": true,
-            "app": shown.share.app,
+            "app": shown.ask.app(),
+            "screenshot": matches!(shown.ask, Ask::Screenshot(_)),
             "output": view.output,
             // Outputs by name, windows by app id.
             "sources": shown.sources.iter().map(|source| match source {
@@ -854,6 +904,7 @@ fn items(
     layout: &Layout,
     app: Option<&str>,
     sources: crate::portal::Sources,
+    screenshot: bool,
     labels: &[String],
     colors: &Colors,
 ) -> Vec<Item> {
@@ -868,11 +919,17 @@ fn items(
         _ => "a screen or a window",
     };
     let title = match app {
+        _ if screenshot => match app {
+            Some(app) => format!("Take a screenshot for {app}"),
+            None => "An app asks for a screenshot".to_string(),
+        },
         Some(app) if sources.monitors && sources.windows => format!("Share with {app}"),
         Some(app) => format!("Share {what} with {app}"),
         None => format!("An app asks to share {what}"),
     };
-    let note = if sources.windows {
+    let note = if screenshot {
+        "It will get a picture of what you pick, without the pointer."
+    } else if sources.windows {
         "It will see everything in what you pick until it stops sharing."
     } else {
         "It will see everything the screen shows until it stops sharing."
@@ -914,8 +971,9 @@ fn items(
     }
     // Share's label on the accent, as the switcher's selected title.
     let on_accent = bits(colors.hover_icon);
+    let act = if screenshot { "Take" } else { "Share" };
     for (rect, label, color) in [
-        (layout.share, "Share", on_accent),
+        (layout.share, act, on_accent),
         (layout.cancel, "Cancel", text),
     ] {
         let (x, y) = local(rect);
@@ -930,8 +988,13 @@ fn items(
         });
     }
     let hints_y = local(layout.share).1 + (BUTTON_HEIGHT - crate::panel::FOOTER_HEIGHT) / 2;
+    let hints = if screenshot {
+        &SCREENSHOT_HINTS
+    } else {
+        &HINTS
+    };
     items.extend(crate::panel::footer(
-        &HINTS,
+        hints,
         None,
         hints_y,
         panel.size.w,
@@ -1078,6 +1141,7 @@ mod tests {
             &layout(area(), 1, 0, 0),
             Some("App"),
             monitors,
+            false,
             &["A".into()],
             &colors,
         );

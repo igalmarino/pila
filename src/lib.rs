@@ -58,6 +58,7 @@ pub mod scale;
 pub mod screencast;
 pub mod screencast_buffers;
 pub mod screencopy;
+pub mod screenshot;
 pub mod sd_notify;
 pub mod session_bus;
 pub mod session_lock;

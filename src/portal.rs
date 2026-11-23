@@ -115,6 +115,14 @@ pub enum Request {
     },
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
     Close { session: String },
+    /// A screenshot, answered with its file's URI: of every output at once,
+    /// or of what the user picks (`ask`: the app wants to choose, or has no
+    /// permission to take one unasked).
+    Screenshot {
+        ask: bool,
+        app: Option<String>,
+        reply: Reply<Result<String, Refused>>,
+    },
 }
 
 /// A stream started for a session, as `Start` answers it.
@@ -149,11 +157,13 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
                 send: send.clone(),
                 selections: Mutex::default(),
             };
+            let screenshot = Screenshot { send: send.clone() };
             let built = zbus::block_on(
                 zbus::connection::Builder::address(address.as_str())
                     .method_timeout(std::time::Duration::from_secs(5))
                     .name(BUS_NAME)
                     .serve_at(PATH, screencast)
+                    .serve_at(PATH, screenshot)
                     .build(),
             );
             // Off the event loop, what its connection to PipeWire would
@@ -317,6 +327,55 @@ impl ScreenCast {
     #[zbus(property, name = "version")]
     fn version(&self) -> u32 {
         5
+    }
+}
+
+/// `org.freedesktop.impl.portal.Screenshot`.
+struct Screenshot {
+    send: calloop::channel::Sender<Request>,
+}
+
+#[zbus::interface(name = "org.freedesktop.impl.portal.Screenshot")]
+impl Screenshot {
+    async fn screenshot(
+        &self,
+        _handle: OwnedObjectPath,
+        app_id: String,
+        _parent_window: String,
+        options: HashMap<String, OwnedVariant>,
+    ) -> (u32, Results) {
+        let flag = |key: &str| {
+            options
+                .get(key)
+                .and_then(|v| bool::try_from(v).ok())
+                .unwrap_or(false)
+        };
+        // Taken unasked only when the app doesn't want to choose and
+        // xdg-desktop-portal says it may (its permission store).
+        let ask = flag("interactive") || !flag("permission_store_checked");
+        debug!(app_id, ask, "portal: screenshot");
+        let (reply, answer) = reply_channel();
+        let request = Request::Screenshot {
+            ask,
+            app: app_name(&app_id, &data_dirs()),
+            reply,
+        };
+        if self.send.send(request).is_err() {
+            return (RESPONSE_OTHER, Results::new());
+        }
+        match answer.await {
+            Some(Ok(uri)) => match OwnedVariant::try_from(Variant::from(uri)) {
+                Ok(uri) => (RESPONSE_SUCCESS, Results::from([("uri".to_string(), uri)])),
+                Err(_) => (RESPONSE_OTHER, Results::new()),
+            },
+            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
+            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        }
+    }
+
+    #[zbus(property, name = "version")]
+    fn version(&self) -> u32 {
+        2
     }
 }
 

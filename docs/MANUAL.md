@@ -701,6 +701,14 @@ a daemon they only reach the log.
 `wl-clipboard`. `grim` and other screenshot tools work on their own too, and so do a shell's own
 screenshot features.
 
+**An app's screenshot** (a browser's, a Flatpak's, anything that asks the desktop portal) is
+Pila's too. An app the portal lets take one without asking (its permission store) gets every
+monitor at once, as they're laid out; otherwise, or when the app wants you to choose, the same
+panel as for screen sharing asks what to take, a monitor or a window (the window alone, even
+covered or minimized): click or arrows, then **Take** (or Enter), or **Cancel** (or Escape). The
+pointer isn't in it. The picture is saved in `$XDG_RUNTIME_DIR/pila-screenshots` (the last ten
+are kept; it goes at logout) and handed to the app.
+
 **Screen sharing** in browsers, OBS and video calls goes through the desktop portal
 (`xdg-desktop-portal`), which hands it to Pila: Pila asks what to share and streams it over
 PipeWire, with no other program. When an app asks to share, a panel in the middle of the screen
@@ -731,16 +739,16 @@ do. On a TTY Pila hands the session bus and systemd its environment by itself (`
 
 **Portals.** xdg-desktop-portal picks its backends from `pila-portals.conf` (named after
 `XDG_CURRENT_DESKTOP`). Pila's, in `/etc/xdg/xdg-desktop-portal/`, uses `xdg-desktop-portal-gtk`
-for everything (a GTK file chooser) but screen sharing (Pila itself) and screenshots
-(`xdg-desktop-portal-wlr`). For GNOME's file chooser, install `xdg-desktop-portal-gnome` and
+for everything (a GTK file chooser) but screen sharing and screenshots (Pila itself). For GNOME's file chooser, install `xdg-desktop-portal-gnome` and
 Nautilus, and write your own `~/.config/xdg-desktop-portal/pila-portals.conf`. It replaces Pila's
-whole, so keep its `ScreenCast` and `Screenshot` lines, or screen sharing stops working:
+whole, so keep its `ScreenCast` and `Screenshot` lines, or screen sharing and apps' screenshots
+stop working:
 
 ```ini
 [preferred]
 default=gnome;gtk
 org.freedesktop.impl.portal.ScreenCast=pila
-org.freedesktop.impl.portal.Screenshot=wlr
+org.freedesktop.impl.portal.Screenshot=pila
 # These need GNOME Shell in the GNOME backend.
 org.freedesktop.impl.portal.Access=gtk
 org.freedesktop.impl.portal.Notification=gtk

@@ -661,6 +661,43 @@ impl Portal {
         Started { thread }
     }
 
+    /// Ask for a screenshot as app `app_id`, as xdg-desktop-portal asks:
+    /// `interactive` (the app wants to choose), `checked` (its permission
+    /// store lets it take one unasked). Its answer comes on a thread: the
+    /// response and the picture's URI.
+    pub fn screenshot(
+        &mut self,
+        app_id: &str,
+        interactive: bool,
+        checked: bool,
+    ) -> std::thread::JoinHandle<(u32, Option<String>)> {
+        let handle = self.handle();
+        let bus = self.bus.clone();
+        let app_id = app_id.to_string();
+        std::thread::spawn(move || {
+            let options = HashMap::from([
+                ("interactive".to_string(), OwnedVariant::from(interactive)),
+                (
+                    "permission_store_checked".to_string(),
+                    OwnedVariant::from(checked),
+                ),
+            ]);
+            let reply = zbus::block_on(bus.call_method(
+                Some(NAME),
+                PATH,
+                Some("org.freedesktop.impl.portal.Screenshot"),
+                "Screenshot",
+                &(handle, app_id.as_str(), "", options),
+            ))
+            .unwrap_or_else(|err| panic!("Screenshot: {err}"));
+            let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
+            let uri = results
+                .get("uri")
+                .map(|uri| String::try_from(uri.try_clone().unwrap()).unwrap());
+            (response, uri)
+        })
+    }
+
     /// Close the session `name`, as xdg-desktop-portal does when the app
     /// stops sharing.
     pub fn close(&self, name: &str) {
