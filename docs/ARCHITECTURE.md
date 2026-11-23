@@ -1325,7 +1325,10 @@ Key flows and invariants:
   on, enabled: `apply_vrr`), as gamma is. While it's on, `frame_finish` reports a variable
   refresh (`Refresh::Variable`) in presentation feedback.
 - **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
-  surface state (`BlurRegion`, committed by Smithay); `Pila::scene` evaluates it per
+  surface state (`BlurRegion`, committed by Smithay), decomposed into rectangles on every
+  frame (`region_rects`): a region of more than `MAX_REGION_RECTS` rectangles, or one that
+  breaks into more, is drawn as its bounding box, so a client's region costs Pila little
+  however it's made; `Pila::scene` evaluates it per
   layer surface into `SceneLayer::blur` (upper layers only for now) and per window into
   `SceneWindow::blur` (`blur = true` in a rule covers the geometry and title bar, not a
   client's shadow; a window opaque over its geometry and at full opacity gets none,

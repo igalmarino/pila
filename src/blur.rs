@@ -128,16 +128,37 @@ fn client_region(surface: &WlSurface) -> Option<(Option<RegionAttributes>, Size<
 }
 
 /// A client's region as rectangles, clipped to `bounds`.
+/// The most rectangles a region is drawn as: a client's region is
+/// decomposed on every frame, and past this it's drawn as its bounding box.
+const MAX_REGION_RECTS: usize = 64;
+
 fn region_rects(
     region: &RegionAttributes,
     bounds: Rectangle<i32, Logical>,
 ) -> Vec<Rectangle<i32, Logical>> {
+    // What's added, as one box: at least what the client asked for.
+    let bounding = || {
+        region
+            .rects
+            .iter()
+            .filter(|(kind, _)| matches!(kind, RectangleKind::Add))
+            .filter_map(|(_, rect)| rect.intersection(bounds))
+            .reduce(|a, b| a.merge(b))
+            .into_iter()
+            .collect()
+    };
+    if region.rects.len() > MAX_REGION_RECTS {
+        return bounding();
+    }
     let mut rects: Vec<Rectangle<i32, Logical>> = Vec::new();
     for (kind, rect) in &region.rects {
         match kind {
             RectangleKind::Add => rects.extend(rect.intersection(bounds)),
             RectangleKind::Subtract => {
                 rects = Rectangle::subtract_rects_many(rects, [*rect]);
+                if rects.len() > MAX_REGION_RECTS {
+                    return bounding();
+                }
             }
         }
     }
@@ -1152,5 +1173,54 @@ impl Dispatch<ExtBackgroundEffectSurfaceV1, WlSurface> for Pila {
                 *slot.0.locked() = None;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{region_rects, MAX_REGION_RECTS};
+    use smithay::{
+        utils::Rectangle,
+        wayland::compositor::{RectangleKind, RegionAttributes},
+    };
+
+    /// A client's region is decomposed on every frame: however many
+    /// rectangles it sends, what comes out stays few, covering at least what
+    /// it asked for (blurring more is harmless, the frame missed isn't).
+    #[test]
+    fn a_region_of_many_rectangles_gives_few() {
+        let bounds = Rectangle::from_size((1000, 1000).into());
+        let mut rects = vec![(RectangleKind::Add, bounds)];
+        for y in 0..40 {
+            for x in 0..40 {
+                let hole = Rectangle::new((x * 25 + 5, y * 25 + 5).into(), (10, 10).into());
+                rects.push((RectangleKind::Subtract, hole));
+            }
+        }
+        let region = RegionAttributes { rects };
+        let started = std::time::Instant::now();
+        let out = region_rects(&region, bounds);
+        assert!(started.elapsed() < std::time::Duration::from_millis(5));
+        assert!(out.len() <= MAX_REGION_RECTS, "{} rects", out.len());
+        assert!(out.iter().any(|r| r.contains((1, 1))));
+        assert!(out.iter().any(|r| r.contains((998, 998))));
+    }
+
+    /// A few rectangles, as clients send, are kept as they are.
+    #[test]
+    fn a_region_of_few_rectangles_is_kept() {
+        let bounds = Rectangle::from_size((100, 100).into());
+        let region = RegionAttributes {
+            rects: vec![
+                (RectangleKind::Add, bounds),
+                (
+                    RectangleKind::Subtract,
+                    Rectangle::new((40, 40).into(), (20, 20).into()),
+                ),
+            ],
+        };
+        let out = region_rects(&region, bounds);
+        assert_eq!(out.len(), 4);
+        assert!(!out.iter().any(|r| r.contains((50, 50))));
     }
 }
