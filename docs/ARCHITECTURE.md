@@ -1499,7 +1499,8 @@ Key flows and invariants:
   the focus types see it, so the focus types don't guard them: `lock` closes them, cancelling
   the portal requests waiting first (else cancelling the shown picker would show the next one,
   the session not locked yet), the input paths skip them while locked, and `start_cast` and
-  `take_screenshot` refuse while locked.
+  `take_screenshot` refuse while locked. A Mod+Tab in progress ends (`end_switch`), and the
+  switcher's tiles take no click while locked.
   `tests/lock.rs::nothing_but_the_lock_gets_input_or_shows_while_locked` tries every action
   (`Action::examples`, a table a new kind of action doesn't build without), gesture,
   activation, taskbar and pager request and the window menu while locked. The lock is confirmed (`confirm_lock`)

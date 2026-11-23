@@ -584,6 +584,50 @@ fn locking_stops_a_repeating_binding() {
     assert_eq!(runs(&pila), stopped, "the binding ran on while locked");
 }
 
+/// A Mod+Tab in progress as the session locks (swayidle locking while Mod is
+/// held) is over: its switcher is gone, and a click where a tile was goes to
+/// the lock surface, activating no window.
+#[test]
+fn locking_ends_a_switch_and_its_switcher() {
+    let mut pila = TestPila::start();
+    let apps = pila.client();
+    apps.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    apps.window("b").size(400, 300).create();
+    pila.wait_focus("b");
+    pila.key_press("Super");
+    pila.key("Tab");
+    let state = pila.wait("the switcher", |s| s["switcher_view"]["shown"] == true);
+    let tile = state["switcher_view"]["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["app_id"] == "b")
+        .unwrap()["rect"]
+        .clone();
+    let f = |k: &str| tile[k].as_f64().unwrap();
+    let (x, y) = (f("x") + f("w") / 2.0, f("y") + f("h") / 2.0);
+
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    locker.lock_surface(&lock, "HEADLESS-1", LOCK_COLOR);
+    locker.wait_logged("lock", "Locked");
+    let state = pila.wait("locked", |s| s["locked"] == true);
+    assert!(state["switch"].is_null(), "the switch is over");
+    assert_eq!(state["switcher_view"]["shown"], false);
+
+    apps.clear_events();
+    pila.click_at(x, y);
+    locker.wait("the click on the lock surface", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, common::client::Ev::Button { pressed: false, .. }))
+    });
+    pila.key_release("Super");
+    pila.settle();
+    assert!(pila.state()["switch"].is_null());
+}
+
 /// An output that changes while locked (here its scale) has its lock surface
 /// sized to it again: one left at the old size would leave part of the
 /// screen uncovered, or hang off it.

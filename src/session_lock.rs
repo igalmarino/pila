@@ -245,6 +245,9 @@ impl SessionLockHandler for Pila {
         self.close_window_menu();
         self.hide_shortcuts();
         self.close_overview();
+        // A Mod+Tab in progress ends as if Mod were let go, its switcher
+        // with it.
+        self.end_switch();
         let held = self
             .session_lock
             .lock

@@ -280,7 +280,7 @@ impl Pila {
     /// The window of the tile at `location` (global), if the switcher is
     /// shown there.
     pub fn switcher_view_window_at(&self, location: Point<f64, Logical>) -> Option<Window> {
-        if !self.switcher_view.shown {
+        if !self.switcher_view.shown || self.is_locked() {
             return None;
         }
         let (_, tiles, _) = self.switcher_layout()?;
