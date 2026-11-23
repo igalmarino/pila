@@ -1094,3 +1094,25 @@ fn install_names_the_missing_build_dependencies() {
     assert!(cargo_ran, "cargo didn't run: {stderr}");
     assert!(!stderr.contains("Missing"), "{stderr}");
 }
+
+/// Without XDG_RUNTIME_DIR (run with sudo, or outside a login session) Pila
+/// says so and how to start it, rather than crashing with a backtrace.
+#[test]
+fn without_a_runtime_dir_pila_says_so() {
+    let dir = std::env::temp_dir().join(format!("pila-no-runtime-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_pila"))
+        .args(["--backend", "headless"])
+        .env_remove("XDG_RUNTIME_DIR")
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .env("XDG_CONFIG_HOME", &dir)
+        .env("XDG_STATE_HOME", &dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("XDG_RUNTIME_DIR"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "a crash: {stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

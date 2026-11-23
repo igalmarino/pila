@@ -330,6 +330,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(error) = missing_library("libEGL.so.1") {
         return Err(error.into());
     }
+    // Its Wayland socket goes there: without it (started with sudo, or
+    // outside a login session), say so rather than crash.
+    if std::env::var_os("XDG_RUNTIME_DIR").is_none_or(|dir| dir.is_empty()) {
+        return Err(
+            "XDG_RUNTIME_DIR is not set, so Pila has nowhere for its Wayland socket: \
+             start it from a login screen, or as your own user (not with sudo)"
+                .into(),
+        );
+    }
 
     let display: Display<Pila> = Display::new()?;
     let mut state = Pila::new(&mut event_loop, display, config);
