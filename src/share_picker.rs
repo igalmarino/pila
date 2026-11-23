@@ -131,11 +131,11 @@ impl Ask {
         }
     }
 
-    /// The xdg-foreign handle of the window it was asked from.
-    fn parent(&self) -> Option<&str> {
+    /// The window it was asked from, as the portal said it.
+    fn parent(&self) -> Option<&crate::portal::ParentWindow> {
         match self {
-            Ask::Cast(share) => share.parent.as_deref(),
-            Ask::Screenshot(shot) => shot.parent.as_deref(),
+            Ask::Cast(share) => share.parent.as_ref(),
+            Ask::Screenshot(shot) => shot.parent.as_ref(),
         }
     }
 
@@ -502,8 +502,7 @@ impl Pila {
         if app.is_none() {
             let window = ask
                 .parent()
-                .and_then(|handle| self.globals.xdg_foreign.exported_surface(handle))
-                .and_then(|surface| self.window_for_surface(surface));
+                .and_then(|parent| self.window_of_parent(parent));
             if let Some(window) = window {
                 let app_id = crate::foreign_toplevel::app_id(&window);
                 if !app_id.is_empty() {
@@ -533,6 +532,25 @@ impl Pila {
         self.draw_share_picker_text();
         if let Some(app_id) = look_up {
             self.name_share_picker_app(app_id);
+        }
+    }
+
+    /// The window a portal request says it comes from: the one exported as
+    /// its xdg-foreign handle, or the X11 window of its id (any X11 client
+    /// could name another's, but one outside a sandbox, the only kind named
+    /// this way, can do as much harm on its own).
+    pub(crate) fn window_of_parent(&self, parent: &crate::portal::ParentWindow) -> Option<Window> {
+        match parent {
+            crate::portal::ParentWindow::Wayland(handle) => {
+                let surface = self.globals.xdg_foreign.exported_surface(handle)?;
+                self.window_for_surface(surface)
+            }
+            crate::portal::ParentWindow::X11(id) => self
+                .space
+                .elements()
+                .chain(self.off_space_windows())
+                .find(|w| w.x11_surface().is_some_and(|x| x.window_id() == *id))
+                .cloned(),
         }
     }
 

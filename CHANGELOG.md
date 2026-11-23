@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **The share panel names X11 apps too** by the window they ask from (Chrome, Discord or OBS
+  running through Xwayland), as it names Wayland apps that say theirs.
+
 ## 0.9.2 (2026-11-22)
 
 - **The .deb and .rpm are back:** 0.9.1's weren't built (a mistake in their description, from

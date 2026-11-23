@@ -129,7 +129,7 @@ pub struct Share {
     pub cursor: CursorMode,
     /// Who asks (`portal::Request::Start`), and the window it asks from.
     pub app: Option<String>,
-    pub parent: Option<String>,
+    pub parent: Option<crate::portal::ParentWindow>,
     /// What it may share: the picker offers these.
     pub sources: portal::Sources,
     pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,

@@ -369,7 +369,7 @@ impl Pila {
         &mut self,
         session: String,
         app: Option<String>,
-        parent: Option<String>,
+        parent: Option<crate::portal::ParentWindow>,
         asked: Vec<Asked>,
         reply: Reply<Result<Vec<Bound>, Refused>>,
     ) {
@@ -384,9 +384,8 @@ impl Pila {
         // An app without an app id is known by the window it binds from.
         if self.app_shortcuts.sessions[index].app.is_empty() {
             let window = parent
-                .as_deref()
-                .and_then(|handle| self.globals.xdg_foreign.exported_surface(handle))
-                .and_then(|surface| self.window_for_surface(surface));
+                .as_ref()
+                .and_then(|parent| self.window_of_parent(parent));
             if let Some(window) = window {
                 self.app_shortcuts.sessions[index].app = crate::foreign_toplevel::app_id(&window);
             }

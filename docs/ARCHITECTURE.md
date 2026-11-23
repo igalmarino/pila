@@ -1203,8 +1203,9 @@ Key flows and invariants:
   says Take). A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id; an app with none, outside a sandbox, by the window it asks
-  from, the request's `parent_window` an xdg-foreign handle, `XdgForeignState::exported_surface`
-  of Pila's Smithay fork: that window's app id, then its desktop entry's name read on a thread,
+  from, the request's `parent_window` (`portal::ParentWindow`, `window_of_parent`): an
+  xdg-foreign handle, `XdgForeignState::exported_surface` of Pila's Smithay fork, or an X11
+  window's id; that window's app id, then its desktop entry's name read on a thread,
   `name_share_picker_app`) and shows what it may share as live previews: every output,
   left to right, then, if it shares windows, every window with a foreign-toplevel identifier and
   a size, in focus order (`focus_history`; minimized and other workspaces' too). With both kinds

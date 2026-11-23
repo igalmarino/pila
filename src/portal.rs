@@ -112,9 +112,8 @@ pub enum Request {
         /// Who asks, as the picker names it: its desktop entry's name, else
         /// its app id; `None` if the portal didn't say (`app_name`).
         app: Option<String>,
-        /// The app's window the request came from, by its xdg-foreign
-        /// handle (`parent_handle`).
-        parent: Option<String>,
+        /// The app's window the request came from (`parent_handle`).
+        parent: Option<ParentWindow>,
         reply: Reply<Result<Vec<Stream>, Refused>>,
     },
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
@@ -125,7 +124,7 @@ pub enum Request {
     Screenshot {
         ask: bool,
         app: Option<String>,
-        parent: Option<String>,
+        parent: Option<ParentWindow>,
         reply: Reply<Result<String, Refused>>,
     },
     /// A color the user picks on the screen (`color_pick.rs`).
@@ -141,7 +140,7 @@ pub enum Request {
     BindShortcuts {
         session: String,
         app: Option<String>,
-        parent: Option<String>,
+        parent: Option<ParentWindow>,
         shortcuts: Vec<crate::app_shortcuts::Asked>,
         reply: Reply<Result<Vec<crate::app_shortcuts::Bound>, Refused>>,
     },
@@ -673,14 +672,25 @@ impl Screenshot {
     }
 }
 
-/// A portal request's parent window, `wayland:<handle>` (an xdg-foreign
-/// handle the app exported its window as): the handle.
-fn parent_handle(parent_window: &str) -> Option<String> {
-    parent_window
-        .strip_prefix("wayland:")
-        .map(str::trim)
-        .filter(|handle| !handle.is_empty())
-        .map(str::to_string)
+/// The app's window a portal request comes from (its `parent_window`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParentWindow {
+    /// `wayland:<handle>`: the xdg-foreign handle the app exported it as.
+    Wayland(String),
+    /// `x11:<id>`: an X11 window's id, in hexadecimal.
+    X11(u32),
+}
+
+/// A request's `parent_window` (none for an empty or unknown one).
+fn parent_handle(parent_window: &str) -> Option<ParentWindow> {
+    let parent_window = parent_window.trim();
+    if let Some(handle) = parent_window.strip_prefix("wayland:") {
+        let handle = handle.trim();
+        return (!handle.is_empty()).then(|| ParentWindow::Wayland(handle.to_string()));
+    }
+    let id = parent_window.strip_prefix("x11:")?.trim();
+    let id = id.strip_prefix("0x").unwrap_or(id);
+    u32::from_str_radix(id, 16).ok().map(ParentWindow::X11)
 }
 
 /// Where desktop entries are looked for: `$XDG_DATA_HOME` (or
@@ -893,6 +903,25 @@ mod tests {
         // A window's position means nothing: it has none.
         assert_eq!(property(1, "source_type"), Some(Some(SOURCE_WINDOW)));
         assert!(!streams[1].1.contains_key("position"));
+    }
+
+    /// A request's parent window: a Wayland handle, an X11 window's id in
+    /// hexadecimal (with `0x` or not), or nothing Pila can use.
+    #[test]
+    fn a_parent_window_is_a_handle_or_an_x11_id() {
+        assert_eq!(
+            parent_handle("wayland:abc123"),
+            Some(ParentWindow::Wayland("abc123".into()))
+        );
+        assert_eq!(
+            parent_handle("x11:5e00006"),
+            Some(ParentWindow::X11(0x5e00006))
+        );
+        assert_eq!(parent_handle("x11:0x2a"), Some(ParentWindow::X11(0x2a)));
+        assert_eq!(parent_handle(""), None);
+        assert_eq!(parent_handle("wayland:"), None);
+        assert_eq!(parent_handle("x11:nothex"), None);
+        assert_eq!(parent_handle("other:1"), None);
     }
 
     /// The types an app selects: a monitor by default, windows when asked

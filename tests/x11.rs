@@ -1946,3 +1946,31 @@ fn an_x11_app_can_start_a_move_or_resize_of_its_window() {
         (gx - 30, gy - 20, gw + 30, gh + 20),
     );
 }
+
+/// An X11 app outside a sandbox asking to share the screen (no app id) is
+/// named by the X11 window it says it asks from (`parent_window`
+/// `x11:<id>`): its class.
+#[test]
+fn an_x11_app_is_named_by_its_window_in_the_share_picker() {
+    use common::pipewire::{Daemon, Portal};
+    let bus = notifications::Bus::start();
+    let pipewire = Daemon::start();
+    let mut pila = TestPila::start_with(Options {
+        env: vec![bus.env(), pipewire.env()],
+        ..Options::default()
+    });
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    let id = x.window("XApp", (300, 200), 0xff0000);
+    pila.wait("the X11 window", |s| {
+        x11_window(s, "XApp").is_some_and(|w| w["mapped"] == true)
+    });
+    let mut portal = Portal::connect(&bus.address);
+    portal.parent_window = format!("x11:{id:x}");
+    let started = portal.request("x11named", "", 1);
+    let state = pila.wait("the picker", |s| s["share_picker"]["shown"] == true);
+    assert_eq!(state["share_picker"]["app"], "XApp");
+    pila.key("Escape");
+    assert_eq!(started.answer().0, 1);
+}

@@ -38,7 +38,7 @@ pub struct Shot {
     /// Who asks (`portal::Request::Screenshot`), and the window it asks
     /// from.
     pub app: Option<String>,
-    pub parent: Option<String>,
+    pub parent: Option<crate::portal::ParentWindow>,
     pub reply: Reply<Result<String, Refused>>,
 }
 
