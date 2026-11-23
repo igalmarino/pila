@@ -15,13 +15,16 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
   an edge or corner; moving, resizing and centering from the keyboard; minimize; showing the
   desktop; keeping a window above the others or on all workspaces; moving windows and focus
   between monitors; switching by recent use (Mod+Tab, Alt+Tab), the windows shown as live
-  previews while it's held; tapping Mod alone opens the
+  previews while it's held; the overview (Mod+W, the top-left corner or a four-finger swipe up),
+  the workspace's windows spread out live, none over another, to pick one; tapping Mod alone opens the
   launcher (fuzzel by default); workspaces spanning all monitors (Mod+1..N, Mod and the mouse wheel,
   four-finger swipes); a window menu on the title bar (right click); windows asking for
   attention marked with an amber title bar; volume, brightness, media and screenshot keys bound
   by default (wpctl, brightnessctl, playerctl, grim and slurp); the screen locked and the
   monitors off after a while without input, by default (swayidle and swaylock); a shadow under each window (`[shadow]`); optional
-  rounded corners (`corner-radius`, `rounded-corners`: GTK's by default); your own colors (`[colors]`).
+  rounded corners (`corner-radius`, `rounded-corners`: GTK's by default); your own colors (`[colors]`);
+  every shortcut, with your own keys, on Mod+? (`show-shortcuts`), and the few to get going shown
+  on the first run.
 - **Animations**, short and subtle: windows opening, closing, minimizing, maximizing and
   snapping; launchers and notifications; workspaces sliding. Configurable, or off.
 - **Window and layer rules** by app id, title or namespace: animations, workspace, size,
@@ -52,10 +55,11 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
   desktop shell. Sandboxed apps (Flatpak) don't see the protocols that read the
   screen or act on other windows and input (wp-security-context).
 - **The desktop portal, served by Pila** (its own backend: no xdg-desktop-portal-wlr): screen
-  sharing for browsers, video calls and OBS over PipeWire, of a monitor or a single window (kept
+  sharing for browsers, video calls and OBS over PipeWire, of a monitor, a region of one you drag
+  out (marked on the screen in the accent color while it's shared) or a single window (kept
   updating while it's covered, minimized or on another workspace), picked in a panel Pila draws
   with live previews; apps' screenshots, of every monitor when the portal lets the app take one
-  unasked, else of the monitor or window you pick; a color picked from the screen (GTK's color
+  unasked, else of the monitor, region or window you pick; a color picked from the screen (GTK's color
   chooser, GIMP); and apps' global shortcuts (push-to-talk, a recorder's start and stop), whose
   keys you confirm or change in a panel and Pila remembers for each app. Nothing is shared or
   taken without your say, a shared window shows nothing new while the screen is locked, and
@@ -80,8 +84,8 @@ Usage is in the [manual](MANUAL.md), and each flow and invariant in
 - **A compositor, not a desktop environment:** bar, launcher, notifications, wallpaper and lock
   screen are external clients (layer shell, ext-session-lock, ...): standard tools such as
   waybar and fuzzel by default, any other one in their place. Pila draws only what a
-  compositor must or does best itself: title bars and the window switcher, with live previews
-  (its IPC tells another one what to show). The floating modes of KDE
+  compositor must or does best itself: title bars, and the window switcher and the overview, with
+  live previews (its IPC tells another switcher what to show). The floating modes of KDE
   Plasma, GNOME and COSMIC come with their own shell; labwc keeps Openbox's model and XML
   config; Wayfire is built around Compiz-style plugins. Pila has one TOML file and an IPC
   socket.

@@ -8,7 +8,7 @@
 # Pila user manual
 
 Pila is a stacking Wayland compositor: windows overlap and you move them around, as on most
-desktops. Pila draws the windows, their title bars and shadows and the window switcher, and
+desktops. Pila draws the windows, their title bars and shadows, the window switcher and the overview, and
 handles the keyboard, mouse, touchpad and monitors. The rest of a desktop (a bar, a launcher,
 notifications, a wallpaper, a lock screen) comes from separate, standard programs: by default waybar,
 fuzzel, mako and swayidle with swaylock, where they're installed (the package `pila-desktop`
@@ -233,7 +233,7 @@ them (`icon`, `icon-inactive`); a button under the pointer (`hover`, `hover-icon
 `close-hover`, `close-hover-icon` for the close button). `background` is what shows behind the
 windows without a wallpaper, and `snap-preview` the area a dragged window would snap to (it may
 be translucent: `#rrggbbaa`). Apps that draw their own title bar keep their own colors. Pila's
-window switcher takes the same colors; other programs can read them with `pila msg colors`.
+window switcher, overview and panels take the same colors; other programs can read them with `pila msg colors`.
 
 **Wallpaper.** A wallpaper program draws it: swaybg (package swaybg), or a shell's. The default
 `autostart` runs `swaybg` as it is, and Pila gives it its own wallpaper: `background`, plain,
