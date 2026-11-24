@@ -93,6 +93,9 @@ fn a_subsurface_moved_back_but_not_applied_makes_no_room_for_its_child() {
     let client = pila.client();
     let window = client.window("a").color(RED).create();
     pila.wait_focus("a");
+    // The window commits when the test says, never on a frame callback:
+    // that commit would apply sub1's move back.
+    client.set_auto_draw(window, false);
     let root = client.surface(window);
     let (sub1, sub1_object) = client.subsurface(&root, "sub1", (30_000, 0), (1, 1), RED);
     // The window's commit applies sub1's place.

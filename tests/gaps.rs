@@ -154,7 +154,7 @@ fn a_maximized_windows_shadow_on_the_next_output_is_redrawn() {
         ..Options::default()
     });
     let client = pila.client();
-    client.window("a").color(RED).create();
+    let a = client.window("a").color(RED).create();
     pila.wait_focus("a");
     pila.combo("Super+m");
     pila.wait("maximized inside the gap", |s| {
@@ -163,10 +163,10 @@ fn a_maximized_windows_shadow_on_the_next_output_is_redrawn() {
     pila.settle();
     let [shadow, ..] = pila.pixel(1281.0, 400.0);
     assert!(shadow < 200, "its shadow on B: {shadow}");
-    pila.combo("Super+m");
-    pila.wait("unmaximized", |s| {
-        window_in(s, "a").unwrap()["maximized"] == false
-    });
+    // Gone, its shadow goes from B too.
+    client.set_auto_draw(a, false);
+    client.unmap(a);
+    pila.wait("unmapped", |s| window_in(s, "a").is_none());
     pila.settle();
     assert_eq!(
         pila.pixel(1281.0, 400.0),
