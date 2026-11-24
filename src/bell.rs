@@ -35,6 +35,9 @@ const FLASH_COLOR: [f32; 4] = [0.18, 0.18, 0.18, 0.18];
 struct BellFlash {
     buffer: RefCell<SolidColorBuffer>,
     until: Cell<Option<Instant>>,
+    /// A timer is set to redraw it once it's over: one per window, however
+    /// often it rings.
+    timer: Cell<bool>,
 }
 
 /// The flash to draw over `window` this frame, if it's flashing: a buffer
@@ -69,14 +72,33 @@ impl Pila {
     fn flash_window(&mut self, window: &Window) {
         let flash = window.user_data().get_or_insert(BellFlash::default);
         flash.until.set(Some(Instant::now() + FLASH));
-        self.queue_redraw();
-        // Redraw again once it's over, so it disappears.
-        let _ = self
-            .loop_handle
-            .insert_source(Timer::from_duration(FLASH), |_, _, state| {
-                state.queue_redraw();
-                TimeoutAction::Drop
-            });
+        // Where it shows: its window, title bar included.
+        self.queue_redraw_window(window);
+        if flash.timer.replace(true) {
+            return;
+        }
+        // Redraw it once it's over, so it disappears: later than set if it
+        // rang again meanwhile.
+        let window = window.clone();
+        let inserted =
+            self.loop_handle
+                .insert_source(Timer::from_duration(FLASH), move |_, _, state| {
+                    let Some(flash) = window.user_data().get::<BellFlash>() else {
+                        return TimeoutAction::Drop;
+                    };
+                    let now = Instant::now();
+                    match flash.until.get() {
+                        Some(until) if until > now => TimeoutAction::ToDuration(until - now),
+                        _ => {
+                            flash.timer.set(false);
+                            state.queue_redraw_window(&window);
+                            TimeoutAction::Drop
+                        }
+                    }
+                });
+        if inserted.is_err() {
+            flash.timer.set(false);
+        }
     }
 }
 

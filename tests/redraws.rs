@@ -477,3 +477,38 @@ fn a_window_appearing_or_drawn_at_a_new_size_starts_settling() {
     );
     pila.wait("the bar's appearing noted", |s| settling(s) > resized);
 }
+
+/// The bell's flash shows on its window: ringing it redraws the outputs that
+/// window is on, not the others.
+#[test]
+fn the_bell_redraws_only_its_windows_output() {
+    use wayland_protocols::xdg::system_bell::v1::client::xdg_system_bell_v1::XdgSystemBellV1;
+    let mut pila = two_fast_outputs();
+    let client = pila.client();
+    pila.move_to(1280.0 + 500.0, 400.0);
+    let window = client.window("b").size(400, 300).create();
+    assert_eq!(pila.wait_window("b")["output"], "B");
+    client.roundtrip();
+    let before = pila.settle();
+    let bell: XdgSystemBellV1 = client.bind("xdg_system_bell_v1", 1);
+    bell.ring(Some(&client.surface(window)));
+    client.flush();
+    pila.wait("the flash", |s| {
+        window_in(s, "b").unwrap()["flashing"] == true
+    });
+    let after = pila.wait("the flash over, drawn", |s| {
+        window_in(s, "b").unwrap()["flashing"] == false && s["redraw_pending"] == false
+    });
+    let after = pila.wait("pila to settle", |s| {
+        s["redraw_pending"] == false && redraws(s, "B").0 >= redraws(&after, "B").0
+    });
+    assert!(
+        redraws(&after, "B").0 > redraws(&before, "B").0,
+        "B drew the flash"
+    );
+    assert_eq!(
+        redraws(&after, "A"),
+        redraws(&before, "A"),
+        "A was redrawn for a bell on B"
+    );
+}

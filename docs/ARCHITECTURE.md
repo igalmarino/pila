@@ -1038,8 +1038,9 @@ Key flows and invariants:
 - **System bell** (`bell.rs`, xdg-system-bell): visual only. The ringing window (its root
   window for a subsurface or popup; the focused window when the client names none) gets a
   short `BellFlash` in its user data, which `scene()` turns into a solid element drawn just
-  in front of that window and its title bar (`SceneWindow::flash`); a timer redraws when it
-  ends. Ignored while locked.
+  in front of that window and its title bar (`SceneWindow::flash`). Ringing redraws that
+  window's outputs (`queue_redraw_window`), and one timer per window (`BellFlash::timer`, put
+  off while it rings again) redraws them when it ends. Ignored while locked.
 - **Output scale** (`scale.rs`): per output from `[[output]]` (`Config::output`; nested
   the output is `winit`, scale only), may be fractional. Every coordinate Pila handles is
   logical; `render.rs` gets the scale per output (`scale::output_scale`). Pila's own
