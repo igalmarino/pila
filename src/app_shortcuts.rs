@@ -573,6 +573,8 @@ impl Pila {
         self.app_shortcuts.pending = None;
         *self.app_shortcuts.buffers.borrow_mut() = Buffers::default();
         self.queue_redraw();
+        // A share asked meanwhile waited for it.
+        self.show_share_picker();
         Some(panel)
     }
 

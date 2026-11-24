@@ -1200,7 +1200,7 @@ Key flows and invariants:
   (`emit_app_shortcut`, `portal::emit_shortcut`). Closing a session drops its shortcuts.
 - **Color picker** (`color_pick.rs`, the portal's `PickColor`, `portal::Request::PickColor`):
   `Pila::color_pick` holds the answer while it's on (one at a time; refused while locked or while
-  the share picker asks). Modal: the keyboard filter gives it every press (Escape cancels),
+  the share picker or an app's shortcuts panel asks). Modal: the keyboard filter gives it every press (Escape cancels),
   `pointer_button` every press (the first picks), `Pila::under` hits nothing; the pointer is a
   crosshair (`update_decoration_cursor`), the hot corner is off, and a panel at the top of the
   output under the pointer says what to do (`scene_color_pick`, front of `output_elements`; it
@@ -1208,8 +1208,9 @@ Key flows and invariants:
   elements drawn into a 1x1 texture with the pointer's pixel at its origin, read back
   (`Captures::read_back`, `when_copied`). Locking cancels it (`SessionLockHandler::lock`).
 - **Share picker** (`share_picker.rs`): the consent to share, or to take a screenshot (`Ask`:
-  either kind waits in `ScreenCasts::waiting`; a screenshot's panel offers both kinds of source,
-  says Take). A panel on the output under the
+  either kind waits in `ScreenCasts::waiting`, also while the color picker or an app's
+  shortcuts panel is open, both of which show it when they close; a screenshot's panel offers
+  both kinds of source, says Take). A panel on the output under the
   pointer names the app (`portal::Request::Start`'s `app`: its desktop entry's `Name`, read on
   the bus's thread, else its app id; an app with none, outside a sandbox, by the window it asks
   from, the request's `parent_window` (`portal::ParentWindow`, `window_of_parent`): an

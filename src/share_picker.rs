@@ -551,9 +551,14 @@ impl ScenePicker {
 
 impl Pila {
     /// Show the picker for the first request waiting, unless one is shown.
-    /// Never while locked: the requests are cancelled.
+    /// Never while locked: the requests are cancelled. While another of
+    /// Pila's panels that takes every key is open (the color picker, an
+    /// app's shortcuts), the requests wait for it to close.
     pub(crate) fn show_share_picker(&mut self) {
         if self.share_picker.shown.is_some() || self.screencast.waiting.is_empty() {
+            return;
+        }
+        if !self.is_locked() && (self.color_pick_open() || self.app_shortcuts_open()) {
             return;
         }
         if self.is_locked() {

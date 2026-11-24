@@ -1146,6 +1146,47 @@ fn a_color_is_picked_with_a_click() {
 /// Escape cancels it, and so does locking the screen; while it's on keys
 /// reach no app.
 #[test]
+fn a_share_asked_while_picking_a_color_waits_for_it() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let asked = portal.pick_color("org.example.Paint");
+    pila.wait("the color picker", color_pick_open);
+    let started = portal.request("waiting", "org.example.Browser", 1);
+    pila.wait("the share waiting", |s| s["share_picker"]["waiting"] == 1);
+    pila.stays(
+        "one panel at a time",
+        std::time::Duration::from_millis(200),
+        |s| s["share_picker"]["shown"] == false,
+    );
+    // Escape is the color picker's, and then the share picker comes.
+    pila.key("Escape");
+    assert_eq!(asked.join().unwrap(), (1, None), "color picking cancelled");
+    wait_picker(&mut pila);
+    assert!(!color_pick_open(&pila.state()));
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
+}
+
+#[test]
+fn no_color_is_picked_over_the_shortcuts_panel() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    portal.shortcuts_session("s1", "org.example.Talk");
+    let bound = portal.bind_shortcuts("s1", &[("talk", "Push to talk", "CTRL+F12")]);
+    pila.wait("the panel", |s| s["app_shortcuts"]["panel"]["text"] == true);
+    let asked = portal.pick_color("org.example.Paint");
+    // Checked before waiting for the answer: one shown wouldn't answer.
+    pila.stays(
+        "no color picker",
+        std::time::Duration::from_millis(300),
+        |s| !color_pick_open(s),
+    );
+    assert_eq!(asked.join().unwrap(), (1, None), "refused");
+    pila.key("Escape");
+    assert_eq!(bound.join().unwrap().0, 1);
+}
+
+#[test]
 fn color_picking_is_cancelled_by_escape_or_the_lock() {
     let (mut pila, bus, _pipewire) = start();
     let client = pila.client();
