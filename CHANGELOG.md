@@ -27,6 +27,25 @@
   containing a path, and could block on a FIFO.
 - **Fixed:** `pila-session` didn't remove `XAUTHORITY` from the systemd user environment when the
   session ended.
+- **Fixed:** Two screenshots saved at the same moment (two apps asking) could write over each
+  other, so an app got another's picture. Each is now its own file, readable by the user alone.
+- **Fixed:** A remembered global shortcut read back from `app-shortcuts.json` was bound even if no
+  app could be given that key (a plain letter); such an entry is now dropped and the app is asked
+  again.
+- **Fixed:** A share or screenshot asked while the color picker or an app's shortcuts panel was
+  open showed its panel over it; it now waits for the other to close. The color picker no longer
+  opens over the shortcuts panel.
+- **Fixed:** An X11 menu or tooltip could end up below a window opened or raised while it was
+  shown.
+- **Fixed:** Maximizing on an output too short for `gaps` and a title bar asked the window for a
+  negative height.
+- **Fixed:** A window held (pressed or dragged) in the overview that closed meanwhile stayed held.
+- **Fixed:** Session restore accepted a toplevel renamed to nothing, created sessions past its cap
+  when all were in use by several apps, and restored sizes from `sessions.json` that no window
+  could have (a negative one crashed debug builds).
+- **Fixed:** The bell's flash redrew every monitor instead of the ringing window's.
+- **Fixed:** `pila msg --json` passed DEL and C1 control characters from window titles to the
+  terminal as they were; they're now escaped.
 
 ## 0.9.4 (2026-11-23)
 
