@@ -105,6 +105,24 @@ pub(super) fn fallback_order(first: usize, modes: &[ModeKey]) -> Vec<usize> {
     order
 }
 
+/// The modes to try, as indices into `modes`, after one asked for that
+/// isn't among them (the connector's modes changed since: a link retrained
+/// at a lower rate drops the modes it can't carry): a listed one of its size
+/// and refresh with its fallbacks, else the lighter ones, as
+/// `fallback_order` would order them.
+pub(super) fn fallback_for_unlisted(asked: ModeKey, modes: &[ModeKey]) -> Vec<usize> {
+    if let Some(same) = modes.iter().position(|m| *m == asked) {
+        return fallback_order(same, modes);
+    }
+    let mut keys = vec![asked];
+    keys.extend_from_slice(modes);
+    fallback_order(0, &keys)
+        .into_iter()
+        .skip(1)
+        .map(|i| i - 1)
+        .collect()
+}
+
 /// Set `surface`'s CRTC up with its mode or, if that fails, with the first
 /// of its `fallback_order` that works, which then becomes its mode (and its
 /// `Output`'s). `None` if none did.
@@ -128,7 +146,16 @@ where
             .into_iter()
             .map(|i| surface.modes[i])
             .collect(),
-        None => vec![surface.mode],
+        // Tried as it is first: the kernel may still take it.
+        None => std::iter::once(surface.mode)
+            .chain(
+                fallback_for_unlisted(ModeKey::from(&surface.mode), &keys)
+                    .into_iter()
+                    .map(|i| surface.modes[i])
+                    .filter(|mode| *mode != surface.mode),
+            )
+            .take(MAX_MODE_ATTEMPTS)
+            .collect(),
     };
     let describe = |mode: &DrmMode| {
         let wl = WlMode::from(*mode);
@@ -301,7 +328,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
                             .output
                             .change_current_state(Some(wl_mode), None, None, None);
                         info!(name, mode = ?wl_mode.size, refresh_mhz = wl_mode.refresh, "output mode changed");
-                        surface.first_frame = true;
+                        surface.crtc_state.first_frame = true;
                         remodeled.push(id);
                     }
                     Err(err) => {
@@ -422,13 +449,21 @@ fn link_status(
 /// Outputs whose link the kernel marked bad (DisplayPort link training
 /// failed, typically after a resume or through a dock) show nothing until
 /// the compositor sets them up again: it sends a hotplug event and waits.
-/// Checked after every connector scan. On an atomic device the property is
-/// set back to good, which makes the kernel set the mode again (the same
-/// one); otherwise, or if that fails, the output is turned off and on.
+/// Checked after every connector scan with the session active (on another
+/// VT nothing could be set up: the scan at `ActivateSession` checks again).
+/// The connector's modes are read again first, since the kernel drops those
+/// the link can no longer carry. With the mode still listed, on an atomic
+/// device the property is set back to good, which makes the kernel set that
+/// mode again; otherwise, or if that fails, the output is turned off and on,
+/// falling back to a lighter mode if it must (`initialize_with_fallback`),
+/// and what's on it is fitted to the new mode.
 fn retrain_bad_links(state: &mut Pila) {
     let Some(Backend::Udev(data)) = &mut state.backend else {
         return;
     };
+    if !data.session.is_active() {
+        return;
+    }
     let bad: Vec<(OutputId, Output, property::Handle)> = data
         .outputs
         .iter()
@@ -438,6 +473,7 @@ fn retrain_bad_links(state: &mut Pila) {
             (value == LINK_STATUS_BAD).then(|| (*id, s.output.clone(), prop))
         })
         .collect();
+    let mut refit = false;
     for (id, output, prop) in bad {
         let name = output.name();
         warn!(name, "the monitor's link went bad: setting it up again");
@@ -445,7 +481,23 @@ fn retrain_bad_links(state: &mut Pila) {
         let Some(device) = data.drm_device(id) else {
             continue;
         };
-        let retrained = device.is_atomic() && {
+        let modes = device
+            .get_connector(connector, false)
+            .map(|info| info.modes().to_vec())
+            .unwrap_or_default();
+        let Some(surface) = data.outputs.get_mut(&id) else {
+            continue;
+        };
+        if !modes.is_empty() && modes != surface.modes {
+            info!(name, modes = modes.len(), "the monitor's modes changed");
+            surface.modes = modes;
+        }
+        let listed = surface.modes.contains(&surface.mode);
+        let mode_before = output.current_mode();
+        let Some(device) = data.drm_device(id) else {
+            continue;
+        };
+        let retrained = listed && device.is_atomic() && {
             let mut request = AtomicModeReq::new();
             request.add_property(
                 connector,
@@ -466,6 +518,7 @@ fn retrain_bad_links(state: &mut Pila) {
             warn!(name, "couldn't set the output up again");
             continue;
         }
+        refit |= output.current_mode() != mode_before;
         // A frame in flight still gets its vblank (`frame_finish`).
         if let Some(surface) = data.outputs.get_mut(&id) {
             surface.redraw_needed = true;
@@ -473,6 +526,10 @@ fn retrain_bad_links(state: &mut Pila) {
         info!(name, "link set up again");
     }
     data.queue_redraw();
+    // On a lighter mode: windows, panels and lock surfaces follow it.
+    if refit {
+        state.fit_to_outputs();
+    }
 }
 
 /// `name` for the output `id`, unless an output of another GPU has it (both
@@ -618,36 +675,24 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
             connector: connector.handle(),
             mode: drm_mode,
             global: None,
-            frame_pending: false,
-            last_vblank: None,
             last_vblank_time: None,
-            back_to_back: false,
             redraw_needed: true,
-            lock_frame: LockFrame::None,
             modes,
             gamma: None,
             gamma_lut,
+            power_on_when_active: false,
             gamma_pending: None,
-            gamma_in_flight: false,
-            recovery: Recovery::default(),
             adaptive_sync: false,
-            presented_variable: false,
-            first_frame: true,
             direct: false,
             swapchain_format: None,
             client_format: None,
             refused_scanout: None,
             scanout_feedback: None,
-            idle_until: None,
             idle_timer: false,
-            idle_streak: 0,
             redraw_content: crate::redraw::Content::Maybe,
-            request: None,
-            queued_request: None,
             render_timing: Default::default(),
-            render_at: None,
-            queued_held: false,
-            torn: false,
+
+            crtc_state: CrtcState::default(),
         },
     );
     if !enabled {
@@ -754,11 +799,7 @@ pub(super) fn enable_output(state: &mut Pila, id: OutputId) -> bool {
         scanout_formats = surface.scanout_feedback.is_some(),
         "direct scanout formats for clients"
     );
-    surface.drm_output = Some(drm_output);
-    surface.frame_pending = false;
-    surface.redraw_needed = true;
-    surface.recovery = Recovery::default();
-    surface.first_frame = true;
+    surface.crtc_set_up(drm_output);
     apply_vrr(surface);
     surface.global = Some(surface.output.create_global::<Pila>(&state.display_handle));
     let output = surface.output.clone();
@@ -782,13 +823,8 @@ pub(super) fn disable_output(state: &mut Pila, id: OutputId) {
     let Some(global) = surface.global.take() else {
         return;
     };
-    surface.drm_output = None;
+    surface.crtc_cleared();
     surface.scanout_feedback = None;
-    surface.frame_pending = false;
-    surface.gamma_in_flight = false;
-    surface.lock_frame = LockFrame::None;
-    surface.last_vblank = None;
-    surface.presented_variable = false;
     let output = surface.output.clone();
     crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     info!(name = output.name(), "output disabled");
@@ -1024,6 +1060,23 @@ mod tests {
             fallback_order(5, &[mode(1920, 1080, 60)]),
             Vec::<usize>::new()
         );
+    }
+
+    #[test]
+    fn a_mode_no_longer_listed_falls_back_to_the_lighter_ones_listed() {
+        // The link now carries no 4K: from 4K at 144 Hz, the 1440p modes.
+        let after: Vec<ModeKey> = monitor().into_iter().skip(3).take(3).collect();
+        assert_eq!(
+            fallback_for_unlisted(mode(3840, 2160, 144), &after),
+            [0, 1, 2]
+        );
+        // Still listed (another timing of it): from there, as usual.
+        assert_eq!(
+            fallback_for_unlisted(mode(2560, 1440, 144), &after),
+            fallback_order(1, &after)
+        );
+        // Nothing lighter left.
+        assert!(fallback_for_unlisted(mode(640, 480, 60), &after).is_empty());
     }
 
     #[test]

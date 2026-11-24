@@ -137,11 +137,11 @@ fn prepare(state: &mut Pila, id: OutputId) -> Option<Ready> {
     if let Some(Backend::Udev(data)) = &mut state.backend {
         let wait = data.outputs.get(&id).and_then(|surface| {
             let wait = idle_wait(
-                surface.idle_until,
+                surface.crtc_state.idle_until,
                 now,
                 surface.redraw_content,
-                surface.idle_streak,
-                surface.frame_pending,
+                surface.crtc_state.idle_streak,
+                surface.crtc_state.frame_pending,
                 lock_pending,
             );
             wait.filter(|_| surface.redraw_needed)
@@ -150,7 +150,7 @@ fn prepare(state: &mut Pila, id: OutputId) -> Option<Ready> {
             if let Some(request) = data
                 .outputs
                 .get_mut(&id)
-                .and_then(|surface| surface.request.as_mut())
+                .and_then(|surface| surface.crtc_state.request.as_mut())
             {
                 request.held = true;
             }
@@ -162,11 +162,11 @@ fn prepare(state: &mut Pila, id: OutputId) -> Option<Ready> {
         return None;
     };
     let surface = data.outputs.get(&id)?;
-    if surface.frame_pending
+    if surface.crtc_state.frame_pending
         || !surface.redraw_needed
         || surface.drm_output.is_none()
         || !data.session.is_active()
-        || surface.recovery.blocks_render()
+        || surface.crtc_state.recovery.blocks_render()
     {
         return None;
     }
@@ -226,19 +226,19 @@ fn hold_late(state: &mut Pila, id: OutputId, now: Duration, lock_pending: bool) 
     // shows at the same vblank either way).
     let steady = enabled
         && !lock_pending
-        && !surface.first_frame
-        && !surface.torn
-        && !surface.presented_variable
+        && !surface.crtc_state.first_frame
+        && !surface.crtc_state.torn
+        && !surface.crtc_state.presented_variable
         && !animating
         && !settling;
-    if let Some(hold) = surface.render_at {
+    if let Some(hold) = surface.crtc_state.render_at {
         if render_late::still_held(hold, now, steady) {
             return true;
         }
         // Its moment, or let go: drawn now (and not as held if let go, since
         // it isn't drawn its margin before the vblank).
         if now < hold.at {
-            surface.render_at = None;
+            surface.crtc_state.render_at = None;
         }
         return false;
     }
@@ -253,8 +253,8 @@ fn hold_late(state: &mut Pila, id: OutputId, now: Duration, lock_pending: bool) 
     let Some(hold) = at else {
         return false;
     };
-    surface.render_at = Some(hold);
-    if let Some(request) = surface.request.as_mut() {
+    surface.crtc_state.render_at = Some(hold);
+    if let Some(request) = surface.crtc_state.request.as_mut() {
         request.held = true;
     }
     data.schedule_late_render(id, hold.at);
@@ -315,7 +315,9 @@ fn draw(
     // scanout: the `direct scanout` log below says how many).
     let others_pending = outputs
         .iter()
-        .filter(|(other, surface)| **other != id && other.node == id.node && surface.frame_pending)
+        .filter(|(other, surface)| {
+            **other != id && other.node == id.node && surface.crtc_state.frame_pending
+        })
         .count();
     // Checked above; the commits applied since (`signal_commit_timers`)
     // can't take an output away, but nothing is lost by not counting on it.
@@ -339,9 +341,9 @@ fn draw(
     };
     surface.redraw_needed = false;
     surface.redraw_content = crate::redraw::Content::Maybe;
-    let request = surface.request.take();
+    let request = surface.crtc_state.request.take();
     // Held to be drawn now, its margin before the vblank (`render_late.rs`).
-    let held = surface.render_at.take();
+    let held = surface.crtc_state.render_at.take();
     // How long before its vblank a held frame was ready, if it is already.
     let mut spare = None;
 
@@ -507,8 +509,8 @@ fn draw(
                 let queue_started = std::time::Instant::now();
                 match drm_output.queue_frame(Some(feedback)) {
                     Ok(()) => {
-                        surface.frame_pending = true;
-                        surface.queued_held = held.is_some();
+                        surface.crtc_state.frame_pending = true;
+                        surface.crtc_state.queued_held = held.is_some();
                         // What it took to be ready, once its GPU work is
                         // done too (`render_late.rs`).
                         let waits = if direct {
@@ -540,18 +542,19 @@ fn draw(
                         }
                         // The first frame after a modeset starts a new grid
                         // of vblanks: nothing to measure it against.
-                        surface.queued_request =
-                            request.filter(|_| !surface.first_frame).map(|r| Request {
+                        surface.crtc_state.queued_request = request
+                            .filter(|_| !surface.crtc_state.first_frame)
+                            .map(|r| Request {
                                 drawn: Some(now),
                                 after: in_flight_shown(
                                     surface.last_vblank_time,
                                     r.in_flight,
-                                    surface.torn,
+                                    surface.crtc_state.torn,
                                 ),
                                 ..r
                             });
                         if scene.locked {
-                            surface.lock_frame = LockFrame::Queued;
+                            surface.crtc_state.lock_frame = LockFrame::Queued;
                         }
                     }
                     Err(err) => {
@@ -563,7 +566,7 @@ fn draw(
                 nothing_new = true;
                 if scene.locked {
                     // Nothing changed: the screen already shows the locked scene.
-                    surface.lock_frame = LockFrame::Shown;
+                    surface.crtc_state.lock_frame = LockFrame::Shown;
                 }
             }
         }
@@ -573,33 +576,42 @@ fn draw(
         }
     }
     if !scene.locked {
-        surface.lock_frame = LockFrame::None;
+        surface.crtc_state.lock_frame = LockFrame::None;
     }
-    let queued = surface.frame_pending;
+    let queued = surface.crtc_state.frame_pending;
     if held.is_some() {
-        surface.back_to_back = back_to_back_after_held(surface.back_to_back, queued);
+        surface.crtc_state.back_to_back =
+            back_to_back_after_held(surface.crtc_state.back_to_back, queued);
     }
-    let wait_over = surface.idle_until.is_none_or(|until| now >= until);
-    surface.idle_streak = idle_streak(surface.idle_streak, nothing_new, queued, wait_over);
-    surface.idle_until = nothing_new.then(|| {
+    let wait_over = surface
+        .crtc_state
+        .idle_until
+        .is_none_or(|until| now >= until);
+    surface.crtc_state.idle_streak = idle_streak(
+        surface.crtc_state.idle_streak,
+        nothing_new,
+        queued,
+        wait_over,
+    );
+    surface.crtc_state.idle_until = nothing_new.then(|| {
         let period = crate::frame_stats::refresh_period(&output);
         idle_until(surface.last_vblank_time, now, period)
     });
     let mut retry = None;
     if let Some((stage, err)) = failure {
-        retry = surface.recovery.failed();
-        if surface.recovery.should_log() {
+        retry = surface.crtc_state.recovery.failed();
+        if surface.crtc_state.recovery.should_log() {
             warn!(
                 output = output.name(),
                 stage,
                 err,
-                failures = surface.recovery.failures(),
+                failures = surface.crtc_state.recovery.failures(),
                 retry_ms = retry.map(|d| d.as_millis() as u64),
                 "frame failed; trying again later"
             );
         }
     } else if queued {
-        let failures = surface.recovery.succeeded();
+        let failures = surface.crtc_state.recovery.succeeded();
         if failures > 0 {
             info!(output = output.name(), failures, "output recovered");
         }
@@ -633,7 +645,7 @@ fn draw(
             Some(Backend::Udev(data)) => data
                 .outputs
                 .get_mut(&id)
-                .is_some_and(|s| std::mem::take(&mut s.first_frame)),
+                .is_some_and(|s| std::mem::take(&mut s.crtc_state.first_frame)),
             _ => false,
         };
         if first {
@@ -680,16 +692,16 @@ pub(super) fn frame_finish(
     let Some(surface) = data.outputs.get_mut(&id) else {
         return;
     };
-    surface.frame_pending = false;
+    surface.crtc_state.frame_pending = false;
     // A gamma change's vblank (`gamma.rs`), not a frame's: nothing new was
     // shown, and `last_vblank` stays the last frame's, so a running
     // animation counts this refresh as missed.
-    if std::mem::take(&mut surface.gamma_in_flight) {
+    if std::mem::take(&mut surface.crtc_state.gamma_in_flight) {
         render_output(state, id, true);
         return;
     }
-    if surface.lock_frame == LockFrame::Queued {
-        surface.lock_frame = LockFrame::Shown;
+    if surface.crtc_state.lock_frame == LockFrame::Queued {
+        surface.crtc_state.lock_frame = LockFrame::Shown;
     }
 
     let frame_duration = crate::frame_stats::refresh_period(&surface.output);
@@ -709,17 +721,23 @@ pub(super) fn frame_finish(
     // While an animation runs every vblank should show a new frame: the
     // vblanks since the last frame shown, beyond one, were missed (if it's
     // still running: the pause after one ends doesn't count).
-    let missed = match metadata.is_some().then_some(surface.last_vblank).flatten() {
-        Some(last) if !torn => missed_refreshes(last, seq, surface.back_to_back && animating),
+    let missed = match metadata
+        .is_some()
+        .then_some(surface.crtc_state.last_vblank)
+        .flatten()
+    {
+        Some(last) if !torn => {
+            missed_refreshes(last, seq, surface.crtc_state.back_to_back && animating)
+        }
         _ => 0,
     };
     // A frame asked for in time to show at a vblank, shown at a later one
     // (`frame_stats::late_refreshes`). With adaptive sync vblanks have no
     // fixed grid to measure by.
     let shown = hw_time.unwrap_or_else(|| now.into());
-    let request = surface.queued_request.take();
+    let request = surface.crtc_state.queued_request.take();
     let late = request
-        .filter(|_| !surface.presented_variable && !torn)
+        .filter(|_| !surface.crtc_state.presented_variable && !torn)
         .map_or(0, |r| {
             crate::frame_stats::late_refreshes(r.at, r.after, r.vblank, shown, frame_duration)
         });
@@ -740,7 +758,7 @@ pub(super) fn frame_finish(
     }
     // A frame held to be drawn late (`render_late.rs`) that still came late:
     // that output draws at once for a while.
-    if std::mem::take(&mut surface.queued_held) && (late > 0 || missed > 0) {
+    if std::mem::take(&mut surface.crtc_state.queued_held) && (late > 0 || missed > 0) {
         surface.render_timing.showed_late(now.into());
         debug!(
             target: "pila::frames",
@@ -748,11 +766,11 @@ pub(super) fn frame_finish(
             "render late: a held frame came late; drawing at once for a while"
         );
     }
-    surface.torn = torn;
+    surface.crtc_state.torn = torn;
     // From the first redraw asked for with something new to the vblank that
     // showed it (`frame_stats.rs`, latency).
     let latency = request.map(|r| shown.saturating_sub(r.at));
-    surface.last_vblank = metadata.is_some().then_some(seq);
+    surface.crtc_state.last_vblank = metadata.is_some().then_some(seq);
     // The time of a torn flip isn't a vblank's: the grid the next vblank is
     // reckoned from (`idle_until`, `commit_pacing`) stays the last one's.
     if !torn || surface.last_vblank_time.is_none() {
@@ -787,8 +805,8 @@ pub(super) fn frame_finish(
     } else {
         Refresh::fixed(frame_duration)
     };
-    if variable != surface.presented_variable {
-        surface.presented_variable = variable;
+    if variable != surface.crtc_state.presented_variable {
+        surface.crtc_state.presented_variable = variable;
         debug!(
             target: "pila::frames",
             name = surface.output.name(),
@@ -823,8 +841,9 @@ pub(super) fn frame_finish(
         if let Some(surface) = data.outputs.get_mut(&id) {
             // A frame held to be drawn late (`render_late.rs`) is on its
             // way too.
-            let on_its_way = surface.frame_pending || surface.render_at.is_some();
-            surface.back_to_back = back_to_back(animating, on_its_way);
+            let on_its_way =
+                surface.crtc_state.frame_pending || surface.crtc_state.render_at.is_some();
+            surface.crtc_state.back_to_back = back_to_back(animating, on_its_way);
         }
     }
 }
@@ -937,7 +956,7 @@ pub(super) fn maybe_confirm_lock(state: &mut Pila) {
     let outputs = data
         .outputs
         .values()
-        .map(|surface| (surface.drm_output.is_some(), surface.lock_frame));
+        .map(|surface| (surface.drm_output.is_some(), surface.crtc_state.lock_frame));
     if lock_shown(outputs) {
         state.confirm_lock();
     }

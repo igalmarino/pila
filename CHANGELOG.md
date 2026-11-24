@@ -7,6 +7,12 @@
   pointer to be pushed that many logical pixels past the corner (with a mouse or touchpad), and
   `hot-corner-delay` for it to stay there that many milliseconds. By default it's still the
   top-left corner, at once.
+- **Fixed:** A monitor whose DisplayPort link went bad (after a resume, or through a dock) while
+  Pila's session was on another VT could be left off; it's now set up again when the session is
+  back. And when the link could no longer carry the monitor's mode, the monitor stayed off: it
+  now comes on with a lighter mode, and windows and panels follow it.
+- **Fixed:** A monitor powered on (`pila msg action power-on-monitors`, `wlopm`) while Pila's
+  session was on another VT stayed off; it now comes on when the session is back.
 
 ## 0.9.6 (2026-11-24)
 

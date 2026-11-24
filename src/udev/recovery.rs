@@ -11,7 +11,7 @@ use std::time::Duration;
 const FIRST_DELAY: Duration = Duration::from_millis(100);
 const MAX_DELAY: Duration = Duration::from_secs(10);
 
-/// An output's failures since its last frame queued (`OutputSurface::recovery`).
+/// An output's failures since its last frame queued (`CrtcState::recovery`).
 #[derive(Debug, Default)]
 pub(super) struct Recovery {
     failures: u32,

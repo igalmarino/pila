@@ -320,7 +320,7 @@ Key flows and invariants:
   committing nothing in a loop of frame callbacks (no new picture: no buffer or one without
   damage, `redraw::brings_content`) or the pointer moving with the cursor hidden would make Pila
   redraw as fast as it loops. After any such redraw, whatever was asked, the output waits until half a period before its next
-  vblank (`draw::idle_until`, `OutputSurface::idle_until`; a one-shot timer,
+  vblank (`draw::idle_until`, `CrtcState::idle_until`; a one-shot timer,
   `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
   nothing (`draw::idle_wait`): at most one per refresh. What's asked says what it brings
   (`redraw::Content`, the most of the requests since the last redraw: `redraw_content`): a
@@ -331,7 +331,7 @@ Key flows and invariants:
   say), it waits too, until the wait is over. An output with a frame in flight (its vblank draws it)
   or a lock waiting for its frame never waits. Past those waits a frame is drawn late, its
   margin before the next vblank (`render-late`, on by default; `udev/render_late.rs`,
-  `draw::hold_late`), but only in a steady scene: `OutputSurface::render_at` holds the output
+  `draw::hold_late`), but only in a steady scene: `CrtcState::render_at` holds the output
   and a timer (`schedule_late_render`) draws it then, so what clients and input bring meanwhile
   makes that vblank. The margin is the worst of the output's last frames' readiness
   (`RenderTiming`: from `prepare` to the later of the commit queued and the GPU's fence, which
@@ -341,7 +341,7 @@ Key flows and invariants:
   hold it up), plus `render_late::SLACK`, never under half a period (`MIN_MARGIN_DIVISOR`).
   Nothing is held before a frame was measured, after a composited frame with no fence, with a
   vblank older than a second (the rounded refresh drifts), after a torn frame
-  (`OutputSurface::torn`), with adaptive sync, for the first frame after a modeset, while a lock
+  (`CrtcState::torn`), with adaptive sync, for the first frame after a modeset, while a lock
   waits, while Pila animates, or for 300 ms after a window or layer surface appears or a window
   draws itself at a new size (`Pila::start_settling`, from `animate_open`, `layer_committed` and
   `geometry_committed`'s `DrawnSize`, animated or not: `render_late::settling`): apps are busy
@@ -355,24 +355,35 @@ Key flows and invariants:
   the link's bandwidth) blocks only its own output until a per-output timer retries it
   (`recovery.rs`: 100 ms doubling up to 10 s, logged at the 1st, 2nd, 4th… failure, reset by
   a queued frame, `ActivateSession` or the output coming on; the retry takes DRM master
-  first), so one broken output never stops the others. Setting a CRTC up (`enable_output`,
+  first), so one broken output never stops the others. What lasts as long as a CRTC's current
+  setup (the frame in flight, the vblanks seen, the waits and holds, the recovery, the lock
+  frame: `CrtcState`) starts over whole, `CrtcState::default`, whenever the CRTC is cleared or set
+  up again (`OutputSurface::crtc_cleared` when powered off or disabled, `crtc_set_up` when
+  enabled or powered on, and at `ActivateSession`), never field by field. Setting a CRTC up (`enable_output`,
   `set_output_power`) goes through `initialize_with_fallback`: if the mode asked for fails
   (Smithay's `initialize_output` test-commits it, so a mode beyond the link's bandwidth fails
   there), the connector's `fallback_order` follows (same size at lower refresh, then smaller
   sizes, nothing heavier, at most 8 tries), and the one that works becomes the output's mode;
   after a power-on, `output_power.rs` then calls `Pila::fit_to_outputs`. A mode change asked
   for explicitly (`apply_output_config`) doesn't fall back: it fails and says so. After every
-  connector scan (a udev change event comes with it) `retrain_bad_links` looks for enabled
-  outputs whose `link-status` the kernel set to bad (DisplayPort link training failed, e.g.
-  after a resume or through a dock), which show nothing until the compositor acts: on an
-  atomic device a commit sets it back to good with `ALLOW_MODESET`, so the kernel sets the
-  same mode again (Smithay doesn't handle the property); otherwise, or if that fails, the
-  output is powered off and on. The session lock is
+  connector scan with the session active (a udev change event comes with it; on another VT
+  nothing could be set up, and the scan at `ActivateSession` checks again) `retrain_bad_links`
+  looks for enabled outputs whose `link-status` the kernel set to bad (DisplayPort link
+  training failed, e.g. after a resume or through a dock), which show nothing until the
+  compositor acts. It reads the connector's modes again first, since the kernel drops those the
+  link can no longer carry. With the mode still listed, on an atomic device a commit sets the
+  link back to good with `ALLOW_MODESET`, so the kernel sets the same mode again (Smithay
+  doesn't handle the property); otherwise, or if that fails, the output is powered off and on,
+  and `initialize_with_fallback` tries a mode no longer listed as it is and then the lighter
+  listed ones (`fallback_for_unlisted`); a new mode is followed by `Pila::fit_to_outputs`. The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
   releases held keys; `ActivateSession` takes DRM master, resets each device (`activate(true)`:
   every connector off, one modeset, since another compositor may have left them on other
-  CRTCs), clears each output's recovery and frame in flight (`first_frame` again), re-applies
-  gamma (`reapply_gamma`), then scans the connectors, opens GPUs added meanwhile
+  CRTCs), starts each output's `CrtcState` over, re-applies gamma (`reapply_gamma`, which drops
+  ramps that no longer fit the CRTC's gamma size, `ramp_fits`, rather than read past them),
+  powers on the outputs asked to come on while away (`power_on_when_active`: without DRM master
+  `set_output_power` can't set a CRTC up, so it remembers and says yes), then scans the
+  connectors, opens GPUs added meanwhile
   (`apply_other_gpus`) and re-applies the outputs, since a monitor plugged in meanwhile can't
   come on without DRM master (`enable_output` waits). Libinput devices get keyboard LEDs and the
   `[input.touchpad]`/`[input.mouse]` settings (`configure_pointer`; a touchpad is a device
@@ -545,7 +556,7 @@ Key flows and invariants:
   apart too (`record_upload`, an `uploads` line: how many, average and worst CPU), and so
   are captures' copies into shm finished once the GPU is done (`record_copy`, a `copies` line:
   the event loop's part, mapping the read-back and writing a portal share's buffer; a capture
-  client's buffer and a screenshot are written on the copy thread, not counted). The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
+  client's buffer and a screenshot are written on the copy thread, not counted). The first frame after an output is set up (`CrtcState::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
   (no frame queued: a commit with no new picture, the pointer moving with no cursor drawn) is counted
   apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless), and a
@@ -555,7 +566,7 @@ Key flows and invariants:
   time for a vblank (`frame_stats::IN_TIME`, 4 ms or half a period, before it; with a frame in
   flight, the vblank after the one that really showed it: one shown late doesn't make the next
   late) but shown at a later one counts its refreshes as missed,
-  animation or not, and is counted `late` (`late_refreshes`, from `OutputSurface::request`, the
+  animation or not, and is counted `late` (`late_refreshes`, from `CrtcState::request`, the
   first such request since the last redraw (one that finds nothing drops it); not with adaptive sync, nor for the first frame
   after a modeset). Each late frame is logged with what made it late: held back by the wait
   (`held`), drawn late (`drawn_after_ms`) or shown late after being drawn in time
@@ -578,7 +589,7 @@ Key flows and invariants:
   `render_late::Hold`) and how long before it they were ready (`spare_*`: from `RenderTiming`'s
   `queued` for a client's buffer, else its `gpu_done` through `Backend::gpu_done`; zero for one
   ready after it), and the frames' latency, from the first
-  redraw asked for with something new (`OutputSurface::request`) to the vblank that showed it
+  redraw asked for with something new (`CrtcState::request`) to the vblank that showed it
   (`latency_frames`, `latency_avg_ms`, `latency_max_ms`). `scripts/check` judges these
   lines and reports the idle redraws per output, the GPU time and latency per output and the
   loop's work.

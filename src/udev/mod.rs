@@ -237,7 +237,7 @@ pub struct UdevData {
     pointers: Vec<libinput::Device>,
     /// A render pass is already queued for this loop iteration.
     redraw_scheduled: bool,
-    /// When redraws are asked for (`OutputSurface::request`).
+    /// When redraws are asked for (`CrtcState::request`).
     clock: smithay::utils::Clock<smithay::utils::Monotonic>,
     loop_handle: LoopHandle<'static, Pila>,
     /// Last: see the struct docs.
@@ -254,20 +254,11 @@ struct OutputSurface {
     mode: DrmMode,
     /// Its `wl_output` global: `None` while disabled (`enabled`).
     global: Option<GlobalId>,
-    /// A frame was queued and its vblank hasn't arrived yet.
-    frame_pending: bool,
-    /// The sequence number of the vblank that showed the last frame.
-    last_vblank: Option<u64>,
     /// When the last frame was shown (the kernel's timestamp, on the
     /// presentation clock, if it gives one).
     last_vblank_time: Option<Duration>,
-    /// Pila wanted a new frame at every vblank after `last_vblank` (an
-    /// animation was running; `frame_stats.rs`).
-    back_to_back: bool,
     /// Something changed since the last frame.
     redraw_needed: bool,
-    /// Progress of the frame that confirms a session lock.
-    lock_frame: LockFrame,
     /// The connector's modes, for `[[output]]` mode changes on reload.
     modes: Vec<DrmMode>,
     /// The gamma ramps a client set (`gamma_control.rs`), re-applied
@@ -276,26 +267,15 @@ struct OutputSurface {
     /// The CRTC's `GAMMA_LUT`, through which a client's ramps go out without
     /// blocking (`gamma.rs`); `None` on a legacy device or driver.
     gamma_lut: Option<property::Handle>,
+    /// Powered on while the session was on another VT: it comes on when the
+    /// session is back (`set_output_power`).
+    power_on_when_active: bool,
     /// Ramps set but not sent yet: they go out once no frame is on its way
     /// (`commit_pending_gamma`).
     gamma_pending: Option<Vec<u16>>,
-    /// The commit on its way (`frame_pending`) is a gamma change, not a frame.
-    gamma_in_flight: bool,
-    /// Frames that failed at the DRM level (`recovery.rs`): drawing waits
-    /// for a retry instead of failing again on every event.
-    recovery: Recovery,
     /// Adaptive sync as `[[output]]` asks for it, set again whenever the
     /// CRTC is set up again (`outputs::apply_vrr`).
     adaptive_sync: bool,
-    /// Whether the last frame shown was reported to clients with a variable
-    /// refresh, logged when it changes (`scripts/check --vrr` reads it);
-    /// forgotten while the CRTC is off.
-    presented_variable: bool,
-    /// The next frame is the first since the CRTC was set up (connected,
-    /// enabled, powered on, a new mode, the session back): it allocates the
-    /// swapchain and commits the modeset, a cost of setting the output up
-    /// that's logged on its own, not counted in the frame budget.
-    first_frame: bool,
     /// The frame last queued was a client's buffer as it is, on the primary
     /// plane (`draw::frame_flags`); logged when it changes.
     direct: bool,
@@ -315,6 +295,50 @@ struct OutputSurface {
     /// dmabufs: the formats its primary plane takes first (`scanout_feedback`).
     /// Only for an output on the primary GPU, with a CRTC.
     scanout_feedback: Option<DmabufFeedback>,
+    /// That timer is set.
+    idle_timer: bool,
+    /// The most the redraws asked for since the last one bring
+    /// (`redraw::Content`): a change of Pila's own waits only past
+    /// `SURE_STREAK` redraws in a row that found nothing new, a client's
+    /// new picture doesn't unless the last two redraws found nothing new
+    /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
+    redraw_content: crate::redraw::Content,
+    /// What its recent frames took to be ready, for rendering late
+    /// (`render_late.rs`).
+    render_timing: render_late::RenderTiming,
+    /// What lasts as long as the CRTC's current setup (`CrtcState`).
+    crtc_state: CrtcState,
+}
+
+/// An output's state that lasts as long as its CRTC's current setup: the
+/// frame in flight, the vblanks seen, the waits and holds on its frames, its
+/// DRM failures. All of it starts over together whenever the CRTC is cleared
+/// or set up again (powered off or on, disabled, enabled, the session back
+/// from another VT): `CrtcState::default`, never field by field.
+struct CrtcState {
+    /// A frame was queued and its vblank hasn't arrived yet.
+    frame_pending: bool,
+    /// The sequence number of the vblank that showed the last frame.
+    last_vblank: Option<u64>,
+    /// Pila wanted a new frame at every vblank after `last_vblank` (an
+    /// animation was running; `frame_stats.rs`).
+    back_to_back: bool,
+    /// Progress of the frame that confirms a session lock.
+    lock_frame: LockFrame,
+    /// The commit on its way (`frame_pending`) is a gamma change, not a frame.
+    gamma_in_flight: bool,
+    /// Frames that failed at the DRM level (`recovery.rs`): drawing waits
+    /// for a retry instead of failing again on every event.
+    recovery: Recovery,
+    /// Whether the last frame shown was reported to clients with a variable
+    /// refresh, logged when it changes (`scripts/check --vrr` reads it);
+    /// forgotten while the CRTC is off.
+    presented_variable: bool,
+    /// The next frame is the first since the CRTC was set up (connected,
+    /// enabled, powered on, a new mode, the session back): it allocates the
+    /// swapchain and commits the modeset, a cost of setting the output up
+    /// that's logged on its own, not counted in the frame budget.
+    first_frame: bool,
     /// After a redraw that had nothing new to show, the next that may bring
     /// nothing either waits until then (`draw::idle_until`, `draw::idle_wait`):
     /// a client committing no new picture (no buffer, or one without damage)
@@ -322,25 +346,14 @@ struct OutputSurface {
     /// pointer moving with no cursor drawn, redraw at most once per refresh.
     /// A timer then draws what's due.
     idle_until: Option<Duration>,
-    /// That timer is set.
-    idle_timer: bool,
     /// Redraws in a row that found nothing new, since the last frame queued:
     /// past one a client's new picture waits too, past `SURE_STREAK` even a
     /// change of Pila's own (`draw::idle_wait`).
     idle_streak: u32,
-    /// The most the redraws asked for since the last one bring
-    /// (`redraw::Content`): a change of Pila's own waits only past
-    /// `SURE_STREAK` redraws in a row that found nothing new, a client's
-    /// new picture doesn't unless the last two redraws found nothing new
-    /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
-    redraw_content: crate::redraw::Content,
     /// The first such request since the last redraw, then the one of the
     /// frame in flight: how late it shows is measured (`frame_stats.rs`).
     request: Option<Request>,
     queued_request: Option<Request>,
-    /// What its recent frames took to be ready, for rendering late
-    /// (`render_late.rs`).
-    render_timing: render_late::RenderTiming,
     /// Held to be drawn then, its margin before the next vblank
     /// (`render_late.rs`); a timer draws it. Cleared when drawn.
     render_at: Option<render_late::Hold>,
@@ -352,7 +365,29 @@ struct OutputSurface {
     torn: bool,
 }
 
-/// A redraw asked for with something new to show (`OutputSurface::request`).
+impl Default for CrtcState {
+    fn default() -> Self {
+        Self {
+            frame_pending: false,
+            last_vblank: None,
+            back_to_back: false,
+            lock_frame: LockFrame::None,
+            gamma_in_flight: false,
+            recovery: Recovery::default(),
+            presented_variable: false,
+            first_frame: true,
+            idle_until: None,
+            idle_streak: 0,
+            request: None,
+            queued_request: None,
+            render_at: None,
+            queued_held: false,
+            torn: false,
+        }
+    }
+}
+
+/// A redraw asked for with something new to show (`CrtcState::request`).
 #[derive(Clone, Copy, Debug)]
 struct Request {
     /// When (monotonic).
@@ -372,6 +407,22 @@ struct Request {
 }
 
 impl OutputSurface {
+    /// The CRTC was set up (connected, enabled, powered on): everything
+    /// about its frames starts over, and it draws its first.
+    fn crtc_set_up(&mut self, drm_output: PilaDrmOutput) {
+        self.drm_output = Some(drm_output);
+        self.crtc_state = CrtcState::default();
+        self.redraw_needed = true;
+    }
+
+    /// The CRTC was cleared (powered off, disabled): no frame is on its way,
+    /// and the vblanks of the dark gap aren't missed refreshes.
+    fn crtc_cleared(&mut self) {
+        self.drm_output = None;
+        self.crtc_state = CrtcState::default();
+        self.power_on_when_active = false;
+    }
+
     /// Not disabled (`[[output]]` or a display tool): a disabled one has no
     /// surface, no global and isn't mapped, but is still listed as a head.
     fn enabled(&self) -> bool {
@@ -385,10 +436,10 @@ impl OutputSurface {
             return;
         }
         self.redraw_content = self.redraw_content.max(content);
-        if self.request.is_none() {
-            self.request = self.last_vblank_time.map(|vblank| Request {
+        if self.crtc_state.request.is_none() {
+            self.crtc_state.request = self.last_vblank_time.map(|vblank| Request {
                 at: now,
-                in_flight: self.frame_pending,
+                in_flight: self.crtc_state.frame_pending,
                 vblank,
                 held: false,
                 drawn: None,
@@ -459,7 +510,7 @@ impl UdevData {
             if let Some(Backend::Udev(data)) = &mut state.backend {
                 data.take_master();
                 if let Some(surface) = data.outputs.get_mut(&id) {
-                    surface.recovery.retry();
+                    surface.crtc_state.recovery.retry();
                     surface.redraw_needed = true;
                 }
                 data.schedule_render();
@@ -471,13 +522,13 @@ impl UdevData {
             // next redraw instead.
             warn!(err = %err.error, "can't schedule a retry for an output");
             if let Some(surface) = self.outputs.get_mut(&id) {
-                surface.recovery.retry();
+                surface.crtc_state.recovery.retry();
             }
         }
     }
 
     /// Draw `id` at `at` (monotonic), its margin before the next vblank
-    /// (`render_late.rs`, `OutputSurface::render_at`, which `draw::prepare`
+    /// (`render_late.rs`, `CrtcState::render_at`, which `draw::prepare`
     /// lets through from then on).
     fn schedule_late_render(&mut self, id: OutputId, at: Duration) {
         let delay = at.saturating_sub(self.clock.now().into());
@@ -494,7 +545,7 @@ impl UdevData {
             // asked for: draw it now instead.
             warn!(err = %err.error, "can't schedule an output's late render");
             if let Some(surface) = self.outputs.get_mut(&id) {
-                surface.render_at = None;
+                surface.crtc_state.render_at = None;
             }
         }
     }
@@ -527,7 +578,7 @@ impl UdevData {
             if let Some(Backend::Udev(data)) = &mut state.backend {
                 if let Some(surface) = data.outputs.get_mut(&id) {
                     surface.idle_timer = false;
-                    surface.idle_until = None;
+                    surface.crtc_state.idle_until = None;
                 }
                 data.schedule_render();
             }
@@ -539,7 +590,7 @@ impl UdevData {
             warn!(err = %err.error, "can't schedule an output's redraw");
             if let Some(surface) = self.outputs.get_mut(&id) {
                 surface.idle_timer = false;
-                surface.idle_until = None;
+                surface.crtc_state.idle_until = None;
             }
         }
     }
@@ -655,6 +706,7 @@ impl UdevData {
             devices,
             gpus,
             primary,
+            session,
             ..
         } = self;
         let Some(GpuDevice {
@@ -665,17 +717,21 @@ impl UdevData {
         };
         let surface = outputs.get_mut(&id).expect("found above");
         let name = surface.output.name();
+        if !on {
+            surface.power_on_when_active = false;
+        }
         if on == surface.drm_output.is_some() {
             return true;
         }
+        if on && !session.is_active() {
+            // No DRM master on another VT: setting the CRTC up would fail.
+            // It comes on at `ActivateSession`.
+            surface.power_on_when_active = true;
+            info!(name, "output comes on when the session is back");
+            return true;
+        }
         if !on {
-            surface.drm_output = None;
-            surface.frame_pending = false;
-            surface.gamma_in_flight = false;
-            surface.lock_frame = LockFrame::None;
-            // The vblanks of the dark gap aren't missed refreshes.
-            surface.last_vblank = None;
-            surface.presented_variable = false;
+            surface.crtc_cleared();
             // Off goes ahead without a renderer; only this needs one.
             let restored = match setup_renderer(gpus, primary, render_node) {
                 Some(OutputRenderer::Primary(mut renderer)) => drm
@@ -708,11 +764,7 @@ impl UdevData {
             warn!(name, "failed to power the output on");
             return false;
         };
-        surface.drm_output = Some(drm_output);
-        surface.frame_pending = false;
-        surface.redraw_needed = true;
-        surface.recovery = Recovery::default();
-        surface.first_frame = true;
+        surface.crtc_set_up(drm_output);
         info!(name, "output powered on");
         outputs::apply_vrr(surface);
         self.reapply_gamma(id);
@@ -777,10 +829,27 @@ impl UdevData {
             return;
         };
         surface.gamma_pending = None;
-        let surface = &self.outputs[&id];
-        let Some(size) = self.gamma_size(&surface.output) else {
+        let output = surface.output.clone();
+        let Some(size) = self.gamma_size(&output) else {
             return;
         };
+        let Some(surface) = self.outputs.get_mut(&id) else {
+            return;
+        };
+        // Set for the CRTC's size then; should it have changed since, the
+        // ramps are dropped rather than read past their end.
+        if surface
+            .gamma
+            .as_ref()
+            .is_some_and(|ramp| !ramp_fits(ramp, size))
+        {
+            warn!(
+                name = output.name(),
+                size, "the CRTC's gamma size changed: its ramps go back to linear"
+            );
+            surface.gamma = None;
+        }
+        let surface = &self.outputs[&id];
         let linear;
         let ramp = match &surface.gamma {
             Some(ramp) => ramp,
@@ -1011,13 +1080,26 @@ pub fn init_udev(
                     let ids: Vec<_> = data.outputs.keys().copied().collect();
                     for id in ids {
                         let surface = data.outputs.get_mut(&id).expect("listed");
-                        surface.frame_pending = false;
-                        surface.gamma_in_flight = false;
-                        // Failures while away were for lack of DRM master.
-                        surface.recovery = Recovery::default();
-                        surface.first_frame = true;
+                        // The device was reset: no frame is on its way, the
+                        // vblanks start over, failures while away were for
+                        // lack of DRM master.
+                        surface.crtc_state = CrtcState::default();
                         // Another VT may have changed the LUTs.
                         data.reapply_gamma(id);
+                    }
+                    // Powered on while away.
+                    let waiting: Vec<Output> = data
+                        .outputs
+                        .values_mut()
+                        .filter_map(|surface| {
+                            (std::mem::take(&mut surface.power_on_when_active) && surface.enabled())
+                                .then(|| surface.output.clone())
+                        })
+                        .collect();
+                    for output in waiting {
+                        if !data.set_output_power(&output, true) {
+                            warn!(name = output.name(), "couldn't power the output on");
+                        }
                     }
                 }
                 // Monitors plugged or unplugged while away. Those it found
@@ -1117,6 +1199,19 @@ mod tests {
         use smithay::backend::allocator::format::has_alpha;
         assert!(!has_alpha(COLOR_FORMATS[0]), "{:?}", COLOR_FORMATS[0]);
         assert!(!has_alpha(COLOR_FORMATS[1]), "{:?}", COLOR_FORMATS[1]);
+    }
+
+    #[test]
+    fn a_crtc_set_up_again_starts_with_its_first_frame_and_nothing_on_its_way() {
+        let state = CrtcState::default();
+        assert!(state.first_frame);
+        assert!(!state.frame_pending && !state.gamma_in_flight && !state.queued_held);
+        assert!(state.lock_frame == LockFrame::None);
+        // The vblanks before aren't counted against the ones after.
+        assert!(state.last_vblank.is_none() && !state.back_to_back);
+        assert!(state.render_at.is_none() && state.idle_until.is_none());
+        assert!(state.request.is_none() && state.queued_request.is_none());
+        assert!(!state.recovery.blocks_render());
     }
 
     #[test]

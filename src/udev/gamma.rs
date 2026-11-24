@@ -42,6 +42,13 @@ pub(super) fn apply_gamma(
     size: u32,
     cause: GammaCause,
 ) -> bool {
+    if !ramp_fits(ramp, size) {
+        warn!(
+            len = ramp.len(),
+            size, "gamma ramps of another size than the CRTC's: not set"
+        );
+        return false;
+    }
     let n = size as usize;
     let started = Instant::now();
     let result = device.set_gamma(crtc, &ramp[..n], &ramp[n..2 * n], &ramp[2 * n..3 * n]);
@@ -159,10 +166,10 @@ pub(super) fn commit_pending_gamma(data: &mut UdevData, id: OutputId) -> bool {
     };
     let crtc = id.crtc;
     if surface.gamma_pending.is_none()
-        || surface.frame_pending
+        || surface.crtc_state.frame_pending
         || surface.drm_output.is_none()
         || !active
-        || surface.recovery.blocks_render()
+        || surface.crtc_state.recovery.blocks_render()
     {
         return false;
     }
@@ -172,8 +179,8 @@ pub(super) fn commit_pending_gamma(data: &mut UdevData, id: OutputId) -> bool {
     let size = (ramp.len() / 3) as u32;
     if let Some(prop) = surface.gamma_lut {
         if commit_gamma_lut(drm.device(), crtc, prop, &ramp, size) {
-            surface.frame_pending = true;
-            surface.gamma_in_flight = true;
+            surface.crtc_state.frame_pending = true;
+            surface.crtc_state.gamma_in_flight = true;
             return true;
         }
     }
@@ -181,6 +188,13 @@ pub(super) fn commit_pending_gamma(data: &mut UdevData, id: OutputId) -> bool {
         warn!(name = surface.output.name(), "failed to set gamma");
     }
     false
+}
+
+/// Whether `ramp` holds red, green and blue ramps of `size` entries each:
+/// the CRTC's gamma size, which a ramp set earlier is checked against again
+/// before it's set (`UdevData::reapply_gamma`).
+pub(super) fn ramp_fits(ramp: &[u16], size: u32) -> bool {
+    size > 0 && ramp.len() == 3 * size as usize
 }
 
 /// Identity ramps (red, green, blue) of `size` entries each.
@@ -212,6 +226,14 @@ mod tests {
         assert!(!warns(FRAME_BUDGET / 2, GammaCause::Client));
         // Expected: a modeset blocks anyway, every output at every startup.
         assert!(!warns(slow, GammaCause::Modeset));
+    }
+
+    #[test]
+    fn a_ramp_fits_only_three_times_the_crtcs_size() {
+        assert!(ramp_fits(&linear_ramp(256), 256));
+        assert!(!ramp_fits(&linear_ramp(256), 1024));
+        assert!(!ramp_fits(&linear_ramp(1024), 256));
+        assert!(!ramp_fits(&[], 0));
     }
 
     #[test]

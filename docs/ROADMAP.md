@@ -42,15 +42,8 @@ implemented or ready to work on once someone can test them on real hardware; com
 ## Bare metal, with a symptom or a TTY session
 
 The bare-metal backend (`src/udev/`) can only be tested on real hardware from a TTY, so changes
-there wait for a reported problem or a session set aside for testing them.
-
-- **One place for a monitor's display state:** A monitor's per-frame state (pending frames,
-  gamma, timers, recovery) is set up and torn down in several places: turning it off, unplugging
-  it, switching VTs. Gathering it into one structure with one teardown would make those paths
-  harder to get wrong.
-- **Guards on VT switches, hotplug and gamma:** Skip work while the session is inactive, recheck a
-  monitor's modes when its link is retrained, and check a gamma ramp's length again before it's
-  reapplied (today guaranteed by the display controller's fixed size, not by the code).
+there wait for a reported problem or a session set aside for testing them. None are waiting
+now.
 
 ## Under consideration
 
