@@ -10,7 +10,7 @@ ran (`starts` on `pila::animation`), swaybg's layer surface came, waybar's surfa
 picture, the stream got frames, monitors were identified from their EDID (bare metal), and the
 frame statistics (no missed refresh, frames shown late included, CPU per frame on average within 4 ms, for the outputs'
 frames and, on average over all of them, the captures'; each copy of a client's shm buffer at
-its commit, `uploads`, and each capture's copy into shm once the GPU is done, `copies`, within
+its commit, `uploads`, and each capture's copy into shm once the GPU is done, `copies` (the event loop's part of it), within
 8 ms (half a 60 Hz period, render late's margin), since they hold the event loop; bare metal, if a night light set gamma,
 its changes within that budget too: commits that don't wait). It prints PASS/FAIL per check
 and exits 1 on a failure (`scripts/check --judge <log>` judges a log again; `PILA_BIN` runs

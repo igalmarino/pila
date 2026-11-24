@@ -174,7 +174,9 @@ pub struct Pila {
     /// Commits held back for a refresh (wp-fifo barriers) or a timestamp
     /// (wp-commit-timing) (`commit_pacing.rs`).
     pub commit_pacing: crate::commit_pacing::CommitPacing,
-    /// Screen capture: ext-image-copy-capture and wlr-screencopy.
+    /// Screen capture: ext-image-copy-capture and wlr-screencopy. Before
+    /// `backend`: dropped first, it waits for the copy thread, whose jobs
+    /// read the renderer's GL mappings (`copy_thread.rs`).
     pub capture: crate::capture::Captures,
     /// Screen sharing through the portal Pila serves (`screencast.rs`).
     pub screencast: crate::screencast::ScreenCasts,

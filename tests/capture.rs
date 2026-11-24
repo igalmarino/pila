@@ -122,6 +122,33 @@ fn an_output_capture_has_the_screens_pixels() {
     );
 }
 
+/// How many copies into memory that may be new (a client's shm buffer, a
+/// screenshot's) were written on the copy thread, off the event loop: the
+/// first write into such memory faults its pages in, 9 ms of an 8 MB frame
+/// on bare metal.
+fn copies_off_loop(state: &Value) -> u64 {
+    state["copies_off_loop"].as_u64().expect("copies_off_loop")
+}
+
+#[test]
+fn a_capture_into_shm_is_written_off_the_event_loop() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").size(400, 300).color(RED).create();
+    pila.wait_focus("a");
+    let (x, y, ..) = rect(&pila.window("a")["geometry"]);
+    let before = copies_off_loop(&pila.settle());
+    let source = output_source(&client, "HEADLESS-1");
+    let (session, size) = session(&client, &source, "session");
+    let (_frame, file) = capture(&client, &session, size, "frame");
+    client.wait_logged("frame", "Ready");
+    assert_eq!(copies_off_loop(&pila.state()), before + 1);
+    assert_eq!(
+        read_pixel(&file, 1280, (x + 50) as i32, (y + 50) as i32),
+        [255, 0, 0]
+    );
+}
+
 #[test]
 fn a_window_its_client_fades_is_faded_in_a_capture() {
     let mut pila = TestPila::start();
@@ -677,6 +704,23 @@ fn screencopy_copies_an_output() {
         read_pixel(&file, 1280, (x + 50) as i32, (y + 50) as i32),
         [255, 0, 0]
     );
+    assert_eq!(read_pixel(&file, 1280, 5, 5), BACKGROUND);
+}
+
+#[test]
+fn a_screencopy_is_written_off_the_event_loop() {
+    let mut pila = TestPila::start();
+    let before = copies_off_loop(&pila.settle());
+    let client = pila.client();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output(0, &client.output("HEADLESS-1"), &client.qh, "copy".into());
+    client.flush();
+    client.wait_logged("copy", "BufferDone");
+    let (buffer, file) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("copy", "Ready");
+    assert_eq!(copies_off_loop(&pila.state()), before + 1);
     assert_eq!(read_pixel(&file, 1280, 5, 5), BACKGROUND);
 }
 

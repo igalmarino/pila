@@ -22,7 +22,7 @@ use smithay::{
 use tracing::{info, warn};
 
 use crate::{
-    capture::Source,
+    capture::{Source, Write},
     config::Colors,
     panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     portal::{Refused, Reply},
@@ -203,7 +203,10 @@ impl Pila {
                 clear,
             },
             Fourcc::Abgr8888,
-            move |pixels| pixels.write_into(&mut read.borrow_mut()[..], 0, 4),
+            // One pixel: on the event loop.
+            Write::OnLoop(Box::new(move |pixels| {
+                pixels.write_into(&mut read.borrow_mut()[..], 0, 4)
+            })),
         );
         let copied = match copied {
             Ok(copied) => copied,

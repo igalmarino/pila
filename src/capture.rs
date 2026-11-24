@@ -37,6 +37,7 @@
 //! sessions are created stopped. Any client but a sandboxed one
 //! (`state::is_privileged`) may capture, as with other compositors.
 
+use crate::copy_thread::Job;
 use crate::sync::Locked;
 use std::{
     cell::RefCell,
@@ -55,7 +56,7 @@ use smithay::{
             buffer_type,
             damage::OutputDamageTracker,
             element::AsRenderElements,
-            gles::{GlesRenderer, GlesTarget, GlesTexture},
+            gles::{GlesMapping, GlesRenderer, GlesTarget, GlesTexture},
             sync::SyncPoint,
             Bind, BufferType, ExportMem, Offscreen, Texture, TextureMapping,
         },
@@ -216,6 +217,9 @@ pub struct Captures {
     /// next ones (`MAX_SHM_TEXTURES`): kept while captures go on, dropped
     /// once none does (`trim_textures`), since a 4K one is 33 MB.
     shm_textures: Vec<GlesTexture>,
+    /// Where copies into memory that may be new are written
+    /// (`Write::OffLoop`).
+    pub copy_thread: crate::copy_thread::CopyThread,
 }
 
 /// A pending output capture to fill from the frame its output just
@@ -791,7 +795,8 @@ impl Pila {
     }
 }
 
-/// A copy into a client's buffer, done or still on the GPU.
+/// A copy into a client's buffer, done, still on the GPU, or read back and
+/// left for the copy thread to write.
 pub(crate) enum Copied {
     Done,
     /// `finish` completes it once `fence` (a native fence fd) is signaled.
@@ -799,19 +804,23 @@ pub(crate) enum Copied {
         fence: OwnedFd,
         finish: Finish,
     },
+    /// Read back; the copy thread writes it (`Write::OffLoop`).
+    Writing(Job),
 }
 
-/// What completes a copy once the GPU is done with it.
-pub(crate) type Finish = Box<dyn FnOnce(&mut GlesRenderer) -> Result<(), CopyError>>;
+/// What completes a copy once the GPU is done with it, on the event loop:
+/// all of it, or all but the write the copy thread does (`Write::OffLoop`).
+pub(crate) type Finish = Box<dyn FnOnce(&mut GlesRenderer) -> Result<Option<Job>, CopyError>>;
 
 impl Pila {
-    /// Run `then` once `copied` is complete: now, or when the GPU is done with
-    /// it, without waiting on the event loop. A copy still on the GPU never
-    /// completes within this call, so `then` may look up the sessions
+    /// Run `then` once `copied` is complete: now, or when the GPU (and the
+    /// copy thread, for a write off the event loop) is done with it, without
+    /// waiting on the event loop. A copy still on the GPU or the copy thread
+    /// never completes within this call, so `then` may look up the sessions
     /// `process_captures` holds meanwhile. If `wanted` says the client gave
     /// up on the frame by then (destroyed it), neither the rest of the copy
     /// (writing into its shm buffer, which it may have reused) nor `then`
-    /// runs.
+    /// runs; a write already on the copy thread is done, `then` isn't.
     pub(crate) fn when_copied(
         &mut self,
         copied: Copied,
@@ -820,12 +829,13 @@ impl Pila {
     ) {
         let (fence, finish) = match copied {
             Copied::Done => return then(self, Ok(())),
+            Copied::Writing(job) => return self.write_then(job, wanted, then),
             Copied::InFlight { fence, finish } => (fence, finish),
         };
         trace!("capture: waiting for the GPU's fence");
         // Taken by whichever runs it: the source, or this if it can't be added.
         let pending = Rc::new(RefCell::new(Some((finish, wanted, then))));
-        fn run<W: Fn() -> bool, T: FnOnce(&mut Pila, Result<(), CopyError>)>(
+        fn run<W: Fn() -> bool + 'static, T: FnOnce(&mut Pila, Result<(), CopyError>) + 'static>(
             state: &mut Pila,
             pending: &RefCell<Option<(Finish, W, T)>>,
         ) {
@@ -842,7 +852,11 @@ impl Pila {
                 };
                 // It holds the event loop: counted apart (`copies`).
                 state.record_copy(started.elapsed());
-                then(state, result);
+                match result {
+                    Ok(Some(job)) => state.write_then(job, wanted, then),
+                    Ok(None) => then(state, Ok(())),
+                    Err(err) => then(state, Err(err)),
+                }
             }
         }
         let in_source = pending.clone();
@@ -861,6 +875,23 @@ impl Pila {
                 .insert_idle(move |state| run(state, &pending));
             self.wake.ping();
         }
+    }
+
+    /// Write a copy on the copy thread, then `then` if the frame is still
+    /// `wanted`.
+    fn write_then(
+        &mut self,
+        job: Job,
+        wanted: impl Fn() -> bool + 'static,
+        then: impl FnOnce(&mut Pila, Result<(), CopyError>) + 'static,
+    ) {
+        self.write_off_loop(job, move |state, result| {
+            if wanted() {
+                then(state, result);
+            } else {
+                trace!("capture: the frame is gone; its copy is dropped");
+            }
+        });
     }
 }
 
@@ -980,7 +1011,7 @@ pub(crate) fn render_into_dmabuf(
     if let Some(fence) = sync.export() {
         return Ok(Copied::InFlight {
             fence,
-            finish: Box::new(|_| Ok(())),
+            finish: Box::new(|_| Ok(None)),
         });
     }
     sync.wait().map_err(|e| render_error(&e))?;
@@ -1041,7 +1072,10 @@ fn copy_to_shm(
         scale,
         source,
         wanted,
-        move |pixels| {
+        // A client's buffer may be new: its first write faults its pages in.
+        // Smithay's shm pools may be written from any thread: the pool is
+        // locked while it is (a resize waits), and a SIGBUS caught there.
+        Write::OffLoop(Box::new(move |pixels| {
             with_buffer_contents_mut(&buffer, |ptr, len, data| {
                 // SAFETY: the pool stays mapped, `len` bytes long, for the
                 // duration of this closure; `write_into` checks the range.
@@ -1049,8 +1083,52 @@ fn copy_to_shm(
                 pixels.write_into(dst, data.offset as usize, data.stride as usize)
             })
             .map_err(|_| CopyError::Constraints)?
-        },
+        })),
     )
+}
+
+/// Where a read-back's pixels are written, and so on which thread.
+pub(crate) enum Write {
+    /// On the event loop: little, or into memory written before (a portal
+    /// share's buffers, mapped once and used again).
+    OnLoop(Box<dyn FnOnce(&ReadBack<'_>) -> WriteResult>),
+    /// On the copy thread (`copy_thread.rs`): into memory that may be new
+    /// (a client's shm buffer, a screenshot's), whose first write faults
+    /// its pages in, milliseconds for a screen.
+    OffLoop(Box<dyn FnOnce(&ReadBack<'_>) -> WriteResult + Send>),
+}
+
+type WriteResult = Result<(), CopyError>;
+
+/// A read-back's pixels, mapped, handed to the copy thread with the mapping
+/// that keeps them so.
+struct Mapped {
+    pixels: *const u8,
+    len: usize,
+    width: usize,
+    height: usize,
+    bottom_up: bool,
+    swap_rb: bool,
+    /// Unmapped once dropped (on the renderer's next cleanup).
+    _mapping: GlesMapping,
+}
+
+// SAFETY: `pixels` is only read, and stays mapped while `_mapping` lives
+// (its drop only queues the unmap for the renderer, on the event loop) and
+// the renderer does: it outlives the copy thread (`copy_thread.rs`).
+unsafe impl Send for Mapped {}
+
+impl Mapped {
+    fn read_back(&self) -> ReadBack<'_> {
+        ReadBack {
+            // SAFETY: see `Send` above; `len` bytes were mapped.
+            pixels: unsafe { std::slice::from_raw_parts(self.pixels, self.len) },
+            width: self.width,
+            height: self.height,
+            bottom_up: self.bottom_up,
+            swap_rb: self.swap_rb,
+        }
+    }
 }
 
 /// Pixels read back from an offscreen texture (`read_back`), in the byte
@@ -1156,7 +1234,8 @@ impl Captures {
     /// Draw `source` offscreen and hand its pixels, in `wanted`'s byte
     /// order (`Argb8888` or `Abgr8888`), to `write`: once the GPU is done,
     /// off the event loop's back where a fence says when
-    /// (`Pila::when_copied`). Reuses the offscreen textures of shm copies.
+    /// (`Pila::when_copied`), on the thread `write` says. Reuses the
+    /// offscreen textures of shm copies.
     pub(crate) fn read_back(
         &mut self,
         renderer: &mut GlesRenderer,
@@ -1164,7 +1243,7 @@ impl Captures {
         scale: Scale<f64>,
         source: Source<'_>,
         wanted: Fourcc,
-        write: impl FnOnce(&ReadBack<'_>) -> Result<(), CopyError> + 'static,
+        write: Write,
     ) -> Result<Copied, CopyError> {
         read_back(
             renderer,
@@ -1186,7 +1265,7 @@ fn read_back(
     scale: Scale<f64>,
     source: Source<'_>,
     wanted: Fourcc,
-    write: impl FnOnce(&ReadBack<'_>) -> Result<(), CopyError> + 'static,
+    write: Write,
 ) -> Result<Copied, CopyError> {
     let (w, h) = (size.w, size.h);
     // One of this size from an earlier copy, or a new one.
@@ -1230,29 +1309,41 @@ fn read_back(
         .ok()
         .flatten()
         .and_then(|fence| fence.export().ok());
-    let finish = move |renderer: &mut GlesRenderer| {
+    let finish = move |renderer: &mut GlesRenderer| -> Result<Option<Job>, CopyError> {
         let bottom_up = !mapping.flipped();
-        let pixels = renderer
-            .map_texture(&mapping)
-            .map_err(|e| render_error(&e))?;
         let (width, height) = (w as usize, h as usize);
-        if pixels.len() < width * 4 * height {
+        let (pixels, len) = {
+            let pixels = renderer
+                .map_texture(&mapping)
+                .map_err(|e| render_error(&e))?;
+            (pixels.as_ptr(), pixels.len())
+        };
+        if len < width * 4 * height {
             return Err(CopyError::Render("short read-back".into()));
         }
-        write(&ReadBack {
+        let mapped = Mapped {
             pixels,
+            len,
             width,
             height,
             bottom_up,
             swap_rb,
-        })
+            _mapping: mapping,
+        };
+        match write {
+            Write::OnLoop(write) => write(&mapped.read_back()).map(|()| None),
+            Write::OffLoop(write) => Ok(Some(Box::new(move || write(&mapped.read_back())))),
+        }
     };
     match fence {
         Some(fence) => Ok(Copied::InFlight {
             fence,
             finish: Box::new(finish),
         }),
-        None => finish(renderer).map(|()| Copied::Done),
+        None => Ok(match finish(renderer)? {
+            Some(job) => Copied::Writing(job),
+            None => Copied::Done,
+        }),
     }
 }
 

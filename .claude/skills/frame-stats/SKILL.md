@@ -34,7 +34,9 @@ own after the outputs', are logged apart (`captures`), held to the same budget
 loop's own work after each iteration (`after_frames`: taskbars, IPC, the `Space`), paced
 by events rather than frames, is logged apart too (`loop`), and so are clients' shm buffers,
 copied to the GPU at their commits rather than in the frame (`uploads`, `upload.rs`), and
-captures' copies into shm, written on the event loop once the GPU is done with the frame they
-read back (`copies`: a capture client's buffer, or a portal share's; `Pila::when_copied`).
+captures' copies into shm, their part on the event loop once the GPU is done with the frame
+they read back (`copies`, `Pila::when_copied`: mapping the read-back, and writing a portal
+share's buffer; a capture client's buffer and a screenshot are written on the copy thread,
+`copy_thread.rs`, so a copy there is ~0.05 ms).
 `scripts/check` holds each upload and each copy to 8 ms: half a 60 Hz period, render late's
 margin, since they hold the event loop and any frame due meanwhile.

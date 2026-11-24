@@ -883,9 +883,10 @@ if [ -n "$uploads" ]; then
 fi
 
 # Captures' copies into shm, finished once the GPU is done (`copies` in the
-# frame statistics: the read-back written into the capture client's buffer,
-# or a portal share's). Like an upload, a copy holds the event loop and a
-# frame due meanwhile: each within half a period at 60 Hz.
+# frame statistics: the event loop's part, mapping the read-back and writing a
+# portal share's buffer; a capture client's is written on the copy thread).
+# Like an upload, it holds the event loop and a frame due meanwhile: each
+# within half a period at 60 Hz.
 copies=$(grep 'pila::frames: copies' "$log" || true)
 if [ -n "$copies" ]; then
     read -r count average worst < <(awk '{

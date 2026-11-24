@@ -21,6 +21,7 @@ pub mod color_pick;
 pub mod commit_pacing;
 pub mod config;
 pub mod config_reload;
+pub mod copy_thread;
 pub mod cursor;
 pub mod decoration;
 pub mod edid;

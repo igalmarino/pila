@@ -1037,6 +1037,24 @@ fn a_screenshot_taken_unasked_is_the_whole_screen() {
     assert_eq!(png_pixel(&png, x, y), expected, "the window in it");
 }
 
+/// A screenshot's pixels are written into memory of their own, new each
+/// time: on the copy thread, off the event loop.
+#[test]
+fn a_screenshot_is_written_off_the_event_loop() {
+    let (mut pila, bus, _pipewire) = start();
+    let before = pila.settle()["copies_off_loop"]
+        .as_u64()
+        .expect("copies_off_loop");
+    let mut portal = Portal::connect(&bus.address);
+    let (response, uri) = portal
+        .screenshot("org.example.Browser", false, true)
+        .join()
+        .unwrap();
+    assert_eq!(response, 0, "Screenshot");
+    assert!(uri.is_some(), "its URI");
+    assert_eq!(pila.state()["copies_off_loop"], before + 1);
+}
+
 /// An app that wants to choose, or that its permission store doesn't let
 /// take one unasked, gets the picker: what's picked is taken (a window
 /// alone, at its size); Escape takes nothing.

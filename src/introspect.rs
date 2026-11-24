@@ -393,6 +393,9 @@ impl Pila {
             },
             // Commits whose shm buffers were uploaded at once (`upload.rs`).
             "early_uploads": self.early_uploads,
+            // Captures' writes into memory that may be new, done on the copy
+            // thread (`copy_thread.rs`).
+            "copies_off_loop": self.capture.copy_thread.written,
             // A redraw asked for from `after_frames` is queued by an idle
             // callback (`defer_redraws`): pending until it runs.
             "redraw_pending": self.deferred_redraw_idles > 0

@@ -11,6 +11,9 @@
   session, by shrinking a shared-memory buffer (`SIGBUS`). The buffers are now sealed at their size.
 - **Fixed:** Locking while `Mod+Tab` was held left the switcher open underneath, and a click on the
   lock screen could activate a window. Locking now ends the switch.
+- **Fixed:** Every screenshot (`grim`, the portal's) and the first frame of every screen share
+  into shared memory held Pila up to 9 ms at 1920x1080, which could make a monitor miss a
+  refresh. The pixels are now written into the app's buffer on a thread of their own.
 - **Fixed:** A blur region made of very many rectangles cost several milliseconds of CPU on every
   frame; past 64 rectangles it's now blurred as its bounding box.
 - **Fixed:** Nested subsurfaces could be placed past Pila's 32768 px limit by moving a parent back

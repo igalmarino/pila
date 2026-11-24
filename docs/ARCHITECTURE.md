@@ -540,7 +540,8 @@ Key flows and invariants:
   frame. Clients' shm buffers copied at their commits ("Uploads") are recorded
   apart too (`record_upload`, an `uploads` line: how many, average and worst CPU), and so
   are captures' copies into shm finished once the GPU is done (`record_copy`, a `copies` line:
-  a capture client's buffer or a portal share's, written on the event loop). The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
+  the event loop's part, mapping the read-back and writing a portal share's buffer; a capture
+  client's buffer and a screenshot are written on the copy thread, not counted). The first frame after an output is set up (`OutputSurface::first_frame`: swapchain
   and modeset) is logged on its own and not counted. A redraw that found nothing new on an output
   (no frame queued: a commit with no new picture, the pointer moving with no cursor drawn) is counted
   apart, `idle` and its summed CPU `idle_cpu_ms` (`record_idle_frame`, udev and headless), and a
@@ -1081,7 +1082,18 @@ Key flows and invariants:
   `Pila::when_copied` finishes it (shm: maps the read-back) and sends `ready` from a
   calloop source on the fence fd, unless the client destroyed the frame meanwhile: then
   nothing is written into its buffer, which it may be using again. Without one it waits,
-  as before.
+  as before. Nor does it write into shm there: a client's buffer may be new, and the first
+  write into it faults its pages in (9 ms for 1920x1080 on bare metal, every screenshot and
+  every share's first frame), so the read-back's mapping goes, with what to write
+  (`capture::Write::OffLoop`), to the copy thread (`copy_thread.rs`: one, started at the
+  first copy, jobs in order, results back through a calloop channel in the same order,
+  `copies_off_loop` in the state), and `ready` follows from there; a frame destroyed once
+  its write started gets it all the same, but no `ready`. Smithay's shm pools may be
+  written from any thread (locked while written, a SIGBUS caught there); the mapping stays
+  valid while the job holds it, and the renderer outlives the thread (`Captures`, which
+  joins it when dropped, comes before `backend` in `Pila`). The portal's screenshots are
+  written there too; a portal share's buffers, mapped once and used again, and the color
+  picker's pixel stay on the event loop (`Write::OnLoop`).
   On bare metal an output's captures are filled from the frame its DRM compositor just
   composited, blitted (`RenderFrameResult::blit_frame_result`, between `render_frame` and
   `queue_frame` in `udev/draw.rs`), instead of drawing the scene a second time:

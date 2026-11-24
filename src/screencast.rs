@@ -52,7 +52,7 @@ use smithay::{
 use tracing::{debug, info, warn};
 
 use crate::{
-    capture::{CopyError, ReadBack, Source, Target},
+    capture::{CopyError, ReadBack, Source, Target, Write},
     cursor::CursorPixels,
     portal::{self, CursorMode, Refused, Reply, Request},
     render::{self, PilaRenderElement},
@@ -869,14 +869,16 @@ impl Pila {
                 scale,
                 source,
                 Fourcc::Argb8888,
-                move |pixels| {
+                // The stream's buffers are mapped once and used again: no
+                // pages to fault in.
+                Write::OnLoop(Box::new(move |pixels| {
                     if buffers.get() != generation {
                         return Ok(());
                     }
                     // SAFETY: the buffer is still the stream's (same
                     // generation) and dequeued, so ours to write.
                     unsafe { fill(buffer, pixels, w, h) }
-                },
+                })),
             ),
         };
         let stream = cast.stream.clone();

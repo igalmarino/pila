@@ -22,10 +22,11 @@ use smithay::{
 use tracing::{info, warn};
 
 use crate::{
-    capture::{Source, Target},
+    capture::{Source, Target, Write},
     portal::{Refused, Reply},
     render::{self, PilaRenderElement},
     scale::output_scale,
+    sync::Locked,
     Pila,
 };
 
@@ -163,7 +164,7 @@ impl Pila {
                 }
             }
         }
-        let pixels = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let pixels = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let filled = pixels.clone();
         let (w, h) = (size.w as usize, size.h as usize);
         let copied = capture.read_back(
@@ -175,11 +176,12 @@ impl Pila {
                 clear,
             },
             Fourcc::Abgr8888,
-            move |read| {
-                let mut pixels = filled.borrow_mut();
+            // Memory of its own, new: its pages fault in as it's written.
+            Write::OffLoop(Box::new(move |read| {
+                let mut pixels = filled.locked();
                 pixels.resize(w * h * 4, 0);
                 read.write_into(&mut pixels, 0, w * 4)
-            },
+            })),
         );
         let copied = match copied {
             Ok(copied) => copied,
@@ -196,7 +198,7 @@ impl Pila {
                     failed(err);
                     return reply.send(Err(Refused::Failed));
                 }
-                let pixels = std::mem::take(&mut *pixels.borrow_mut());
+                let pixels = std::mem::take(&mut *pixels.locked());
                 save_on_a_thread(pixels, (w as u32, h as u32), reply);
             },
         );
