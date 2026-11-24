@@ -1476,7 +1476,8 @@ Key flows and invariants:
   (`take_session_restore`: inside the usable area, `fit_in_area`; output gone: as usual).
   Until placed, `session_output` is the window's output for its scale and fill size. Saved
   to `$XDG_STATE_HOME/pila/sessions.json` by a thread (a second after a change, and at exit,
-  `finish_sessions`), at most `MAX_SESSIONS`, empty ones going first; nested, and in a second
+  `finish_sessions`), at most `MAX_SESSIONS`, empty ones going first (with all in use, a new
+  one is inert); nested, and in a second
   Pila on the same state (`take_sessions_lock`, a `scripts/tty` next to the login session),
   only in memory (`load_and_persist`). What a client can leave there is bounded
   (`MAX_TOPLEVELS`, `MAX_NAME_BYTES`, `MAX_CLIENT_SESSIONS`).

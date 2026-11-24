@@ -596,6 +596,34 @@ fn a_toplevel_name_has_a_limited_length() {
     drop(pila);
 }
 
+/// A toplevel renamed to nothing is an error, as one added with no name is.
+#[test]
+fn a_toplevel_cant_be_renamed_to_nothing() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let session = client.session(None, "session");
+    client.session_id("session");
+    let object = std::cell::RefCell::new(None);
+    client
+        .window("a")
+        .before_commit(|toplevel| {
+            *object.borrow_mut() = Some(session.add_toplevel(
+                toplevel,
+                "named".into(),
+                &client.qh,
+                "toplevel".to_string(),
+            ));
+        })
+        .create();
+    pila.wait_focus("a");
+    let object: XdgToplevelSessionV1 = object.into_inner().unwrap();
+    client.expect_error();
+    object.rename(String::new());
+    client.flush();
+    // invalid_name
+    assert_error(&client, 3, "xdg_session_v1");
+}
+
 #[test]
 fn a_client_has_a_limited_number_of_sessions_in_use() {
     let pila = TestPila::start();
@@ -611,6 +639,34 @@ fn a_client_has_a_limited_number_of_sessions_in_use() {
     client.roundtrip();
     client.roundtrip();
     assert!(client.logged("extra").is_empty());
+    drop(pila);
+}
+
+/// Sessions in use are never forgotten to make room: with as many in use as
+/// Pila keeps (256, from 8 clients), another client's new one is inert.
+#[test]
+fn sessions_in_use_cap_the_sessions_kept() {
+    let pila = TestPila::start();
+    let mut clients = Vec::new();
+    let mut live = Vec::new();
+    for c in 0..8 {
+        let client = pila.client();
+        for i in 0..32 {
+            let tag = format!("c{c}s{i}");
+            live.push(client.session(None, &tag));
+            client.session_id(&tag);
+        }
+        clients.push(client);
+    }
+    let late = pila.client();
+    late.session(None, "extra");
+    late.roundtrip();
+    late.roundtrip();
+    assert!(
+        late.logged("extra").is_empty(),
+        "{:?}",
+        late.logged("extra")
+    );
     drop(pila);
 }
 

@@ -21,7 +21,8 @@
 //! they stay in memory (`load_and_persist`), so that a pila on the side leaves
 //! the login session's alone, and so they do in a second pila on the same state
 //! (`take_sessions_lock`; `scripts/tty`). At most `MAX_SESSIONS`: the least
-//! recently used not in use go, empty ones first. What a client can leave there
+//! recently used not in use go, empty ones first; with all in use, a new one
+//! is inert, as one past `MAX_CLIENT_SESSIONS` is. What a client can leave there
 //! is bounded (`MAX_TOPLEVELS`, `MAX_NAME_BYTES`, `MAX_CLIENT_SESSIONS`).
 //!
 //! It only touches the client's own windows, and a session id is secret and
@@ -107,9 +108,15 @@ struct Saved {
 }
 
 impl Saved {
+    /// The rect when floating, if it's one a window could have had: the file
+    /// may have been written by anything.
     fn rect(&self) -> Option<Rectangle<i32, Logical>> {
-        self.rect
-            .map(|(x, y, w, h)| Rectangle::new((x, y).into(), (w, h).into()))
+        let (x, y, w, h) = self.rect?;
+        let fits = w > 0
+            && h > 0
+            && crate::surface_limits::size_ok(w, h)
+            && crate::surface_limits::position_ok(x.into(), y.into());
+        fits.then(|| Rectangle::new((x, y).into(), (w, h).into()))
     }
 }
 
@@ -647,6 +654,11 @@ impl Dispatch<XdgSessionManagerV1, ()> for Pila {
             session.restored();
         } else {
             state.session_management.evict();
+            // None could go: all in use, by clients of their own.
+            if state.session_management.sessions.len() >= MAX_SESSIONS {
+                debug!("as many sessions in use as are kept: this one is inert");
+                return;
+            }
             state.session_management.sessions.insert(
                 session_id.clone(),
                 Session {
@@ -803,11 +815,16 @@ impl Dispatch<XdgToplevelSessionV1, ()> for Pila {
         if name == tracked.name {
             return;
         }
-        if name.len() > MAX_NAME_BYTES {
+        if name.is_empty() || name.len() > MAX_NAME_BYTES {
             if let Some(owner) = &session.owner {
+                let what = if name.is_empty() {
+                    "an empty"
+                } else {
+                    "a too long"
+                };
                 owner.post_error(
                     xdg_session_v1::Error::InvalidName,
-                    "a too long toplevel name",
+                    format!("{what} toplevel name"),
                 );
             }
             return;
@@ -840,6 +857,22 @@ mod tests {
     use super::*;
 
     const AREA: ((i32, i32), (i32, i32)) = ((100, 50), (1000, 800));
+
+    /// `sessions.json` is a file anything may have written: a size or place
+    /// no client could have had isn't restored (an app would be configured
+    /// to it).
+    #[test]
+    fn a_saved_rect_past_the_limits_isnt_restored() {
+        let saved = |rect| Saved {
+            rect: Some(rect),
+            ..Saved::default()
+        };
+        assert!(saved((10, 20, 400, 300)).rect().is_some());
+        assert!(saved((10, 20, -400, 300)).rect().is_none());
+        assert!(saved((10, 20, 0, 300)).rect().is_none());
+        assert!(saved((10, 20, 40_000, 300)).rect().is_none());
+        assert!(saved((i32::MAX, 20, 400, 300)).rect().is_none());
+    }
 
     fn fit(loc: (i32, i32), size: (i32, i32), bar: i32) -> (i32, i32) {
         let area = Rectangle::new(AREA.0.into(), AREA.1.into());
