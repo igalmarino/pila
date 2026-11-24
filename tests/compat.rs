@@ -292,6 +292,8 @@ fn ipc_answers_and_events_keep_their_fields() {
         LAYOUT,
     );
     has_fields("the colors", &ask(&mut ipc, "colors")["colors"], COLORS);
+    // Its objects' fields need the portal: `portal::a_share_remembered_is_shared_again_without_asking`.
+    assert!(ask(&mut ipc, "screen-shares")["screen_shares"].is_array());
     assert!(ask(&mut ipc, "switch")["switch"].is_null());
     pila.key_press("Alt");
     pila.key("Tab");

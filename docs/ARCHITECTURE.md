@@ -1157,7 +1157,9 @@ Key flows and invariants:
   region of one or a window, sized as screen captures size it (`Pila::capture_geometry`; an
   output's and a region's part of it: `Pila::target_area`, a region clipped to its output as it
   is now; a region's sides in pixels rounded down to even numbers, `capture::region_pixels`, as
-  encoders such as x264 need them and recorders pass a stream on as it comes). A region's stream is described as a monitor's of its size, where it is. Frames are made from
+  encoders such as x264 need them and recorders pass a stream on as it comes). A region's stream
+  is described as a monitor's of its size, where it is. A request that names a grant of its app
+  (`restore_data`) may skip the picker: below, "Remembered shares". Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
   output's elements (from the region's top-left for a region), or the window's alone, its
   geometry's top-left the buffer's (and the pointer's, cursor embedded, over a region or a window
@@ -1266,7 +1268,9 @@ Key flows and invariants:
   and every output is dimmed under it (`share_picker::elements`, in front of everything of
   Pila's in `render::output_elements`; never while locked). Arrows select (Tab too without tabs), Enter/Share
   shares (`Pila::start_cast`), Escape/Cancel answers cancelled; then the next request waiting
-  is shown. Opening it ends a switch and closes the cheatsheet, the overview and the window
+  is shown. A share whose app asks for it to be remembered (`persist_mode`) has a Remember row
+  under the tiles (`Shown::remember`, `Layout::remember`; R or a click toggles it, its box a
+  solid that changes at once, the label constant), below. Opening it ends a switch and closes the cheatsheet, the overview and the window
   menu; locking cancels it and every request waiting (`SessionLockHandler::lock`), the app
   closing its session takes its request away (answered as failed). Its texts are one image
   drawn on a thread with the cheatsheet's code (`panel::draw_text`); the panel shows
@@ -1293,6 +1297,27 @@ Key flows and invariants:
   when one starts or ends (`update_region_outlines`, which redraws the outputs whose outlines come
   or go), drawn by the backends beside the pointer (`render::screen_elements`), never by a capture;
   an outline over a fullscreen window keeps it from tearing (`Scene::tears`).
+- **Remembered shares** (`screen_grants.rs`, the ScreenCast portal's `persist_mode` and
+  `restore_data`): `SelectSources` keeps the `persist_mode` asked and the grant id in
+  `restore_data` (`(suv)`: vendor `pila`, version 1, the id; `portal::restore_id`), which
+  `Start` passes on (`Request::Start`'s `persist` and `restore`, then `Share`'s). A grant is an
+  id of 128 random bits (`state_file::random_id`: a secret only xdg-desktop-portal, which keeps it
+  for the app behind a token of its own, and Pila see) for an app id and what it shares
+  (`screen_grants::Shared`: an output by name, a region of one, local, logical; a window by app id
+  and title). On `Start`, `restored_share` (never while locked) looks the id up among the app's
+  grants and what it shares now (`grant_target`; a region off its output isn't there) and starts
+  the cast at once (`start_cast`'s `remembered`); otherwise the request waits for the picker as
+  any other, the Remember toggle on if it named a grant of the app. Picked with it on,
+  `new_screen_grant` makes the grant (the id asked to restore kept, so the portal's token keeps
+  working) at the mode asked; with it off, the grant asked for is forgotten. The grant answered
+  rides on the cast and goes back with `Start`'s answer (`portal::Started::remembered`, results
+  `restore_data` and `persist_mode`); a new one is kept only then (`keep_screen_grant`, from
+  `handle_cast_events`), so a share that never started leaves none. `persist_mode` 2 grants are
+  saved to `$XDG_STATE_HOME/pila/screen-shares.json` (`save_store`, on a thread, whole or not at
+  all, mode 0600, `state_file::write`), read by the portal's thread at startup
+  (`Request::ScreenGrants`, merged with any made meanwhile); mode 1 grants stay in memory.
+  `pila msg screen-shares` lists them, `forget-screen-share` forgets one or all (allowed while
+  locked: it only takes access away).
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in

@@ -1739,6 +1739,295 @@ fn a_screenshot_of_a_region() {
     assert_eq!(png_pixel(&png, 50, 40), rgba(GREEN), "the window in it");
 }
 
+const RECORDER: &str = "org.example.Recorder";
+
+/// Wait until `started` is answered without the picker, or the picker
+/// shows: the state then.
+fn answered_or_picker(pila: &mut TestPila, started: &Started) -> Value {
+    pila.wait("an answer, or the picker", |s| {
+        started.answered() || s["share_picker"]["shown"] == true
+    })
+}
+
+/// Ask as the recorder for a monitor's share remembered until revoked,
+/// turn Remember on and share the output selected: `Start`'s results.
+fn share_remembered(
+    pila: &mut TestPila,
+    portal: &mut Portal,
+    name: &str,
+) -> common::pipewire::Vardict {
+    let started = portal.request_remembered(name, RECORDER, 1, 2, None);
+    let picker = wait_picker(pila);
+    assert_eq!(picker["remember"], false, "offered, off");
+    pila.key("r");
+    pila.wait("Remember on", |s| s["share_picker"]["remember"] == true);
+    pila.key("Return");
+    let (response, results) = started.answer_results();
+    assert_eq!(response, 0, "Start");
+    results
+}
+
+/// `pila msg --json screen-shares`' list.
+fn screen_shares(pila: &TestPila) -> Vec<Value> {
+    let out = pila.msg(&["--json", "screen-shares"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+    answer["screen_shares"].as_array().unwrap().clone()
+}
+
+/// An app that asks for its share to be remembered gets a Remember toggle;
+/// with it on, the app gets `restore_data`, and with it the same output
+/// again without the picker. The grant is kept on disk and listed.
+#[test]
+fn a_share_remembered_is_shared_again_without_asking() {
+    let (mut pila, bus, pipewire) = start();
+    let client = pila.client();
+    client.window("shared").size(200, 150).color(BLUE).create();
+    let (x, y) = window_center(&mut pila, "shared");
+    pila.settle();
+    let mut portal = Portal::connect(&bus.address);
+    let results = share_remembered(&mut pila, &mut portal, "first");
+    assert_eq!(u32::try_from(&results["persist_mode"]).unwrap(), 2);
+    let data = results["restore_data"].try_clone().unwrap();
+    let id = common::pipewire::restore_id(&data);
+
+    let stored = pila.wait_file("state/pila/screen-shares.json");
+    assert!(
+        stored.contains(&id) && stored.contains(RECORDER),
+        "{stored}"
+    );
+    let shares = screen_shares(&pila);
+    assert_eq!(shares.len(), 1, "{shares:?}");
+    // Its fields, as `docs/IPC.md` lists them: only ever add to these.
+    for field in ["id", "app", "app_id", "shares", "persistent"] {
+        assert!(shares[0].get(field).is_some(), "no {field}: {}", shares[0]);
+    }
+    assert_eq!(shares[0]["id"], id.as_str());
+    assert_eq!(shares[0]["app_id"], RECORDER);
+    assert_eq!(shares[0]["persistent"], true);
+    assert_eq!(
+        shares[0]["shares"],
+        json!({ "kind": "output", "output": "HEADLESS-1" })
+    );
+    let listed = String::from_utf8_lossy(&pila.msg(&["screen-shares"]).stdout).into_owned();
+    assert!(
+        listed.contains(&id) && listed.contains("HEADLESS-1"),
+        "{listed}"
+    );
+
+    portal.close("first");
+    let again = portal.request_remembered("again", RECORDER, 1, 2, Some(&data));
+    let state = answered_or_picker(&mut pila, &again);
+    assert_eq!(state["share_picker"]["shown"], false, "asked again");
+    let (response, results) = again.answer_results();
+    assert_eq!(response, 0, "Start");
+    assert_eq!(
+        common::pipewire::restore_id(&results["restore_data"]),
+        id,
+        "remembered by the same grant"
+    );
+    let (node, _) = {
+        let streams: Vec<(u32, common::pipewire::Vardict)> =
+            results["streams"].try_clone().unwrap().try_into().unwrap();
+        streams.into_iter().next().expect("a stream")
+    };
+    let expected = pila.pixel(x as f64, y as f64);
+    let consumer = pipewire.consume(node);
+    consumer.wait_frame("of the output", |f| f.rgba(x, y) == expected);
+}
+
+/// Remember is offered only to an app that asks for it, turns on and off
+/// with a click too, and left off gives the app nothing to restore; asked
+/// for while the app runs, the grant isn't kept on disk.
+#[test]
+fn remember_is_the_users_choice() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_remembered("unasked", RECORDER, 1, 0, None);
+    assert!(wait_picker(&mut pila)["remember"].is_null(), "not offered");
+    pila.key("r");
+    pila.key("Escape");
+    assert_eq!(started.answer().0, 1, "cancelled");
+
+    let started = portal.request_remembered("off", RECORDER, 1, 2, None);
+    let picker = wait_picker(&mut pila);
+    let (x, y) = center(&picker["remember_rect"]);
+    pila.click_at(x, y);
+    pila.wait("on", |s| s["share_picker"]["remember"] == true);
+    pila.click_at(x, y);
+    pila.wait("off", |s| s["share_picker"]["remember"] == false);
+    pila.key("Return");
+    let (response, results) = started.answer_results();
+    assert_eq!(response, 0, "Start");
+    assert!(!results.contains_key("restore_data"), "nothing remembered");
+    assert!(screen_shares(&pila).is_empty());
+
+    let started = portal.request_remembered("running", RECORDER, 1, 1, None);
+    wait_picker(&mut pila);
+    pila.key("r");
+    pila.wait("on", |s| s["share_picker"]["remember"] == true);
+    pila.key("Return");
+    let (response, results) = started.answer_results();
+    assert_eq!(response, 0, "Start");
+    assert_eq!(u32::try_from(&results["persist_mode"]).unwrap(), 1);
+    let shares = screen_shares(&pila);
+    assert_eq!(shares.len(), 1);
+    assert_eq!(shares[0]["persistent"], false);
+    assert!(
+        !pila.dir.join("state/pila/screen-shares.json").exists(),
+        "kept on disk"
+    );
+}
+
+/// A remembered window that isn't there is asked for again, Remember on;
+/// turned off, the grant is forgotten.
+#[test]
+fn a_remembered_share_not_there_is_asked_for_again() {
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    let window = client.window("doc").title("Report").create();
+    pila.wait_window("doc");
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request_remembered("first", RECORDER, 2, 2, None);
+    wait_picker(&mut pila);
+    pila.key("r");
+    pila.wait("on", |s| s["share_picker"]["remember"] == true);
+    pila.key("Return");
+    let (response, results) = started.answer_results();
+    assert_eq!(response, 0, "Start");
+    let data = results["restore_data"].try_clone().unwrap();
+    assert_eq!(
+        screen_shares(&pila)[0]["shares"],
+        json!({ "kind": "window", "app_id": "doc", "title": "Report" })
+    );
+    portal.close("first");
+    client.destroy(window);
+    client.window("doc").title("Other").create();
+    pila.wait("the other window", |s| {
+        s["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["title"] == "Other")
+    });
+
+    let again = portal.request_remembered("again", RECORDER, 2, 2, Some(&data));
+    let state = answered_or_picker(&mut pila, &again);
+    assert_eq!(state["share_picker"]["shown"], true, "shared unasked");
+    assert_eq!(state["share_picker"]["remember"], true, "as it was");
+    pila.key("r");
+    pila.wait("off", |s| s["share_picker"]["remember"] == false);
+    pila.key("Return");
+    let (response, results) = again.answer_results();
+    assert_eq!(response, 0, "Start");
+    assert!(!results.contains_key("restore_data"));
+    assert!(screen_shares(&pila).is_empty(), "the grant forgotten");
+}
+
+/// A grant is the app's: another app's request naming it is asked.
+#[test]
+fn another_apps_remembered_share_isnt_restored() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let results = share_remembered(&mut pila, &mut portal, "first");
+    let data = results["restore_data"].try_clone().unwrap();
+    let other = portal.request_remembered("other", "org.example.Other", 1, 2, Some(&data));
+    let state = answered_or_picker(&mut pila, &other);
+    assert_eq!(state["share_picker"]["shown"], true, "shared unasked");
+    assert_eq!(state["share_picker"]["remember"], false);
+    pila.key("Escape");
+    assert_eq!(other.answer().0, 1, "cancelled");
+    assert_eq!(screen_shares(&pila).len(), 1, "the recorder's kept");
+}
+
+/// `pila msg forget-screen-share` forgets a grant (an unknown id fails),
+/// or all of them: the app is asked again.
+#[test]
+fn a_forgotten_share_is_asked_for_again() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let data = share_remembered(&mut pila, &mut portal, "first")["restore_data"]
+        .try_clone()
+        .unwrap();
+    let id = common::pipewire::restore_id(&data);
+    let unknown = pila.msg(&["forget-screen-share", "0123"]);
+    assert_eq!(unknown.status.code(), Some(1), "an unknown id");
+    let out = pila.msg(&["forget-screen-share", &id]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(screen_shares(&pila).is_empty());
+    let file = pila.dir.join("state/pila/screen-shares.json");
+    pila.wait("the file without it", |_| {
+        std::fs::read_to_string(&file).is_ok_and(|text| !text.contains(&id))
+    });
+    let again = portal.request_remembered("again", RECORDER, 1, 2, Some(&data));
+    let state = answered_or_picker(&mut pila, &again);
+    assert_eq!(state["share_picker"]["shown"], true, "shared unasked");
+    pila.key("Escape");
+    assert_eq!(again.answer().0, 1);
+
+    share_remembered(&mut pila, &mut portal, "second");
+    share_remembered(&mut pila, &mut portal, "third");
+    let out = pila.msg(&["forget-screen-share", "all"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "forgot 2");
+    assert!(screen_shares(&pila).is_empty());
+}
+
+/// Grants kept on disk from before (another run of Pila) restore: a
+/// region, at its place.
+#[test]
+fn a_share_kept_from_before_is_restored() {
+    let state = std::env::temp_dir().join(format!("pila-grants-state-{}", rand_suffix()));
+    std::fs::create_dir_all(state.join("pila")).unwrap();
+    std::fs::write(
+        state.join("pila/screen-shares.json"),
+        format!(
+            r#"{{"grants": {{"00ff": {{"app_id": "{RECORDER}", "app": "Recorder",
+            "shared": {{"kind": "region", "output": "HEADLESS-1",
+            "x": 100, "y": 50, "width": 200, "height": 120}}}}}}}}"#
+        ),
+    )
+    .unwrap();
+    let (mut pila, bus, pipewire) = start_with_env(
+        "HEADLESS-1:640x480",
+        vec![("XDG_STATE_HOME".into(), state.display().to_string())],
+    );
+    let mut portal = Portal::connect(&bus.address);
+    let data = common::pipewire::restore_data("00ff");
+    let started = portal.request_remembered("kept", RECORDER, 1, 2, Some(&data));
+    let state_now = answered_or_picker(&mut pila, &started);
+    assert_eq!(state_now["share_picker"]["shown"], false, "asked again");
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    assert_eq!(described(&streams[0].1), (1, (200, 120), true));
+    let consumer = pipewire.consume(streams[0].0);
+    consumer.wait_frame("of the region", |f| (f.width, f.height) == (200, 120));
+}
+
+/// Nothing is shared while the screen is locked, remembered or not.
+#[test]
+fn a_remembered_share_isnt_restored_while_locked() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let data = share_remembered(&mut pila, &mut portal, "first")["restore_data"]
+        .try_clone()
+        .unwrap();
+    let locker = pila.client();
+    let _lock = locker.lock_session();
+    pila.wait("locked", |s| s["locked"] == true);
+    let again = portal.request_remembered("locked", RECORDER, 1, 2, Some(&data));
+    assert_eq!(answered_with(again), 1, "cancelled");
+    assert_eq!(screen_shares(&pila).len(), 1, "still remembered");
+}
+
 /// Locking while a region is dragged cancels the request, drag and all.
 #[test]
 fn locking_cancels_a_region_being_dragged() {

@@ -29,6 +29,10 @@ Requests:
   focus <id>          Focus a window, by its id in `windows`
   close <id>          Ask a window to close
   minimize <id>       Minimize a window; focus brings it back
+  screen-shares       The screen shares remembered for apps, which they
+                      get again without asking
+  forget-screen-share <id>|all
+                      Forget one, by its id in `screen-shares`, or all
 
 Options:
   --json              Print Pila's answer as it is (docs/IPC.md)";
@@ -69,13 +73,18 @@ fn request(args: &[String]) -> Result<Value, String> {
     };
     match name.as_str() {
         "windows" | "outputs" | "workspaces" | "keyboard" | "colors" | "switch" | "focused"
-        | "version"
+        | "version" | "screen-shares"
             if rest.is_empty() =>
         {
             Ok(json!({ "request": name }))
         }
         "windows" | "outputs" | "workspaces" | "keyboard" | "colors" | "switch" | "focused"
-        | "version" => Err(format!("{name} takes no arguments")),
+        | "version" | "screen-shares" => Err(format!("{name} takes no arguments")),
+        "forget-screen-share" => match rest {
+            [all] if all == "all" => Ok(json!({ "request": name, "all": true })),
+            [id] => Ok(json!({ "request": name, "id": id })),
+            _ => Err(format!("{name} takes one id, or all")),
+        },
         "action" if rest.is_empty() => Err("action needs an action".to_string()),
         "action" => Ok(json!({ "request": "action", "action": rest.join(" ") })),
         "subscribe" if rest.is_empty() => Ok(json!({ "request": "subscribe" })),
@@ -171,6 +180,39 @@ fn window_line(window: &Value) -> String {
         } else {
             format!("  [{}]", marks.join(", "))
         },
+    )
+}
+
+/// A screen share remembered: its id, the app, what it shares, and how long
+/// it's kept.
+fn screen_share_line(share: &Value) -> String {
+    let shares = &share["shares"];
+    let what = match shares["kind"].as_str() {
+        Some("output") => plain(&shares["output"]),
+        Some("region") => format!(
+            "{} region {}x{}+{}+{}",
+            plain(&shares["output"]),
+            shares["width"],
+            shares["height"],
+            shares["x"],
+            shares["y"]
+        ),
+        Some("window") => format!(
+            "window {}: {}",
+            plain(&shares["app_id"]),
+            plain(&shares["title"])
+        ),
+        _ => "?".to_string(),
+    };
+    format!(
+        "{}  {}  {what}{}",
+        plain(&share["id"]),
+        plain(&share["app"]),
+        if share["persistent"] == true {
+            ""
+        } else {
+            "  [while it runs]"
+        }
     )
 }
 
@@ -272,6 +314,13 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
             }
         },
         "version" => vec![format!("pila {}", plain(&answer["version"]))],
+        "screen-shares" => match list("screen_shares") {
+            shares if shares.is_empty() => vec!["no screen share remembered".to_string()],
+            shares => shares.iter().map(screen_share_line).collect(),
+        },
+        "forget-screen-share" if answer["forgotten"].is_u64() => {
+            vec![format!("forgot {}", answer["forgotten"])]
+        }
         _ => Vec::new(),
     }
 }
@@ -385,6 +434,21 @@ mod tests {
             request(&args(&["subscribe", "windows", "outputs"])).unwrap(),
             json!({ "request": "subscribe", "events": ["windows", "outputs"] })
         );
+    }
+
+    #[test]
+    fn a_screen_share_is_forgotten_by_id_or_all() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            request(&args(&["forget-screen-share", "0a1b"])).unwrap(),
+            json!({ "request": "forget-screen-share", "id": "0a1b" })
+        );
+        assert_eq!(
+            request(&args(&["forget-screen-share", "all"])).unwrap(),
+            json!({ "request": "forget-screen-share", "all": true })
+        );
+        assert!(request(&args(&["forget-screen-share"])).is_err());
+        assert!(request(&args(&["screen-shares", "x"])).is_err());
     }
 
     #[test]

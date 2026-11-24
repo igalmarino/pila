@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New:** Screen sharing can be remembered for an app. When an app asks the portal to remember its
+  share (Kooha and OBS do), the share picker shows a **Remember** toggle (`R`, or a click; off by
+  default). With it on, the app gets the same monitor, region or window again next time without the
+  picker; if that isn't there, the picker asks again. `pila msg screen-shares` lists what's
+  remembered and `pila msg forget-screen-share <id>` (or `all`) revokes it. Grants meant to last
+  are kept in `~/.local/state/pila/screen-shares.json`.
 - **Fixed:** Recording a shared region in full-screen mode failed in Kooha (a missing GStreamer
   plugin, it said) when the region had an odd width or height in pixels, which video encoders such
   as x264 refuse. A region is now shared with even sides: one rounded down loses its last column

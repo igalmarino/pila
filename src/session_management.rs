@@ -31,7 +31,6 @@
 
 use std::{
     collections::HashMap,
-    io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::mpsc::{self, Sender},
@@ -157,31 +156,7 @@ pub fn init_global(dh: &DisplayHandle) {
 
 /// `$XDG_STATE_HOME/pila/sessions.json`.
 fn sessions_path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })?;
-    Some(state.join("pila/sessions.json"))
-}
-
-/// Write `text` to `path` whole or not at all. Sessions' ids are secrets: only
-/// for the user.
-fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()?;
-    std::fs::rename(&temporary, path)
+    crate::state_file::path("sessions.json")
 }
 
 /// Only one pila at a time saves sessions (`scripts/tty` runs one next to the
@@ -206,17 +181,6 @@ fn take_sessions_lock(path: &Path) -> std::io::Result<Option<std::fs::File>> {
         Err(Errno::WOULDBLOCK) => Ok(None),
         Err(err) => Err(err.into()),
     }
-}
-
-/// 128 random bits, in hex.
-fn new_session_id() -> Option<String> {
-    let mut bytes = [0u8; 16];
-    let read = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
-    if let Err(err) = read {
-        warn!(?err, "no random session id");
-        return None;
-    }
-    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 fn now() -> u64 {
@@ -277,7 +241,7 @@ impl SessionManagement {
                     while let Ok(newer) = received.try_recv() {
                         text = newer;
                     }
-                    if let Err(err) = write_atomically(&path, &text) {
+                    if let Err(err) = crate::state_file::write(&path, &text) {
                         warn!(?path, %err, "can't save the sessions");
                     }
                 }
@@ -617,7 +581,9 @@ impl Dispatch<XdgSessionManagerV1, ()> for Pila {
         let known = session_id.filter(|id| state.session_management.sessions.contains_key(id));
         let is_known = known.is_some();
         // A failure leaves the object inert: the session id `""` is no session.
-        let session_id = known.or_else(new_session_id).unwrap_or_default();
+        let session_id = known
+            .or_else(crate::state_file::random_id)
+            .unwrap_or_default();
         let session = data_init.init(id, session_id.clone());
         if !matches!(reason, WEnum::Value(_)) {
             manager.post_error(

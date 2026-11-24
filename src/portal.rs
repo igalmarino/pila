@@ -109,12 +109,19 @@ pub enum Request {
         session: String,
         cursor: CursorMode,
         sources: Sources,
-        /// Who asks, as the picker names it: its desktop entry's name, else
-        /// its app id; `None` if the portal didn't say (`app_name`).
+        /// Who asks, as the portal names it (empty for an app it doesn't),
+        /// and as the picker names it: its desktop entry's name, else its
+        /// app id; `None` if the portal didn't say (`app_name`).
+        app_id: String,
         app: Option<String>,
         /// The app's window the request came from (`parent_handle`).
         parent: Option<ParentWindow>,
-        reply: Reply<Result<Vec<Stream>, Refused>>,
+        /// How long the app asks for the share to be remembered
+        /// (`persist_mode`), and the grant it was remembered by before, if
+        /// it asks to restore one (`restore_data`, `screen_grants.rs`).
+        persist: u32,
+        restore: Option<String>,
+        reply: Reply<Result<Started, Refused>>,
     },
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
     Close { session: String },
@@ -134,6 +141,9 @@ pub enum Request {
     /// What apps' shortcuts were confirmed before, read from their file
     /// (`app_shortcuts.rs`).
     ShortcutsStore(crate::app_shortcuts::Store),
+    /// The screen shares remembered for apps, read from their file
+    /// (`screen_grants.rs`).
+    ScreenGrants(crate::screen_grants::Store),
     /// An app's global shortcuts session began.
     ShortcutsSession { session: String, app_id: String },
     /// A session binds its shortcuts: answered once they are.
@@ -164,6 +174,14 @@ pub struct Stream {
     pub size: (i32, i32),
 }
 
+/// What `Start` answers: the streams, and the grant the share is
+/// remembered by (`screen_grants.rs`), if it is: its id and `persist_mode`.
+#[derive(Debug, Clone)]
+pub struct Started {
+    pub streams: Vec<Stream>,
+    pub remembered: Option<(String, u32)>,
+}
+
 /// Why a session didn't start.
 #[derive(Debug)]
 pub enum Refused {
@@ -189,6 +207,7 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
             let shortcuts = GlobalShortcuts { send: send.clone() };
             // What was confirmed before, read here: off the event loop.
             let _ = send.send(Request::ShortcutsStore(crate::app_shortcuts::read_store()));
+            let _ = send.send(Request::ScreenGrants(crate::screen_grants::read_store()));
             let built = zbus::block_on(
                 zbus::connection::Builder::address(address.as_str())
                     .method_timeout(std::time::Duration::from_secs(5))
@@ -238,10 +257,40 @@ pub fn end_session(connection: &zbus::Connection, session: String) {
 }
 
 /// What `SelectSources` chose for a session, used by `Start`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Selection {
     cursor: CursorMode,
     sources: Sources,
+    persist: u32,
+    restore: Option<String>,
+}
+
+/// Who wrote the `restore_data` Pila answers, and how (`restore_data`'s
+/// vendor and version): it reads none other.
+const RESTORE_VENDOR: &str = "pila";
+const RESTORE_VERSION: u32 = 1;
+
+/// The grant `restore_data` (`(suv)`) names, if it's Pila's.
+fn restore_id(data: &Variant<'_>) -> Option<String> {
+    let Variant::Structure(data) = data else {
+        return None;
+    };
+    let [Variant::Str(vendor), Variant::U32(version), Variant::Variant(id)] = data.fields() else {
+        return None;
+    };
+    let Variant::Str(id) = &**id else {
+        return None;
+    };
+    (vendor.as_str() == RESTORE_VENDOR && *version == RESTORE_VERSION).then(|| id.to_string())
+}
+
+/// `restore_data` naming grant `id`.
+fn restore_data(id: &str) -> Variant<'static> {
+    Variant::from((
+        RESTORE_VENDOR.to_string(),
+        RESTORE_VERSION,
+        Variant::from(id.to_string()),
+    ))
 }
 
 /// `org.freedesktop.impl.portal.ScreenCast`.
@@ -280,6 +329,8 @@ impl ScreenCast {
                     monitors: true,
                     windows: false,
                 },
+                persist: crate::screen_grants::PERSIST_NONE,
+                restore: None,
             },
         );
         (RESPONSE_SUCCESS, Results::new())
@@ -299,13 +350,25 @@ impl ScreenCast {
             return (RESPONSE_OTHER, Results::new());
         };
         let cursor = CursorMode::from_request(wanted("cursor_mode"));
-        debug!(?sources, ?cursor, "portal: sources selected");
+        let persist = wanted("persist_mode").unwrap_or(crate::screen_grants::PERSIST_NONE);
+        let restore = options
+            .get("restore_data")
+            .and_then(|data| restore_id(data));
+        debug!(
+            ?sources,
+            ?cursor,
+            persist,
+            restore = restore.is_some(),
+            "portal: sources selected"
+        );
         let mut selections = self.selections.locked();
         let Some(selection) = selections.get_mut(session_handle.as_str()) else {
             return (RESPONSE_OTHER, Results::new());
         };
         selection.cursor = cursor;
         selection.sources = sources;
+        selection.persist = persist;
+        selection.restore = restore;
         (RESPONSE_SUCCESS, Results::new())
     }
 
@@ -318,7 +381,7 @@ impl ScreenCast {
         _options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
         let session = session_handle.to_string();
-        let Some(selection) = self.selections.locked().get(&session).copied() else {
+        let Some(selection) = self.selections.locked().get(&session).cloned() else {
             return (RESPONSE_OTHER, Results::new());
         };
         let (reply, answer) = reply_channel();
@@ -327,18 +390,21 @@ impl ScreenCast {
             cursor: selection.cursor,
             sources: selection.sources,
             app: app_name(&app_id, &data_dirs()),
+            app_id,
             parent: parent_handle(&parent_window),
+            persist: selection.persist,
+            restore: selection.restore,
             reply,
         };
         if self.send.send(request).is_err() {
             return (RESPONSE_OTHER, Results::new());
         }
-        let streams = match answer.await {
-            Some(Ok(streams)) => streams,
+        let started = match answer.await {
+            Some(Ok(started)) => started,
             Some(Err(Refused::Cancelled)) => return (RESPONSE_CANCELLED, Results::new()),
             Some(Err(Refused::Failed)) | None => return (RESPONSE_OTHER, Results::new()),
         };
-        match streams_result(&streams) {
+        match start_results(&started) {
             Ok(results) => (RESPONSE_SUCCESS, results),
             Err(err) => {
                 warn!(%err, "portal: can't describe the streams");
@@ -759,7 +825,21 @@ fn read_desktop_entry(path: &std::path::Path) -> Option<String> {
     Some(text)
 }
 
-/// `Start`'s results: `streams`, `a(ua{sv})`.
+/// `Start`'s results: `streams`, and the grant it's remembered by, if it
+/// is (`restore_data`, `persist_mode`).
+fn start_results(started: &Started) -> zbus::Result<Results> {
+    let mut results = streams_result(&started.streams)?;
+    if let Some((id, mode)) = &started.remembered {
+        results.insert(
+            "restore_data".to_string(),
+            OwnedVariant::try_from(restore_data(id))?,
+        );
+        results.insert("persist_mode".to_string(), OwnedVariant::from(*mode));
+    }
+    Ok(results)
+}
+
+/// `Start`'s streams: `streams`, `a(ua{sv})`.
 fn streams_result(streams: &[Stream]) -> zbus::Result<Results> {
     let streams: Vec<(u32, HashMap<String, Variant<'static>>)> = streams
         .iter()
@@ -954,6 +1034,32 @@ mod tests {
         // A window's position means nothing: it has none.
         assert_eq!(property(1, "source_type"), Some(Some(SOURCE_WINDOW)));
         assert!(!streams[1].1.contains_key("position"));
+    }
+
+    /// `restore_data` is `(suv)`, Pila's vendor and version, the grant's id
+    /// in the variant; Pila reads back its own and no other.
+    #[test]
+    fn restore_data_names_the_grant_and_reads_back() {
+        let started = Started {
+            streams: Vec::new(),
+            remembered: Some(("0a1b".to_string(), 2)),
+        };
+        let results = start_results(&started).unwrap();
+        let data = &results["restore_data"];
+        assert_eq!(data.value_signature().to_string(), "(suv)");
+        assert_eq!(u32::try_from(&results["persist_mode"]).unwrap(), 2);
+        assert_eq!(restore_id(data), Some("0a1b".to_string()));
+        let other = Variant::from(("gnome".to_string(), 1u32, Variant::from("0a1b")));
+        assert_eq!(restore_id(&other), None, "another backend's");
+        let newer = Variant::from(("pila".to_string(), 2u32, Variant::from("0a1b")));
+        assert_eq!(restore_id(&newer), None, "another version");
+        assert_eq!(restore_id(&Variant::from(7u32)), None);
+        let unremembered = start_results(&Started {
+            streams: Vec::new(),
+            remembered: None,
+        })
+        .unwrap();
+        assert!(!unremembered.contains_key("restore_data"));
     }
 
     /// A request's parent window: a Wayland handle, an X11 window's id in

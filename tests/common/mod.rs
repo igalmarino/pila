@@ -110,6 +110,18 @@ fn full_config(config: &str) -> String {
 }
 
 impl TestPila {
+    /// `pila msg <args>` as a program in this session would run it.
+    pub fn msg(&self, args: &[&str]) -> std::process::Output {
+        std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+            .arg("msg")
+            .args(args)
+            .env_remove("PILA_SOCKET")
+            .env("WAYLAND_DISPLAY", &self.display)
+            .env("XDG_RUNTIME_DIR", &self.dir)
+            .output()
+            .expect("run pila msg")
+    }
+
     pub fn start() -> Self {
         Self::start_with(Options::default())
     }

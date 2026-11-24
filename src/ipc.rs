@@ -324,6 +324,10 @@ pub enum Request {
     Close(String),
     /// By the window's id; `Focus` brings it back.
     Minimize(String),
+    /// The screen shares remembered for apps (`screen_grants.rs`).
+    ScreenShares,
+    /// Forget one, by its id, or all of them (`None`).
+    ForgetScreenShare(Option<String>),
 }
 
 /// A line of the protocol as a request, or why it isn't one. Reads it and
@@ -361,6 +365,11 @@ pub fn parse_request(line: &[u8]) -> Result<Request, String> {
         "focus" => Request::Focus(string_field(&request, "id")?.to_string()),
         "close" => Request::Close(string_field(&request, "id")?.to_string()),
         "minimize" => Request::Minimize(string_field(&request, "id")?.to_string()),
+        "screen-shares" => Request::ScreenShares,
+        "forget-screen-share" => Request::ForgetScreenShare(match request.get("all") {
+            Some(Value::Bool(true)) => None,
+            _ => Some(string_field(&request, "id")?.to_string()),
+        }),
         other => return Err(format!("unknown request {other:?}")),
     })
 }
@@ -414,6 +423,18 @@ fn handle(
             let window = named_window(state, &id)?;
             state.minimize_window(&window);
             Ok(json!({}))
+        }
+        Request::ScreenShares => Ok(json!({
+            "protocol": PROTOCOL,
+            "screen_shares": state.ipc_screen_shares(),
+        })),
+        // Forgetting takes access away: allowed while locked too.
+        Request::ForgetScreenShare(Some(id)) => match state.forget_screen_grant(&id) {
+            true => Ok(json!({})),
+            false => Err(format!("no screen share remembered as {id:?}")),
+        },
+        Request::ForgetScreenShare(None) => {
+            Ok(json!({ "forgotten": state.forget_screen_grants() }))
         }
     }
 }

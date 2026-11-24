@@ -399,7 +399,7 @@ impl Linker {
 
 /// A `Start` waiting for its answer.
 pub struct Started {
-    thread: std::thread::JoinHandle<(u32, Vec<(u32, Vardict)>)>,
+    thread: std::thread::JoinHandle<(u32, Vardict)>,
 }
 
 impl Started {
@@ -416,6 +416,20 @@ impl Started {
     /// The response and the streams: each node id and its properties
     /// (`source_type`, `size`, a monitor's `position`).
     pub fn answer_streams(self) -> (u32, Vec<(u32, Vardict)>) {
+        let (response, results) = self.answer_results();
+        let streams = results
+            .get("streams")
+            .map(|streams| {
+                let streams: Vec<(u32, Vardict)> = streams.try_clone().unwrap().try_into().unwrap();
+                streams
+            })
+            .unwrap_or_default();
+        (response, streams)
+    }
+
+    /// The response and all of `Start`'s results (`streams`, and
+    /// `restore_data` and `persist_mode` for a share remembered).
+    pub fn answer_results(self) -> (u32, Vardict) {
         self.thread.join().expect("Start's thread")
     }
 
@@ -612,6 +626,34 @@ unsafe fn read_buffer(buffer: *mut pw::sys::pw_buffer, width: u32, height: u32) 
     }
 }
 
+/// `restore_data` as Pila writes it (`(suv)`: its vendor and version, the
+/// grant's id), for a grant `id` written into its file by a test.
+pub fn restore_data(id: &str) -> OwnedVariant {
+    OwnedVariant::try_from(zbus::Variant::from((
+        "pila".to_string(),
+        1u32,
+        zbus::Variant::from(id.to_string()),
+    )))
+    .unwrap()
+}
+
+/// The grant's id in `restore_data` Pila answered.
+pub fn restore_id(data: &OwnedVariant) -> String {
+    let zbus::Variant::Structure(data) = &**data else {
+        panic!("restore_data isn't a structure: {data:?}");
+    };
+    let [zbus::Variant::Str(vendor), zbus::Variant::U32(1), zbus::Variant::Variant(id)] =
+        data.fields()
+    else {
+        panic!("not Pila's restore_data: {data:?}");
+    };
+    assert_eq!(vendor.as_str(), "pila");
+    let zbus::Variant::Str(id) = &**id else {
+        panic!("the grant's id isn't a string: {id:?}");
+    };
+    id.to_string()
+}
+
 /// The portal Pila serves, called as xdg-desktop-portal calls it.
 pub struct Portal {
     bus: Connection,
@@ -705,14 +747,47 @@ impl Portal {
         cursor_mode: u32,
         types: u32,
     ) -> Started {
+        self.request_with(name, app_id, cursor_mode, types, 0, None)
+    }
+
+    /// `request_sources` (the pointer hidden), asking for the share to be
+    /// remembered (`persist_mode` 1: while the app runs, 2: until revoked)
+    /// and, with `restore_data` (as `Start` answered it before), to restore
+    /// one.
+    pub fn request_remembered(
+        &mut self,
+        name: &str,
+        app_id: &str,
+        types: u32,
+        persist_mode: u32,
+        restore_data: Option<&OwnedVariant>,
+    ) -> Started {
+        self.request_with(name, app_id, 1, types, persist_mode, restore_data)
+    }
+
+    fn request_with(
+        &mut self,
+        name: &str,
+        app_id: &str,
+        cursor_mode: u32,
+        types: u32,
+        persist_mode: u32,
+        restore_data: Option<&OwnedVariant>,
+    ) -> Started {
         let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
         let handle = self.handle();
         let (response, _) = self.call("CreateSession", &(handle, &session, app_id, Vardict::new()));
         assert_eq!(response, 0, "CreateSession");
-        let options = HashMap::from([
+        let mut options = HashMap::from([
             ("types".to_string(), OwnedVariant::from(types)),
             ("cursor_mode".to_string(), OwnedVariant::from(cursor_mode)),
         ]);
+        if persist_mode > 0 {
+            options.insert("persist_mode".to_string(), OwnedVariant::from(persist_mode));
+        }
+        if let Some(data) = restore_data {
+            options.insert("restore_data".to_string(), data.try_clone().unwrap());
+        }
         let handle = self.handle();
         let (response, _) = self.call("SelectSources", &(handle, &session, app_id, options));
         assert_eq!(response, 0, "SelectSources");
@@ -735,16 +810,7 @@ impl Portal {
                 ),
             ))
             .unwrap_or_else(|err| panic!("Start: {err}"));
-            let (response, results): (u32, Vardict) = reply.body().deserialize().unwrap();
-            let streams = results
-                .get("streams")
-                .map(|streams| {
-                    let streams: Vec<(u32, Vardict)> =
-                        streams.try_clone().unwrap().try_into().unwrap();
-                    streams
-                })
-                .unwrap_or_default();
-            (response, streams)
+            reply.body().deserialize::<(u32, Vardict)>().unwrap()
         });
         Started { thread }
     }

@@ -17,14 +17,7 @@ fn socket(pila: &TestPila) -> std::path::PathBuf {
 
 /// `pila msg <args>` as a program in this session would run it.
 fn msg(pila: &TestPila, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_pila"))
-        .arg("msg")
-        .args(args)
-        .env_remove("PILA_SOCKET")
-        .env("WAYLAND_DISPLAY", &pila.display)
-        .env("XDG_RUNTIME_DIR", &pila.dir)
-        .output()
-        .expect("run pila msg")
+    pila.msg(args)
 }
 
 fn text(out: &Output) -> String {

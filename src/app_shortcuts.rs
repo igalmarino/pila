@@ -157,13 +157,7 @@ pub type Store = HashMap<String, HashMap<String, String>>;
 
 /// `$XDG_STATE_HOME/pila/app-shortcuts.json`.
 pub fn store_path() -> Option<std::path::PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state"))
-        })?;
-    Some(state.join("pila/app-shortcuts.json"))
+    crate::state_file::path("app-shortcuts.json")
 }
 
 /// The store, read from its file (none or unreadable: empty). Reads a file:
@@ -199,7 +193,7 @@ fn save_store(store: Store) {
             let file = HashMap::from([("apps".to_string(), store)]);
             let written = serde_json::to_string_pretty(&file)
                 .map_err(std::io::Error::other)
-                .and_then(|text| write_atomically(&path, &text));
+                .and_then(|text| crate::state_file::write(&path, &text));
             if let Err(err) = written {
                 warn!(%err, path = %path.display(), "can't save the apps' shortcuts");
             }
@@ -207,23 +201,6 @@ fn save_store(store: Store) {
     if let Err(err) = spawned {
         warn!(?err, "can't save the apps' shortcuts");
     }
-}
-
-fn write_atomically(path: &std::path::Path, text: &str) -> std::io::Result<()> {
-    use std::{io::Write, os::unix::fs::OpenOptionsExt};
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()?;
-    std::fs::rename(&temporary, path)
 }
 
 /// A signal to the app's session.

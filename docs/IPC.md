@@ -19,6 +19,8 @@ pila msg action <action>             Run an action (same syntax as [bindings])
 pila msg focus <id>                  Focus a window on any workspace
 pila msg close <id>                  Ask a window to close
 pila msg minimize <id>               Minimize a window (use focus to restore it)
+pila msg [--json] screen-shares      List the screen shares remembered for apps
+pila msg forget-screen-share <id>|all  Forget one remembered screen share, or all of them
 ```
 
 Examples:
@@ -81,9 +83,12 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `focus` | `id` | — |
 | `close` | `id` | — |
 | `minimize` | `id` | — (succeeds even if already minimized; `focus` restores it) |
+| `screen-shares` | — | `protocol`, `screen_shares` |
+| `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
-`quit`), while queries continue to work. The only actions allowed while locked are
+`quit`), while queries continue to work, and so does `forget-screen-share`, which only takes access
+away. The only actions allowed while locked are
 `power-off-monitors`, `power-on-monitors`, and `switch-layout`, so idle daemons can turn off
 monitors after locking and lock screens can switch keyboard layouts. Note that `spawn` actions run
 commands as your user, which any process running under your account can already do.
@@ -148,6 +153,17 @@ While `Mod+Tab`, `Alt+Tab`, or a window-switching swipe is active, an object wit
 Returns `null` when no window switch is in progress. Pila handles the switching logic and renders
 its own switcher UI; this field exists for external tools that also want to display switcher state.
 Sending a `focus` request ends the active switch on that window.
+
+**Screen share (`screen-shares`):**
+A share remembered for an app, which it gets again without the picker (see the manual, "Screen
+sharing"), sorted by app:
+- `id`: the grant's id, for `forget-screen-share` (a secret the app's portal keeps; don't share it)
+- `app`: the app as the picker named it; `app_id`: as the portal named it (empty for an app it
+  doesn't name)
+- `shares`: an object with `kind`: `"output"` (with `output`, a monitor name), `"region"` (with
+  `output` and `x`, `y`, `width`, `height` in logical pixels, from the monitor's top-left), or
+  `"window"` (with `app_id` and `title`)
+- `persistent`: `true` if it's kept until revoked (saved), `false` while the app runs
 
 ## Events
 

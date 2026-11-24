@@ -75,6 +75,8 @@ pub struct ScreenCasts {
     /// Requests to share waiting for the picker, first come first asked:
     /// it shows one at a time (`share_picker.rs`).
     pub(crate) waiting: std::collections::VecDeque<crate::share_picker::Ask>,
+    /// The shares remembered for apps (`screen_grants.rs`).
+    pub(crate) grants: crate::screen_grants::Grants,
     next_id: u64,
 }
 
@@ -136,11 +138,16 @@ pub struct Share {
     /// How the pointer shows in the stream.
     pub cursor: CursorMode,
     /// Who asks (`portal::Request::Start`), and the window it asks from.
+    pub app_id: String,
     pub app: Option<String>,
     pub parent: Option<crate::portal::ParentWindow>,
     /// What it may share: the picker offers these.
     pub sources: portal::Sources,
-    pub reply: Reply<Result<Vec<portal::Stream>, Refused>>,
+    /// How long it asks for the share to be remembered, and the grant it
+    /// asks to restore (`screen_grants.rs`).
+    pub persist: u32,
+    pub restore: Option<String>,
+    pub reply: Reply<Result<portal::Started, Refused>>,
 }
 
 /// Pila's connection to PipeWire, made at the first cast. Fields drop in
@@ -190,8 +197,10 @@ struct Cast {
     /// Dropped before `stream`.
     _listener: StreamListener<()>,
     stream: StreamRc,
-    /// `Start`'s answer, once the node has an id.
-    reply: Option<Reply<Result<Vec<portal::Stream>, Refused>>>,
+    /// `Start`'s answer, once the node has an id, and the grant the share
+    /// is remembered by (kept then, if new).
+    reply: Option<Reply<Result<portal::Started, Refused>>>,
+    remembered: Option<crate::screen_grants::Remembered>,
     position: (i32, i32),
     logical_size: (i32, i32),
     /// A consumer is linked: frames go out.
@@ -266,28 +275,40 @@ impl Pila {
                 session,
                 cursor,
                 sources,
+                app_id,
                 app,
                 parent,
+                persist,
+                restore,
                 reply,
             } => {
                 // Connected at startup; again if the connection went.
                 if let Err(err) = self.connect_pipewire() {
                     warn!(err, "portal: can't connect to PipeWire");
                 }
+                let share = Share {
+                    session,
+                    cursor,
+                    app_id,
+                    app,
+                    parent,
+                    sources,
+                    persist,
+                    restore,
+                    reply,
+                };
+                // Remembered for the app: shared at once, if it's there.
+                if let Some((target, remembered)) = self.restored_share(&share) {
+                    return self.start_cast(share, target, remembered);
+                }
                 self.screencast
                     .waiting
-                    .push_back(crate::share_picker::Ask::Cast(Share {
-                        session,
-                        cursor,
-                        app,
-                        parent,
-                        sources,
-                        reply,
-                    }));
+                    .push_back(crate::share_picker::Ask::Cast(share));
                 self.show_share_picker();
             }
             Request::PickColor { reply } => self.start_color_pick(reply),
             Request::ShortcutsStore(store) => self.app_shortcuts_store(store),
+            Request::ScreenGrants(store) => self.screen_grants_store(store),
             Request::ShortcutsSession { session, app_id } => {
                 self.app_shortcuts_session(session, app_id)
             }
@@ -324,15 +345,23 @@ impl Pila {
     }
 
     /// Start `share`'s stream of `target` (an output or a window), picked
-    /// by the user (`share_picker.rs`), answered once its node has an id.
-    pub(crate) fn start_cast(&mut self, share: Share, target: Target) {
+    /// by the user (`share_picker.rs`) or remembered for the app
+    /// (`screen_grants.rs`, by `remembered`), answered once its node has an
+    /// id.
+    pub(crate) fn start_cast(
+        &mut self,
+        share: Share,
+        target: Target,
+        remembered: Option<crate::screen_grants::Remembered>,
+    ) {
         let Share {
             session,
             cursor,
             reply,
             ..
         } = share;
-        // Only the user's pick starts a share, and never while locked.
+        // Only the user's pick (now, or remembered) starts a share, and
+        // never while locked.
         if self.is_locked() {
             return reply.send(Err(Refused::Cancelled));
         }
@@ -420,6 +449,7 @@ impl Pila {
             _listener: listener,
             stream,
             reply: Some(reply),
+            remembered,
             position,
             logical_size,
             streaming: false,
@@ -528,6 +558,8 @@ impl Pila {
         };
         let events = std::mem::take(&mut *pipewire.events.borrow_mut());
         let mut lost = false;
+        // New grants of shares that started, kept once the casts are let go.
+        let mut kept = Vec::new();
         for (id, event) in events {
             if let CastEvent::Disconnected(err) = event {
                 warn!(err, "portal: PipeWire connection lost");
@@ -546,12 +578,24 @@ impl Pila {
                     if let Some(reply) = cast.reply.take() {
                         let node_id = cast.stream.node_id();
                         debug!(node_id, "portal: stream ready");
-                        reply.send(Ok(vec![portal::Stream {
-                            node_id,
-                            source_type: cast.source_type,
-                            position: cast.position,
-                            size: cast.logical_size,
-                        }]));
+                        let remembered = cast.remembered.take();
+                        reply.send(Ok(portal::Started {
+                            streams: vec![portal::Stream {
+                                node_id,
+                                source_type: cast.source_type,
+                                position: cast.position,
+                                size: cast.logical_size,
+                            }],
+                            remembered: remembered.as_ref().map(|r| (r.id.clone(), r.mode)),
+                        }));
+                        if let Some(crate::screen_grants::Remembered {
+                            id,
+                            grant: Some(grant),
+                            ..
+                        }) = remembered
+                        {
+                            kept.push((id, grant));
+                        }
                     }
                 }
                 CastEvent::State(StreamState::Streaming) => {
@@ -584,6 +628,9 @@ impl Pila {
                 CastEvent::Negotiated(..) => {}
                 CastEvent::Disconnected(_) => {}
             }
+        }
+        for (id, grant) in kept {
+            self.keep_screen_grant(id, grant);
         }
         self.end_casts();
         if lost {

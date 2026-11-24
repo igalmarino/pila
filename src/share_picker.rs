@@ -12,6 +12,11 @@
 //! after the outputs): picking it hides the panel for the user to drag one
 //! (`share_region.rs`).
 //!
+//! An app that asks for its share to be remembered gets a Remember toggle
+//! under the tiles (R, or a click; off unless the app had one remembered):
+//! with it on, the app gets what's picked again next time without asking
+//! (`screen_grants.rs`).
+//!
 //! While it's shown it's modal: every key goes to it (`input.rs`), a click
 //! does nothing but on its controls, and every output is dimmed under it.
 //! Requests wait their turn in `ScreenCasts::waiting`; locking the screen
@@ -80,6 +85,12 @@ const TAB_WIDTH: i32 = 120;
 const TABS_GAP: i32 = 28;
 /// The selected tile's highlight: around the tile and its label.
 const SELECTED_MARGIN: i32 = 6;
+/// The Remember row (an app asking for its share to be remembered): under
+/// the tiles, its box at its left, the label beside it.
+const REMEMBER_GAP: i32 = 20;
+const REMEMBER_HEIGHT: i32 = 28;
+const REMEMBER_BOX: i32 = 20;
+const REMEMBER_LABEL_AT: i32 = 32;
 /// The footer: the buttons, as tall as they are, the hints beside them.
 const BUTTON_HEIGHT: i32 = 36;
 const SHARE_WIDTH: i32 = 120;
@@ -113,6 +124,24 @@ const TABBED_SCREENSHOT_HINTS: [(&str, &str); 4] = [
     ("Enter", "take"),
     ("Esc", "cancel"),
 ];
+/// With the Remember toggle: its key, before Enter's.
+const REMEMBER_HINT: (&str, &str) = ("R", "remember");
+
+/// The footer's hints: for a share or a screenshot, with tabs or not, with
+/// the Remember toggle or not.
+fn hints(screenshot: bool, tabbed: bool, remember: bool) -> Vec<(&'static str, &'static str)> {
+    let hints: &[(&str, &str)] = match (screenshot, tabbed) {
+        (false, false) => &HINTS,
+        (true, false) => &SCREENSHOT_HINTS,
+        (false, true) => &TABBED_HINTS,
+        (true, true) => &TABBED_SCREENSHOT_HINTS,
+    };
+    let mut hints = hints.to_vec();
+    if remember {
+        hints.insert(hints.len() - 2, REMEMBER_HINT);
+    }
+    hints
+}
 
 /// A tab of the picker that offers both kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,6 +198,8 @@ struct Shown {
     /// other tab, back when it's shown again.
     tab: Tab,
     other_selected: usize,
+    /// The Remember toggle, if the app asks for its share to be remembered.
+    remember: Option<bool>,
 }
 
 /// What the picker asks about: a share, or a screenshot.
@@ -312,18 +343,22 @@ pub struct Layout {
     pub cancel: Rectangle<i32, Logical>,
     /// The key hints, left of the buttons.
     pub hints: Rectangle<i32, Logical>,
+    /// The Remember row, with the toggle.
+    pub remember: Option<Rectangle<i32, Logical>>,
 }
 
 /// The panel for `outputs` outputs and `windows` windows (rows of them from
 /// `first_row` shown), in the middle of `area`. With both kinds, they're on
 /// tabs, `tab` shown, the panel the same on either. The outputs' rows are
-/// centered, three to a row; the windows' rows a grid in the middle.
+/// centered, three to a row; the windows' rows a grid in the middle. With
+/// `remember`, the Remember row under them.
 pub fn layout(
     area: Rectangle<i32, Logical>,
     outputs: usize,
     windows: usize,
     tab: Tab,
     first_row: usize,
+    remember: bool,
 ) -> Layout {
     let tabbed = outputs > 0 && windows > 0;
     let outputs_shown = if outputs == 0 && windows == 0 {
@@ -361,18 +396,20 @@ pub fn layout(
         .into_iter()
         .flatten()
         .fold((0, 0), |(w, h), (cw, ch)| (w.max(cw), h.max(ch)));
-    let hints = if tabbed {
-        TABBED_HINTS.len()
-    } else {
-        HINTS.len()
-    };
+    let hints = hints(false, tabbed, remember).len();
     let width = (2 * PADDING + content.0).max(min_width(hints));
     let top = if tabbed {
         TILES_AT + BUTTON_HEIGHT + TABS_GAP
     } else {
         TILES_AT
     };
-    let height = top + content.1 + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
+    let remember_row = if remember {
+        REMEMBER_GAP + REMEMBER_HEIGHT
+    } else {
+        0
+    };
+    let height =
+        top + content.1 + remember_row + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
     let panel = Rectangle::new(
         area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
         Size::from((width, height)),
@@ -452,6 +489,12 @@ pub fn layout(
         panel.loc + Point::from((PADDING, buttons_y)),
         Size::from((crate::panel::hints_width(hints), BUTTON_HEIGHT)),
     );
+    let remember = remember.then(|| {
+        Rectangle::new(
+            panel.loc + Point::from((PADDING, top + content.1 + REMEMBER_GAP)),
+            Size::from((width - 2 * PADDING, REMEMBER_HEIGHT)),
+        )
+    });
     Layout {
         panel,
         tiles,
@@ -461,7 +504,16 @@ pub fn layout(
         share,
         cancel,
         hints,
+        remember,
     }
+}
+
+/// The Remember toggle's box, in its `row`.
+fn remember_box(row: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+    Rectangle::new(
+        row.loc + Point::from((0, (row.size.h - REMEMBER_BOX) / 2)),
+        Size::from((REMEMBER_BOX, REMEMBER_BOX)),
+    )
 }
 
 /// Where a preview of a `source`-sized output goes in its `tile`: as large
@@ -502,6 +554,8 @@ pub enum KeyEffect {
     PreviousTab,
     Share,
     Cancel,
+    /// The Remember toggle, where it's shown.
+    Remember,
     Nothing,
 }
 
@@ -513,6 +567,7 @@ pub fn key_effect(sym: Keysym) -> KeyEffect {
         Keysym::ISO_Left_Tab => KeyEffect::PreviousTab,
         Keysym::Return | Keysym::KP_Enter | Keysym::space => KeyEffect::Share,
         Keysym::Escape => KeyEffect::Cancel,
+        Keysym::r | Keysym::R => KeyEffect::Remember,
         _ => KeyEffect::Nothing,
     }
 }
@@ -528,6 +583,8 @@ pub struct ScenePicker {
     /// The windows shown and the tile each one's preview fits in.
     pub windows: Vec<(Window, Rectangle<i32, Logical>)>,
     pub selected: usize,
+    /// The Remember toggle, if it's shown: on or off.
+    pub remember: Option<bool>,
     /// The windows' corners (`corner-radius`, `rounded-corners`); `None`:
     /// square.
     pub rounding: Option<(f64, crate::rounded::Corners)>,
@@ -594,11 +651,11 @@ impl Pila {
             sources.push(Source::Region);
         }
         if wanted.windows {
-            let windows = self.windows.focus_history.iter().filter(|window| {
-                window.alive()
-                    && crate::foreign_toplevel::identifier(window).is_some()
-                    && !window.geometry().size.is_empty()
-            });
+            let windows = self
+                .windows
+                .focus_history
+                .iter()
+                .filter(|window| crate::screen_grants::shareable(window));
             sources.extend(windows.cloned().map(Source::Window));
         }
         if sources.is_empty() {
@@ -644,6 +701,17 @@ impl Pila {
             screenshot = matches!(ask, Ask::Screenshot(_)),
             "portal: asking what to share"
         );
+        // Offered if the app asks for the share to be remembered: on if it
+        // had one remembered (that isn't there now).
+        let remember = match &ask {
+            Ask::Cast(share) if share.persist > crate::screen_grants::PERSIST_NONE => Some(
+                share
+                    .restore
+                    .as_ref()
+                    .is_some_and(|id| self.screen_grant(id, &share.app_id).is_some()),
+            ),
+            _ => None,
+        };
         self.share_picker.shown = Some(Shown {
             ask,
             app,
@@ -652,6 +720,7 @@ impl Pila {
             selected,
             tab,
             other_selected,
+            remember,
         });
         *self.share_picker.buffers.borrow_mut() = Buffers::default();
         self.share_picker.pending = None;
@@ -786,7 +855,22 @@ impl Pila {
             return;
         };
         match (target, shown.ask) {
-            (Some(target), Ask::Cast(share)) => self.start_cast(share, target),
+            (Some(target), Ask::Cast(share)) => {
+                // Remembered if the toggle's on; otherwise the grant the app
+                // asked to restore, not there, goes.
+                let remembered = match shown.remember {
+                    Some(true) => self.new_screen_grant(&share, shown.app.as_deref(), &target),
+                    _ => {
+                        if let Some(id) = &share.restore {
+                            if self.screen_grant(id, &share.app_id).is_some() {
+                                self.forget_screen_grant(id);
+                            }
+                        }
+                        None
+                    }
+                };
+                self.start_cast(share, target, remembered)
+            }
             (Some(target), Ask::Screenshot(shot)) => self.take_screenshot(Some(target), shot.reply),
             (None, ask) => ask.cancel(),
         }
@@ -825,6 +909,19 @@ impl Pila {
         }
     }
 
+    /// Turn the Remember toggle on or off, where it's shown.
+    fn toggle_share_remember(&mut self) {
+        let Some(shown) = self.share_picker.shown.as_mut() else {
+            return;
+        };
+        let Some(remember) = shown.remember.as_mut() else {
+            return;
+        };
+        *remember = !*remember;
+        let output = shown.output.clone();
+        self.queue_redraw_named_output(&output);
+    }
+
     /// Whether what it asks for is a screenshot.
     pub(crate) fn share_picker_screenshot(&self) -> bool {
         self.share_picker
@@ -856,13 +953,14 @@ impl Pila {
             KeyEffect::Next | KeyEffect::NextTab => self.select_share(first + (at + 1) % count),
             KeyEffect::Share => self.pick_share(),
             KeyEffect::Cancel => self.cancel_share_picker(),
+            KeyEffect::Remember => self.toggle_share_remember(),
             KeyEffect::Nothing => {}
         }
     }
 
     /// A press at `location` while it's shown (it takes them all): a tab
     /// shows it, a tile selects its source, the buttons share or cancel,
-    /// elsewhere nothing.
+    /// the Remember row turns it on or off, elsewhere nothing.
     pub fn share_picker_press(&mut self, location: Point<f64, Logical>) {
         if self.region_selecting() {
             return self.region_press(location);
@@ -875,6 +973,11 @@ impl Pila {
             self.pick_share();
         } else if layout.cancel.to_f64().contains(location) {
             self.cancel_share_picker();
+        } else if layout
+            .remember
+            .is_some_and(|row| row.to_f64().contains(location))
+        {
+            self.toggle_share_remember();
         } else if let Some((tab, _)) = layout
             .tabs
             .iter()
@@ -924,7 +1027,14 @@ impl Pila {
             .or_else(|| self.space.outputs().next())?;
         let area = self.space.output_geometry(output)?;
         let (outputs, windows) = shown.counts();
-        let layout = layout(area, outputs, windows, shown.tab, shown.first_window_row());
+        let layout = layout(
+            area,
+            outputs,
+            windows,
+            shown.tab,
+            shown.first_window_row(),
+            shown.remember.is_some(),
+        );
         let mut previews = Vec::new();
         let mut shown_windows = Vec::new();
         let mut region_tile = None;
@@ -952,6 +1062,7 @@ impl Pila {
             previews,
             windows: shown_windows,
             selected: shown.selected,
+            remember: shown.remember,
             rounding: crate::panel::rounding(&self.config),
             region: self.scene_region(),
             region_tile,
@@ -1199,6 +1310,8 @@ impl Pila {
             "window_previews": view.buffers.borrow().windows.len(),
             "share": rect(view.layout.share),
             "cancel": rect(view.layout.cancel),
+            "remember": shown.remember,
+            "remember_rect": view.layout.remember.map(rect),
             "text": view.buffers.borrow().text.is_some(),
             "previews": view.buffers.borrow().previews.len(),
             "waiting": self.screencast.waiting.len(),
@@ -1295,15 +1408,29 @@ fn items(
             color,
         });
     }
+    if let Some(row) = layout.remember {
+        let (x, y) = local(row);
+        let label = match app {
+            Some(app) => format!("Remember: share this with {app} again without asking"),
+            None => "Remember: share this with the app again without asking".to_string(),
+        };
+        items.push(Item::Text {
+            text: label,
+            at: (
+                x + REMEMBER_LABEL_AT,
+                y + (REMEMBER_HEIGHT - LABEL_HEIGHT) / 2,
+            ),
+            w: row.size.w - REMEMBER_LABEL_AT,
+            h: LABEL_HEIGHT,
+            font: BODY,
+            align: Align::Left,
+            color: text,
+        });
+    }
     let hints_y = local(layout.share).1 + (BUTTON_HEIGHT - crate::panel::FOOTER_HEIGHT) / 2;
-    let hints: &[(&str, &str)] = match (screenshot, layout.tab.is_some()) {
-        (false, false) => &HINTS,
-        (true, false) => &SCREENSHOT_HINTS,
-        (false, true) => &TABBED_HINTS,
-        (true, true) => &TABBED_SCREENSHOT_HINTS,
-    };
+    let hints = hints(screenshot, layout.tab.is_some(), layout.remember.is_some());
     items.extend(crate::panel::footer(
-        hints,
+        &hints,
         None,
         hints_y,
         panel.size.w,
@@ -1449,10 +1576,59 @@ pub fn elements(
                 None,
             )
         });
-    let solids =
-        selected
-            .into_iter()
-            .chain(crate::panel::buttons(layout.share, layout.cancel, colors));
+    // The Remember toggle's box: edged as Cancel, the accent inside when
+    // it's on.
+    let toggle = layout
+        .remember
+        .map(remember_box)
+        .into_iter()
+        .flat_map(|square| {
+            let key = Some((
+                f64::from(crate::panel::CAP_RADIUS),
+                crate::rounded::Corners::All,
+            ));
+            let inner = Rectangle::new(
+                square.loc + Point::from((1, 1)),
+                square.size - Size::from((2, 2)),
+            );
+            let mark = Rectangle::new(
+                square.loc + Point::from((5, 5)),
+                square.size - Size::from((10, 10)),
+            );
+            let on = view.remember == Some(true);
+            let fill = if on {
+                crate::panel::accent(colors)
+            } else {
+                crate::panel::opaque(colors.bar)
+            };
+            [
+                (
+                    "remember-mark",
+                    mark,
+                    fill,
+                    Some((2.0, crate::rounded::Corners::All)),
+                ),
+                (
+                    "remember-fill",
+                    inner,
+                    crate::panel::opaque(colors.bar),
+                    Some((
+                        f64::from(crate::panel::CAP_RADIUS - 1),
+                        crate::rounded::Corners::All,
+                    )),
+                ),
+                (
+                    "remember-edge",
+                    square,
+                    crate::panel::rgb(colors.hover),
+                    key,
+                ),
+            ]
+        });
+    let solids = selected
+        .into_iter()
+        .chain(toggle)
+        .chain(crate::panel::buttons(layout.share, layout.cancel, colors));
     elements.extend(crate::panel::solids(
         renderer,
         &mut buffers.solids,
@@ -1502,7 +1678,7 @@ mod tests {
             windows: false,
         };
         let picker = items(
-            &layout(area(), 1, 0, Tab::Screens, 0),
+            &layout(area(), 1, 0, Tab::Screens, 0, false),
             Some("App"),
             monitors,
             false,
@@ -1532,6 +1708,7 @@ mod tests {
         let controls: Vec<_> = [layout.share, layout.cancel, layout.hints]
             .into_iter()
             .chain(tabs)
+            .chain(layout.remember)
             .collect();
         for rect in &controls {
             assert!(panel.contains_rect(*rect), "{what}: {rect:?} in {panel:?}");
@@ -1553,7 +1730,7 @@ mod tests {
     #[test]
     fn the_panel_is_centered_with_its_tiles_and_buttons_inside() {
         for count in 1..=5 {
-            let layout = layout(area(), count, 0, Tab::Screens, 0);
+            let layout = layout(area(), count, 0, Tab::Screens, 0, false);
             assert_eq!(layout.tiles.len(), count);
             assert!(layout.tabs.is_empty(), "no tabs with one kind");
             let panel = layout.panel;
@@ -1561,11 +1738,36 @@ mod tests {
             assert_inside(&layout, &format!("{count} outputs"));
         }
         // Three to a row, then another row.
-        let four = layout(area(), 4, 0, Tab::Screens, 0);
+        let four = layout(area(), 4, 0, Tab::Screens, 0, false);
         assert_eq!(
             four.tiles[3].loc.y,
             four.tiles[0].loc.y + TILE.1 + LABEL_GAP + LABEL_HEIGHT + ROW_GAP
         );
+    }
+
+    /// The Remember row, where it's offered: under the tiles, above the
+    /// footer, the panel taller by it and its key's hint.
+    #[test]
+    fn the_remember_row_is_between_the_tiles_and_the_footer() {
+        for (outputs, windows, tab) in [(1, 0, Tab::Screens), (2, 7, Tab::Windows)] {
+            let without = layout(area(), outputs, windows, tab, 0, false);
+            let with = layout(area(), outputs, windows, tab, 0, true);
+            assert_eq!(without.remember, None);
+            let row = with.remember.expect("the row");
+            assert_inside(&with, "with Remember");
+            assert_eq!(
+                with.panel.size.h,
+                without.panel.size.h + REMEMBER_GAP + REMEMBER_HEIGHT
+            );
+            assert!(with.tiles.iter().all(|t| t.loc.y < row.loc.y));
+            assert!(row.loc.y + row.size.h < with.share.loc.y);
+            assert!(row.contains_rect(remember_box(row)));
+        }
+        for tabbed in [false, true] {
+            let hints = hints(false, tabbed, true);
+            let at = |key: &str| hints.iter().position(|(k, _)| *k == key).unwrap();
+            assert_eq!(at("R") + 1, at("Enter"), "R before Enter: {hints:?}");
+        }
     }
 
     /// With windows too, the outputs and the windows are on tabs, the panel
@@ -1576,8 +1778,8 @@ mod tests {
     fn outputs_and_windows_are_on_tabs() {
         let small = Rectangle::new((0, 0).into(), (1280, 800).into());
         for outputs in [2, 4] {
-            let screens = layout(small, outputs, 12, Tab::Screens, 0);
-            let windows = layout(small, outputs, 12, Tab::Windows, 0);
+            let screens = layout(small, outputs, 12, Tab::Screens, 0, false);
+            let windows = layout(small, outputs, 12, Tab::Windows, 0, false);
             for (layout, tab) in [(&screens, Tab::Screens), (&windows, Tab::Windows)] {
                 assert_eq!(
                     layout.tabs.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
@@ -1596,17 +1798,20 @@ mod tests {
             assert_eq!(windows.shown, (outputs..outputs + 10).collect::<Vec<_>>());
         }
         // Scrolled: the second and third rows of windows.
-        let scrolled = layout(small, 2, 12, Tab::Windows, 1);
+        let scrolled = layout(small, 2, 12, Tab::Windows, 1, false);
         assert_eq!(scrolled.shown, [7, 8, 9, 10, 11, 12, 13]);
         assert_eq!(scrolled.shown.len(), scrolled.tiles.len());
         // Past the end: the last two rows.
-        assert_eq!(layout(small, 2, 12, Tab::Windows, 5).shown, scrolled.shown);
+        assert_eq!(
+            layout(small, 2, 12, Tab::Windows, 5, false).shown,
+            scrolled.shown
+        );
     }
 
     /// Windows alone: no tabs, their rows a grid in the middle.
     #[test]
     fn windows_alone_have_no_tabs() {
-        let layout = layout(area(), 0, 3, Tab::Windows, 0);
+        let layout = layout(area(), 0, 3, Tab::Windows, 0, false);
         assert!(layout.tabs.is_empty());
         assert_eq!(layout.tab, None);
         assert_eq!(layout.shown, [0, 1, 2]);
@@ -1616,7 +1821,7 @@ mod tests {
         let right = panel.loc.x + panel.size.w - (layout.tiles[2].loc.x + WINDOW_TILE.0);
         assert!((left - right).abs() <= 1, "centered: {left} and {right}");
         // A second row starts under the first's first tile.
-        let seven = super::layout(area(), 0, 7, Tab::Windows, 0);
+        let seven = super::layout(area(), 0, 7, Tab::Windows, 0, false);
         assert_eq!(seven.tiles[5].loc.x, seven.tiles[0].loc.x);
     }
 
@@ -1639,6 +1844,7 @@ mod tests {
         assert_eq!(key_effect(Keysym::ISO_Left_Tab), KeyEffect::PreviousTab);
         assert_eq!(key_effect(Keysym::Return), KeyEffect::Share);
         assert_eq!(key_effect(Keysym::Escape), KeyEffect::Cancel);
+        assert_eq!(key_effect(Keysym::r), KeyEffect::Remember);
         assert_eq!(key_effect(Keysym::a), KeyEffect::Nothing);
     }
 }

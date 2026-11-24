@@ -155,6 +155,16 @@ Focus, close, or minimize a window by the
 returned by
 .B pila msg windows
 (focusing a minimized window restores it).
+.TP
+.BR "pila msg " [ \-\-json ] " screen\-shares"
+List the screen shares remembered for apps, which they get again without the share picker.
+.TP
+.BI "pila msg forget\-screen\-share " id\fR|\fBall
+Forget a remembered screen share by the
+.I id
+returned by
+.BR "pila msg screen\-shares" ,
+or all of them.
 .PP
 Scripts should pass
 .BR \-\-json ,
@@ -412,6 +422,10 @@ Nested and secondary instances keep this state in memory only.
 .TP
 .IR ~/.local/state/pila/app\-shortcuts.json " (or " $XDG_STATE_HOME/pila/app\-shortcuts.json )
 Persisted global shortcut assignments confirmed through the GlobalShortcuts portal.
+.TP
+.IR ~/.local/state/pila/screen\-shares.json " (or " $XDG_STATE_HOME/pila/screen\-shares.json )
+Screen shares remembered for apps through the ScreenCast portal's Remember toggle (listed by
+.BR "pila msg screen\-shares" ).
 .TP
 .I $XDG_RUNTIME_DIR/pila\-screenshots/
 Temporary storage for portal screenshots (last 10 kept until logout).

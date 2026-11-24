@@ -709,6 +709,16 @@ locking the screen cancels an open picker and pauses updates to active window sh
 cursor is included according to the app's request. Requires `xdg-desktop-portal`, `pipewire`, and a
 session D-Bus bus (set up by your login manager or `pila-session`; not available in nested mode).
 
+**Remembering a share:** Apps that ask the portal to remember their share (recorders such as Kooha
+and OBS do) get a **Remember** toggle under the picker's tiles, off by default: press `R` or click
+it. With it on, the next time that app asks, it gets the same monitor, region, or window (matched
+by app ID and title) again without the picker. If what was remembered isn't there (a monitor
+unplugged, a window closed), the picker asks again with the toggle on; turning it off forgets the
+grant. Nothing is shared while the screen is locked. Grants the app asked to keep are saved in
+`~/.local/state/pila/screen-shares.json` (those meant to last while the app runs stay in memory).
+List them with `pila msg screen-shares`, and revoke one with `pila msg forget-screen-share <id>`
+(or `all`).
+
 ## Portals, polkit, and the keyring
 
 Desktop apps expect three session services that full desktop environments start automatically:
@@ -924,6 +934,8 @@ pila msg focus <id>              # focus a window by ID
 pila msg close <id>              # close a window by ID
 pila msg minimize <id>           # minimize a window (focus restores it)
 pila msg switch                  # inspect active Mod+Tab switcher state
+pila msg screen-shares           # list the screen shares remembered for apps
+pila msg forget-screen-share <id> # revoke one (or all)
 pila msg --json subscribe        # stream live window, workspace, and output changes
 ```
 
