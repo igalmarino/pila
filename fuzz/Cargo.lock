@@ -1313,7 +1313,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pila"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "bitflags",
  "calloop",
@@ -1876,7 +1876,7 @@ checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/igalmarino/smithay.git?rev=81119da564c84a1ce161c6f0a18188c1184dbdf2#81119da564c84a1ce161c6f0a18188c1184dbdf2"
+source = "git+https://github.com/igalmarino/smithay.git?rev=afdce3200fd6df7a71ed7ad9d6f8e68237b18920#afdce3200fd6df7a71ed7ad9d6f8e68237b18920"
 dependencies = [
  "aliasable",
  "appendlist",

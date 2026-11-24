@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.5 (2026-11-23)
 
 - **Security (lock screen and screen sharing):** If two apps asked to share the screen at once,
   locking the session showed the second request behind the lock screen, where Enter or a click
