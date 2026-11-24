@@ -228,9 +228,13 @@ Key flows and invariants:
   `PILA_HEADLESS_CHECK_INVARIANTS=1` (also set by the harness), every 50 ms
   `broken_invariant` checks that input can't get stuck: no popup grab (pointer or keyboard; an
   input method's keyboard grab isn't one) outlives every menu (its candidate window isn't
-  one), and the keyboard isn't on a layer surface that takes none; one broken for 500 ms (a
-  client may be slow to destroy a dismissed menu) is a panic. A new kind of grab or focus
-  Pila takes gets its invariant there.
+  one), and the keyboard isn't on a layer surface that takes none; while locked, the keyboard
+  and the pointer are on a lock surface or nothing; each window is in one place only (the
+  `Space`, `parked`, `minimized` or `unmapped`), one in the focus history in one of the first
+  three; and the windows kept on top are above the others, X11 menus above all
+  (`Pila::keep_on_top`). One broken for 500 ms (a client may be slow to destroy a dismissed
+  menu) is a panic. A new kind of grab, focus or place for a window Pila takes gets its
+  invariant there.
 - **Nested-only (winit):** named cursor shapes are drawn by the host (`apply_cursor`),
   but while the cursor is magnified (`shake_cursor.rs`) Pila draws them from its own theme
   and hides the host's; client cursor surfaces are drawn by Pila (`cursor.rs`). Winit doesn't report the pointer

@@ -14,10 +14,6 @@ testing and protocols Pila doesn't implement yet.
 
 Small items that can be tested in CI without new hardware.
 
-- **Stronger invariant checks in the tests:** The headless backend's checks
-  (`PILA_HEADLESS_CHECK_INVARIANTS`) could also verify the stacking order (windows kept on top,
-  then X11 menus), that each window is in exactly one place (on screen, on another workspace,
-  minimized or unmapped), and that nothing but the lock screen gets input while locked.
 - **More fuzz targets:** App ids and shortcut triggers from the portal, `sessions.json` and
   `app-shortcuts.json` as read back, blur regions, and window menu requests.
 - **Test coverage:** Pointer grabs (menus, moves, resizes), screen capture, output management and

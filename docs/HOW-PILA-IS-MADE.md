@@ -78,9 +78,11 @@ Some bugs have no obvious visual symptom, so the test suite checks them continuo
 
 - **On-demand per-output redraws:** Under test, Pila panics if an output's rendered content changes
   without a corresponding redraw request (`PILA_HEADLESS_CHECK_REDRAWS`).
-- **No stuck input:** Under test, Pila panics if a popup grab outlives its menu or if keyboard
-  focus remains on a layer surface that doesn't accept keyboard input
-  (`PILA_HEADLESS_CHECK_INVARIANTS`).
+- **No stuck input, no lost windows:** Under test, Pila panics if a popup grab outlives its menu,
+  if keyboard focus remains on a layer surface that doesn't accept keyboard input, if anything
+  but the lock screen holds the keyboard or pointer while locked, if a window is in two places
+  at once (say, on screen and minimized) or nowhere, or if a window ends up above one kept on
+  top (`PILA_HEADLESS_CHECK_INVARIANTS`).
 - **Session lock isolation:** While locked, any code path that tries to deliver input to anything
   other than a lock surface panics in debug builds.
 - **No stale doc references:** A test fails if the documentation references a source file or symbol

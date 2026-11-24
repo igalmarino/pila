@@ -31,9 +31,11 @@ Integration tests (`tests/*.rs`, harness in `tests/common/`) run a headless Pila
   `PILA_HEADLESS_CHECK_REDRAWS=1`: Pila panics ("changed and no redraw was asked for it") if
   an output shows something new that no redraw request for it explains (`headless.rs`,
   `check_redraws`); the fix is a redraw request where the change is made (`redraw.rs`). It
-  also sets `PILA_HEADLESS_CHECK_INVARIANTS=1`: Pila panics ("invariant broken") if input
-  stays stuck for half a second, a popup grab with no popup left or the keyboard on a layer
-  surface that takes none (`headless.rs`, `broken_invariant`).
+  also sets `PILA_HEADLESS_CHECK_INVARIANTS=1`: Pila panics ("invariant broken") if for half
+  a second a popup grab has no popup left, the keyboard is on a layer surface that takes none,
+  the keyboard or pointer is on anything but the lock screen while locked, a window is in two
+  places (on screen, parked, minimized, unmapped) or a focused one in none, or a window is
+  above one kept on top or an X11 menu (`headless.rs`, `broken_invariant`).
 
 `tests/FEATURES.md` maps every feature to its tests (or says why it has none), and
 `features_inventory_is_complete` fails if a test it names is gone or an integration test

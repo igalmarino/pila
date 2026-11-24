@@ -14,12 +14,18 @@
 //! none would only show at an unrelated redraw.
 //!
 //! With `PILA_HEADLESS_CHECK_INVARIANTS=1` (the harness sets it too) Pila
-//! checks every `CHECK_EVERY` that input is in a state it can leave
-//! (`broken_invariant`): no popup grab outlives its popups, and the keyboard
-//! isn't left on a layer surface that takes none. One that stays broken for
-//! `INVARIANT_GRACE` (a client may take a moment to destroy a dismissed menu)
-//! is a panic: a stuck grab or a lost keyboard otherwise only shows as the
-//! next click or key going nowhere.
+//! checks every `CHECK_EVERY` that input is in a state it can leave and the
+//! windows are where they belong (`broken_invariant`): no popup grab outlives
+//! its popups, the keyboard isn't left on a layer surface that takes none,
+//! nothing but the lock screen has the keyboard or the pointer while locked,
+//! each window is in one place only (on screen, on another workspace,
+//! minimized or unmapped; one ever focused is in one of the first three), and
+//! the always-on-top windows are above the others with X11 menus above all
+//! (`Pila::keep_on_top`). One that stays broken for `INVARIANT_GRACE` (a
+//! client may take a moment to destroy a dismissed menu) is a panic: a stuck
+//! grab or a lost keyboard otherwise only shows as the next click or key going
+//! nowhere, a window in two places or under a window kept on top as a wrong
+//! picture.
 
 use std::{
     os::unix::fs::MetadataExt,
@@ -795,8 +801,101 @@ fn render_all(state: &mut Pila) {
 }
 
 /// `PILA_HEADLESS_CHECK_INVARIANTS` (see the module docs): what's wrong
-/// with the input state, if anything.
+/// with the input state or the windows, if anything.
 fn broken_invariant(state: &Pila) -> Option<String> {
+    locked_input(state)
+        .or_else(|| misplaced_window(state))
+        .or_else(|| misstacked_window(state))
+        .or_else(|| broken_input(state))
+}
+
+/// While locked, the keyboard and the pointer are on a lock surface or on
+/// nothing.
+fn locked_input(state: &Pila) -> Option<String> {
+    if !state.is_locked() {
+        return None;
+    }
+    let keyboard = state.keyboard_focus();
+    let pointer = state
+        .seat
+        .get_pointer()
+        .and_then(|p| p.current_focus())
+        .and_then(|focus| {
+            smithay::wayland::seat::WaylandFocus::wl_surface(&focus).map(|s| s.into_owned())
+        });
+    [("keyboard", keyboard), ("pointer", pointer)]
+        .into_iter()
+        .find_map(|(what, focus)| {
+            let focus = focus?;
+            (!state.is_lock_surface(&focus)).then(|| {
+                format!("the {what} is on something other than the lock screen while locked")
+            })
+        })
+}
+
+/// Each window in one place: on screen, on another workspace, minimized or
+/// unmapped; one ever focused (and still there) is in one of the first three.
+fn misplaced_window(state: &Pila) -> Option<String> {
+    use smithay::{desktop::Window, utils::IsAlive};
+    let places = [
+        ("on screen", state.space.elements().collect::<Vec<_>>()),
+        (
+            "on another workspace",
+            state.workspaces.parked.iter().collect(),
+        ),
+        ("minimized", state.windows.minimized.iter().collect()),
+        ("unmapped", state.windows.unmapped.iter().collect()),
+    ];
+    let mut seen: Vec<(&Window, &str)> = Vec::new();
+    for (place, windows) in &places {
+        for window in windows {
+            if let Some((_, first)) = seen.iter().find(|(w, _)| w == window) {
+                let name = crate::foreign_toplevel::app_id(window);
+                return Some(format!("{name:?} is both {first} and {place}"));
+            }
+            seen.push((window, place));
+        }
+    }
+    let mapped = |window: &Window| {
+        places[..3]
+            .iter()
+            .any(|(_, windows)| windows.contains(&window))
+    };
+    state
+        .windows
+        .focus_history
+        .iter()
+        .find(|w| w.alive() && !mapped(w))
+        .map(|w| {
+            let name = crate::foreign_toplevel::app_id(w);
+            format!("{name:?}, focused before, is nowhere (not on screen, parked or minimized)")
+        })
+}
+
+/// The always-on-top windows above the others, X11 menus above all
+/// (`Pila::keep_on_top`).
+fn misstacked_window(state: &Pila) -> Option<String> {
+    use crate::{stacking::is_always_on_top, workspaces::is_override_redirect};
+    let mut menu_seen = false;
+    let mut on_top_seen = false;
+    for window in state.space.elements() {
+        let name = || crate::foreign_toplevel::app_id(window);
+        if is_override_redirect(window) {
+            menu_seen = true;
+        } else if menu_seen {
+            return Some(format!("{:?} is above an X11 menu", name()));
+        } else if is_always_on_top(window) {
+            on_top_seen = true;
+        } else if on_top_seen {
+            return Some(format!("{:?} is above a window kept on top", name()));
+        }
+    }
+    None
+}
+
+/// No popup grab outlives its popups, and the keyboard isn't left on a layer
+/// surface that takes none.
+fn broken_input(state: &Pila) -> Option<String> {
     use smithay::{
         desktop::{layer_map_for_output, PopupKind, PopupManager},
         wayland::{seat::WaylandFocus, shell::wlr_layer::KeyboardInteractivity},
