@@ -1184,7 +1184,8 @@ Key flows and invariants:
   (its app: the app id, else the app id of the window `BindShortcuts` comes from, by its
   xdg-foreign handle). `BindShortcuts` binds at once what the store confirmed before for that
   app (`Store`, `$XDG_STATE_HOME/pila/app-shortcuts.json`, read by the portal's thread at startup,
-  `Request::ShortcutsStore`, and written whole by a thread at each save); otherwise a modal panel
+  `Request::ShortcutsStore`, and written whole by a thread at each save; a key read back that no
+  app could be given, `assignable`, isn't remembered, so the app is asked again); otherwise a modal panel
   (`ask_app_shortcuts`; refused while locked or another panel asks) lists them with the keys asked
   for (`parse_trigger`, the shortcuts XDG specification's text; only `assignable` ones: with Ctrl,
   Alt or Super, or a key that types nothing), none where Pila's bindings or another session have

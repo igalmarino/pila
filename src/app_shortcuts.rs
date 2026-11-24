@@ -146,6 +146,11 @@ pub fn assignable(combo: &KeyCombo) -> bool {
         || (0x1008_ff00..=0x1008_ffff).contains(&raw)
 }
 
+/// Keys read back from the store: only those an app could be given.
+fn remembered_keys(text: &str) -> Option<KeyCombo> {
+    parse_trigger(text).filter(assignable)
+}
+
 /// The keys confirmed for apps' shortcuts, by app, then by shortcut id: the
 /// trigger text, empty for one left unset.
 pub type Store = HashMap<String, HashMap<String, String>>;
@@ -391,14 +396,23 @@ impl Pila {
             }
         }
         let app_key = self.app_shortcuts.sessions[index].app.clone();
-        let remembered = (!app_key.is_empty())
+        // The file may have been written by anything: a key no app could be
+        // given isn't remembered, and the app is asked again.
+        let remembered: Option<HashMap<String, String>> = (!app_key.is_empty())
             .then(|| self.app_shortcuts.store.as_ref()?.get(&app_key))
-            .flatten();
+            .flatten()
+            .map(|r| {
+                r.iter()
+                    .filter(|(_, text)| text.is_empty() || remembered_keys(text).is_some())
+                    .map(|(id, text)| (id.clone(), text.clone()))
+                    .collect()
+            });
+        let remembered = remembered.as_ref();
         let rows: Vec<Bound> = asked
             .iter()
             .map(|asked| {
                 let keys = match remembered.and_then(|r| r.get(&asked.id)) {
-                    Some(text) => parse_trigger(text),
+                    Some(text) => remembered_keys(text),
                     None => asked
                         .preferred
                         .as_deref()
@@ -458,7 +472,7 @@ impl Pila {
             .map(|(id, text)| Bound {
                 id: id.clone(),
                 description: String::new(),
-                keys: parse_trigger(text),
+                keys: remembered_keys(text),
             })
             .collect()
     }

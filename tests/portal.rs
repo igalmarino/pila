@@ -16,6 +16,14 @@ const GREEN: [u8; 4] = [255, 40, 200, 60];
 /// apps find their desktop entries in the test's own data directory (one,
 /// `org.example.Browser`, named "Web Browser").
 fn start_with(outputs: &str) -> (TestPila, notifications::Bus, Daemon) {
+    start_with_env(outputs, Vec::new())
+}
+
+/// `start_with`, with more environment.
+fn start_with_env(
+    outputs: &str,
+    env: Vec<(String, String)>,
+) -> (TestPila, notifications::Bus, Daemon) {
     let bus = notifications::Bus::start();
     let pipewire = Daemon::start();
     let data = std::env::temp_dir().join(format!(
@@ -35,7 +43,10 @@ fn start_with(outputs: &str) -> (TestPila, notifications::Bus, Daemon) {
             bus.env(),
             pipewire.env(),
             ("XDG_DATA_DIRS".into(), data.to_string_lossy().into_owned()),
-        ],
+        ]
+        .into_iter()
+        .chain(env)
+        .collect(),
         ..Default::default()
     });
     (pila, bus, pipewire)
@@ -1377,6 +1388,45 @@ fn an_apps_global_shortcut_is_confirmed_then_sent_to_it() {
         pila.state()["app_shortcuts"]["panel"].is_null(),
         "not asked again"
     );
+}
+
+/// `app-shortcuts.json` is a file anything may have written: a remembered
+/// key no app could be given (a plain letter) isn't bound, and the app is
+/// asked again.
+#[test]
+fn a_remembered_key_no_app_could_get_isnt_bound() {
+    let state = std::env::temp_dir().join(format!("pila-shortcuts-state-{}", rand_suffix()));
+    std::fs::create_dir_all(state.join("pila")).unwrap();
+    std::fs::write(
+        state.join("pila/app-shortcuts.json"),
+        r#"{"apps": {"org.example.Talk": {"talk": "a"}}}"#,
+    )
+    .unwrap();
+    let (mut pila, bus, _pipewire) = start_with_env(
+        "HEADLESS-1:640x480",
+        vec![("XDG_STATE_HOME".into(), state.display().to_string())],
+    );
+    let mut portal = Portal::connect(&bus.address);
+    portal.shortcuts_session("s1", "org.example.Talk");
+    let bound = portal.bind_shortcuts("s1", &[("talk", "Push to talk", "CTRL+F12")]);
+    // Checked before waiting for the answer: a panel shown wouldn't answer.
+    let state_now = pila.wait("the panel, or the keys bound", |s| {
+        !s["app_shortcuts"]["panel"].is_null()
+            || s["app_shortcuts"]["sessions"].as_array().is_some_and(|a| {
+                a.iter()
+                    .any(|s| !s["shortcuts"].as_array().unwrap().is_empty())
+            })
+    });
+    assert!(
+        !state_now["app_shortcuts"]["panel"].is_null(),
+        "bound without asking: {}",
+        state_now["app_shortcuts"]
+    );
+    let panel = &state_now["app_shortcuts"]["panel"];
+    assert_ne!(panel["rows"][0]["keys"], "a");
+    pila.key("Escape");
+    assert_eq!(bound.join().unwrap().0, 1);
+    let _ = std::fs::remove_dir_all(&state);
 }
 
 /// In the panel: keys Pila binds aren't offered (the row starts unset) nor
