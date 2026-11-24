@@ -824,10 +824,19 @@ impl Pila {
             .selected
             .as_ref()
             .is_some_and(|w| !laid_out.iter().any(|(other, _)| other == w));
+        // A window held (pressed or dragged) that's gone is let go: its
+        // release, still suppressed, goes nowhere.
+        let held_gone = open
+            .press
+            .as_ref()
+            .is_some_and(|p| !laid_out.iter().any(|(other, _)| *other == p.window));
         if let Some(open) = self.overview.open.as_mut() {
             open.laid_out = laid_out;
             if selected_gone {
                 open.selected = None;
+            }
+            if held_gone {
+                open.press = None;
             }
         }
         self.defer_redraws(|state| {

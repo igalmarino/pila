@@ -832,7 +832,8 @@ Key flows and invariants:
   (`arrange`, a pure function: the row count that shows them largest). The places are computed
   from the windows as they are each time they're asked for, so opening, closing, resizing and
   minimizing meanwhile need nothing of their own; `overview_laid_out` (from `after_frames`)
-  redraws the outputs whose places changed (`defer_redraws`) and drops a selection that's gone.
+  redraws the outputs whose places changed (`defer_redraws`) and drops a selection, or a window
+  held (pressed or dragged), that's gone.
   Nothing is drawn anew: `Pila::scene` gives each shown window a `WindowEffect` whose `FrameMap`
   maps its frame onto its place (`overview_scene_windows`, minimized ones built with
   `scene_window_at` at their remembered place), so it's drawn as an animating window is, with its

@@ -726,3 +726,31 @@ fn a_four_finger_swipe_up_opens_it_and_down_closes_it() {
     swipe(&mut pila, 4, &[(0.0, 40.0), (0.0, 40.0)]);
     pila.wait("closed", |s| s["overview"]["open"] == false);
 }
+
+/// A window held in it (pressed, or dragged) that closes meanwhile is let
+/// go: nothing is dragged, and the release picks nothing and moves nothing.
+#[test]
+fn a_window_closing_while_held_in_it_is_let_go() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let a = client.window("a").create();
+    pila.wait_focus("a");
+    client.window("b").create();
+    pila.wait_focus("b");
+    let state = open(&mut pila);
+    let (to_x, to_y) = thumb_center(&state, 3);
+    drag(&mut pila, center(slot(&state, "a")), (to_x, to_y));
+    pila.wait("a dragged", |s| s["overview"]["dragging"] == "a");
+    client.destroy(a);
+    client.flush();
+    let state = pila.wait("a gone and let go", |s| {
+        window_in(s, "a").is_none() && s["overview"]["dragging"].is_null()
+    });
+    assert_eq!(state["overview"]["open"], true);
+    pila.release("left");
+    pila.settle();
+    let state = pila.state();
+    assert_eq!(state["overview"]["open"], true, "still open");
+    assert_eq!(state["workspace"], 1);
+    assert!(pila.alive());
+}
