@@ -14,7 +14,21 @@ testing and protocols Pila doesn't implement yet.
 
 Small items that can be tested in CI without new hardware.
 
-Nothing currently queued; 0.9.4 shipped the previous batch.
+- **Panels opened before the fonts load:** The fonts load in the background at startup; a share
+  picker or shortcuts panel opened in that first moment (an autostarted app asking right away)
+  may keep no text until it's reopened. Needs a test hook that holds the fonts back, then a redraw
+  of open panels' text once they're in.
+- **A test for Xwayland's pointer lock:** Games running through Xwayland that hide their cursor
+  get the pointer locked, with a position hint for when it's let go. Pila now honors the hint for
+  X11 windows, but no test covers it yet: the tests' X11 client needs XFixes to hide its cursor.
+- **Stronger invariant checks in the tests:** The headless backend's checks
+  (`PILA_HEADLESS_CHECK_INVARIANTS`) could also verify the stacking order (windows kept on top,
+  then X11 menus), that each window is in exactly one place (on screen, on another workspace,
+  minimized or unmapped), and that nothing but the lock screen gets input while locked.
+- **More fuzz targets:** App ids and shortcut triggers from the portal, `sessions.json` and
+  `app-shortcuts.json` as read back, blur regions, and window menu requests.
+- **Test coverage:** Pointer grabs (menus, moves, resizes), screen capture, output management and
+  screencopy are the least covered parts (`scripts/coverage`).
 
 ## Next
 
@@ -38,6 +52,34 @@ implemented or ready to work on once someone can test them on real hardware; com
 - **Touchscreens** (`wl_touch`): Currently, touch events only count as idle-resetting activity.
 - **Drawing tablets** (`tablet-v2`).
 - **VR headsets** (`wp-drm-lease-v1`): Only if there is user demand.
+
+## Bare metal, with a symptom or a TTY session
+
+The bare-metal backend (`src/udev/`) can only be tested on real hardware from a TTY, so changes
+there wait for a reported problem or a session set aside for testing them.
+
+- **One place for a monitor's display state:** A monitor's per-frame state (pending frames,
+  gamma, timers, recovery) is set up and torn down in several places: turning it off, unplugging
+  it, switching VTs. Gathering it into one structure with one teardown would make those paths
+  harder to get wrong.
+- **Guards on VT switches, hotplug and gamma:** Skip work while the session is inactive, recheck a
+  monitor's modes when its link is retrained, and check a gamma ramp's length again before it's
+  reapplied (today guaranteed by the display controller's fixed size, not by the code).
+
+## Under consideration
+
+Behaviors that could reasonably go either way. Each stays as it is unless users ask otherwise.
+
+- **Virtual keyboards on the lock screen:** Programs using `virtual-keyboard-unstable-v1`
+  (`wtype`, on-screen keyboards, remote input) can type into the lock screen. Sandboxed apps
+  can't see the protocol, and blocking it would stop an on-screen keyboard from typing the
+  password.
+- **Screen sharing while locked:** An approved monitor share keeps streaming while the session is
+  locked, showing the lock screen and the pointer. Pausing it instead is a small change if
+  users prefer the other side to see nothing.
+- **Turning off the last monitor:** `wlr-randr` (or any output-management client) may turn off
+  every monitor, leaving a black screen until one is turned back on or from a TTY. Refusing to
+  turn off the last one would prevent mistakes but break scripts that do it on purpose.
 
 ## Waiting for other projects
 
