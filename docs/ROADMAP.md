@@ -14,10 +14,6 @@ testing and protocols Pila doesn't implement yet.
 
 Small items that can be tested in CI without new hardware.
 
-- **Panels opened before the fonts load:** The fonts load in the background at startup; a share
-  picker or shortcuts panel opened in that first moment (an autostarted app asking right away)
-  may keep no text until it's reopened. Needs a test hook that holds the fonts back, then a redraw
-  of open panels' text once they're in.
 - **A test for Xwayland's pointer lock:** Games running through Xwayland that hide their cursor
   get the pointer locked, with a position hint for when it's let go. Pila now honors the hint for
   X11 windows, but no test covers it yet: the tests' X11 client needs XFixes to hide its cursor.

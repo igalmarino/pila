@@ -47,7 +47,7 @@ use smithay::{desktop::Window, utils::IsAlive};
 
 use crate::{
     config::Colors,
-    panel::{bits, draw_text, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{bits, draw_text, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
@@ -1139,8 +1139,12 @@ impl Pila {
                     return;
                 }
                 state.share_picker.pending = None;
-                let Some(pixels) = pixels else {
-                    // No fonts: the panel goes on without its text.
+                // No fonts yet: the panel goes on without its text until
+                // they come (`Pila::draw_panels_text`).
+                if NoText::ask_again(&pixels) {
+                    state.draw_share_picker_text();
+                }
+                let Ok(pixels) = pixels else {
                     return;
                 };
                 state.share_picker.buffers.borrow_mut().text =

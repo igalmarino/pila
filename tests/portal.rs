@@ -24,6 +24,19 @@ fn start_with_env(
     outputs: &str,
     env: Vec<(String, String)>,
 ) -> (TestPila, notifications::Bus, Daemon) {
+    start_with_options(outputs, env, false)
+}
+
+/// `start`, with the fonts held back until `TestPila::release_fonts`.
+fn start_holding_fonts() -> (TestPila, notifications::Bus, Daemon) {
+    start_with_options("HEADLESS-1:640x480", Vec::new(), true)
+}
+
+fn start_with_options(
+    outputs: &str,
+    env: Vec<(String, String)>,
+    hold_fonts: bool,
+) -> (TestPila, notifications::Bus, Daemon) {
     let bus = notifications::Bus::start();
     let pipewire = Daemon::start();
     let data = std::env::temp_dir().join(format!(
@@ -47,6 +60,7 @@ fn start_with_env(
         .into_iter()
         .chain(env)
         .collect(),
+        hold_fonts,
         ..Default::default()
     });
     (pila, bus, pipewire)
@@ -1710,4 +1724,84 @@ fn locking_cancels_a_region_being_dragged() {
     let picker = &pila.state()["share_picker"];
     assert_eq!(picker["shown"], false);
     assert_eq!(picker["region"]["selecting"], false);
+}
+
+/// A panel opened before the fonts are in shows with no text, and gets it
+/// once they come, without being opened again.
+fn text_comes_with_the_fonts(pila: &mut TestPila, what: &str, text: impl Fn(&Value) -> bool) {
+    pila.stays(
+        &format!("{what} without text"),
+        std::time::Duration::from_millis(200),
+        |s| !text(s),
+    );
+    pila.release_fonts();
+    pila.wait(&format!("{what}'s text"), text);
+}
+
+#[test]
+fn the_picker_opened_before_the_fonts_gets_its_text_when_they_come() {
+    let (mut pila, bus, _pipewire) = start_holding_fonts();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("early", "org.example.Browser", 1);
+    pila.wait("the share picker", |s| s["share_picker"]["shown"] == true);
+    text_comes_with_the_fonts(&mut pila, "the share picker", |s| {
+        s["share_picker"]["text"] == true
+    });
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
+}
+
+#[test]
+fn the_color_picker_opened_before_the_fonts_gets_its_text_when_they_come() {
+    let (mut pila, bus, _pipewire) = start_holding_fonts();
+    let mut portal = Portal::connect(&bus.address);
+    let asked = portal.pick_color("org.example.Paint");
+    pila.wait("the color picker", color_pick_open);
+    text_comes_with_the_fonts(&mut pila, "the color picker", |s| {
+        s["color_pick"]["text"] == true
+    });
+    pila.key("Escape");
+    assert_eq!(asked.join().unwrap(), (1, None));
+}
+
+#[test]
+fn the_shortcuts_panel_opened_before_the_fonts_gets_its_text_when_they_come() {
+    let (mut pila, bus, _pipewire) = start_holding_fonts();
+    let mut portal = Portal::connect(&bus.address);
+    portal.shortcuts_session("s1", "org.example.Talk");
+    let _bound = portal.bind_shortcuts("s1", &[("talk", "Push to talk", "CTRL+F12")]);
+    pila.wait("the panel", |s| !s["app_shortcuts"]["panel"].is_null());
+    text_comes_with_the_fonts(&mut pila, "the shortcuts panel", |s| {
+        s["app_shortcuts"]["panel"]["text"] == true
+    });
+}
+
+#[test]
+fn the_region_guide_shown_before_the_fonts_gets_its_text_when_they_come() {
+    let (mut pila, bus, _pipewire) = start_holding_fonts();
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("early", "org.example.Browser", 1);
+    let picker = pila.wait("the share picker", |s| s["share_picker"]["shown"] == true)
+        ["share_picker"]
+        .clone();
+    let index = region_index(&picker);
+    let (x, y) = tile_of(&picker, index);
+    pila.click_at(x, y);
+    pila.wait("Region selected", |s| {
+        s["share_picker"]["selected"] == index
+    });
+    pila.key("Return");
+    pila.wait("selecting a region", |s| {
+        s["share_picker"]["region"]["selecting"] == true
+    });
+    text_comes_with_the_fonts(&mut pila, "the region guide", |s| {
+        s["share_picker"]["region"]["text"] == true
+    });
+    // Escape goes back to the picker, and there it cancels.
+    pila.key("Escape");
+    pila.wait("back to the picker", |s| {
+        s["share_picker"]["shown"] == true && s["share_picker"]["region"]["selecting"] == false
+    });
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
 }

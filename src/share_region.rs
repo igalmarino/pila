@@ -26,7 +26,7 @@ use tracing::{info, warn};
 use crate::{
     capture::Target,
     config::Colors,
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -450,11 +450,18 @@ impl Pila {
                     return;
                 }
                 selecting.pending = None;
-                if let Some(pixels) = pixels {
+                // Drawn, the latest is asked (the selection may have moved
+                // meanwhile); with no fonts, their coming asks
+                // (`Pila::draw_panels_text`), or this, if they came while it
+                // was drawn; failed, not until what it says changes.
+                let again = pixels.is_ok() || NoText::ask_again(&pixels);
+                if let Ok(pixels) = pixels {
                     buffers.borrow_mut().text = Some(ContentImage::new(key.clone(), pixels));
                 }
                 state.redraw_region();
-                state.draw_region_text();
+                if again {
+                    state.draw_region_text();
+                }
             });
         if let Err(err) = inserted {
             warn!(?err, "can't wait for the region guide's text");

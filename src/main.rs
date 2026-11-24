@@ -273,9 +273,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             // Every output: title bars, the window menu and notices on screen
-            // may all show text. Logged for tests that count redraws.
+            // may all show text. Logged for tests that count redraws. Panels
+            // shown meanwhile draw theirs.
             tracing::debug!("fonts in place: redrawing every output");
             state.queue_redraw();
+            state.draw_panels_text();
         })?;
     text::init(move || fonts_ready.ping());
 

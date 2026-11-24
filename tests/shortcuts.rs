@@ -331,3 +331,22 @@ fn it_dims_every_output_while_shown() {
     pila.wait_pixel(5.0, 5.0, WHITE);
     pila.wait_pixel(bx, by, WHITE);
 }
+
+/// Opened before the fonts are in, the cheatsheet takes the keys (it's
+/// modal) but isn't drawn until its text is there, which their coming brings.
+#[test]
+fn the_cheatsheet_opened_before_the_fonts_shows_when_they_come() {
+    let mut pila = TestPila::start_with(Options {
+        hold_fonts: true,
+        ..Options::default()
+    });
+    pila.combo("Super+Shift+slash");
+    pila.wait("shown", shown);
+    pila.stays(
+        "no text before the fonts",
+        std::time::Duration::from_millis(200),
+        |s| s["shortcuts_view"]["text"] == false,
+    );
+    pila.release_fonts();
+    pila.wait("its text", |s| s["shortcuts_view"]["text"] == true);
+}

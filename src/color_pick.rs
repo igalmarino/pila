@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use crate::{
     capture::{Source, Write},
     config::Colors,
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
     portal::{Refused, Reply},
     render::{self, PilaRenderElement},
     scale::output_scale,
@@ -326,7 +326,10 @@ impl Pila {
                     return;
                 }
                 state.color_pick.pending = None;
-                let Some(pixels) = pixels else {
+                if NoText::ask_again(&pixels) {
+                    state.draw_color_pick_text();
+                }
+                let Ok(pixels) = pixels else {
                     return;
                 };
                 state.color_pick.buffers.borrow_mut().text =

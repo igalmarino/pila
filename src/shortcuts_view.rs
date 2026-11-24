@@ -22,7 +22,7 @@ use smithay::{
 
 use crate::{
     config::{Action, Colors, Config, KeyCombo, ModKey, Trigger, WorkspaceTarget},
-    panel::{self, draw_text, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, draw_text, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -635,17 +635,25 @@ impl Pila {
                 if state.shortcuts_view.pending.as_ref() != Some(&key) {
                     return;
                 }
-                let Some(pixels) = pixels else {
-                    // No fonts yet: their arrival asks again
-                    // (`shortcuts_need_content`). With them, it failed: it
-                    // stays pending, not asked again on every turn of the
-                    // loop, until what it says changes.
-                    if crate::text::loaded() {
-                        tracing::warn!("can't draw the shortcuts' text");
-                    } else {
+                let pixels = match pixels {
+                    Ok(pixels) => pixels,
+                    // No fonts yet: their coming asks again
+                    // (`Pila::draw_panels_text`), or this, if they came
+                    // while it was drawn.
+                    Err(NoText::NoFonts) => {
                         state.shortcuts_view.pending = None;
+                        if NoText::ask_again(&pixels) {
+                            state.draw_shortcuts_text();
+                        }
+                        return;
                     }
-                    return;
+                    // With them, it failed: it stays pending, not asked
+                    // again on every turn of the loop, until what it says
+                    // changes.
+                    Err(NoText::Failed) => {
+                        tracing::warn!("can't draw the shortcuts' text");
+                        return;
+                    }
                 };
                 state.shortcuts_view.pending = None;
                 state.shortcuts_view.buffers.borrow_mut().text =
@@ -792,6 +800,7 @@ impl Pila {
                 let r = view.rect;
                 serde_json::json!({
                     "shown": true,
+                    "text": self.shortcuts_view.buffers.borrow().text.is_some(),
                     "heading": view.heading.text(),
                     "output": view.output,
                     "rect": { "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h },

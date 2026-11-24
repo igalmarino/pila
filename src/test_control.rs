@@ -23,6 +23,8 @@
 //! - `output_add` `spec` (`NAME:WxH[@HZ][=MAKE/MODEL[/SERIAL]]`),
 //!   `output_remove` `name`.
 //! - `output_fail_next`: the next time outputs are applied, the backend fails.
+//! - `fonts_release`: put fonts held by `PILA_HEADLESS_HOLD_FONTS=1` in place
+//!   (`text::release_held`).
 //! - `spawn` `command`: run a command as a binding would.
 //! - `release_keys`: release every held key, as the nested backend does when
 //!   its window loses the keyboard (`Pila::release_all_keys`).
@@ -280,6 +282,10 @@ fn handle(state: &mut Pila, request: &Value) -> Result<Value, String> {
             if !headless::remove_output(state, str_field(request, "name")?) {
                 return Err("no such output".into());
             }
+            json!({})
+        }
+        "fonts_release" => {
+            crate::text::release_held();
             json!({})
         }
         "output_fail_next" => {

@@ -497,9 +497,47 @@ fn draw_cap(
     blit_text(pixels, width, text, x + (cap_w - text.width) / 2, y);
 }
 
-/// `key`'s items drawn into one image (`None` until the fonts have loaded).
-/// On a thread: shaping and rasterizing them all takes a few milliseconds.
-pub fn draw_text(key: &TextKey) -> Option<Vec<u8>> {
+/// Why a panel's content wasn't drawn (`draw_text`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoText {
+    /// The fonts weren't in yet: their coming asks for it again
+    /// (`Pila::draw_panels_text`).
+    NoFonts,
+    /// With the fonts in: not asked again until what it says changes.
+    Failed,
+}
+
+impl NoText {
+    /// A draw that found no fonts, when they've come since: it's asked again
+    /// at once, as their coming may have found it still on its way.
+    pub fn ask_again(drawn: &Result<Vec<u8>, NoText>) -> bool {
+        *drawn == Err(NoText::NoFonts) && crate::text::loaded()
+    }
+}
+
+impl crate::Pila {
+    /// The fonts are in: the panels shown that drew no text without them
+    /// draw it now (each skips one drawn or on its way).
+    pub fn draw_panels_text(&mut self) {
+        self.draw_shortcuts_text();
+        self.draw_share_picker_text();
+        self.draw_region_text();
+        self.draw_color_pick_text();
+        self.draw_app_shortcuts_text();
+    }
+}
+
+/// `key`'s items drawn into one image. On a thread: shaping and rasterizing
+/// them all takes a few milliseconds.
+pub fn draw_text(key: &TextKey) -> Result<Vec<u8>, NoText> {
+    if !crate::text::loaded() {
+        return Err(NoText::NoFonts);
+    }
+    draw_items(key).ok_or(NoText::Failed)
+}
+
+/// `draw_text` with the fonts loaded.
+fn draw_items(key: &TextKey) -> Option<Vec<u8>> {
     use crate::text::{render_text, Style};
     let scale = key.scale;
     let (width, height) = (key.size.0 * scale, key.size.1 * scale);

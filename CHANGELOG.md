@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** A share picker, color picker or app shortcuts panel opened in Pila's first moment
+  (an app started with the session asking right away) could stay without its text until it was
+  opened again, and the shortcuts cheatsheet could take the keys without showing. They now get
+  their text as soon as the fonts have loaded.
+
 ## 0.9.5 (2026-11-23)
 
 - **Security (lock screen and screen sharing):** If two apps asked to share the screen at once,

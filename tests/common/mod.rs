@@ -56,6 +56,10 @@ pub struct Options {
     /// (`config_path`), which holds `config` as it is if that isn't empty
     /// and nothing at all otherwise (none of the defaults above).
     pub default_config_path: bool,
+    /// The fonts load but aren't put in place until `release_fonts`
+    /// (`PILA_HEADLESS_HOLD_FONTS=1`), to open panels before they're in;
+    /// `start_with` doesn't wait for them.
+    pub hold_fonts: bool,
 }
 
 pub struct TestPila {
@@ -209,6 +213,9 @@ impl TestPila {
         for (k, v) in &options.env {
             cmd.env(k, v);
         }
+        if options.hold_fonts {
+            cmd.env("PILA_HEADLESS_HOLD_FONTS", "1");
+        }
         if let Some(soft) = options.soft_file_limit {
             use std::os::unix::process::CommandExt;
             // SAFETY: getrlimit and setrlimit are async-signal-safe.
@@ -266,8 +273,18 @@ impl TestPila {
         };
         // The fonts load in the background and end with a redraw of every
         // output: under load it came in the middle of tests counting them.
-        pila.wait_fonts();
+        if !options.hold_fonts {
+            pila.wait_fonts();
+        }
         pila
+    }
+
+    /// Put the fonts held back (`Options::hold_fonts`) in place, and wait
+    /// until their redraw is asked for.
+    #[track_caller]
+    pub fn release_fonts(&mut self) {
+        self.request(json!({"cmd": "fonts_release"}));
+        self.wait_fonts();
     }
 
     /// Send a request; panics if pila refuses it.

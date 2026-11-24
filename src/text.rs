@@ -27,6 +27,31 @@ static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
 /// ever be drawn, so what's only text (the shortcuts panel) isn't shown.
 static UNAVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The tests' way to open panels before the fonts are in
+/// (`PILA_HEADLESS_HOLD_FONTS=1`): the loaded fonts wait here until
+/// `release_held` (the control socket's `fonts_release`).
+static HELD: (Mutex<bool>, std::sync::Condvar) = (Mutex::new(true), std::sync::Condvar::new());
+
+/// Let fonts held by `PILA_HEADLESS_HOLD_FONTS=1` be put in place.
+pub fn release_held() {
+    if let Ok(mut held) = HELD.0.lock() {
+        *held = false;
+    }
+    HELD.1.notify_all();
+}
+
+/// Wait for `release_held` if the tests asked to hold the fonts back.
+fn wait_if_held() {
+    if !std::env::var_os("PILA_HEADLESS_HOLD_FONTS").is_some_and(|v| v == "1") {
+        return;
+    }
+    debug!("fonts held until the tests release them");
+    let Ok(held) = HELD.0.lock() else {
+        return;
+    };
+    drop(HELD.1.wait_while(held, |held| *held));
+}
+
 /// Start loading the system fonts in the background. Call once at startup.
 /// `ready` runs on that thread once they're in place (to redraw title bars),
 /// or once it's known there are none (`unavailable`).
@@ -53,6 +78,7 @@ pub fn init(ready: impl FnOnce() + Send + 'static) {
                 ready();
                 return;
             };
+            wait_if_held();
             let _ = FONTS.set(Mutex::new(fonts));
             info!(
                 elapsed = ?loaded,

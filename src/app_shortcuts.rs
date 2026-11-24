@@ -33,7 +33,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     config::{Colors, KeyCombo, Mods, Trigger},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
     portal::{Refused, Reply},
     render::PilaRenderElement,
     Pila,
@@ -856,7 +856,10 @@ impl Pila {
                     return;
                 }
                 state.app_shortcuts.pending = None;
-                let Some(pixels) = pixels else {
+                if NoText::ask_again(&pixels) {
+                    state.draw_app_shortcuts_text();
+                }
+                let Ok(pixels) = pixels else {
                     return;
                 };
                 state.app_shortcuts.buffers.borrow_mut().text =

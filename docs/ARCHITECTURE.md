@@ -798,7 +798,11 @@ Key flows and invariants:
   after it, from the left; a note at the right), `FOOTER` under its content. The switcher and
   the window menu have no title, and tighter room of their own. Texts and keycaps are `Item`s
   drawn by `draw_text` on a thread into one image the size of the panel (`TextKey` says what it
-  shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`.
+  shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`. A draw that finds
+  no fonts yet (`NoText::NoFonts`) is asked again when they come (`Pila::draw_panels_text`,
+  from the fonts' ping in `main.rs`), or at once if they came while it was on its way
+  (`NoText::ask_again`); one that fails with them (`NoText::Failed`) isn't asked again until
+  what it says changes.
 - **Switcher** (`switcher_view.rs`): Pila's own window switcher, drawn by Pila, that only shows
   the switch `switcher.rs` does (see "Window switching"). `Pila::switch_changed` (and
   `cycle_focus` once the switch is in place) call `switcher_view_changed`: a new switch arms a
@@ -908,7 +912,8 @@ Key flows and invariants:
   blended over them) is one image the size of the panel, drawn on a thread
   (`Pila::draw_shortcuts_text`: ~30 lines shaped and uploaded one by one cost a 7 ms frame; as
   one image drawn off the loop, 2 ms), asked for from `after_frames` only while it has none and
-  could (`shortcuts_need_content`: an output or the fonts coming after it's shown; rebuilding
+  could (`shortcuts_need_content`: an output coming after it's shown; the fonts' coming asks
+  through `Pila::draw_panels_text`, as for every panel; rebuilding
   the key on every turn of the loop cost 18 µs a turn) and by a reload
   (`shortcuts_config_changed`, which makes its background and border anew so that a change of
   corners alone is drawn); one that fails with the fonts loaded isn't asked again until it
@@ -1258,7 +1263,7 @@ Key flows and invariants:
   menu; locking cancels it and every request waiting (`SessionLockHandler::lock`), the app
   closing its session takes its request away (answered as failed). Its texts are one image
   drawn on a thread with the cheatsheet's code (`panel::draw_text`); the panel shows
-  without them until then. Each preview is its output's scene (`render::scene_elements`, no
+  without them until then, and until the fonts come if it opens before them. Each preview is its output's scene (`render::scene_elements`, no
   blur backdrops) drawn small into an `OffscreenWindow` from `after_frames`
   (`Pila::update_share_previews`, with the captures' scene), over a kept background solid:
   damage only where the output changed, and the picker's output is redrawn only then.
@@ -1755,7 +1760,10 @@ Key flows and invariants:
   (`text::follow_fontconfig`; cosmic-text's own is Open Sans, installed or not), the one the
   tools and GTK draw in, and until then `render_title` returns `None` and bars draw
   without text; once loaded (and warmed up: common characters shaped and rasterized on that
-  thread, `text::init`) a ping asks for a redraw (`main.rs`). With no fonts at all (CI's system,
+  thread, `text::init`) a ping asks for a redraw (`main.rs`) and the panels shown meanwhile draw
+  their text (`Pila::draw_panels_text`). The tests hold the loaded fonts back with
+  `PILA_HEADLESS_HOLD_FONTS=1` until the control socket's `fonts_release`
+  (`text::release_held`), to open panels before them. With no fonts at all (CI's system,
   or `PILA_HEADLESS_NO_FONTS=1` for the tests) `text::unavailable` is set and the ping asks for
   nothing but to hide a shortcuts panel shown meanwhile, which isn't shown then: it's all text.
   The title texture is at most `MAX_TITLE_WIDTH` (8192 px) wide, however wide
