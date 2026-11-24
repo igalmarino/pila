@@ -128,7 +128,7 @@ jobs:
       - run: nix develop --command cargo --version
       # The metapackage: Pila and the default configuration's tools.
       - run: nix build .#pila-desktop --out-link desktop --print-build-logs
-      - run: for program in pila waybar fuzzel mako swayidle swaylock kitty wpctl; do test -x "desktop/bin/$program"; done
+      - run: for program in pila swaybg waybar fuzzel mako swayidle swaylock kitty wpctl; do test -x "desktop/bin/$program"; done
       # EGL's drivers, which a NixOS system provides, come from Mesa here. If
       # it starts, it's still running when its time is up. An X client
       # connecting starts the package's Xwayland (on demand), which refuses
