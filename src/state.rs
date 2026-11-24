@@ -2719,6 +2719,23 @@ fn exported_vars(
 
 #[cfg(test)]
 mod tests {
+    /// `pila-session` takes back from systemd, as the session ends, what
+    /// Pila exported to it: a variable left would point the next session's
+    /// programs at a socket or a cookie that's gone.
+    #[test]
+    fn the_session_script_takes_back_what_pila_exports() {
+        let script = include_str!("../resources/session/pila-session");
+        let line = script
+            .lines()
+            .find_map(|l| l.strip_prefix("session_env=("))
+            .and_then(|l| l.strip_suffix(')'))
+            .expect("session_env=(...) in pila-session");
+        let taken_back: Vec<&str> = line.split_whitespace().collect();
+        for name in super::SESSION_ENV {
+            assert!(taken_back.contains(&name), "{name} not in {line}");
+        }
+    }
+
     #[test]
     fn the_bus_gets_what_programs_get() {
         let set = |name: &str, value: Option<&str>| (name.to_string(), value.map(String::from));

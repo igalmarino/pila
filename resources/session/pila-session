@@ -38,7 +38,7 @@ pila="$(dirname "$(readlink -f "$0")")/pila"
 
 # What Pila exports to systemd (SESSION_ENV in src/state.rs), taken back when
 # the session ends.
-session_env=(WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE PILA_SOCKET)
+session_env=(WAYLAND_DISPLAY DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE PILA_SOCKET)
 
 # A session bus: the systemd user bus if there is one, else a new one.
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
