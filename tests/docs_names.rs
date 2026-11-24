@@ -150,3 +150,26 @@ fn the_docs_name_only_code_that_exists() {
         stale.join("\n")
     );
 }
+
+/// Antigravity reads `AGENTS.md` with its `@[label](path)` includes expanded
+/// and truncates a rule file past 24,000 bytes, so `CLAUDE.md`, inlined there,
+/// would lose its end without a word.
+#[test]
+fn agents_md_with_claude_md_inlined_fits_antigravity_rule_limit() {
+    const LIMIT: usize = 24_000;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let agents = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+    let include = "@[CLAUDE.md](CLAUDE.md)";
+    assert!(
+        agents.contains(include),
+        "AGENTS.md no longer inlines CLAUDE.md"
+    );
+    let claude = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    let expanded = agents.replace(include, &claude).len();
+    assert!(
+        expanded <= LIMIT,
+        "AGENTS.md with CLAUDE.md inlined is {expanded} bytes, over Antigravity's \
+         {LIMIT}-byte limit for a rule file: shorten CLAUDE.md, or move a section \
+         into a file AGENTS.md only points to"
+    );
+}

@@ -97,6 +97,8 @@ desktop kept as a fallback), with **Claude Code** inside the container.
   `gtk4-widget-factory`, `xterm`) and desktop tools (`kitty`, `fuzzel`, `waybar`, `swaybg`, `mako`,
   `swaylock`, `wl-clipboard`, `grim`, `slurp`, `wtype`, `wlr-randr`, `wlopm`, `wlsunset`, `fcitx5`).
 - **Claude Code:** Native install with credentials and history persisted across container rebuilds.
+- **Antigravity CLI:** Google's `agy`, native install, its login and settings (`~/.gemini`)
+  persisted the same way.
 
 The container connects to whichever desktop session you invoke `scripts/dev` from: run it inside
 Pila and nested Pila opens there; run it inside GNOME and it opens on GNOME. Bare-metal changes are
@@ -154,6 +156,7 @@ set:
 scripts/dev up        # initial build takes a few minutes
 scripts/dev shell     # open a shell in the container
 scripts/dev claude    # start Claude Code in the container
+scripts/dev agy       # start the Antigravity CLI in the container
 scripts/dev cargo build
 ```
 
@@ -175,8 +178,10 @@ cargo run                  # opens a nested Pila window
 Run `claude` (or `scripts/dev claude`) and sign in. If browser authentication finishes without the
 terminal noticing, paste the code shown in the browser into the prompt.
 
-`CLAUDE.md` documents the project context, constraints, and commands. To pre-approve routine
-commands, create `.claude/settings.json`:
+`CLAUDE.md` documents the project context, constraints, and commands. Other agents (the
+Antigravity CLI, `agy`) read `AGENTS.md`, which inlines it; a test keeps the two under
+Antigravity's 24,000-byte limit for a rule file. To pre-approve routine Claude Code commands,
+create `.claude/settings.json`:
 
 ```json
 {

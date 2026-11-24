@@ -12,7 +12,8 @@ cosmic-comp does: 0.7.0, the last release, is from June 2025; for now from Pila'
 Two more files go with this one: `tests/CLAUDE.md` (how the integration tests work) and
 `scripts/CLAUDE.md` (`scripts/check`, `scripts/apps`, the demo video); read the one for the
 directory before working in `tests/` or `scripts/`. Releases and packaging are in the
-`release` skill (`.claude/skills/release`).
+`release` skill (`.claude/skills/release`). `AGENTS.md` inlines this file for other agents
+(Antigravity), which cut it past 24,000 bytes: `docs_names` checks it fits.
 
 ## Environment
 

@@ -6,6 +6,7 @@
 #   scripts/dev rebuild    rebuild the image and recreate the container
 #   scripts/dev shell      open a shell inside the container (default)
 #   scripts/dev claude     start Claude Code inside the container
+#   scripts/dev agy        start the Antigravity CLI inside the container
 #   scripts/dev <cmd...>   run any command inside, e.g. scripts/dev cargo build
 set -euo pipefail
 
@@ -34,5 +35,6 @@ case "$cmd" in
     rebuild) devcontainer up --workspace-folder . --remove-existing-container --build-no-cache "$@" ;;
     shell)   up && exec devcontainer exec --workspace-folder . bash -l ;;
     claude)  up && exec devcontainer exec --workspace-folder . claude "$@" ;;
+    agy)     up && exec devcontainer exec --workspace-folder . agy "$@" ;;
     *)       up && exec devcontainer exec --workspace-folder . "$cmd" "$@" ;;
 esac

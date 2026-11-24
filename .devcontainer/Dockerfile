@@ -62,6 +62,7 @@ RUN groupadd -g "${USER_GID}" "${USERNAME}" \
     && echo "${USERNAME}:${USERNAME}" | chpasswd \
     && mkdir -p /workspace /commandhistory \
         "/home/${USERNAME}/.claude" \
+        "/home/${USERNAME}/.gemini" \
         "/home/${USERNAME}/.config/gh" \
         "/home/${USERNAME}/.cargo/registry" \
         "/home/${USERNAME}/.local/bin" \
@@ -102,3 +103,8 @@ RUN printf '%s\n' \
 # Claude Code, native installer (installs to ~/.local/bin and auto-updates).
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && claude --version
+
+# Google's Antigravity CLI (`agy`), native installer (installs to ~/.local/bin
+# and updates itself; its login and settings live in ~/.gemini, a volume).
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash \
+    && test -x "/home/${USERNAME}/.local/bin/agy"
