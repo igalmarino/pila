@@ -186,3 +186,27 @@ fn without_a_gap_a_maximized_window_is_square() {
     pila.settle();
     assert_eq!(pila.pixel(1.0, 1.0), RED_PIXEL, "a square corner");
 }
+
+/// On an output too short for the gap and a title bar, a maximized window is
+/// asked for a size of at least one pixel, never a negative one (a protocol
+/// error for the client).
+#[test]
+fn a_maximized_window_on_a_tiny_output_gets_a_positive_size() {
+    let mut pila = TestPila::start_with(Options {
+        config: "gaps = 20\n".into(),
+        outputs: Some("A:640x50".into()),
+        ..Options::default()
+    });
+    let client = pila.client();
+    let a = client.window("a").color(RED).create();
+    pila.wait_focus("a");
+    pila.combo("Super+m");
+    pila.wait("maximized", |s| {
+        window_in(s, "a").unwrap()["maximized"] == true
+    });
+    pila.settle();
+    client.roundtrip();
+    let (w, h) = client.last_configure(a).size;
+    assert!(w > 0 && h > 0, "configured {w}x{h}");
+    assert!(pila.alive());
+}

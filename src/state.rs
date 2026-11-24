@@ -1650,10 +1650,11 @@ impl Pila {
             if !fullscreen {
                 output_geo = crate::snap::gapped(output_geo, self.config.gaps);
             }
-            // A maximized window's title bar stays visible above it.
+            // A maximized window's title bar stays visible above it; on an
+            // output too short for it, the window keeps a pixel.
             let bar = decoration::layout_offset(window, fullscreen);
             output_geo.loc.y += bar;
-            output_geo.size.h -= bar;
+            output_geo.size.h = (output_geo.size.h - bar).max(1);
             if let (Some(loc), false) = (mapped_loc, was_maximized || was_fullscreen) {
                 // The size it was last asked for, which it may not have drawn
                 // yet (a quick unmaximize, then fullscreen): what it has
