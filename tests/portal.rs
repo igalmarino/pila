@@ -1651,6 +1651,29 @@ fn a_region_dragged_is_shared_at_its_size() {
     );
 }
 
+/// A region is shared with even sides, as encoders (x264) need them: an odd
+/// rectangle loses its last column or row, and the guide says so.
+#[test]
+fn a_region_is_shared_with_even_sides() {
+    let (mut pila, bus, pipewire) = start();
+    pila.move_to(100.0, 100.0);
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("odd", "org.example.Recorder", 1);
+    pick_region(&mut pila);
+    pila.move_to(100.0, 100.0);
+    pila.press("left");
+    pila.move_to(401.0, 251.0);
+    pila.wait("the guide's size, even", |s| {
+        s["share_picker"]["region"]["size"] == serde_json::json!([300, 150])
+    });
+    pila.release("left");
+    let (response, streams) = started.answer_streams();
+    assert_eq!(response, 0, "Start");
+    let consumer = pipewire.consume(streams[0].0);
+    let frame = consumer.wait_frame("of the region", |_| true);
+    assert_eq!((frame.width, frame.height), (300, 150), "even sides");
+}
+
 #[test]
 fn a_region_stays_on_the_output_it_starts_on() {
     let (mut pila, bus, pipewire) = start_with("A:640x480,B:800x600");

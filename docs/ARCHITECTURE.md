@@ -1156,7 +1156,8 @@ Key flows and invariants:
   asks for one at a time (below). What a cast shares is a `capture::Target`, an output, a
   region of one or a window, sized as screen captures size it (`Pila::capture_geometry`; an
   output's and a region's part of it: `Pila::target_area`, a region clipped to its output as it
-  is now). A region's stream is described as a monitor's of its size, where it is. Frames are made from
+  is now; a region's sides in pixels rounded down to even numbers, `capture::region_pixels`, as
+  encoders such as x264 need them and recorders pass a stream on as it comes). A region's stream is described as a monitor's of its size, where it is. Frames are made from
   `after_frames` like captures' (`process_screencasts`): the cast's damage tracker over the
   output's elements (from the region's top-left for a region), or the window's alone, its
   geometry's top-left the buffer's (and the pointer's, cursor embedded, over a region or a window
@@ -1285,7 +1286,7 @@ Key flows and invariants:
   none; Enter finishes it too, Escape goes back to the panel. Every output is dimmed but the
   rectangle, outlined in the accent outside it (`share_region::elements`, instead of the panel's),
   and a guide at the top of the output under the pointer (the drag's while held) says what to do
-  and the rectangle's size in the stream's pixels: its text drawn on a thread, one at a time, the
+  and the rectangle's size in the stream's pixels (even, `capture::region_pixels`): its text drawn on a thread, one at a time, the
   latest asked for drawn when the one drawing is done. Only the outputs it was and is on redraw
   (`redraw_region`). The picker answered, cancelled or locked ends it (`take_share_picker`). While
   a region is shared, its outline stays on the screen: `Scene::shared_regions`, set from the casts

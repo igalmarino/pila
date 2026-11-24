@@ -694,9 +694,10 @@ app with live previews across two tabs:
 
 - **Screens:** Lists all monitors (defaulting to the one under the pointer), followed by **Region**
   to share a custom rectangle. Choosing **Region** hides the picker and turns the pointer into a
-  crosshair; drag a rectangle on a monitor (a top banner shows its dimensions) and release to start
-  sharing, or press Escape to return to the picker. While active, a thin accent-colored outline
-  marks the shared region on screen without appearing in the stream.
+  crosshair; drag a rectangle on a monitor (a top banner shows its dimensions in pixels, rounded
+  down to even numbers, as video encoders need them) and release to start sharing, or press
+  Escape to return to the picker. While active, a thin accent-colored outline marks the shared
+  region on screen without appearing in the stream.
 - **Windows** (when the app supports window sharing): Lists all windows in most-recently-used
   order, including minimized windows and those on other workspaces. A shared window streams at its
   own size and keeps updating while covered, minimized, or on another workspace; closing the window

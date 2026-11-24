@@ -172,6 +172,16 @@ impl DmabufTarget {
     }
 }
 
+/// The size in pixels a region of `size` (logical) is captured at, at
+/// `scale`: its sides rounded down to even numbers (at least 2), as video
+/// encoders such as x264 need them, and recorders (Kooha) pass a stream on
+/// to them as it comes. Down keeps it inside what was picked.
+pub(crate) fn region_pixels(size: Size<i32, Logical>, scale: Scale<f64>) -> Size<i32, Physical> {
+    let size = size.to_f64().to_physical(scale).to_i32_round::<i32>();
+    let even = |side: i32| (side & !1).max(2);
+    Size::from((even(size.w), even(size.h)))
+}
+
 /// What of an output a `Target` shows (`Pila::target_area`).
 pub(crate) struct TargetArea {
     pub output: Output,
@@ -447,8 +457,7 @@ impl Pila {
             Target::Region(..) => {
                 let TargetArea { output, area, .. } = self.target_area(target)?;
                 let scale = output_scale(&output);
-                let size = area.size.to_f64().to_physical(scale).to_i32_round();
-                Some((size, scale))
+                Some((region_pixels(area.size, scale), scale))
             }
             Target::Toplevel(identifier) => {
                 let window = self.window_for_identifier(identifier)?;

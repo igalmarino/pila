@@ -388,11 +388,7 @@ impl Pila {
     fn region_size(&self) -> Option<(i32, i32)> {
         let (name, rect) = self.region_selected()?;
         let output = self.space.outputs().find(|o| o.name() == name)?;
-        let size = rect
-            .size
-            .to_f64()
-            .to_physical(crate::scale::output_scale(output))
-            .to_i32_round::<i32>();
+        let size = crate::capture::region_pixels(rect.size, crate::scale::output_scale(output));
         Some((size.w, size.h))
     }
 

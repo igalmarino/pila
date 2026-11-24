@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed:** Recording a shared region in full-screen mode failed in Kooha (a missing GStreamer
+  plugin, it said) when the region had an odd width or height in pixels, which video encoders such
+  as x264 refuse. A region is now shared with even sides: one rounded down loses its last column
+  or row, and the guide shows the size shared.
 - **Fixed:** A share picker, color picker or app shortcuts panel opened in Pila's first moment
   (an app started with the session asking right away) could stay without its text until it was
   opened again, and the shortcuts cheatsheet could take the keys without showing. They now get
