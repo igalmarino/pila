@@ -378,16 +378,19 @@ impl Pila {
     }
 
     /// Check a configuration against the current monitors; the error says
-    /// why it can't be applied.
+    /// why it can't be applied. Every head is in `heads`: `Apply` refuses
+    /// one that leaves a head out (`UnconfiguredHead`) before this.
     fn check_output_configuration(
         &self,
         heads: &HashMap<String, HeadConfig>,
     ) -> Result<(), String> {
         let om = &self.outputs.management;
-        for info in &om.heads {
-            let Some(config) = heads.get(&info.name) else {
-                return Err(format!("head {} isn't configured", info.name));
-            };
+        let configured = || {
+            om.heads
+                .iter()
+                .filter_map(|info| Some((info, heads.get(&info.name)?)))
+        };
+        for (info, config) in configured() {
             if !config.enabled {
                 continue;
             }
@@ -440,8 +443,7 @@ impl Pila {
         }
         if self.backend.as_ref().is_some_and(Backend::is_nested) {
             // Nested, the host decides everything but the scale.
-            for info in &om.heads {
-                let config = &heads[&info.name];
+            for (info, config) in configured() {
                 let same_mode = match config.mode {
                     None | Some(ModeChoice::Index(0)) => true,
                     Some(ModeChoice::Custom { size, .. }) => {
