@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **Security (lock screen and screen sharing):** If two apps asked to share the screen at once,
+  locking the session showed the second request behind the lock screen, where Enter or a click
+  shared the screen (or took a screenshot) without the user seeing what was asked. Locking now
+  cancels every pending request, Pila's panels take no input while locked, and nothing is shared
+  while locked.
+- **Security (screen sharing):** An app receiving a screen share could crash Pila, and with it the
+  session, by shrinking a shared-memory buffer (`SIGBUS`). The buffers are now sealed at their size.
+- **Fixed:** Locking while `Mod+Tab` was held left the switcher open underneath, and a click on the
+  lock screen could activate a window. Locking now ends the switch.
+- **Fixed:** A blur region made of very many rectangles cost several milliseconds of CPU on every
+  frame; past 64 rectangles it's now blurred as its bounding box.
+- **Fixed:** Nested subsurfaces could be placed past Pila's 32768 px limit by moving a parent back
+  without applying it.
+- **Fixed:** With `gaps`, the shadow of a maximized window that reached the next monitor wasn't
+  redrawn there, appearing late and staying behind after the window closed.
+- **Fixed:** Taskbars using `ext-foreign-toplevel-list` didn't get title or app id changes from
+  minimized windows or windows on other workspaces.
+- **Fixed:** Windows brought onto the current workspace by lowering `workspaces` were stacked above
+  always-on-top windows.
+- **Fixed:** Games running through Xwayland that lock the pointer could make it jump when
+  unlocking (Pila ignored their pointer position hint).
+- **Fixed:** The share picker read desktop entries outside the data directories for app ids
+  containing a path, and could block on a FIFO.
+- **Fixed:** `pila-session` didn't remove `XAUTHORITY` from the systemd user environment when the
+  session ended.
+
 ## 0.9.4 (2026-11-23)
 
 - **Share a screen region:** The share picker now includes **Region** after the monitor list for
