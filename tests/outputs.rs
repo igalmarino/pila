@@ -1035,3 +1035,109 @@ fn the_gpus_time_on_each_frame_is_measured() {
         assert!(avg <= max && max < 1000.0, "{report}");
     }
 }
+
+/// What a configuration may not do, each a protocol error on a client of its
+/// own (it ends the connection): enable a head twice, be applied twice,
+/// leave a head neither enabled nor disabled, take another head's mode,
+/// ask for a custom mode with no size.
+#[test]
+fn a_configuration_used_wrongly_is_a_protocol_error() {
+    type Wrong = fn(&Client, &ZwlrOutputConfigurationV1);
+    let cases: [(&str, Wrong, String); 5] = [
+        (
+            "a head enabled twice",
+            |client, config| {
+                let a = head(client, "A");
+                config.enable_head(&a, &client.qh, "config_head".into());
+                config.enable_head(&a, &client.qh, "config_head".into());
+            },
+            format!(
+                "{} on object zwlr_output_configuration_v1",
+                ConfigurationError::AlreadyConfiguredHead as u32
+            ),
+        ),
+        (
+            "applied twice",
+            |client, config| {
+                for name in ["A", "B"] {
+                    config.enable_head(&head(client, name), &client.qh, "config_head".into());
+                }
+                config.apply();
+                config.apply();
+            },
+            format!(
+                "{} on object zwlr_output_configuration_v1",
+                ConfigurationError::AlreadyUsed as u32
+            ),
+        ),
+        (
+            "B left out",
+            |client, config| {
+                config.enable_head(&head(client, "A"), &client.qh, "config_head".into());
+                config.apply();
+            },
+            format!(
+                "{} on object zwlr_output_configuration_v1",
+                ConfigurationError::UnconfiguredHead as u32
+            ),
+        ),
+        (
+            "B's mode for A",
+            |client, config| {
+                let a = config.enable_head(&head(client, "A"), &client.qh, "config_head".into());
+                a.set_mode(&mode(client, &head(client, "B"), (1024, 768)));
+            },
+            format!(
+                "{} on object zwlr_output_configuration_head_v1",
+                ConfigHeadError::InvalidMode as u32
+            ),
+        ),
+        (
+            "a custom mode with no width",
+            |client, config| {
+                let a = config.enable_head(&head(client, "A"), &client.qh, "config_head".into());
+                a.set_custom_mode(0, 800, 0);
+            },
+            format!(
+                "{} on object zwlr_output_configuration_head_v1",
+                ConfigHeadError::InvalidCustomMode as u32
+            ),
+        ),
+    ];
+    let pila = two_outputs();
+    for (what, wrong, expected) in cases {
+        let (client, om) = manager(&pila);
+        let config = configuration(&client, &om);
+        client.expect_error();
+        wrong(&client, &config);
+        client.flush();
+        let error = client.wait_error();
+        assert!(
+            error.contains(&format!("Protocol error {expected}")),
+            "{what}: {error}"
+        );
+    }
+}
+
+/// A configuration made before the outputs changed (a monitor plugged in)
+/// is cancelled: the client starts over from the new heads. Applying it
+/// then is no error, and changes nothing.
+#[test]
+fn a_configuration_made_before_the_outputs_changed_is_cancelled() {
+    let mut pila = two_outputs();
+    let (client, om) = manager(&pila);
+    let config = configuration(&client, &om);
+    let a = config.enable_head(&head(&client, "A"), &client.qh, "config_head".into());
+    a.set_scale(2.0);
+    config.enable_head(&head(&client, "B"), &client.qh, "config_head".into());
+    client.flush();
+    client.roundtrip();
+    pila.request(json!({ "cmd": "output_add", "spec": "C:800x600" }));
+    client.wait_logged("config", "Cancelled");
+    config.apply();
+    client.flush();
+    client.roundtrip();
+    assert!(!client.has_logged("config", "Succeeded"));
+    assert!(client.error().is_none(), "{:?}", client.error());
+    assert_eq!(pila.state()["outputs"][0]["scale"], 1.0);
+}

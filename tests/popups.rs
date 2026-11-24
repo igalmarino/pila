@@ -365,3 +365,47 @@ fn a_popup_on_the_surface_of_a_hidden_one_is_configured_and_shows() {
     });
     assert_eq!(client.error(), None);
 }
+
+/// While a menu is open (its grab holds the pointer), a scroll over it and a
+/// touchpad pinch reach it: a long menu scrolls, and the grab passes them on.
+#[test]
+fn a_menu_open_gets_the_scroll_and_gestures_over_it() {
+    use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v1::ZwpPointerGesturesV1;
+    let (mut pila, client, window, (x, y, ..)) = window_at_its_place();
+    let gestures: ZwpPointerGesturesV1 = client.bind("zwp_pointer_gestures_v1", 3);
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    gestures.get_pinch_gesture(&pointer, &client.qh, "pinch".into());
+    client.flush();
+    client.roundtrip();
+
+    press_in(&mut pila, &client, x + 20, y + 20);
+    let (menu, _) = client.popup("menu", Ok(window), &Placement::default(), true, BLUE);
+    client.wait_surface_configured(menu);
+    pila.release("left");
+    let state = pila.wait("the menu's grab", |s| {
+        s["pointer"]["grab"] == "popup" && mapped_popup(s, "a")
+    });
+    let (mx, my, mw, mh) = rect(&popup_of(&state, "a").unwrap()["geometry"]);
+    pila.move_to((mx + mw / 2) as f64, (my + mh / 2) as f64);
+    client.wait("the pointer on the menu", |s| {
+        s.pointer_name.as_deref() == Some("menu")
+    });
+
+    client.clear_events();
+    pila.scroll("wheel", 0.0, 15.0);
+    client.wait("the menu's scroll", |s| {
+        s.events
+            .iter()
+            .any(|e| matches!(e, Ev::Axis { horizontal: false, value } if *value > 0.0))
+    });
+    pila.gesture(json!({ "kind": "pinch", "phase": "begin", "fingers": 2 }));
+    pila.gesture(json!({ "kind": "pinch", "phase": "update", "scale": 1.5, "rotation": 0.0 }));
+    pila.gesture(json!({ "kind": "pinch", "phase": "end" }));
+    client.wait_logged("pinch", "End");
+    assert!(client.has_logged("pinch", "scale: 1.5"));
+    assert_eq!(
+        pila.state()["pointer"]["grab"],
+        "popup",
+        "the menu is still open"
+    );
+}

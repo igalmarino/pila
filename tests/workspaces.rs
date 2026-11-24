@@ -331,3 +331,64 @@ fn a_minimized_window_keeps_its_workspace() {
     assert!(state["focused"].is_null());
     assert_eq!(window_in(&state, "a").unwrap()["workspace"], 1);
 }
+
+/// Mod+dragging a window, Mod with a wheel notch goes to the next workspace
+/// and the window comes along, still in the drag; the window it was over
+/// stays behind and sees neither the notch nor a touchpad pinch made during
+/// the drag (the move's grab keeps them from the clients).
+#[test]
+fn a_window_dragged_with_mod_comes_along_to_the_workspace_the_wheel_picks() {
+    use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v1::ZwpPointerGesturesV1;
+    let mut pila = TestPila::with_config("workspaces = 2\n[input]\nwheel-binding-cooldown = 0\n");
+    let client = pila.client();
+    client.window("under").size(800, 600).create();
+    pila.wait_focus("under");
+    client.window("dragged").size(300, 200).create();
+    pila.wait_focus("dragged");
+    let gestures: ZwpPointerGesturesV1 = client.bind("zwp_pointer_gestures_v1", 3);
+    let pointer = client.lock().pointer.clone().expect("a pointer");
+    gestures.get_pinch_gesture(&pointer, &client.qh, "pinch".into());
+    client.flush();
+    client.roundtrip();
+    let (x, y, w, h) = rect(&pila.window("dragged")["geometry"]);
+    pila.move_to((x + w / 2) as f64, (y + h / 2) as f64);
+    pila.settle();
+    client.roundtrip();
+
+    pila.key_press("Super_L");
+    pila.press("left");
+    pila.wait("a move", |s| s["pointer"]["grab"] == "move");
+    pila.move_by(40.0, 20.0);
+    client.clear_events();
+    pila.scroll("wheel", 0.0, 1.0);
+    pila.wait("workspace 2", |s| s["workspace"] == 2);
+    pila.gesture(json!({ "kind": "pinch", "phase": "begin", "fingers": 2 }));
+    pila.gesture(json!({ "kind": "pinch", "phase": "end" }));
+    pila.move_by(10.0, 10.0);
+    let dragged_x = |s: &Value| {
+        s["windows"].as_array().and_then(|windows| {
+            let window = windows.iter().find(|w| w["app_id"] == "dragged")?;
+            Some(rect(&window["geometry"]).0)
+        })
+    };
+    pila.wait("still dragged, on 2", |s| {
+        s["pointer"]["grab"] == "move" && dragged_x(s) == Some(x + 50)
+    });
+    assert_eq!(pila.window("dragged")["workspace"], 2);
+    pila.release("left");
+    pila.key_release("Super_L");
+    pila.wait("the grab ends", |s| s["pointer"]["grabbed"] == false);
+    assert_eq!(pila.window("dragged")["workspace"], 2);
+    assert_eq!(pila.window("under")["workspace"], 1);
+    client.roundtrip();
+    let scrolled = |e: &Ev| matches!(e, Ev::Axis { .. } | Ev::AxisV120 { .. });
+    assert!(
+        !client.events().iter().any(scrolled),
+        "{:?}",
+        client.events()
+    );
+    assert!(
+        !client.has_logged("pinch", "Begin"),
+        "a pinch reached a window"
+    );
+}

@@ -1068,3 +1068,33 @@ fn the_stream_client_works_without_memfd_create() {
     assert!(out.status.success(), "{stdout}{stderr}");
     assert!(stdout.contains("failed 0"), "{stdout}{stderr}");
 }
+
+/// A monitor turned while a capture of it goes on: its pixel size changes,
+/// so the session says the new buffer size, a frame into a buffer of the old
+/// one fails with `buffer_constraints`, and one of the new size is captured.
+#[test]
+fn turning_a_captured_output_changes_its_buffer_size() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let source = output_source(&client, "HEADLESS-1");
+    let (session, size) = session(&client, &source, "session");
+    assert_eq!(size, (1280, 800));
+    // One frame at a time: each is destroyed before the next.
+    let (frame, _) = capture(&client, &session, size, "first");
+    client.wait_logged("first", "Ready");
+    frame.destroy();
+
+    pila.write_config("[[output]]\nname = \"HEADLESS-1\"\ntransform = \"90\"\n");
+    pila.wait("turned", |s| s["outputs"][0]["transform"] == "_90");
+    pila.settle();
+    let (frame, _) = capture(&client, &session, size, "old");
+    client.wait_logged("old", "BufferConstraints");
+    frame.destroy();
+    client.wait("the new size", |s| {
+        s.logged("session")
+            .iter()
+            .any(|e| e == "BufferSize { width: 800, height: 1280 }")
+    });
+    let (_frame, _) = capture(&client, &session, (800, 1280), "new");
+    client.wait_logged("new", "Ready");
+}

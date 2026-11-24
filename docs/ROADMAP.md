@@ -12,10 +12,9 @@ testing and protocols Pila doesn't implement yet.
 
 ## Now: the next release
 
-Small items that can be tested in CI without new hardware.
-
-- **Test coverage:** Pointer grabs (menus, moves, resizes), screen capture, output management and
-  screencopy are the least covered parts (`scripts/coverage`).
+Small items that can be tested in CI without new hardware. None left for now: what the tests
+still miss (`scripts/coverage`, 86% of lines) is mostly the bare-metal backend, which waits for a
+TTY session, and error paths that need a failing GPU.
 
 ## Next
 

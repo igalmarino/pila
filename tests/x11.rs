@@ -1972,11 +1972,37 @@ fn an_x11_app_can_start_a_move_or_resize_of_its_window() {
     geometry_is(&mut pila, "resized from the bottom right", (gx, gy, gw, gh));
     // From the top left corner (0): the bottom right stays.
     drag(&mut pila, (gx + 5, gy + 5), 0, (-30.0, -20.0));
-    geometry_is(
-        &mut pila,
-        "resized from the top left",
-        (gx - 30, gy - 20, gw + 30, gh + 20),
-    );
+    let (gx, gy, gw, gh) = (gx - 30, gy - 20, gw + 30, gh + 20);
+    geometry_is(&mut pila, "resized from the top left", (gx, gy, gw, gh));
+
+    // Every other edge an app may name: only that edge (or corner) follows
+    // the pointer, which moves by (20, 10) each time.
+    // (direction, where on the window, the new geometry from the old one)
+    type Grow = fn((i64, i64, i64, i64)) -> (i64, i64, i64, i64);
+    let edges: [(u32, &str, (i64, i64), Grow); 6] = [
+        (1, "top", (50, 3), |(x, y, w, h)| (x, y + 10, w, h - 10)),
+        (2, "top right", (-5, 3), |(x, y, w, h)| {
+            (x, y + 10, w + 20, h - 10)
+        }),
+        (3, "right", (-3, 50), |(x, y, w, h)| (x, y, w + 20, h)),
+        (5, "bottom", (50, -3), |(x, y, w, h)| (x, y, w, h + 10)),
+        (6, "bottom left", (5, -3), |(x, y, w, h)| {
+            (x + 20, y, w - 20, h + 10)
+        }),
+        (7, "left", (3, 50), |(x, y, w, h)| (x + 20, y, w - 20, h)),
+    ];
+    let mut geometry = (gx, gy, gw, gh);
+    for (direction, edge, (dx, dy), grow) in edges {
+        let (x, y, w, h) = geometry;
+        // Negative offsets count from the right or bottom edge.
+        let at = (
+            if dx < 0 { x + w + dx } else { x + dx },
+            if dy < 0 { y + h + dy } else { y + dy },
+        );
+        drag(&mut pila, at, direction, (20.0, 10.0));
+        geometry = grow(geometry);
+        geometry_is(&mut pila, &format!("resized from the {edge}"), geometry);
+    }
 }
 
 /// An X11 app outside a sandbox asking to share the screen (no app id) is
