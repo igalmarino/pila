@@ -330,6 +330,38 @@ fn focus_doesnt_land_on_an_x11_menu_on_top() {
     pila.wait_focus("x");
 }
 
+/// An X11 menu stays above the windows, even one opening (and raised) while
+/// it's shown, with no window kept on top to make Pila restack.
+#[test]
+fn an_x11_menu_stays_above_a_window_raised_while_its_shown() {
+    let mut pila = TestPila::start();
+    let Some(x11) = X11::connect(&mut pila) else {
+        return;
+    };
+    x11.window("x", (200, 200), 0xff0000);
+    pila.wait_focus("x");
+    x11.menu((100, 120), (80, 60));
+    let menu_on_top = |s: &Value| {
+        let mut windows: Vec<&Value> = s["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w["stack"].is_number())
+            .collect();
+        windows.sort_by_key(|w| w["stack"].as_u64());
+        windows
+            .last()
+            .is_some_and(|w| w["override_redirect"] == true)
+    };
+    pila.wait("the menu on top", menu_on_top);
+    let client = pila.client();
+    client.window("w").create();
+    pila.wait_focus("w");
+    pila.settle();
+    let state = pila.state();
+    assert!(menu_on_top(&state), "{:?}", stacking(&state));
+}
+
 #[test]
 fn an_x11_window_can_stay_on_top() {
     let mut pila = TestPila::start();

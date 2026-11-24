@@ -1655,8 +1655,10 @@ Key flows and invariants:
   state (`workspace_states`, one state per workspace per manager) and `pila msg`.
 - **Always on top, all workspaces** (`stacking.rs`): two marks in a window's user data, from a
   rule when it opens or a binding, shared by its transient family (`mark_new_window`,
-  and again in `transient_parent_changed`). `keep_on_top` puts the marked ones back above the others in their order, doing
-  nothing if they already are (a change of order means damage). **Whatever raises a window has
+  and again in `transient_parent_changed`). `keep_on_top` puts the marked ones back above the others in their order, and X11
+  override-redirect windows (menus, tooltips) above those, doing nothing if they already are
+  (a change of order means damage; with no window marked, a window raised can still go over a
+  menu). **Whatever raises a window has
   to end in it:** `raise_family` and `keep_transients_above` do, and so every
   `map_window` (it raises, whatever its `activate`) is followed by one of them, but X11
   override-redirect windows' (on top by design) and `unpark_active`'s (`show_workspace` ends in

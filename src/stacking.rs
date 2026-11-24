@@ -104,26 +104,18 @@ impl Pila {
     /// menus above those. Nothing if they already are: a change of order
     /// redraws what it touches, and this runs on each step of a drag.
     pub(crate) fn keep_on_top(&mut self) {
-        let managed: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|w| !is_override_redirect(w))
-            .cloned()
-            .collect();
+        let all: Vec<Window> = self.space.elements().cloned().collect();
+        let (menus, managed): (Vec<Window>, Vec<Window>) =
+            all.iter().cloned().partition(is_override_redirect);
         let marked: Vec<Window> = managed
             .iter()
             .filter(|w| is_always_on_top(w))
             .cloned()
             .collect();
-        if managed.ends_with(&marked) {
+        // With no window on top, a window raised can still go over a menu.
+        if managed.ends_with(&marked) && all.ends_with(&menus) {
             return;
         }
-        let menus: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|w| is_override_redirect(w))
-            .cloned()
-            .collect();
         self.raise_in_order(&marked);
         self.raise_in_order(&menus);
     }
