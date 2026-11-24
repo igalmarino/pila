@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.6 (2026-11-24)
 
 - **New:** Screen sharing can be remembered for an app. When an app asks the portal to remember its
   share (Kooha and OBS do), the share picker shows a **Remember** toggle (`R`, or a click; off by
