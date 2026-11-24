@@ -704,6 +704,83 @@ fn only_a_corner_of_the_whole_layout_is_hot() {
     pila.wait("A's corner opens it", |s| s["overview"]["open"] == true);
 }
 
+#[test]
+fn the_hot_corner_can_be_another_corner() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1024x768".into()),
+        config: "[overview]\nhot-corner-position = \"top-right\"\n".into(),
+        ..Options::default()
+    });
+    let _client = windows(&mut pila, &["a"]);
+    pila.move_to(100.0, 100.0);
+    pila.move_to(0.0, 0.0);
+    pila.stays("closed: top-left", Duration::from_millis(300), |s| {
+        s["overview"]["open"] == false
+    });
+    // A's top-right touches B: the pointer goes through it.
+    pila.move_to(1200.0, 100.0);
+    pila.move_to(1279.0, 0.0);
+    pila.stays("closed: A's top-right", Duration::from_millis(300), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.move_to(2000.0, 100.0);
+    pila.move_to(2303.0, 0.0);
+    pila.wait("B's top-right opens it", |s| s["overview"]["open"] == true);
+}
+
+#[test]
+fn with_pressure_the_pointer_must_be_pushed_past_the_corner() {
+    let mut pila = TestPila::with_config("[overview]\nhot-corner-pressure = 100\n");
+    let _client = windows(&mut pila, &["a"]);
+    pila.move_to(100.0, 100.0);
+    pila.move_to(0.0, 0.0);
+    pila.stays("closed: reached", Duration::from_millis(200), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.move_by(-30.0, -30.0);
+    pila.stays("closed: pushed 60", Duration::from_millis(200), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.move_by(-30.0, -10.0);
+    pila.wait("pushed 100", |s| s["overview"]["open"] == true);
+    pila.key("Escape");
+    pila.wait("closed", |s| s["overview"]["open"] == false);
+    // Leaving starts over.
+    pila.move_to(60.0, 60.0);
+    pila.move_to(0.0, 0.0);
+    pila.move_by(-40.0, -40.0);
+    pila.move_to(60.0, 60.0);
+    pila.move_to(0.0, 0.0);
+    pila.move_by(-40.0, -40.0);
+    pila.stays(
+        "closed: pushed 80 each time",
+        Duration::from_millis(200),
+        |s| s["overview"]["open"] == false,
+    );
+}
+
+#[test]
+fn with_a_delay_the_pointer_must_stay_in_the_corner() {
+    let mut pila = TestPila::with_config("[overview]\nhot-corner-delay = 400\n");
+    let _client = windows(&mut pila, &["a"]);
+    pila.move_to(100.0, 100.0);
+    // Through the corner and out again before the delay: nothing.
+    pila.move_to(0.0, 0.0);
+    pila.move_to(60.0, 60.0);
+    pila.stays("closed: left", Duration::from_millis(700), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.move_to(0.0, 0.0);
+    pila.stays("closed: not yet", Duration::from_millis(150), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.wait("opened after the delay", |s| s["overview"]["open"] == true);
+    // Once per visit.
+    pila.stays("still open", Duration::from_millis(600), |s| {
+        s["overview"]["open"] == true
+    });
+}
+
 fn swipe(pila: &mut TestPila, fingers: u32, steps: &[(f64, f64)]) {
     pila.gesture(json!({ "kind": "swipe", "phase": "begin", "fingers": fingers }));
     for (dx, dy) in steps {

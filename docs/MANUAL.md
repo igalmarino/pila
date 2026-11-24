@@ -195,14 +195,19 @@ setting, matching other desktops. Because Pila intercepts them, apps won't see `
 unbind them with `"Alt+Tab" = "none"` and `"Alt+Shift+Tab" = "none"` under `[bindings]`.
 
 **The overview.** Open the overview with `Mod+W`, a four-finger swipe up, or by pushing the pointer
-into the top-left corner of the screen (disabled over fullscreen windows, or turned off with
-`[overview] hot-corner = false`). It spreads all windows on the active workspace (including minimized
+into the top-left corner of the screen (the hot corner; disabled over fullscreen windows and while a
+button is held). It spreads all windows on the active workspace (including minimized
 ones) across their respective monitors as live previews, scaled down so none overlap, over a dimmed
 wallpaper while keeping your bar visible.
 
 - Click a window, or select it with the arrow keys (or pointer) and press Enter, to focus it.
 - Close the overview with Escape, `Mod+W`, the hot corner, a four-finger swipe down, or by clicking
   empty space.
+- The hot corner is set under `[overview]`: `hot-corner-position` picks the corner (`top-left`,
+  `top-right`, `bottom-left` or `bottom-right`; on several monitors, only a corner of the whole
+  layout counts), and two settings keep it from firing by accident: `hot-corner-pressure` (logical
+  pixels the pointer must be pushed past the corner, with a mouse or touchpad; try 100) and
+  `hot-corner-delay` (milliseconds it must stay there; try 250). `hot-corner = false` turns it off.
 - Other keybindings close the overview and run normally, except workspace-switching bindings
   (`Mod+1`–`Mod+9`, etc.), which switch workspaces while keeping the overview open.
 - When you have more than one workspace, a live workspace strip appears at the top of each monitor

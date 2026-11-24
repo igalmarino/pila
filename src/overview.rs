@@ -76,9 +76,8 @@ pub struct Overview {
     /// Closing: the places the windows glide back from.
     closing: Option<Vec<Slot>>,
     buffers: Rc<RefCell<Buffers>>,
-    /// The pointer is in a hot corner: it opened or closed it, and does
-    /// again only once the pointer has left.
-    in_corner: bool,
+    /// The pointer's visit to the hot corner (`hot_corner.rs`).
+    pub(crate) hot_corner: crate::hot_corner::HotCorner,
     /// The workspace thumbnails' textures, by output and workspace: kept
     /// from one opening to the next, so opening makes none (each has its
     /// own damage tracker: only what changed meanwhile is drawn again).
@@ -643,51 +642,6 @@ impl Pila {
         }
         self.close_overview();
         true
-    }
-
-    /// The pointer moved to `location`: pushed into a hot corner (the
-    /// top-left pixel of an output, with no output left of it or above it)
-    /// it opens or closes it, once until it leaves the corner. Not while a
-    /// button is held or a grab runs, nor over a fullscreen window, nor
-    /// while locked; `[overview] hot-corner = false` turns it off.
-    pub(crate) fn hot_corner(&mut self, location: Point<f64, Logical>, held: bool) {
-        let corner = self.space.outputs().find_map(|output| {
-            let geo = self.space.output_geometry(output)?.to_f64();
-            let inside = location.x >= geo.loc.x
-                && location.y >= geo.loc.y
-                && location.x < geo.loc.x + 1.0
-                && location.y < geo.loc.y + 1.0;
-            let beyond = |x: f64, y: f64| {
-                self.space
-                    .outputs()
-                    .filter_map(|o| self.space.output_geometry(o))
-                    .any(|g| g.to_f64().contains(Point::from((x, y))))
-            };
-            let edge = !beyond(geo.loc.x - 0.5, location.y) && !beyond(location.x, geo.loc.y - 0.5);
-            (inside && edge).then(|| output.clone())
-        });
-        let was = std::mem::replace(&mut self.overview.in_corner, corner.is_some());
-        let Some(output) = corner else {
-            return;
-        };
-        if was || held || !self.config.overview.hot_corner || self.is_locked() {
-            return;
-        }
-        if !self.overview_open() && self.fullscreen_on(&output) {
-            return;
-        }
-        tracing::debug!(output = output.name(), "hot corner");
-        self.overview_action(OverviewAction::Toggle);
-    }
-
-    /// Whether the window on top on `output` is fullscreen.
-    fn fullscreen_on(&self, output: &Output) -> bool {
-        self.space
-            .elements()
-            .rev()
-            .filter(|w| !crate::workspaces::is_override_redirect(w))
-            .find(|w| self.window_output(w).as_ref() == Some(output))
-            .is_some_and(|w| crate::state::fill_state(w).1)
     }
 
     /// A button released while it's open: the one held on a window picks

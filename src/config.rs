@@ -1626,26 +1626,91 @@ impl XwaylandFile {
 /// `[overview]` (`overview.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverviewConfig {
-    /// The pointer pushed into an output's top-left corner opens it (or
-    /// closes it).
+    /// The pointer pushed into a corner of the screen opens it (or closes
+    /// it).
     pub hot_corner: bool,
+    /// Which corner.
+    pub hot_corner_position: Corner,
+    /// How far (logical pixels of motion) the pointer must be pushed past
+    /// the corner before it counts; 0: reaching it is enough.
+    pub hot_corner_pressure: u32,
+    /// How long (milliseconds) the pointer must stay in the corner.
+    pub hot_corner_delay: u32,
 }
+
+/// A corner of the screen (`hot-corner-position`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    /// Which way out of the screen the corner is: -1 or 1 on each axis.
+    pub fn outward(self) -> (f64, f64) {
+        match self {
+            Corner::TopLeft => (-1.0, -1.0),
+            Corner::TopRight => (1.0, -1.0),
+            Corner::BottomLeft => (-1.0, 1.0),
+            Corner::BottomRight => (1.0, 1.0),
+        }
+    }
+}
+
+/// `hot-corner-pressure`'s range, in logical pixels.
+pub const HOT_CORNER_PRESSURES: std::ops::RangeInclusive<u32> = 0..=2000;
+/// `hot-corner-delay`'s range, in milliseconds.
+pub const HOT_CORNER_DELAYS: std::ops::RangeInclusive<u32> = 0..=5000;
 
 /// `[overview]` as written.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct OverviewFile {
     hot_corner: Option<bool>,
+    hot_corner_position: Option<Corner>,
+    hot_corner_pressure: Option<u32>,
+    hot_corner_delay: Option<u32>,
 }
 
 impl OverviewFile {
     fn or_example(self, example: Self) -> Self {
-        or_example!(self, example, OverviewFile { hot_corner })
+        or_example!(
+            self,
+            example,
+            OverviewFile {
+                hot_corner,
+                hot_corner_position,
+                hot_corner_pressure,
+                hot_corner_delay
+            }
+        )
     }
 
     fn validate(self) -> Result<OverviewConfig, String> {
+        let pressure = need(self.hot_corner_pressure, "overview.hot-corner-pressure")?;
+        if !HOT_CORNER_PRESSURES.contains(&pressure) {
+            return Err(format!(
+                "overview.hot-corner-pressure = {pressure}: must be {} to {} pixels",
+                HOT_CORNER_PRESSURES.start(),
+                HOT_CORNER_PRESSURES.end()
+            ));
+        }
+        let delay = need(self.hot_corner_delay, "overview.hot-corner-delay")?;
+        if !HOT_CORNER_DELAYS.contains(&delay) {
+            return Err(format!(
+                "overview.hot-corner-delay = {delay}: must be {} to {} milliseconds",
+                HOT_CORNER_DELAYS.start(),
+                HOT_CORNER_DELAYS.end()
+            ));
+        }
         Ok(OverviewConfig {
             hot_corner: need(self.hot_corner, "overview.hot-corner")?,
+            hot_corner_position: need(self.hot_corner_position, "overview.hot-corner-position")?,
+            hot_corner_pressure: pressure,
+            hot_corner_delay: delay,
         })
     }
 }
@@ -3245,6 +3310,29 @@ mod tests {
             assert!(error.contains("xwayland.idle-timeout"), "{error}");
         }
         assert!(Config::from_toml("[xwayland]\nidle-timeout = -1", &no_env).is_err());
+    }
+
+    #[test]
+    fn the_hot_corner_is_top_left_at_once_by_default_and_bounded() {
+        let config = Config::from_toml("", &no_env).unwrap();
+        assert_eq!(config.overview.hot_corner_position, Corner::TopLeft);
+        assert_eq!(config.overview.hot_corner_pressure, 0);
+        assert_eq!(config.overview.hot_corner_delay, 0);
+        let config = Config::from_toml(
+            "[overview]\nhot-corner-position = \"bottom-left\"\nhot-corner-pressure = 80",
+            &no_env,
+        )
+        .unwrap();
+        assert_eq!(config.overview.hot_corner_position, Corner::BottomLeft);
+        assert_eq!(config.overview.hot_corner_pressure, 80);
+        for (text, key) in [
+            ("hot-corner-pressure = 2001", "overview.hot-corner-pressure"),
+            ("hot-corner-delay = 5001", "overview.hot-corner-delay"),
+        ] {
+            let error = Config::from_toml(&format!("[overview]\n{text}"), &no_env).unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+        assert!(Config::from_toml("[overview]\nhot-corner-position = \"left\"", &no_env).is_err());
     }
 
     #[test]

@@ -189,7 +189,12 @@ shake-magnification = 3.0        # maximum scale factor (1.5 to 5.0)
 
 # Overview settings (opened with `overview` / Mod+W).
 [overview]
-hot-corner = true                # push pointer into top-left corner to toggle (disabled over fullscreen)
+hot-corner = true                # push pointer into a corner of the screen to toggle (not over fullscreen)
+hot-corner-position = "top-left" # top-left, top-right, bottom-left or bottom-right
+# hot-corner-pressure = 100       # e.g.: push this far (logical pixels, 0 to 2000) past the corner
+hot-corner-pressure = 0          # 0: reaching the corner is enough (pressure needs a mouse or touchpad)
+# hot-corner-delay = 250          # e.g.: stay this long (milliseconds, 0 to 5000) in the corner
+hot-corner-delay = 0
 
 # Xwayland starts on demand when the first X11 app connects. Set idle-timeout
 # (1 to 3600 seconds) to shut it down after the last X11 client exits (note:

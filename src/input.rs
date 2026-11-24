@@ -604,7 +604,13 @@ impl Pila {
             .map(|last| location - last)
             .unwrap_or_default();
         self.input.host_pointer = Some(location);
-        self.pointer_motion(location, delta, delta, Event::time(&event));
+        self.pointer_motion(
+            location,
+            Point::default(),
+            delta,
+            delta,
+            Event::time(&event),
+        );
     }
 
     /// Relative motion (libinput): move by the delta, staying on the outputs.
@@ -613,9 +619,11 @@ impl Pila {
             return;
         };
         let current = pointer.current_location();
-        let location = self.clamp_to_outputs(current, current + event.delta());
+        let to = current + event.delta();
+        let location = self.clamp_to_outputs(current, to);
         self.pointer_motion(
             location,
+            to - location,
             event.delta(),
             event.delta_unaccel(),
             Event::time(&event),
@@ -641,11 +649,13 @@ impl Pila {
         ))
     }
 
-    /// Move the pointer to `location` (after relative motion of `delta`),
-    /// honoring the active pointer constraint. Shared by both input paths.
+    /// Move the pointer to `location` (after relative motion of `delta`,
+    /// `pushed` past it where the outputs end), honoring the active pointer
+    /// constraint. Shared by both input paths.
     fn pointer_motion(
         &mut self,
         location: Point<f64, Logical>,
+        pushed: Point<f64, Logical>,
         delta: Point<f64, Logical>,
         delta_unaccel: Point<f64, Logical>,
         time: InputTime,
@@ -714,11 +724,7 @@ impl Pila {
         self.overview_pointer_moved(location);
         self.color_pick_moved();
         self.share_picker_moved(location);
-        // Picking a color or a region, the pointer goes to every corner of
-        // the screen.
-        if !self.color_pick_open() && !self.region_selecting() {
-            self.hot_corner(location, pointer.is_grabbed());
-        }
+        self.hot_corner(location, pushed, pointer.is_grabbed());
 
         if !pointer.is_grabbed() {
             // Over pila's own decorations no client sets the cursor, so pila does.

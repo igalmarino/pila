@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **New:** The overview's hot corner can be any corner of the screen (`[overview]
+  hot-corner-position`), and made harder to hit by accident: `hot-corner-pressure` asks for the
+  pointer to be pushed that many logical pixels past the corner (with a mouse or touchpad), and
+  `hot-corner-delay` for it to stay there that many milliseconds. By default it's still the
+  top-left corner, at once.
+
 ## 0.9.6 (2026-11-24)
 
 - **New:** Screen sharing can be remembered for an app. When an app asks the portal to remember its

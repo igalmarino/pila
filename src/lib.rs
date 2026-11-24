@@ -35,6 +35,7 @@ pub mod gestures;
 pub mod grabs;
 pub mod handlers;
 pub mod headless;
+pub mod hot_corner;
 pub mod idle;
 pub mod input;
 pub mod input_method;

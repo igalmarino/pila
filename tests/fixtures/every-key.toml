@@ -67,6 +67,9 @@ enabled = true
 
 [overview]
 hot-corner = false
+hot-corner-position = "bottom-right"
+hot-corner-pressure = 100
+hot-corner-delay = 250
 
 [idle]
 monitors-off = 900
