@@ -225,6 +225,23 @@ impl WheelDirection {
     }
 }
 
+/// The keysym a binding's or an app shortcut's key `name` stands for
+/// (`NoSymbol` for none): case-insensitive, which gives the lowercase keysym
+/// for letters, as the unshifted sym the keyboard filter compares against;
+/// a key by its code (`0x41`, XK_A) the same way, through its name. A name
+/// with a NUL in it is none: xkbcommon's lookup panics on it, and a config
+/// or `app-shortcuts.json` may have one (`"\u0000"`).
+pub fn key_by_name(name: &str) -> Keysym {
+    if name.contains('\0') {
+        return Keysym::NoSymbol;
+    }
+    let sym = xkb::keysym_from_name(name, xkb::KEYSYM_CASE_INSENSITIVE);
+    if sym.raw() == 0 {
+        return sym;
+    }
+    xkb::keysym_from_name(&xkb::keysym_get_name(sym), xkb::KEYSYM_CASE_INSENSITIVE)
+}
+
 impl KeyCombo {
     fn parse(text: &str, mod_key: ModKey) -> Result<Self, String> {
         let mut parts: Vec<&str> = text.split('+').map(str::trim).collect();
@@ -262,9 +279,7 @@ impl KeyCombo {
                 trigger: Trigger::Wheel(direction),
             });
         }
-        // Case-insensitive lookup returns the lowercase keysym for letters,
-        // matching the unshifted sym the keyboard filter compares against.
-        let sym = xkb::keysym_from_name(key, xkb::KEYSYM_CASE_INSENSITIVE);
+        let sym = key_by_name(key);
         if sym.raw() == 0 {
             return Err(format!("unknown key {key:?} in {text:?}"));
         }
@@ -695,6 +710,17 @@ impl KeyboardFile {
     }
 
     fn validate(self) -> Result<KeyboardConfig, String> {
+        // xkbcommon panics on a name with a NUL in it ("\u0000").
+        for (key, value) in [
+            ("layout", &self.layout),
+            ("variant", &self.variant),
+            ("model", &self.model),
+            ("options", &self.options),
+        ] {
+            if value.as_deref().is_some_and(|v| v.contains('\0')) {
+                return Err(format!("keyboard.{key} has a NUL character in it"));
+            }
+        }
         Ok(KeyboardConfig {
             layout: self.layout.unwrap_or_default(),
             variant: self.variant.unwrap_or_default(),
@@ -2685,6 +2711,15 @@ mod tests {
     }
 
     #[test]
+    fn a_key_by_its_code_is_the_one_the_keyboard_gives() {
+        // 0x41 is XK_A; the keyboard filter compares unshifted keysyms.
+        let combo = KeyCombo::parse("Ctrl+0x41", ModKey::Alt).unwrap();
+        assert_eq!(combo.trigger, Trigger::Key(Keysym::a));
+        // A NUL in a name (TOML's "\u0000"): an error, not a crash.
+        assert!(KeyCombo::parse("Ctrl+a\0", ModKey::Alt).is_err());
+    }
+
+    #[test]
     fn a_binding_can_repeat() {
         let none = ModifiersState::default();
         let config = Config::from_toml(
@@ -3797,6 +3832,20 @@ mod tests {
         };
         assert!(config.window_rules.len() >= 3);
         assert!(config.layer_rules.len() >= 2);
+    }
+
+    /// xkbcommon panics on a name with a NUL in it (TOML's "\u0000"), which
+    /// crashed `--check-config`, the start and a reload: the file is refused
+    /// instead (found from the `app_shortcuts` fuzz target's crash in a
+    /// keysym's name).
+    #[test]
+    fn a_keymap_name_with_a_nul_is_refused() {
+        let no_env = |_: &str| None;
+        for key in ["layout", "variant", "model", "options"] {
+            let text = format!("[keyboard]\n{key} = \"us\\u0000\"\n");
+            let err = Config::from_toml(&text, &no_env).unwrap_err();
+            assert!(err.contains(&format!("keyboard.{key}")), "{err}");
+        }
     }
 
     #[test]

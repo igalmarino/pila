@@ -1,6 +1,7 @@
 //! Sequences of protocol requests to a running Pila (the class of crash
 //! 0.4.2 fixed: sizes, offsets, scales, buffers, subsurfaces, viewports,
-//! windows and popups past what's sane). One headless Pila runs for the whole
+//! windows and popups past what's sane; regions, blur regions and window
+//! menus asked for after a click, as an app's title bar does). One headless Pila runs for the whole
 //! fuzzing run (`PILA_BIN`, else `target/debug/pila` of this checkout; build
 //! it first), each input is a new client sending its requests, and the input
 //! fails if Pila died meanwhile. A client killed for a protocol error is fine:
@@ -25,13 +26,18 @@ use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
-        wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_output, wl_registry::WlRegistry,
+        wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_output, wl_pointer,
+        wl_pointer::WlPointer, wl_region::WlRegion, wl_registry::WlRegistry, wl_seat::WlSeat,
         wl_shm, wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_subcompositor::WlSubcompositor,
         wl_subsurface::WlSubsurface, wl_surface::WlSurface,
     },
     Connection, Dispatch, Proxy, QueueHandle,
 };
 use wayland_protocols::{
+    ext::background_effect::v1::client::{
+        ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1,
+        ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1,
+    },
     wp::viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
     xdg::shell::client::{
         xdg_popup::XdgPopup, xdg_positioner, xdg_positioner::XdgPositioner, xdg_surface,
@@ -72,6 +78,17 @@ enum Op {
     DestroySurface { surface: u8 },
     DestroySub { sub: u8 },
     DestroyXdg { xdg: u8 },
+    Region,
+    RegionRect { region: u8, x: i32, y: i32, w: i32, h: i32, subtract: bool },
+    InputRegion { surface: u8, region: Option<u8> },
+    Blur { surface: u8 },
+    BlurRegion { blur: u8, region: Option<u8> },
+    DestroyBlur { blur: u8 },
+    /// A click (through the control socket) where `x`, `y` of the output
+    /// are: the serial a window menu is asked with.
+    Click { x: u16, y: u16, right: bool },
+    /// The window menu, with the last pointer serial (or `serial`, none yet).
+    WindowMenu { toplevel: u8, serial: u32, x: i32, y: i32 },
 }
 
 #[derive(Default)]
@@ -85,6 +102,8 @@ struct Client {
     toplevels: Vec<XdgToplevel>,
     positioners: Vec<XdgPositioner>,
     popups: Vec<XdgPopup>,
+    regions: Vec<WlRegion>,
+    blurs: Vec<ExtBackgroundEffectSurfaceV1>,
 }
 
 /// The one Pila of this run, and the path of its Wayland socket.
@@ -162,6 +181,15 @@ fn server() -> &'static Mutex<Server> {
 }
 
 impl Server {
+    /// A control socket request, its answer read (or not: a dead Pila shows
+    /// at `check_alive`).
+    fn request(&mut self, request: &str) {
+        let mut answer = String::new();
+        if self.control.get_mut().write_all(format!("{request}\n").as_bytes()).is_ok() {
+            let _ = self.control.read_line(&mut answer);
+        }
+    }
+
     /// Panics (the input failed) if Pila is gone: the control socket answers
     /// once what came before was handled.
     fn check_alive(&mut self) {
@@ -181,7 +209,7 @@ impl Server {
 fuzz_target!(|ops: Vec<Op>| {
     let mut server = server().lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(stream) = UnixStream::connect(&server.socket) {
-        run(stream, &ops);
+        run(stream, &ops, &mut server);
     }
     // What a commit leads to is drawn within a frame or two.
     std::thread::sleep(Duration::from_millis(3));
@@ -190,7 +218,7 @@ fuzz_target!(|ops: Vec<Op>| {
 
 /// Connect, bind, send `ops`, and wait for Pila to have handled them (or to
 /// have killed this client for a protocol error).
-fn run(stream: UnixStream, ops: &[Op]) {
+fn run(stream: UnixStream, ops: &[Op], server: &mut Server) {
     let conn = Connection::from_socket(stream).unwrap();
     let Ok((globals, mut queue)) = registry_queue_init::<State>(&conn) else {
         return;
@@ -205,10 +233,32 @@ fn run(stream: UnixStream, ops: &[Op]) {
         return;
     };
     let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+    let blur = globals.bind::<ExtBackgroundEffectManagerV1, _, _>(&qh, 1..=1, ()).ok();
+    let seat = globals.bind::<WlSeat, _, _>(&qh, 1..=9, ()).ok();
+    let _pointer = seat.as_ref().map(|seat| seat.get_pointer(&qh, ()));
+    let globals = Globals {
+        compositor,
+        subcompositor,
+        shm,
+        wm_base,
+        viewporter,
+        blur,
+        seat,
+    };
     let mut c = Client::default();
-    let mut state = State;
+    let mut state = State::default();
     for op in ops {
-        apply(op, &mut c, &qh, &compositor, &subcompositor, &shm, &wm_base, viewporter.as_ref());
+        if let Op::Click { x, y, right } = *op {
+            let button = if right { "right" } else { "left" };
+            server.request(&format!("{{\"cmd\":\"move\",\"x\":{x},\"y\":{y}}}"));
+            server.request(&format!("{{\"cmd\":\"button\",\"button\":\"{button}\"}}"));
+            // Its events (and their serials) reach this client.
+            if queue.roundtrip(&mut state).is_err() {
+                return;
+            }
+            continue;
+        }
+        apply(op, &mut c, &qh, &globals, &state);
         // Events (configures to ack, pings) along the way.
         if conn.flush().is_err() || queue.dispatch_pending(&mut state).is_err() {
             return;
@@ -223,17 +273,27 @@ fn pick<T>(items: &[T], index: u8) -> Option<&T> {
     (!items.is_empty()).then(|| &items[usize::from(index) % items.len()])
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply(
-    op: &Op,
-    c: &mut Client,
-    qh: &QueueHandle<State>,
-    compositor: &WlCompositor,
-    subcompositor: &WlSubcompositor,
-    shm: &WlShm,
-    wm_base: &XdgWmBase,
-    viewporter: Option<&WpViewporter>,
-) {
+/// The globals the ops use (those that may be missing, `None`).
+struct Globals {
+    compositor: WlCompositor,
+    subcompositor: WlSubcompositor,
+    shm: WlShm,
+    wm_base: XdgWmBase,
+    viewporter: Option<WpViewporter>,
+    blur: Option<ExtBackgroundEffectManagerV1>,
+    seat: Option<WlSeat>,
+}
+
+fn apply(op: &Op, c: &mut Client, qh: &QueueHandle<State>, globals: &Globals, state: &State) {
+    let Globals {
+        compositor,
+        subcompositor,
+        shm,
+        wm_base,
+        viewporter,
+        ..
+    } = globals;
+    let viewporter = viewporter.as_ref();
     match *op {
         Op::Surface => c.surfaces.push(compositor.create_surface(qh, ())),
         Op::Pool { size } => {
@@ -425,10 +485,69 @@ fn apply(
                 c.xdgs.swap_remove(i).destroy();
             }
         }
+        Op::Region => c.regions.push(compositor.create_region(qh, ())),
+        Op::RegionRect { region, x, y, w, h, subtract } => {
+            if let Some(region) = pick(&c.regions, region) {
+                if subtract {
+                    region.subtract(x, y, w, h);
+                } else {
+                    region.add(x, y, w, h);
+                }
+            }
+        }
+        Op::InputRegion { surface, region } => {
+            if let Some(surface) = pick(&c.surfaces, surface) {
+                surface.set_input_region(region.and_then(|r| pick(&c.regions, r)));
+            }
+        }
+        Op::Blur { surface } => {
+            if let (Some(surface), Some(blur)) = (pick(&c.surfaces, surface), &globals.blur) {
+                c.blurs.push(blur.get_background_effect(surface, qh, ()));
+            }
+        }
+        Op::BlurRegion { blur, region } => {
+            if let Some(blur) = pick(&c.blurs, blur) {
+                blur.set_blur_region(region.and_then(|r| pick(&c.regions, r)));
+            }
+        }
+        Op::DestroyBlur { blur } => {
+            if !c.blurs.is_empty() {
+                let i = usize::from(blur) % c.blurs.len();
+                c.blurs.swap_remove(i).destroy();
+            }
+        }
+        Op::Click { .. } => {}
+        Op::WindowMenu { toplevel, serial, x, y } => {
+            if let (Some(toplevel), Some(seat)) = (pick(&c.toplevels, toplevel), &globals.seat) {
+                toplevel.show_window_menu(seat, state.serial.unwrap_or(serial), x, y);
+            }
+        }
     }
 }
 
-struct State;
+/// The last pointer event's serial: a window menu is asked with it.
+#[derive(Default)]
+struct State {
+    serial: Option<u32>,
+}
+
+impl Dispatch<WlPointer, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { serial, .. } | wl_pointer::Event::Button { serial, .. } => {
+                state.serial = Some(serial);
+            }
+            _ => {}
+        }
+    }
+}
 
 impl Dispatch<WlRegistry, GlobalListContents> for State {
     fn event(
@@ -485,3 +604,7 @@ delegate_noop!(State: ignore WpViewport);
 delegate_noop!(State: ignore XdgToplevel);
 delegate_noop!(State: ignore XdgPositioner);
 delegate_noop!(State: ignore XdgPopup);
+delegate_noop!(State: ignore WlRegion);
+delegate_noop!(State: ignore WlSeat);
+delegate_noop!(State: ignore ExtBackgroundEffectManagerV1);
+delegate_noop!(State: ignore ExtBackgroundEffectSurfaceV1);

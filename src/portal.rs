@@ -714,7 +714,7 @@ pub(crate) fn data_dirs() -> Vec<std::path::PathBuf> {
 /// `<app_id>.desktop` in `dirs`), else the app id itself; `None` for no app
 /// id (apps outside a sandbox often have none). Reads files: on the bus's
 /// thread, never the event loop.
-pub(crate) fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
+pub fn app_name(app_id: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         return None;

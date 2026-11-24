@@ -62,7 +62,9 @@ directly.
 | `config` | A TOML config file with `PILA_*` overrides (`Config::from_toml`, including rules) |
 | `edid` | Monitor EDID bytes (`edid::parse`) |
 | `gamma_ramp` | A client gamma ramp from a file or open pipe (`gamma_control::read_ramp`) |
-| `protocol` | Wayland request sequences (surfaces, buffers, scales, offsets, subsurfaces, viewports, windows, popups) against a running headless Pila |
+| `app_shortcuts` | An `app-shortcuts.json` read back and its triggers, a trigger an app prefers (read, then saved and read again the same), an app id named by its desktop entry (never a path) |
+| `sessions` | A `sessions.json` read back (`session_management::parse_sessions`), the sizes and places it restores fitted to a monitor |
+| `protocol` | Wayland request sequences (surfaces, buffers, scales, offsets, subsurfaces, viewports, windows, popups, regions, blur regions, window menus after a click) against a running headless Pila |
 
 ```sh
 rustup toolchain install nightly --profile minimal

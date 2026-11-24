@@ -16,5 +16,14 @@ fuzz_target!(|input: (&str, Option<&str>, Option<&str>, Option<&str>)| {
         }
         .map(str::to_string)
     };
-    let _ = pila::config::Config::from_toml(text, &env);
+    let Ok(config) = pila::config::Config::from_toml(text, &env) else {
+        return;
+    };
+    // xkbcommon panics on a name with a NUL in it: none gets through.
+    let kb = &config.keyboard;
+    let names = [Some(&kb.layout), Some(&kb.variant), Some(&kb.model), kb.options.as_ref()];
+    assert!(
+        names.into_iter().flatten().all(|name| !name.contains('\0')),
+        "a keymap name with a NUL: {kb:?}"
+    );
 });

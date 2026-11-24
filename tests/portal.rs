@@ -1427,11 +1427,24 @@ fn an_apps_global_shortcut_is_confirmed_then_sent_to_it() {
 /// asked again.
 #[test]
 fn a_remembered_key_no_app_could_get_isnt_bound() {
+    a_remembered_key_isnt_bound("a");
+}
+
+/// Nor is one whose name has a NUL in it (a JSON `\u0000`), which xkbcommon
+/// can't look up: it crashed Pila (found by the `app_shortcuts` fuzz target).
+#[test]
+fn a_remembered_key_with_a_nul_in_its_name_isnt_bound() {
+    a_remembered_key_isnt_bound("CTRL+F12\\u0000");
+}
+
+/// `stored` (JSON string contents) remembered for the app's shortcut: not
+/// bound, the app asked again.
+fn a_remembered_key_isnt_bound(stored: &str) {
     let state = std::env::temp_dir().join(format!("pila-shortcuts-state-{}", rand_suffix()));
     std::fs::create_dir_all(state.join("pila")).unwrap();
     std::fs::write(
         state.join("pila/app-shortcuts.json"),
-        r#"{"apps": {"org.example.Talk": {"talk": "a"}}}"#,
+        format!(r#"{{"apps": {{"org.example.Talk": {{"talk": "{stored}"}}}}}}"#),
     )
     .unwrap();
     let (mut pila, bus, _pipewire) = start_with_env(
@@ -1455,7 +1468,7 @@ fn a_remembered_key_no_app_could_get_isnt_bound() {
         state_now["app_shortcuts"]
     );
     let panel = &state_now["app_shortcuts"]["panel"];
-    assert_ne!(panel["rows"][0]["keys"], "a");
+    assert_ne!(panel["rows"][0]["keys"], stored);
     pila.key("Escape");
     assert_eq!(bound.join().unwrap().0, 1);
     let _ = std::fs::remove_dir_all(&state);

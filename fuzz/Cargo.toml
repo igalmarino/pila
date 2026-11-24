@@ -17,7 +17,7 @@ libc = "0.2"
 pila = { path = ".." }
 # The protocol target's client, as the integration tests' (`tests/common/`).
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 
 [workspace]
 members = ["."]
@@ -46,6 +46,20 @@ bench = false
 [[bin]]
 name = "gamma_ramp"
 path = "fuzz_targets/gamma_ramp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "app_shortcuts"
+path = "fuzz_targets/app_shortcuts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sessions"
+path = "fuzz_targets/sessions.rs"
 test = false
 doc = false
 bench = false

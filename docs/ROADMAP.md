@@ -14,8 +14,6 @@ testing and protocols Pila doesn't implement yet.
 
 Small items that can be tested in CI without new hardware.
 
-- **More fuzz targets:** App ids and shortcut triggers from the portal, `sessions.json` and
-  `app-shortcuts.json` as read back, blur regions, and window menu requests.
 - **Test coverage:** Pointer grabs (menus, moves, resizes), screen capture, output management and
   screencopy are the least covered parts (`scripts/coverage`).
 

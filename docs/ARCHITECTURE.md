@@ -1211,7 +1211,9 @@ Key flows and invariants:
   `Request::ShortcutsStore`, and written whole by a thread at each save; a key read back that no
   app could be given, `assignable`, isn't remembered, so the app is asked again); otherwise a modal panel
   (`ask_app_shortcuts`; refused while locked or another panel asks) lists them with the keys asked
-  for (`parse_trigger`, the shortcuts XDG specification's text; only `assignable` ones: with Ctrl,
+  for (`parse_trigger`, the shortcuts XDG specification's text; its key by `config::key_by_name`,
+  as a binding's: case-insensitive, by code too, none with a NUL in its name, which xkbcommon
+  panics on; only `assignable` ones: with Ctrl,
   Alt or Super, or a key that types nothing), none where Pila's bindings or another session have
   them (`keys_taken`). The keyboard filter gives the panel every press but a modifier's
   (`app_shortcuts_key`: arrows pick, Backspace clears, Enter saves, Escape cancels, other keys

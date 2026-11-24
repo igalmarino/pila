@@ -89,7 +89,7 @@ pub struct SessionManagement {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Session {
+pub struct Session {
     toplevels: HashMap<String, Saved>,
     /// Seconds since the epoch.
     last_used: u64,
@@ -100,7 +100,7 @@ struct Session {
 
 /// A toplevel's state. All default: nothing known yet.
 #[derive(Serialize, Deserialize, Clone, Copy, Default, PartialEq, Debug)]
-struct Saved {
+pub struct Saved {
     /// x, y, width, height when floating.
     rect: Option<(i32, i32, i32, i32)>,
     maximized: bool,
@@ -110,7 +110,7 @@ struct Saved {
 impl Saved {
     /// The rect when floating, if it's one a window could have had: the file
     /// may have been written by anything.
-    fn rect(&self) -> Option<Rectangle<i32, Logical>> {
+    pub fn rect(&self) -> Option<Rectangle<i32, Logical>> {
         let (x, y, w, h) = self.rect?;
         let fits = w > 0
             && h > 0
@@ -118,6 +118,19 @@ impl Saved {
             && crate::surface_limits::position_ok(x.into(), y.into());
         fits.then(|| Rectangle::new((x, y).into(), (w, h).into()))
     }
+}
+
+impl Session {
+    /// Its toplevels' saved states.
+    pub fn saved(&self) -> impl Iterator<Item = &Saved> {
+        self.toplevels.values()
+    }
+}
+
+/// The sessions in `sessions.json`'s text, which anything may have written
+/// (the `sessions` fuzz target reads it as this does).
+pub fn parse_sessions(text: &str) -> serde_json::Result<HashMap<String, Session>> {
+    serde_json::from_str(text)
 }
 
 struct Tracked {
@@ -236,7 +249,7 @@ impl SessionManagement {
             return;
         };
         match std::fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str(&text) {
+            Ok(text) => match parse_sessions(&text) {
                 Ok(sessions) => self.sessions = sessions,
                 Err(err) => warn!(?path, %err, "ignoring a broken sessions file"),
             },

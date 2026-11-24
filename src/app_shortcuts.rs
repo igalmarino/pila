@@ -94,7 +94,7 @@ pub fn parse_trigger(text: &str) -> Option<KeyCombo> {
             _ => return None,
         }
     }
-    let sym = xkb::keysym_from_name(key, xkb::KEYSYM_CASE_INSENSITIVE);
+    let sym = crate::config::key_by_name(key);
     if sym.raw() == 0 || sym.is_modifier_key() {
         return None;
     }
@@ -175,13 +175,17 @@ pub fn read_store() -> Store {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Store::new();
     };
-    match serde_json::from_str::<HashMap<String, Store>>(&text) {
-        Ok(mut file) => file.remove("apps").unwrap_or_default(),
-        Err(err) => {
-            warn!(%err, path = %path.display(), "can't read the apps' shortcuts");
-            Store::new()
-        }
-    }
+    parse_store(&text).unwrap_or_else(|err| {
+        warn!(%err, path = %path.display(), "can't read the apps' shortcuts");
+        Store::new()
+    })
+}
+
+/// The store in `app-shortcuts.json`'s text, which anything may have
+/// written (the `app_shortcuts` fuzz target reads it as this does).
+pub fn parse_store(text: &str) -> serde_json::Result<Store> {
+    let mut file: HashMap<String, Store> = serde_json::from_str(text)?;
+    Ok(file.remove("apps").unwrap_or_default())
 }
 
 /// Write `store` to its file, on a thread, whole or not at all.
@@ -1057,11 +1061,19 @@ mod tests {
             parse_trigger("LOGO+A").unwrap().trigger,
             Trigger::Key(Keysym::a)
         );
+        // By its code too: saved and read back, it's the same key (found by
+        // the `app_shortcuts` fuzz target's property).
+        assert_eq!(
+            parse_trigger("LOGO+0x41").unwrap().trigger,
+            Trigger::Key(Keysym::a)
+        );
         // What Pila can't bind: NUM, a key it doesn't know, a modifier alone.
         assert_eq!(parse_trigger("NUM+a"), None);
         assert_eq!(parse_trigger("CTRL+NoSuchKey"), None);
         assert_eq!(parse_trigger("CTRL+Shift_L"), None);
         assert_eq!(parse_trigger(""), None);
+        // A NUL in a name: xkbcommon can't look it up (it panicked).
+        assert_eq!(parse_trigger("CTRL+a\0"), None);
     }
 
     #[test]

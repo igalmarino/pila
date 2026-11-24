@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [ipc_request, config, edid, gamma_ramp, protocol]
+        target: [ipc_request, config, edid, gamma_ramp, app_shortcuts, sessions, protocol]
     steps:
       - name: Packages
         run: |

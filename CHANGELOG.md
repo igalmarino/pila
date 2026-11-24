@@ -6,6 +6,12 @@
   (an app started with the session asking right away) could stay without its text until it was
   opened again, and the shortcuts cheatsheet could take the keys without showing. They now get
   their text as soon as the fonts have loaded.
+- **Fixed:** A config with a NUL character (`"\u0000"`) in a key of a binding or in `[keyboard]`
+  crashed Pila at startup, on a reload, and `pila --check-config`; such a file is now refused
+  with a message. So is a NUL in a key remembered in `app-shortcuts.json`, which crashed Pila
+  when the app asked for its shortcuts.
+- **Fixed:** A key written by its code (`Ctrl+0x41`) in a binding, or in an app's global shortcut,
+  never fired when it named a capital letter. It now stands for the key, as its name does.
 
 ## 0.9.5 (2026-11-23)
 
