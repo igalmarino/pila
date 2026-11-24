@@ -107,10 +107,10 @@ fn a_subsurface_moved_back_but_not_applied_makes_no_room_for_its_child() {
     // comes.
     sub1_object.set_position(0, 0);
     client.expect_error();
-    // sub1's commit applies sub2's place: 60000 from the window.
+    // sub2's own commit is refused: once sub1's commit applies its place,
+    // it would be 60000 from the window. Nothing written after it (a write
+    // to the closed connection would lose the error, tests/CLAUDE.md).
     client.subsurface(&sub1, "sub2", (30_000, 0), (1, 1), RED);
-    sub1.commit();
-    client.flush();
     refused(&mut pila, &client, "a subsurface as far as");
 }
 
