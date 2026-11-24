@@ -18,7 +18,8 @@ ENV TZ="${TZ}" \
 
 # System packages:
 #   - general dev tooling
-#   - Rust toolchain manager + fast linker
+#   - Rust toolchain manager + fast linker; cargo-fuzz for fuzz/ (with the
+#     nightly toolchain installed below)
 #   - Smithay build/runtime deps (winit + future DRM/udev/libinput backends)
 #   - Wayland test clients to run inside your compositor
 #   - a machine id: without one D-Bus can't start a session bus, and
@@ -37,7 +38,7 @@ ENV TZ="${TZ}" \
 #     manual's list of what works ("Building your desktop")
 RUN pacman -Syu --noconfirm --needed \
         git openssh github-cli less vim nano jq ripgrep fd unzip \
-        rustup clang mold pkgconf gdb shellcheck cargo-audit \
+        rustup clang mold pkgconf gdb shellcheck cargo-audit cargo-fuzz \
         wayland wayland-protocols libxkbcommon libinput systemd-libs seatd \
         mesa libglvnd libdisplay-info pixman \
         foot kitty weston wayland-utils mesa-utils ttf-dejavu gtk4-demos \
@@ -81,9 +82,11 @@ ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.cargo/bin:${PATH}" \
     EDITOR=vim \
     VISUAL=vim
 
-# Rust stable + editor/lint components; link with mold for faster rebuilds.
+# Rust stable + editor/lint components; nightly (minimal) for the fuzz targets
+# (`cargo +nightly fuzz`, CONTRIBUTING.md); link with mold for faster rebuilds.
 RUN rustup default stable \
     && rustup component add rust-analyzer clippy rustfmt rust-src \
+    && rustup toolchain install nightly --profile minimal \
     && printf '%s\n' \
         '[target.x86_64-unknown-linux-gnu]' \
         'linker = "clang"' \
