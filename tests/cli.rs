@@ -275,6 +275,15 @@ fn the_report_names_each_gpu_and_its_driver_without_lspci() {
         std::fs::create_dir_all(drm.join(card)).unwrap();
         symlink(device, drm.join(card).join("device")).unwrap();
     }
+    // A monitor on DP-1, and Pila drawing on card1: the monitors and the
+    // GPU in use come from this /sys too, not the machine's.
+    std::fs::write(drm.join("card1-DP-1/status"), "connected\n").unwrap();
+    std::fs::write(drm.join("card1-DP-1/modes"), "2560x1440\n1920x1080\n").unwrap();
+    std::fs::write(
+        home.join("state/pila/pila.log"),
+        "2026-11-06T16:18:39Z INFO pila::udev: using GPU gpu=/dev/dri/card1\n",
+    )
+    .unwrap();
     let ids = home.join("pci.ids");
     std::fs::write(
         &ids,
@@ -297,6 +306,15 @@ fn the_report_names_each_gpu_and_its_driver_without_lspci() {
         let out = report_with(&home, &path, "somebody", &env);
         assert!(out.status.success(), "{out:?}");
         let text = std::fs::read_to_string(home.join("pila-report.txt")).unwrap();
+        assert!(
+            text.contains("In use by Pila: /dev/dri/card1 (driver amdgpu)"),
+            "{text}"
+        );
+        let monitors = text.split("## Monitors\n").nth(1).unwrap();
+        assert!(
+            monitors.starts_with("DP-1: preferred mode 2560x1440\n"),
+            "{monitors}"
+        );
         let gpu = text.split("## GPU\n").nth(1).unwrap();
         let lines: Vec<String> = gpu
             .lines()
@@ -311,6 +329,7 @@ fn the_report_names_each_gpu_and_its_driver_without_lspci() {
             "card0: driver simpledrm",
             "card1: Advanced Micro Devices, Inc. [AMD/ATI] Cezanne \
              (PCI 1002:1638, rev d1, \"Onboard IGD\"), driver amdgpu",
+            "In use by Pila: /dev/dri/card1 (driver amdgpu)",
         ]
     );
     // Without pci.ids, the IDs alone.
@@ -319,6 +338,7 @@ fn the_report_names_each_gpu_and_its_driver_without_lspci() {
         [
             "card0: driver simpledrm",
             "card1: (PCI 1002:1638, rev d1, \"Onboard IGD\"), driver amdgpu",
+            "In use by Pila: /dev/dri/card1 (driver amdgpu)",
         ]
     );
 }

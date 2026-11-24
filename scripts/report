@@ -124,7 +124,8 @@ pci_name() {
 }
 
 # Each GPU the kernel has (/sys/class/drm/cardN): its name, PCI IDs and
-# driver, without lspci. PILA_REPORT_SYSFS stands for /sys (the tests).
+# driver, without lspci. PILA_REPORT_SYSFS stands for /sys (the tests), here,
+# in gpu_driver and in section_monitors.
 section_gpu() {
     local card name dev driver vendor device revision label names
     echo "## GPU"
@@ -168,7 +169,7 @@ gpu_device() {
 
 # A GPU's kernel driver, from its device path (/dev/dri/card1).
 gpu_driver() {
-    basename "$(readlink -f "/sys/class/drm/${1##*/}/device/driver" 2>/dev/null)" 2>/dev/null
+    basename "$(readlink -f "${PILA_REPORT_SYSFS:-/sys}/class/drm/${1##*/}/device/driver" 2>/dev/null)" 2>/dev/null
 }
 
 # The other GPUs pila uses for their monitors (`other-gpus = true`: drawn on
@@ -212,7 +213,7 @@ section_monitors() {
     used="$(gpu_device)"
     used="${used##*/}"
     others="$(other_gpus)"
-    for connector in /sys/class/drm/card[0-9]*-*; do
+    for connector in "${PILA_REPORT_SYSFS:-/sys}"/class/drm/card[0-9]*-*; do
         [ -e "$connector/status" ] || continue
         [ "$(cat "$connector/status")" = connected ] || continue
         name="$(basename "$connector")"
