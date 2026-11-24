@@ -292,13 +292,28 @@ fn save(dir: &Path, pixels: &[u8], (width, height): (u32, u32)) -> std::io::Resu
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
-    let mut path = dir.join(format!("screenshot-{stamp}.png"));
-    let mut n = 1;
-    while path.exists() {
-        path = dir.join(format!("screenshot-{stamp}-{n}.png"));
-        n += 1;
-    }
-    std::fs::write(&path, png)?;
+    // Made anew, the user's alone: a name taken (another saved the same
+    // millisecond, on its own thread) is tried with the next count.
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut n = 0;
+    let (path, mut file) = loop {
+        let path = match n {
+            0 => dir.join(format!("screenshot-{stamp}.png")),
+            n => dir.join(format!("screenshot-{stamp}-{n}.png")),
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(file) => break (path, file),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(err) => return Err(err),
+        }
+    };
+    file.write_all(&png)?;
     prune(dir);
     Ok(path)
 }
@@ -339,6 +354,32 @@ fn file_uri(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Screenshots are the user's alone, and two saved at once (two apps
+    /// asking) are two files, never one written over the other.
+    #[test]
+    fn screenshots_are_private_and_never_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        // Not the other test's directory: tests run at once.
+        let dir = std::env::temp_dir().join(format!("pila-shots-at-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pixels = [255u8; 4 * 4];
+        let saved: Vec<PathBuf> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| save(&dir, &pixels, (2, 2)).unwrap()))
+                .collect();
+            threads.into_iter().map(|t| t.join().unwrap()).collect()
+        });
+        let mut unique = saved.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), saved.len(), "{saved:?}");
+        for path in &saved {
+            let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{}", path.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_path_is_a_file_uri() {

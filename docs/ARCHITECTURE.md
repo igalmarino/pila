@@ -1178,7 +1178,8 @@ Key flows and invariants:
   (`take_screenshot`: an output, or a window alone as screen captures draw it). Never while
   locked. No pointer. Drawn offscreen and read back as RGBA (`Captures::read_back`, finished by
   `when_copied`), then encoded as a PNG and written on a thread into
-  `$XDG_RUNTIME_DIR/pila-screenshots` (private; the oldest past `SCREENSHOTS_KEPT` go); the app
+  `$XDG_RUNTIME_DIR/pila-screenshots` (private, each file made anew, `create_new`, so two saved
+  at once never share one; the oldest past `SCREENSHOTS_KEPT` go); the app
   gets its `file://` URI.
 - **Apps' global shortcuts** (`app_shortcuts.rs`, the portal's GlobalShortcuts interface, version 2):
   each `CreateSession` is a `Session` object on the bus and an entry of `Pila::app_shortcuts`
