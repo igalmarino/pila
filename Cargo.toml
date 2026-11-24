@@ -58,12 +58,8 @@ pipewire = "0.10"
 # without waiting for a release (0.7.0 is from June 2025). Move `rev` forward
 # on purpose, with a full test run and a bare-metal check.
 #
-# From Pila's fork for now, branch `pila`: Smithay's 33323a91 (2026-11-16) plus
+# From Pila's fork for now, branch `pila`: Smithay's 54cf9c10 (2026-11-23) plus
 # what it lacks, each kept until Smithay has it:
-# - a text cursor with no width (GTK's) is kept, so input methods' candidate
-#   windows go next to it
-#   (`input_method::a_text_cursor_with_no_width_places_the_candidate_window`
-#   fails without);
 # - asynchronous page flips, Smithay's pull request #1948 rebased (tearing,
 #   `tearing.rs`: Pila doesn't build without its `PresentationMode`; the flips
 #   themselves are bare metal's, `scripts/check` with vkcube);
@@ -85,7 +81,7 @@ pipewire = "0.10"
 # `https://github.com/Smithay/smithay.git` once it has them.
 [dependencies.smithay]
 git = "https://github.com/igalmarino/smithay.git"
-rev = "afdce3200fd6df7a71ed7ad9d6f8e68237b18920"
+rev = "0f42cdb56e3f6316274a20159f94f9a02e58f225"
 default-features = false
 features = [
     "backend_winit",

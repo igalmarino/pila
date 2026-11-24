@@ -83,7 +83,7 @@ fn dmabuf_format(element: &PilaRenderElement, renderer: &mut GlesRenderer) -> Op
         UnderlyingStorage::Wayland(buffer) => smithay::wayland::dmabuf::get_dmabuf(buffer)
             .ok()
             .map(|dmabuf| dmabuf.format()),
-        UnderlyingStorage::Memory(_) => None,
+        UnderlyingStorage::Memory(_) | UnderlyingStorage::SolidColor(_) => None,
     }
 }
 

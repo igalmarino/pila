@@ -69,9 +69,8 @@ Behaviors that could reasonably go either way. Each stays as it is unless users 
   keyboard, and input method) will be replaced by its `ext-` successor once available in
   `wayland-protocols` and Smithay.
 - **Upstreaming Smithay fork patches:** Once Smithay merges the fixes Pila currently carries
-  (zero-width text cursors, async page flips, reserving X displays separately from Xwayland,
-  striped shm uploads, and looking up `xdg-foreign` surfaces), Pila will switch back to upstream
-  Smithay.
+  (async page flips, reserving X displays separately from Xwayland, striped shm uploads, and
+  looking up `xdg-foreign` surfaces), Pila will switch back to upstream Smithay.
 - **Direct scanout of OpenGL apps on AMD GPUs:** On AMD Renoir with Mesa 26.3.1 (`radeonsi`),
   fullscreen OpenGL apps (such as `kitty` or `weston-simple-egl`) keep a render-only compressed
   (DCC) buffer layout that the display engine cannot scan out, even after Pila advertises

@@ -13,6 +13,9 @@
   now comes on with a lighter mode, and windows and panels follow it.
 - **Fixed:** A monitor powered on (`pila msg action power-on-monitors`, `wlopm`) while Pila's
   session was on another VT stayed off; it now comes on when the session is back.
+- **Smithay updated** (10 commits to `54cf9c10`, fork rebased; 0.9.6's pin preserved as tag
+  `rev-afdce320`): drops the fork's zero-width text-cursor patch (now upstream) and stops
+  re-broadcasting unchanged selections.
 
 ## 0.9.6 (2026-11-24)
 
