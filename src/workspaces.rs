@@ -347,8 +347,10 @@ impl Pila {
             // Even while locked: the active workspace must exist.
             self.show_workspace(last);
         } else {
-            // Windows moved onto the active workspace come on screen.
+            // Windows moved onto the active workspace come on screen, below
+            // those on top.
             self.unpark_active();
+            self.keep_on_top();
             self.refresh_pointer_focus();
             self.refresh_workspaces();
             self.queue_redraw();

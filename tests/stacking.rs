@@ -986,3 +986,29 @@ fn a_dialog_goes_and_comes_back_with_a_shown_desktop() {
     let state = pila.wait("back", |s| stacking(s).len() == 2);
     assert_eq!(stacking(&state), ["parent", "dialog"]);
 }
+
+/// Fewer workspaces after a reload bring the windows of those gone to the
+/// last one left: when that's the one shown, they come on screen below a
+/// window on top, not above it.
+#[test]
+fn windows_brought_by_fewer_workspaces_stay_below_one_on_top() {
+    let mut pila = TestPila::with_config("workspaces = 2\n");
+    let client = pila.client();
+    client.window("other").size(600, 400).create();
+    pila.wait_focus("other");
+    pila.combo("Super+Shift+2");
+    pila.wait("other on 2", |s| {
+        window_in(s, "other").unwrap()["workspace"] == 2
+    });
+    client.window("pin").size(300, 200).create();
+    pila.wait_focus("pin");
+    pila.combo("Super+t");
+    pila.wait("marked", |s| {
+        window_in(s, "pin").unwrap()["always_on_top"] == true
+    });
+    pila.write_config("workspaces = 1\n");
+    let state = pila.wait("other here", |s| {
+        s["workspaces"] == 1 && stacking(s).contains(&"other".to_string())
+    });
+    assert_eq!(top(&state), "pin", "{:?}", stacking(&state));
+}
