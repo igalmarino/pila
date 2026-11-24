@@ -105,6 +105,22 @@ fn ask(path: &std::path::Path, request: &Value) -> Result<(String, BufReader<Uni
     Ok((line, reader))
 }
 
+/// A line of JSON from pila, safe to print on a terminal: JSON escapes the
+/// controls below U+0020 only, and DEL and the C1 controls (U+0080 to
+/// U+009F, CSI among them) would reach it as they are. They can only be in
+/// strings, where `\u` escapes say the same.
+fn json_safe(line: &str) -> String {
+    let mut safe = String::with_capacity(line.len());
+    for c in line.chars() {
+        if ('\u{7f}'..='\u{9f}').contains(&c) {
+            safe.push_str(&format!("\\u{:04x}", c as u32));
+        } else {
+            safe.push(c);
+        }
+    }
+    safe
+}
+
 /// A window title and such, safe to print on a terminal: it comes from any
 /// program, and could otherwise hold escape sequences.
 fn plain(value: &Value) -> String {
@@ -303,7 +319,7 @@ pub fn run(args: &[String]) -> i32 {
     // A closed pipe (`| head`) isn't an error worth saying.
     let mut out = std::io::stdout().lock();
     if json_output {
-        let _ = out.write_all(line.as_bytes());
+        let _ = out.write_all(json_safe(&line).as_bytes());
     } else {
         for text in text_of(request["request"].as_str().unwrap_or_default(), &answer) {
             if writeln!(out, "{text}").is_err() {
@@ -330,7 +346,8 @@ fn follow(mut reader: BufReader<UnixStream>, json_output: bool) -> i32 {
             Ok(_) => {}
         }
         let written = if json_output {
-            out.write_all(line.as_bytes()).and_then(|()| out.flush())
+            out.write_all(json_safe(&line).as_bytes())
+                .and_then(|()| out.flush())
         } else {
             let event: Value = serde_json::from_str(&line).unwrap_or_default();
             let kind = plain(&event["event"]);

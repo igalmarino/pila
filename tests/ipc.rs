@@ -684,6 +684,24 @@ fn a_title_cant_reach_the_terminal_as_it_is() {
     );
 }
 
+/// The C1 controls (U+0080 to U+009F, CSI among them, which some terminals
+/// take as ESC [) and DEL aren't escaped by JSON's rules: `--json` escapes
+/// them too, so the JSON printed holds none, and says the same.
+#[test]
+fn a_title_cant_reach_the_terminal_through_json() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    client.window("a").title("evil\u{9b}2J\u{7f}title").create();
+    pila.wait_focus("a");
+    let out = msg(&pila, &["--json", "windows"]);
+    let printed = text(&out);
+    assert!(!printed.contains(['\u{9b}', '\u{7f}']), "{printed:?}");
+    assert_eq!(
+        named(&query(&pila, &["windows"]), "a")["title"],
+        "evil\u{9b}2J\u{7f}title"
+    );
+}
+
 // --- Events ------------------------------------------------------------------
 
 /// A raw subscription: the answer, then events, one per line.

@@ -93,7 +93,8 @@ commands as your user, which any process running under your account can already 
 **Window:**
 - `id`: string unique for the window's lifetime (matches `ext-foreign-toplevel-list`)
 - `app_id`, `title`: strings set by the application (may contain arbitrary characters, including
-  terminal escapes; plain-text `pila msg` output replaces control characters)
+  terminal escapes; plain-text `pila msg` output replaces control characters, and `--json`
+  escapes DEL and the C1 controls as `\u` escapes, as JSON already does those below U+0020)
 - `workspace`: 1-based workspace index
 - `output`: monitor name, or `null` if off-screen
 - `focused`: boolean
