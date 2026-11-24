@@ -1559,7 +1559,10 @@ Key flows and invariants:
   constraint before moving the pointer. Nested, relative motion is derived from the host
   pointer (`Pila::input.host_pointer`); a DRM backend sends real relative motion through the same
   checks. A locked client's cursor position hint (`cursor_position_hint`) moves Pila's pointer
-  there, kept within its window, so unlocking doesn't jump.
+  there, kept within its window (found by `wl_surface()`: an X11 window has no toplevel), so
+  unlocking doesn't jump; Xwayland locks the pointer and hints this way for a game that hides its
+  cursor (XFixes) and warps it. A client letting go of its constraint (`remove_constraint`)
+  clears `Pila::input.constrained`.
 - **Pointer warp** (`pointer_warp.rs`, wp-pointer-warp-v1): a client moves the pointer within
   its own surface. Refused while locked, with a serial other than the pointer's latest enter,
   unless the pointer is on that surface or a surface of its tree, and unless the place it asks

@@ -19,7 +19,7 @@ use smithay::{
     wayland::{
         compositor::RegionAttributes,
         pointer_constraints::{
-            with_pointer_constraint, PointerConstraint, PointerConstraintsHandler,
+            with_pointer_constraint, ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
         },
         seat::WaylandFocus,
         shell::wlr_layer::Layer,
@@ -179,6 +179,19 @@ impl PointerConstraintsHandler for Pila {
             if under == *surface {
                 self.maybe_activate_constraint(surface, origin, pos);
             }
+        }
+    }
+
+    fn remove_constraint(
+        &mut self,
+        surface: &WlSurface,
+        _pointer: &PointerHandle<Self>,
+        _removed: ConstraintRemove,
+    ) {
+        // The client let go (Xwayland, once a game shows its cursor again):
+        // nothing is constrained any more.
+        if self.input.constrained.as_ref() == Some(surface) {
+            self.input.constrained = None;
         }
     }
 

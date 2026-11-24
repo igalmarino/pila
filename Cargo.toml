@@ -111,6 +111,8 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
+# XFixes: the tests' X11 client hides its cursor, as games do.
+x11rb = { version = "0.14", features = ["xfixes"] }
 
 
 

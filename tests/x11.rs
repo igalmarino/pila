@@ -2006,3 +2006,53 @@ fn an_x11_app_is_named_by_its_window_in_the_share_picker() {
     pila.key("Escape");
     assert_eq!(started.answer().0, 1);
 }
+
+/// A game through Xwayland hides its cursor (XFixes) and warps the pointer
+/// within its window: Xwayland locks the pointer and hints where its cursor
+/// is, which Pila's pointer follows (the window found by its surface, an
+/// X11 window having no toplevel), so it doesn't jump back when the cursor
+/// shows again and the lock goes.
+#[test]
+fn an_x11_game_hiding_its_cursor_locks_the_pointer_where_it_warps_it() {
+    use x11rb::protocol::xfixes::ConnectionExt as _;
+    let mut pila = TestPila::start();
+    let Some(x) = X11::connect(&mut pila) else {
+        return;
+    };
+    let id = x.window("Game", (400, 300), 0x0000ff);
+    pila.wait_focus("Game");
+    let (gx, gy, _, _) = rect(&pila.window("Game")["geometry"]);
+    pila.move_to((gx + 50) as f64, (gy + 50) as f64);
+    pila.wait("the pointer over the game", |s| {
+        s["pointer"]["focus"] == "Game"
+    });
+
+    x.conn.xfixes_query_version(5, 0).unwrap().reply().unwrap();
+    x.conn.xfixes_hide_cursor(id).unwrap();
+    x.conn
+        .warp_pointer(x11rb::NONE, id, 0, 0, 0, 0, 200, 150)
+        .unwrap();
+    x.conn.flush().unwrap();
+    pila.wait("locked where the game put it", |s| {
+        s["pointer"]["constrained"] == true
+            && s["pointer"]["x"] == (gx + 200) as f64
+            && s["pointer"]["y"] == (gy + 150) as f64
+    });
+
+    x.conn.xfixes_show_cursor(id).unwrap();
+    x.conn.flush().unwrap();
+    let state = pila.wait("unlocked", |s| s["pointer"]["constrained"] == false);
+    assert_eq!(
+        (state["pointer"]["x"].clone(), state["pointer"]["y"].clone()),
+        (
+            serde_json::json!((gx + 200) as f64),
+            serde_json::json!((gy + 150) as f64)
+        ),
+        "the pointer stays where the game's cursor was"
+    );
+    // And moves again from there.
+    pila.move_by(10.0, 5.0);
+    pila.wait("moved from the hint", |s| {
+        s["pointer"]["x"] == (gx + 210) as f64 && s["pointer"]["y"] == (gy + 155) as f64
+    });
+}

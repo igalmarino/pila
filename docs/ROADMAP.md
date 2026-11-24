@@ -14,9 +14,6 @@ testing and protocols Pila doesn't implement yet.
 
 Small items that can be tested in CI without new hardware.
 
-- **A test for Xwayland's pointer lock:** Games running through Xwayland that hide their cursor
-  get the pointer locked, with a position hint for when it's let go. Pila now honors the hint for
-  X11 windows, but no test covers it yet: the tests' X11 client needs XFixes to hide its cursor.
 - **Stronger invariant checks in the tests:** The headless backend's checks
   (`PILA_HEADLESS_CHECK_INVARIANTS`) could also verify the stacking order (windows kept on top,
   then X11 menus), that each window is in exactly one place (on screen, on another workspace,
