@@ -90,34 +90,17 @@ pub struct ClientIdentity {
     pub executable: Option<String>,
 }
 
-/// What a capture request is trying to capture, for the prompt's wording.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CaptureKind {
-    Screen,
-    Window,
-}
-
 /// A capture request waiting on permission resolution or user confirmation.
 #[derive(Clone)]
 pub enum PendingCapture {
-    Session {
-        resource: ExtImageCopyCaptureSessionV1,
-        kind: CaptureKind,
-    },
+    Session(ExtImageCopyCaptureSessionV1),
     Screencopy(ZwlrScreencopyFrameV1),
 }
 
 impl PendingCapture {
-    fn kind(&self) -> CaptureKind {
-        match self {
-            PendingCapture::Session { kind, .. } => *kind,
-            PendingCapture::Screencopy(_) => CaptureKind::Screen,
-        }
-    }
-
     fn is_alive(&self) -> bool {
         match self {
-            PendingCapture::Session { resource, .. } => resource.is_alive(),
+            PendingCapture::Session(resource) => resource.is_alive(),
             PendingCapture::Screencopy(frame) => frame.is_alive(),
         }
     }
@@ -125,14 +108,14 @@ impl PendingCapture {
     /// The client that asked.
     fn client_id(&self) -> Option<ClientId> {
         match self {
-            PendingCapture::Session { resource, .. } => resource.client(),
+            PendingCapture::Session(resource) => resource.client(),
             PendingCapture::Screencopy(frame) => frame.client(),
         }
         .map(|client| client.id())
     }
 
     fn matches_session(&self, target: &ExtImageCopyCaptureSessionV1) -> bool {
-        matches!(self, PendingCapture::Session { resource, .. } if resource == target)
+        matches!(self, PendingCapture::Session(resource) if resource == target)
     }
 
     fn matches_screencopy(&self, target: &ZwlrScreencopyFrameV1) -> bool {
@@ -168,7 +151,6 @@ struct StoreFile {
 struct Queued {
     key: PromptKey,
     executable: Option<String>,
-    kind: CaptureKind,
     requests: Vec<PendingCapture>,
 }
 
@@ -176,7 +158,6 @@ struct Queued {
 struct Shown {
     key: PromptKey,
     executable: Option<String>,
-    kind: CaptureKind,
     /// `None` when the executable couldn't be determined (cannot persist).
     remember: Option<bool>,
     output: String,
@@ -321,6 +302,18 @@ pub fn evaluate(rules: &[PermissionRule], grants: &[Grant], executable: Option<&
                 Decision::Ask
             }
         }
+    }
+}
+
+/// The prompt's question. A permission is a program's, for every capture
+/// (the screen or any window), whatever it asked for first.
+fn title(executable: Option<&str>) -> String {
+    match executable {
+        Some(exe) => format!(
+            "Allow {} to capture your screen and windows?",
+            program_name(exe)
+        ),
+        None => "Allow an unknown program to capture your screen and windows?".to_string(),
     }
 }
 
@@ -640,19 +633,10 @@ impl Pila {
             Some(exe) => PromptKey::Executable(exe.clone()),
             None => PromptKey::Client(client_id),
         };
-        let kind = request.kind();
         // Coalesce into an open prompt for the same program/client.
         if let Some(shown) = self.capture_permissions.shown.as_mut() {
             if shown.key == key {
-                let redraw_text = kind == CaptureKind::Screen && shown.kind != CaptureKind::Screen;
-                if redraw_text {
-                    shown.kind = CaptureKind::Screen;
-                }
                 shown.requests.push(request);
-                let _ = shown;
-                if redraw_text {
-                    self.draw_capture_permission_text();
-                }
                 return;
             }
         }
@@ -663,16 +647,12 @@ impl Pila {
             .iter_mut()
             .find(|q| q.key == key)
         {
-            if kind == CaptureKind::Screen {
-                queued.kind = CaptureKind::Screen;
-            }
             queued.requests.push(request);
             return;
         }
         self.capture_permissions.waiting.push_back(Queued {
             key,
             executable,
-            kind,
             requests: vec![request],
         });
         self.show_capture_permission();
@@ -718,7 +698,6 @@ impl Pila {
             self.capture_permissions.shown = Some(Shown {
                 key: queued.key,
                 executable: queued.executable,
-                kind: queued.kind,
                 remember,
                 output: output.name(),
                 requests: queued.requests,
@@ -885,14 +864,14 @@ impl Pila {
 
     fn approve_capture(&mut self, request: PendingCapture) {
         match request {
-            PendingCapture::Session { resource, .. } => self.authorize_capture_session(&resource),
+            PendingCapture::Session(resource) => self.authorize_capture_session(&resource),
             PendingCapture::Screencopy(frame) => self.enqueue_screencopy(&frame),
         }
     }
 
     fn deny_capture(&mut self, request: PendingCapture) {
         match request {
-            PendingCapture::Session { resource, .. } => self.deny_capture_session(&resource),
+            PendingCapture::Session(resource) => self.deny_capture_session(&resource),
             PendingCapture::Screencopy(frame) => {
                 if frame.is_alive() {
                     frame.failed();
@@ -1274,10 +1253,7 @@ impl Pila {
             .map(|(shown, view)| {
                 json!({
                     "executable": shown.executable,
-                    "kind": match shown.kind {
-                        CaptureKind::Screen => "screen",
-                        CaptureKind::Window => "window",
-                    },
+                    "title": title(shown.executable.as_deref()),
                     "output": view.output,
                     "remember": shown.remember,
                     "requests": shown.requests.len(),
@@ -1302,22 +1278,13 @@ impl Pila {
 fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
     let (text, dimmed, _) = panel::text_colors(colors);
     let width = layout.panel.size.w;
-    let what = match shown.kind {
-        CaptureKind::Screen => "the screen",
-        CaptureKind::Window => "a window",
-    };
-    let title = match &shown.executable {
-        Some(exe) => format!("Allow {} to capture {what}?", program_name(exe)),
-        None => format!("Allow an unknown program to capture {what}?"),
-    };
+    let title = title(shown.executable.as_deref());
     let path_line = shown
         .executable
         .clone()
         .unwrap_or_else(|| "Executable path unavailable".to_string());
-    let detail = match shown.kind {
-        CaptureKind::Screen => "It will be able to see everything on your screen.",
-        CaptureKind::Window => "It will be able to see the contents of that window.",
-    };
+    // A program allowed may capture anything, whatever it asked for first.
+    let detail = "It will be able to see everything on your screen, and any window.";
     let mut items = vec![
         panel::title(&title, width, colors),
         Item::Text {

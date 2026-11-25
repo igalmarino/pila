@@ -583,10 +583,10 @@ fn an_allowed_program_captures_while_locked() {
     assert!(pila.state()["capture_permission"]["shown"].is_null());
 }
 
-/// A window capture asks about a window, not the screen; a screen capture
-/// by the same program joining its prompt makes it ask about the screen.
+/// A program allowed once may capture the screen and any window: a window
+/// capture's prompt says so, as a screen capture's does.
 #[test]
-fn a_window_capture_asks_about_a_window() {
+fn a_window_capture_asks_about_the_screen_and_windows() {
     use wayland_protocols::ext::{
         foreign_toplevel_list::v1::client::{
             ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
@@ -609,13 +609,15 @@ fn a_window_capture_asks_about_a_window() {
     let manager: ExtImageCopyCaptureManagerV1 = client.bind("ext_image_copy_capture_manager_v1", 1);
     let _window = manager.create_session(&source, CaptureOptions::empty(), &client.qh, "w".into());
     client.flush();
-    pila.wait("asked about a window", |s| {
-        s["capture_permission"]["shown"]["kind"] == "window"
-    });
+    let asks = |s: &Value| {
+        s["capture_permission"]["shown"]["title"]
+            .as_str()
+            .is_some_and(|title| title.ends_with("to capture your screen and windows?"))
+    };
+    pila.wait("asked about the screen and windows", asks);
     let _screen = start_ext_session(&client, "HEADLESS-1", "screen");
-    pila.wait("asked about the screen", |s| {
-        s["capture_permission"]["shown"]["kind"] == "screen"
-            && s["capture_permission"]["shown"]["requests"] == 2
+    pila.wait("the same prompt", |s| {
+        asks(s) && s["capture_permission"]["shown"]["requests"] == 2
     });
     wait_armed(&mut pila);
     pila.key("Return");

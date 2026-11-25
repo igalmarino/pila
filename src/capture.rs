@@ -1585,10 +1585,6 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     }
                 };
                 let target = source.data::<Target>().cloned().unwrap_or(Target::Gone);
-                let kind = match &target {
-                    Target::Toplevel(_) => crate::permissions::CaptureKind::Window,
-                    _ => crate::permissions::CaptureKind::Screen,
-                };
                 let resource = data_init.init(session, ());
                 let session = Session {
                     resource: resource.clone(),
@@ -1607,7 +1603,7 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                 state.capture.sessions.push(session);
                 state.authorize_capture(
                     client,
-                    crate::permissions::PendingCapture::Session { resource, kind },
+                    crate::permissions::PendingCapture::Session(resource),
                 );
             }
             manager::Request::CreatePointerCursorSession { session, .. } => {

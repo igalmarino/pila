@@ -748,6 +748,7 @@ access = "allow"
 Rules match the client's executable path with `*` wildcards; they apply in order and the last match
 wins (`access` is `"allow"`, `"ask"`, or `"deny"`). When an unlisted program (or one matched by
 `access = "ask"`) tries to capture, Pila opens a modal prompt showing its name and executable path.
+A program allowed may capture the screen and any window, whichever it asked for first.
 Press `Enter` (or click **Allow**) to allow it for the current session, `Esc` (or click **Deny**) to
 refuse it, or toggle **Remember** (`R` or click) before allowing to save the choice in
 `~/.local/state/pila/capture-permissions.json`. Allow takes effect only half a second after the
