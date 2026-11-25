@@ -60,8 +60,8 @@ lands quickly, skipping any of it isn't an option.
 
 Every feature gets integration tests. Each test launches a real Pila instance on a headless
 backend, connects real clients (a synthetic Wayland client, plus Xwayland for X11 tests), injects
-input, and verifies state through a control socket. There are around 950 integration tests across
-43 files and about 280 unit tests, all run in CI on every push.
+input, and verifies state through a control socket. There are nearly 1,000 integration tests across
+43 files and about 300 unit tests, all run in CI on every push.
 [tests/FEATURES.md](../tests/FEATURES.md) maps every feature to its tests (or explains why it can't
 be automated, such as bare-metal hardware or visual checks), and a test fails if that inventory ever falls
 out of sync with the suite.
@@ -125,14 +125,15 @@ what still needs testing: newer NVIDIA cards, non-systemd systems, and multi-GPU
 Every push runs `cargo fmt`, `clippy -D warnings`, a `--locked` release build, a staged install,
 and `shellcheck`. Weekly, and whenever dependencies change, CI also builds on Debian, Ubuntu, Fedora,
 and Nix, checks the minimum supported Rust version, and runs `cargo audit`. There are `cargo-fuzz`
-targets for the config parser, EDID, gamma ramps, IPC requests, and Wayland protocol streams, plus
-an experimental workflow running the DRM/KMS backend on the kernel's `vkms` virtual display driver.
+targets for the config parser, EDID, gamma ramps, IPC requests, saved app shortcuts and sessions,
+and Wayland protocol streams, plus an experimental workflow running the DRM/KMS backend on the
+kernel's `vkms` virtual display driver.
 
 ### Documentation
 
 [docs/ARCHITECTURE.md](ARCHITECTURE.md) documents each subsystem's flows and invariants, and
 changes update the relevant section in the same commit. I rely on it just as much as the AI does:
-nobody holds 50,000+ lines of code in their head.
+nobody holds nearly 60,000 lines of code in their head.
 
 ## About the speed
 

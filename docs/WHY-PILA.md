@@ -18,8 +18,9 @@ invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Snapping:** Snap windows to screen halves and quarters via keyboard shortcuts or by dragging to
   an edge or corner, with optional gaps (`gaps`).
 - **Window switcher and overview:** Recent-use window switching (`Mod+Tab`, `Alt+Tab`) with live
-  previews while held; an overview (`Mod+W`, top-left hot corner, or four-finger swipe up) that
-  spreads all workspace windows out live without overlap, plus a live workspace strip.
+  previews while held; an overview (`Mod+W`, configurable hot corner with optional pressure and
+  delay, or four-finger swipe up) that spreads all workspace windows out live without overlap, plus
+  a live workspace strip.
 - **Workspaces:** Shared workspaces spanning all monitors (`Mod+1..N`, `Mod` + scroll wheel, or
   four-finger swipes).
 - **Launcher and shortcuts:** Tap `Mod` alone to open the launcher (fuzzel by default). Built-in
@@ -60,7 +61,8 @@ invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
   `xdg-desktop-portal-wlr` required):
   - *Screen sharing* over PipeWire for browsers, video calls, and OBS: pick a monitor, a custom
     screen region (outlined in the accent color while shared), or a single window (kept live even
-    when covered, minimized, or on another workspace) from a picker with live previews.
+    when covered, minimized, or on another workspace) from a picker with live previews, with an
+    optional **Remember** toggle to reuse the same share without re-prompting.
   - *App screenshots* (either all monitors when permitted without prompting, or chosen via the same
     picker).
   - *Color picker* for GTK, GIMP, Inkscape, and similar apps.
@@ -115,9 +117,11 @@ Pila doesn't redraw.
   re-runs blur passes only when the backdrop changes. Covered windows are skipped, and windows on
   other workspaces or minimized keep their cached backdrop so switching back doesn't reallocate.
 - **Non-blocking event loop:** Font loading and shaping, cursor theme loading, D-Bus environment
-  exports, and GPU capture waits all run on background threads or behind fences. One-time costs
-  (shader compilation, workspace-slide offscreen textures, common glyphs) are paid at startup.
-  Title bar textures are cached across resizes and focus changes.
+  exports, shared-memory capture writes, and GPU capture waits all run on background threads or
+  behind fences. CPU-drawn client buffers upload on commit in 64 KiB strips rather than mid-frame,
+  and one-time costs (shader compilation, texture upload warm-up, workspace-slide offscreen
+  textures, common glyphs) are paid at startup. Title bar textures are cached across resizes and
+  focus changes, and event-loop housekeeping skips subsystems with no active work.
 - **Direct scanout:** On the DRM backend, when a single unobscured client buffer covers a monitor
   (such as a fullscreen game or video), Pila puts it straight on the primary plane without
   compositing. Eligible surfaces receive per-surface dmabuf feedback advertising the plane's
@@ -178,8 +182,8 @@ Pila doesn't redraw.
 - **Mode fallback:** If a monitor's preferred mode exceeds link bandwidth, Pila tests lower refresh
   rates at the same resolution and then smaller resolutions using atomic test commits.
 - **DisplayPort link retraining:** Automatically retrains outputs when the kernel marks
-  `link-status` as bad (common after resume or through docks), which Smithay does not handle on its
-  own.
+  `link-status` as bad (common after resume or through docks, including across VT switches),
+  falling back to a lighter listed mode if the link can no longer carry the previous one.
 - **Safe hotplug:** Removing an output disables its `wl_output` global first and destroys it later,
   preventing protocol errors from clients binding it mid-removal.
 - **Scanout-confirmed screen lock:** `ext-session-lock` is confirmed only after every enabled
@@ -240,8 +244,8 @@ crashes, and bridges clipboards in both directions.
 - **Dynamic rules:** Window rules match on app ID, title, or `xdg-toplevel-tag`, and layer rules
   match on namespace. Rules re-evaluate on title changes and config reloads.
 - **Unix socket IPC:** Served on the event loop. `pila msg` queries windows, outputs, workspaces,
-  colors, and keyboard layouts in plain text or JSON, runs any bindable action, and streams live
-  changes via `subscribe`. See [IPC.md](IPC.md).
+  colors, keyboard layouts, and remembered screen shares in plain text or JSON, runs any bindable
+  action, and streams live changes via `subscribe`. See [IPC.md](IPC.md).
 
 ## Testing and reliability
 
@@ -253,8 +257,9 @@ crashes, and bridges clipboards in both directions.
   is listed. Additional tests check that docs only reference existing code symbols and that the
   manual and man page cover every default binding and CLI flag.
 - **Regression tests first:** Bug fixes begin with a failing test that reproduces the issue.
-- **Fuzzing (`cargo-fuzz`):** Targets for the config, IPC request, EDID, and gamma-ramp parsers,
-  plus arbitrary protocol request sequences against a live Pila instance.
+- **Fuzzing (`cargo-fuzz`):** Targets for the config, IPC request, EDID, gamma-ramp, saved
+  app-shortcut, and saved-session parsers, plus arbitrary protocol request sequences against a live
+  Pila instance.
 - **DRM backend in CI:** A workflow tests the udev backend on the Linux kernel's `vkms` virtual
   display driver, covering frames, gamma, output hotplug, and hotplugging a second `vkms` GPU.
 - **No unexpected panics:** After startup, the code avoids unchecked `unwrap`/`expect` calls;
