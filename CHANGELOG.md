@@ -22,6 +22,11 @@
   corner by a jump rather than a move (`focus-output`, or the corner's monitor unplugged).
 - **Fixed:** The hot corner, a swipe or `pila msg` could open the overview behind the screen
   share picker or the global shortcuts panel.
+- **Fixed:** A monitor asked to power on while Pila's session was on another VT, and then off
+  again (swayidle's timers keep running there), still came on when the session came back.
+- **Fixed:** A monitor whose DisplayPort link went bad and that couldn't be turned back on stayed
+  off for good; it now comes back with input or `power-on-monitors`, and power clients are told
+  it's off.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

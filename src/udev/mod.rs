@@ -687,10 +687,14 @@ impl UdevData {
         true
     }
 
-    /// Whether the output is powered on; `None` for an unknown output.
+    /// Whether the output is powered on, or asked to come on when the
+    /// session is back (`power_on_when_active`: what power clients were
+    /// told, and what `power-off-monitors` must turn off); `None` for an
+    /// unknown output.
     pub fn output_power(&self, output: &Output) -> Option<bool> {
         let id = self.output_id(output)?;
-        Some(self.outputs[&id].drm_output.is_some())
+        let surface = &self.outputs[&id];
+        Some(surface.drm_output.is_some() || surface.power_on_when_active)
     }
 
     /// Turn an output's display off (its CRTC is cleared, so the monitor

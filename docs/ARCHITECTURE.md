@@ -379,14 +379,17 @@ Key flows and invariants:
   link back to good with `ALLOW_MODESET`, so the kernel sets the same mode again (Smithay
   doesn't handle the property); otherwise, or if that fails, the output is powered off and on,
   and `initialize_with_fallback` tries a mode no longer listed as it is and then the lighter
-  listed ones (`fallback_for_unlisted`); a new mode is followed by `Pila::fit_to_outputs`. The session lock is
+  listed ones (`fallback_for_unlisted`); a new mode is followed by `Pila::fit_to_outputs`. An
+  output that went off but couldn't come back stays off as if `power-off-monitors` did it: power
+  clients are told, and input tries again (`off_until_input`). The session lock is
   confirmed once every output has *shown* a locked frame. `PauseSession` (VT switch away)
   releases held keys; `ActivateSession` takes DRM master, resets each device (`activate(true)`:
   every connector off, one modeset, since another compositor may have left them on other
   CRTCs), starts each output's `CrtcState` over, re-applies gamma (`reapply_gamma`, which drops
   ramps that no longer fit the CRTC's gamma size, `ramp_fits`, rather than read past them),
   powers on the outputs asked to come on while away (`power_on_when_active`: without DRM master
-  `set_output_power` can't set a CRTC up, so it remembers and says yes), then scans the
+  `set_output_power` can't set a CRTC up, so it remembers and says yes; `output_power` counts
+  it as on, so `power-off-monitors` meanwhile turns it back off), then scans the
   connectors, opens GPUs added meanwhile
   (`apply_other_gpus`) and re-applies the outputs, since a monitor plugged in meanwhile can't
   come on without DRM master (`enable_output` waits). Libinput devices get keyboard LEDs and the

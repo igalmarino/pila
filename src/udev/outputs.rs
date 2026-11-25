@@ -474,6 +474,7 @@ fn retrain_bad_links(state: &mut Pila) {
         })
         .collect();
     let mut refit = false;
+    let mut stayed_off = Vec::new();
     for (id, output, prop) in bad {
         let name = output.name();
         warn!(name, "the monitor's link went bad: setting it up again");
@@ -512,11 +513,21 @@ fn retrain_bad_links(state: &mut Pila) {
                 }
             }
         };
-        if !retrained
-            && !(data.set_output_power(&output, false) && data.set_output_power(&output, true))
-        {
-            warn!(name, "couldn't set the output up again");
-            continue;
+        if !retrained {
+            if !data.set_output_power(&output, false) {
+                warn!(name, "couldn't set the output up again");
+                continue;
+            }
+            if !data.set_output_power(&output, true) {
+                // Off now, as power clients must be told; input or
+                // `power-on-monitors` tries again (`wake_monitors`).
+                warn!(
+                    name,
+                    "couldn't turn the output back on: it stays off until input"
+                );
+                stayed_off.push(output);
+                continue;
+            }
         }
         refit |= output.current_mode() != mode_before;
         // A frame in flight still gets its vblank (`frame_finish`).
@@ -529,6 +540,11 @@ fn retrain_bad_links(state: &mut Pila) {
     // On a lighter mode: windows, panels and lock surfaces follow it.
     if refit {
         state.fit_to_outputs();
+    }
+    for output in stayed_off {
+        // Off already: this tells the power clients and IPC.
+        state.set_output_power(&output, false);
+        state.outputs.off_until_input.push(output);
     }
 }
 
