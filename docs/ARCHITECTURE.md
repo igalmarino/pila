@@ -429,21 +429,25 @@ Key flows and invariants:
   once the frame is submitted, and sends frame callbacks only to surfaces whose primary
   output it is (surfaces shown nowhere: once a second, `HIDDEN_FRAME_THROTTLE`, so a
   covered animating client doesn't spin; `schedule_hidden_frames`, from `after_frames`,
-  asks for a redraw after that second while such a surface waits, since nothing
-  else may redraw; a captured window's hidden surfaces, off-space ones included, get theirs
-  from its capture instead: see "Screen capture"); frame callback times and
-  feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
+  checks only when `Pila::hidden_frames_dirty` is set — by a hidden surface committing with
+  pending callbacks, by `update_primary_outputs` when a surface loses its primary output, by
+  `map_window`, or when the previous timer fires — and asks for a redraw after that second while
+  such a surface waits, since nothing else may redraw; a captured window's hidden surfaces,
+  off-space ones included, get theirs from its capture instead: see "Screen capture"); frame
+  callback times and feedback both use `Pila::clock` (CLOCK_MONOTONIC). Once per event-loop
   iteration, however many outputs were drawn, `Pila::after_frames` (`state.rs`, from
   `main.rs`'s `event_loop.run` callback, a flush after it) tells the idle notifier of the
   iteration's input (once: each call re-arms every timer), saves sessions and sends keyboard
   layout events, then, when an output was drawn, `Pila::housekeeping` is set or a capture is
-  due: applies the commits fifo unblocked, captures and screencopies (only when an output was
-  drawn or `capture_due`; see "Redraws are on demand, per output"), `space.refresh()`, taskbar
-  updates, IPC events, idle inhibitors, `popups.cleanup()`, animations, hidden surfaces' frames
-  and slide textures (`prepare_slide_textures`); else only the IPC events already due
-  (`send_ipc_events_due`). Buffer age (for partial repaints) needs the window's EGL
-  surface made current first (`winit::make_surface_current`); Smithay's `bind` is lazy,
-  and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
+  due: applies the commits fifo unblocked (skipped when none were signaled), captures and
+  screencopies (only when an output was drawn or `capture_due` and `Captures::has_work`, a
+  screencast is streaming or the share picker is open; see "Redraws are on demand, per output"),
+  `space.refresh()`, taskbar updates, IPC events, idle inhibitors, `popups.cleanup()`, animations
+  (skipped when nothing is animating), hidden surfaces' frames (when dirty) and slide textures
+  (`prepare_slide_textures`, skipped when `SlidePool` already matches the outputs); else only
+  the IPC events already due (`send_ipc_events_due`). Buffer age (for partial repaints) needs
+  the window's EGL surface made current first (`winit::make_surface_current`); Smithay's `bind`
+  is lazy, and querying without it fails with `EGL_BAD_SURFACE` every animated frame.
 - **Redraws are on demand, per output** (`redraw.rs`): nothing redraws an output but a
   request for it. `queue_redraw_output` asks one output for something new to show
   (`request_redraw_as` with another `redraw::Content`, see "Bare metal"), `queue_redraw_rect` the outputs a
@@ -453,12 +457,14 @@ Key flows and invariants:
   would redraw the outputs next to it; maximized inside `gaps` it has the margin, its shadow
   reaching the next output), `queue_redraw_pointer` those of where the
   pointer was and is. `queue_redraw` asks every output, for what's global: the config,
-  outputs, the lock, workspaces, focus (`focus_changed`: title bars and shadows show it), a
-  key Pila acts on, a click, a gesture's begin and end, an animation starting (its steps ask
-  only for the outputs it shows on, `animation_outputs`). Who asks: a commit asks for its surface's
-  outputs before and after it (`redraw_committed`; `surface_outputs` resolves a subsurface,
-  popup, window, layer, lock, cursor or drag-icon surface, and an unknown one asks every
-  output); every change to the `Space`'s windows goes through `map_window`/`unmap_window`/
+  outputs, the lock, workspaces, a key Pila acts on, a click, a gesture's begin and end.
+  `focus_changed` redraws only the window losing focus (`Pila::last_focused`) and the one
+  gaining it (every output while the overview is open); starting a window or layer animation
+  and its steps (`animation_outputs`) redraw only the outputs it shows on. Who asks: a commit
+  asks for its surface's outputs before and after it (`redraw_committed`; `surface_outputs`
+  resolves a subsurface, popup, window, layer, lock, cursor or drag-icon surface; a surface
+  unknown both before and after has no role and redraws nothing, one newly placed redraws where
+  it shows now, and one that became unknown falls back to every output); every change to the `Space`'s windows goes through `map_window`/`unmap_window`/
   `raise_window`, which redraw where the window was and is (a test reads the sources for a
   direct `space.map_element`, which moves a window and redraws nothing); input asks in
   `process_input_event` (a key or scroll a client gets is the client's to show); a destroyed
@@ -1025,9 +1031,10 @@ Key flows and invariants:
   (`Content::Maybe`: it's for the next vblank, and an output whose redraw found nothing new
   waits for it; asked as a change, each such redraw would run `after_frames` and this again,
   as fast as the loop goes), of the outputs they show on
-  (`animation_outputs`: windows' and snapshots' rectangles grown by the shadow and the drop,
-  layers' outputs; every output during a workspace slide), taken before pruning so the last
-  frame is asked for too; locking drops all.
+  (`animation_outputs`: windows' and snapshots' rectangles grown downward by their style's
+  drop, `with_drop`, without spilling sideways onto neighboring outputs when filling an output;
+  layers' outputs; every output during a workspace slide or overview glide), taken before
+  pruning so the last frame is asked for too; locking drops all.
   Animations are visual only: input sees the real geometry.
 - **Window and layer rules** (`rules.rs`, `[[window-rule]]` / `[[layer-rule]]`): match
   windows by app id (`foreign_toplevel::title_and_app_id`: xdg `app_id` or X11
@@ -1399,10 +1406,11 @@ Key flows and invariants:
   on, enabled: `apply_vrr`), as gamma is. While it's on, `frame_finish` reports a variable
   refresh (`Refresh::Variable`) in presentation feedback.
 - **Blur** (`blur.rs`, ext-background-effect-v1): a surface's blur region is `Cacheable`
-  surface state (`BlurRegion`, committed by Smithay), decomposed into rectangles on every
-  frame (`region_rects`): a region of more than `MAX_REGION_RECTS` rectangles, or one that
-  breaks into more, is drawn as its bounding box, so a client's region costs Pila little
-  however it's made; `Pila::scene` evaluates it per
+  surface state (`BlurRegion`, shared behind an `Arc` and committed by Smithay), decomposed into
+  rectangles (`region_rects`) and cached per surface (`CachedBlurRects`, `client_blur`) until a
+  new region is committed or the surface changes size: a region of more than `MAX_REGION_RECTS`
+  rectangles, or one that breaks into more, is drawn as its bounding box, so a client's region
+  costs Pila little however it's made; `Pila::scene` evaluates it per
   layer surface into `SceneLayer::blur` (upper layers only for now) and per window into
   `SceneWindow::blur` (`blur = true` in a rule covers the geometry and title bar, not a
   client's shadow; a window opaque over its geometry and at full opacity gets none,

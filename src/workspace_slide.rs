@@ -25,8 +25,8 @@ use smithay::{
         element::texture::TextureRenderBuffer,
         gles::{GlesRenderer, GlesTexture},
     },
-    desktop::Window,
-    utils::{Logical, Rectangle, Scale},
+    desktop::{Space, Window},
+    utils::{Logical, Rectangle, Scale, Size},
 };
 use tracing::debug;
 
@@ -53,6 +53,10 @@ const TEXTURES_AHEAD: usize = 2;
 #[derive(Default)]
 pub struct SlidePool {
     free: Vec<OffscreenWindow>,
+    /// The outputs `(size, scale)` this pool is already prepared for, so
+    /// `prepare_slide_textures` does no work between output changes and slides.
+    prepared: Vec<(Size<i32, Logical>, Scale<f64>)>,
+    prepared_valid: bool,
 }
 
 impl SlidePool {
@@ -65,6 +69,7 @@ impl SlidePool {
         rect: Rectangle<i32, Logical>,
         scale: Scale<f64>,
     ) -> Option<OffscreenWindow> {
+        self.prepared_valid = false;
         match self.free.iter().position(|t| t.fits(rect, scale)) {
             Some(index) => {
                 let mut texture = self.free.swap_remove(index);
@@ -80,9 +85,29 @@ impl SlidePool {
 
     /// Take a slide's textures back.
     fn give_back(&mut self, slide: WorkspaceSlide) {
+        self.prepared_valid = false;
         self.free.extend(slide.old.into_iter().map(|(_, t)| t));
         self.free
             .extend(slide.textures.borrow_mut().drain(..).map(|(_, t)| t));
+    }
+
+    /// Drop every kept texture (workspace switches aren't animated).
+    fn clear(&mut self) {
+        self.free.clear();
+        self.prepared.clear();
+        self.prepared_valid = false;
+    }
+
+    /// Whether the pool already matches `space`'s current outputs and scales.
+    fn is_prepared_for(&self, space: &Space<Window>) -> bool {
+        if !self.prepared_valid {
+            return false;
+        }
+        let current = space.outputs().filter_map(|output| {
+            let rect = space.output_geometry(output)?;
+            Some((rect.size, crate::scale::output_scale(output)))
+        });
+        self.prepared.iter().copied().eq(current)
     }
 
     /// How many are kept for an output at `rect` and `scale`.
@@ -280,25 +305,31 @@ impl Pila {
     /// which would otherwise pay for them (`after_frames`). Nothing while
     /// workspace switches aren't animated.
     pub fn prepare_slide_textures(&mut self) {
+        // Those in use come back later, and are trimmed then.
+        if self.workspace_slide.is_some() {
+            return;
+        }
         let animated = self.config.workspaces > 1
             && self
                 .config
                 .animations
                 .duration(AnimationKind::Workspace)
                 .is_some();
+        if !animated {
+            self.slide_pool.clear();
+            return;
+        }
+        if self.slide_pool.is_prepared_for(&self.space) {
+            return;
+        }
         let outputs: Vec<_> = self
             .space
             .outputs()
-            .filter(|_| animated)
             .filter_map(|output| {
                 let rect = self.space.output_geometry(output)?;
                 Some((rect, crate::scale::output_scale(output)))
             })
             .collect();
-        // Those in use come back later, and are trimmed then.
-        if self.workspace_slide.is_some() {
-            return;
-        }
         self.slide_pool.trim(&outputs);
         // How many each output is short of; outputs of one size share
         // theirs, so those after the first count against what it gets.
@@ -318,22 +349,31 @@ impl Pila {
                 .min(TEXTURES_AHEAD);
             missing.extend(std::iter::repeat_n((*rect, *scale), short));
         }
-        if missing.is_empty() {
-            return;
-        }
-        let Pila {
-            backend,
-            slide_pool,
-            ..
-        } = self;
-        let Some(mut renderer) = backend.as_mut().and_then(|b| b.renderer()) else {
-            return;
-        };
-        for (rect, scale) in missing {
-            if let Some(texture) = OffscreenWindow::for_output(&mut renderer, rect, scale) {
-                debug!(?rect, "slide: a texture made ahead");
-                slide_pool.free.push(texture);
+        let mut all_ready = true;
+        if !missing.is_empty() {
+            let Pila {
+                backend,
+                slide_pool,
+                ..
+            } = self;
+            let Some(mut renderer) = backend.as_mut().and_then(|b| b.renderer()) else {
+                return;
+            };
+            for (rect, scale) in missing {
+                if let Some(texture) = OffscreenWindow::for_output(&mut renderer, rect, scale) {
+                    debug!(?rect, "slide: a texture made ahead");
+                    slide_pool.free.push(texture);
+                } else {
+                    all_ready = false;
+                }
             }
+        }
+        if all_ready {
+            self.slide_pool.prepared.clear();
+            self.slide_pool
+                .prepared
+                .extend(outputs.iter().map(|(rect, scale)| (rect.size, *scale)));
+            self.slide_pool.prepared_valid = true;
         }
     }
 

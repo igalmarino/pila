@@ -44,7 +44,7 @@ impl Pila {
                 "urgency"
             );
             self.refresh_workspaces();
-            self.queue_redraw();
+            self.queue_redraw_window(window);
         }
     }
 

@@ -45,14 +45,17 @@ fn other_trees<'a>(
 
 /// Record `output` as the primary output of every surface it showed in the
 /// frame described by `states`. Presentation feedback and the scale clients
-/// are told (`scale.rs`) are keyed on it.
+/// are told (`scale.rs`) are keyed on it. Returns whether any surface lost its
+/// primary output (became hidden), so `schedule_hidden_frames` re-checks it.
 pub fn update_primary_outputs(
     scene: &Scene,
     cursor: Option<&WlSurface>,
     output: &Output,
     states: &RenderElementStates,
-) {
-    let update = |surface: &WlSurface, data: &_| {
+) -> bool {
+    let mut became_hidden = false;
+    let mut update = |surface: &WlSurface, data: &_| {
+        let had = surface_primary_scanout_output(surface, data).is_some();
         update_surface_primary_scanout_output(
             surface,
             output,
@@ -61,6 +64,9 @@ pub fn update_primary_outputs(
             states,
             default_primary_scanout_output_compare,
         );
+        if had && surface_primary_scanout_output(surface, data).is_none() {
+            became_hidden = true;
+        }
     };
     // An animating window is drawn through a texture, so it isn't in
     // `states`: it keeps the output it had (`send_frames` paces it).
@@ -69,14 +75,15 @@ pub fn update_primary_outputs(
         .iter()
         .filter(|e| e.offscreen_output().is_none())
     {
-        entry.window.with_surfaces(update);
+        entry.window.with_surfaces(&mut update);
     }
     for entry in scene.layers().filter(|e| e.effect.is_none()) {
-        entry.layer.with_surfaces(update);
+        entry.layer.with_surfaces(&mut update);
     }
     for surface in other_trees(scene, cursor) {
-        with_surfaces_surface_tree(surface, update);
+        with_surfaces_surface_tree(surface, &mut update);
     }
+    became_hidden
 }
 
 /// Whether a surface was last told an output's scanout formats
@@ -246,7 +253,7 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
 }
 
 /// Whether a surface shown on no output has frame callbacks waiting.
-fn hidden_and_waiting(surface: &WlSurface, data: &SurfaceData) -> bool {
+pub(crate) fn hidden_and_waiting(surface: &WlSurface, data: &SurfaceData) -> bool {
     surface_primary_scanout_output(surface, data).is_none()
         && !data
             .cached_state
@@ -265,9 +272,10 @@ impl Pila {
     /// period, and none while no hidden client waits. Called from
     /// `after_frames`.
     pub fn schedule_hidden_frames(&mut self) {
-        if self.hidden_frame_timer {
+        if self.hidden_frame_timer || !self.hidden_frames_dirty {
             return;
         }
+        self.hidden_frames_dirty = false;
         let mut waiting = false;
         let mut check = |surface: &WlSurface, data: &SurfaceData| {
             waiting |= hidden_and_waiting(surface, data);
@@ -286,6 +294,7 @@ impl Pila {
         let timer = Timer::from_duration(HIDDEN_FRAME_THROTTLE);
         let inserted = self.loop_handle.insert_source(timer, |_, _, state| {
             state.hidden_frame_timer = false;
+            state.hidden_frames_dirty = true;
             // Any output's redraw sends them (`send_frames`); one is enough,
             // and it may well have nothing new to show.
             let output = state.space.outputs().next().cloned();

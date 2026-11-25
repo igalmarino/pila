@@ -180,8 +180,16 @@ impl Pila {
         self.close_window_menu_of(window);
         self.remove_foreign_toplevel(window);
         self.windows.focus_history.retain(|w| w != window);
+        if self.last_focused.as_ref() == Some(window) {
+            self.last_focused = None;
+        }
         self.forget_in_switch(window);
         self.forget_off_space(window);
+        // A capture or screencast of an off-space window (minimized or on
+        // another workspace) has no output redraw when it closes.
+        if self.capture.has_work() || self.screencast.active() {
+            self.capture_due = true;
+        }
     }
 }
 

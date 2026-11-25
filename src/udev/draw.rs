@@ -296,6 +296,7 @@ fn draw(
         capture,
         cursor_theme,
         clock,
+        hidden_frames_dirty,
         ..
     } = state;
     let Some(Backend::Udev(data)) = backend else {
@@ -484,7 +485,8 @@ fn draw(
     let render_time = render_started.elapsed().saturating_sub(capture_cpu);
     match rendered {
         Ok((states, is_empty)) => {
-            frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
+            *hidden_frames_dirty |=
+                frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
             // The formats this output's primary plane takes, for a surface
             // it showed as it is or tried to; back to the usual ones for the
             // others, and for all with direct scanout off.

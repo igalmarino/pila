@@ -84,11 +84,12 @@ impl CompositorHandler for Pila {
     }
 
     // Destroying a subsurface takes it off its parent at once, no commit
-    // needed (and a role's destruction may come with no commit either).
+    // needed (and a role's destruction may come with no commit either). A
+    // surface whose role already unmapped it has `surface_outputs == None`
+    // and was already redrawn there.
     fn destroyed(&mut self, surface: &WlSurface) {
-        match self.surface_outputs(surface) {
-            Some(outputs) => outputs.iter().for_each(|o| self.queue_redraw_output(o)),
-            None => self.queue_redraw(),
+        if let Some(outputs) = self.surface_outputs(surface) {
+            outputs.iter().for_each(|o| self.queue_redraw_output(o));
         }
     }
 }

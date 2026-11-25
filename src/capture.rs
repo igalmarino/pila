@@ -249,6 +249,12 @@ pub(crate) struct Composited {
 const MAX_SHM_TEXTURES: usize = 4;
 
 impl Captures {
+    /// Whether any capture session, pending screencopy or kept offscreen
+    /// texture needs attention from `after_frames`.
+    pub fn has_work(&self) -> bool {
+        !self.sessions.is_empty() || !self.screencopies.is_empty() || !self.shm_textures.is_empty()
+    }
+
     /// Drop the offscreen textures when no capture may want them: no
     /// session, no screencopy waiting, no screencopy client keeping damage,
     /// no portal share `streaming`.

@@ -79,7 +79,6 @@ impl Pila {
         let parent = self.transient_parent(window);
         if is_modal && parent.is_some() && parent == self.focused_window() {
             self.focus_window(parent, smithay::utils::SERIAL_COUNTER.next_serial());
-            self.queue_redraw();
         }
     }
 
@@ -222,7 +221,6 @@ impl Pila {
             self.raise_in_order(std::slice::from_ref(window));
             self.keep_transients_above(window);
             self.refresh_pointer_focus();
-            self.queue_redraw();
         }
     }
 }

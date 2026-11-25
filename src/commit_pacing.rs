@@ -186,6 +186,9 @@ impl Pila {
     /// Apply the commits that were waiting on barriers just signaled, and
     /// draw them. Called from `after_frames`.
     pub fn apply_unblocked_commits(&mut self) {
+        if self.commit_pacing.unblocked.is_empty() {
+            return;
+        }
         // From `after_frames`: the redraws the commits ask for are deferred.
         self.defer_redraws(|state| {
             state.apply_commits_of_unblocked_clients();

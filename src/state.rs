@@ -171,6 +171,13 @@ pub struct Pila {
     /// A redraw is scheduled for hidden surfaces waiting for a frame
     /// callback (`frame.rs`, `schedule_hidden_frames`).
     pub hidden_frame_timer: bool,
+    /// A surface may have become hidden with frame callbacks waiting
+    /// (`schedule_hidden_frames`): checked only when dirty.
+    pub hidden_frames_dirty: bool,
+    /// The window that last had keyboard focus (`SeatHandler::focus_changed`),
+    /// so a focus change redraws only the window losing focus and the one
+    /// gaining it.
+    pub last_focused: Option<Window>,
     /// Commits held back for a refresh (wp-fifo barriers) or a timestamp
     /// (wp-commit-timing) (`commit_pacing.rs`).
     pub commit_pacing: crate::commit_pacing::CommitPacing,
@@ -612,6 +619,8 @@ impl Pila {
             deferred_redraws: None,
             deferred_redraw_idles: 0,
             hidden_frame_timer: false,
+            hidden_frames_dirty: false,
+            last_focused: None,
             commit_pacing: Default::default(),
             toplevel_management: Default::default(),
             workspaces: Default::default(),
@@ -863,10 +872,13 @@ impl Pila {
                 (icon.surface.clone(), at)
             }),
             window_menu: self.window_menu.as_ref().map(|menu| menu.scene()),
-            hidden_windows: self
-                .off_space_windows()
-                .filter_map(|window| Some(window.wl_surface()?.into_owned()))
-                .collect(),
+            hidden_windows: if self.blur.is_empty() {
+                Vec::new()
+            } else {
+                self.off_space_windows()
+                    .filter_map(|window| Some(window.wl_surface()?.into_owned()))
+                    .collect()
+            },
             corner_radius: self.config.corner_radius,
             rounded_corners: self.config.rounded_corners,
             switcher: self.scene_switcher(),
@@ -887,12 +899,6 @@ impl Pila {
     ) -> (Vec<SceneWindow>, Vec<SceneGhost>) {
         let focused = self.focused_window();
         let pointer = self.pointer_location();
-        let hovered = match self.under(pointer) {
-            Some(Under::Window(window, Hit::Decoration(Decoration::TitleBar(part)))) => {
-                Some((window, part))
-            }
-            _ => None,
-        };
         // A window fading out as a ghost isn't drawn itself.
         let windows: Vec<Window> = self
             .space
@@ -901,6 +907,24 @@ impl Pila {
             .filter(|w| !self.is_ghost(w))
             .cloned()
             .collect();
+        // Full hit testing (layers, subsurfaces, popups) is only needed when
+        // the pointer lies over some window's title bar.
+        let over_title_bar = windows.iter().any(|window| {
+            self.space
+                .element_location(window)
+                .and_then(|loc| decoration::title_bar_rect(window, loc))
+                .is_some_and(|bar| bar.to_f64().contains(pointer))
+        });
+        let hovered = if over_title_bar {
+            match self.under(pointer) {
+                Some(Under::Window(window, Hit::Decoration(Decoration::TitleBar(part)))) => {
+                    Some((window, part))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let ghosts = self.scene_ghosts(&windows, now);
         let windows = windows
             .iter()
@@ -1629,6 +1653,7 @@ impl Pila {
         // On another workspace or minimized it counts as mapped too, at
         // the place it comes back to.
         let mapped_loc = self.window_location(window);
+        let before_rect = self.window_visual_rect(window);
         let (was_maximized, was_fullscreen) = fill_state(window);
         // On screen and changing: move to the new rect, not jump (refits
         // keep the state and don't animate).
@@ -1724,7 +1749,10 @@ impl Pila {
         if let Some(toplevel) = toplevel.filter(|t| t.is_initial_configure_sent()) {
             toplevel.send_pending_configure();
         }
-        self.queue_redraw();
+        if let Some(rect) = before_rect {
+            self.queue_redraw_rect(rect);
+        }
+        self.queue_redraw_window(window);
     }
 
     pub fn begin_move(
@@ -1916,7 +1944,9 @@ impl Pila {
         // What a capture shows changes with a frame, or with a commit that
         // shows on no output (a hidden window's), and a capture client may
         // ask for a frame: not with every client dispatch.
-        if drawn || capture_due {
+        if (drawn || capture_due)
+            && (self.capture.has_work() || self.screencast.streaming() || self.share_picker_open())
+        {
             let started = std::time::Instant::now();
             // One scene for every capture of this pass, built at the first.
             let mut input = None;

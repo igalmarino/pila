@@ -178,6 +178,7 @@ impl Pila {
     pub fn map_window(&mut self, window: Window, loc: Point<i32, Logical>, activate: bool) {
         self.queue_redraw_window(&window);
         self.space.map_element(window.clone(), loc, activate);
+        self.hidden_frames_dirty = true;
         self.queue_redraw_window(&window);
     }
 
@@ -320,12 +321,8 @@ impl Pila {
         if let Some((output, _)) = self.layer_for_surface(&root) {
             return Some(vec![output]);
         }
-        let lock_output = self.space.outputs().find(|output| {
-            self.lock_surface(output)
-                .is_some_and(|lock| *lock.wl_surface() == root)
-        });
-        if let Some(output) = lock_output {
-            return Some(vec![output.clone()]);
+        if let Some(output) = self.lock_surface_output(&root) {
+            return Some(vec![output]);
         }
         // An input method's candidate window with no text field to show at
         // (`input_method.rs`): nowhere, whatever it draws meanwhile.
@@ -338,20 +335,27 @@ impl Pila {
     }
 
     /// Whether a commit of `surface` (or of its subsurfaces, applied with it)
-    /// brought a buffer since the last time this was asked; forgets it.
-    pub fn commit_brings_content(&self, surface: &WlSurface) -> bool {
+    /// brought a buffer since the last time this was asked; forgets it. Also
+    /// notes when any surface in the tree is hidden with frame callbacks
+    /// waiting (`schedule_hidden_frames`).
+    pub fn commit_brings_content(&mut self, surface: &WlSurface) -> bool {
         let mut content = false;
+        let mut hidden_waiting = self.hidden_frames_dirty;
         with_surface_tree_downward(
             surface,
             (),
             |_, _, _| TraversalAction::DoChildren(()),
-            |_, states, _| {
+            |s, states, _| {
                 if let Some(mark) = states.data_map.get::<BringsContent>() {
                     content |= mark.0.replace(false);
+                }
+                if !hidden_waiting && crate::frame::hidden_and_waiting(s, states) {
+                    hidden_waiting = true;
                 }
             },
             |_, _, _| true,
         );
+        self.hidden_frames_dirty = hidden_waiting;
         content
     }
 
@@ -364,22 +368,29 @@ impl Pila {
         } else {
             Content::Maybe
         };
-        let (Some(mut outputs), Some(after)) = (before, self.surface_outputs(surface)) else {
-            tracing::trace!(target: "pila::frames", "commit of an unknown surface: every output");
-            let outputs: Vec<Output> = self.space.outputs().cloned().collect();
-            for output in outputs {
-                self.request_redraw_as(&output, content);
+        let mut outputs = match (before, self.surface_outputs(surface)) {
+            (Some(mut before), Some(after)) => {
+                for output in after {
+                    if !before.contains(&output) {
+                        before.push(output);
+                    }
+                }
+                before
             }
-            return;
+            // Unknown before (no role yet, so drawn nowhere), now placed: only
+            // where it shows now.
+            (None, Some(after)) => after,
+            // Unknown before and after (no role yet): drawn nowhere.
+            (None, None) => return,
+            // Known before, unknown now: fall back to every output.
+            (Some(_), None) => {
+                tracing::trace!(target: "pila::frames", "commit of an unknown surface: every output");
+                self.space.outputs().cloned().collect()
+            }
         };
-        for output in after {
-            if !outputs.contains(&output) {
-                outputs.push(output);
-            }
-        }
         // Shown nowhere, it may still be captured (`after_frames`).
         self.capture_due |= outputs.is_empty();
-        for output in outputs {
+        for output in outputs.drain(..) {
             self.request_redraw_as(&output, content);
         }
     }

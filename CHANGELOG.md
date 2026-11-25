@@ -20,6 +20,11 @@
   monitor) could still spike to ~15 ms on AMD APUs (`radeonsi`) with 128 KiB strips and a cold
   upload path. Pila now warms up `glTexSubImage2D` at renderer startup and uploads shm buffers in
   64 KiB strips, keeping 1440p uploads under 6 ms (and logs any upload over 8 ms as `slow upload`).
+- **Improved:** Lowered CPU overhead in the event loop (`after_frames`), per-frame scene building,
+  and multi-monitor redraws: housekeeping skips animation stepping, slide-pool trimming, capture
+  timing, and hidden-surface scans when nothing needs them; focus changes, animations, fill states,
+  and unknown-role surface commits only redraw affected outputs; `Pila::scene` caches decomposed
+  blur regions per surface and skips full hit-testing when the pointer isn't over any title bar.
 
 ## 0.9.6 (2026-11-24)
 

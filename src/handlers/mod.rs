@@ -79,8 +79,17 @@ impl SeatHandler for Pila {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
-        // Title bars and shadows show which window has focus.
-        self.queue_redraw();
+        // Resolve the focused window before dropping `KeyboardFocus` (an X11
+        // window may not have its wl_surface associated yet). From `focused`:
+        // Smithay calls this with the keyboard locked, so asking it would
+        // deadlock.
+        let window = focused.and_then(|focus| match focus {
+            KeyboardFocus::Surface(surface) => {
+                let root = self.popup_root(surface).unwrap_or_else(|| surface.clone());
+                self.window_for_surface(&root)
+            }
+            KeyboardFocus::X11(x11) => self.window_for_x11(x11),
+        });
         let focused = focused.and_then(KeyboardFocus::surface);
         // A pointer constraint only holds while its window has keyboard focus.
         self.release_constraint_for_focus(focused.as_ref());
@@ -89,11 +98,21 @@ impl SeatHandler for Pila {
         let client = focused.as_ref().and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
-        // The user is looking at it now (`urgency.rs`). From `focused`: Smithay
-        // calls this with the keyboard locked, so asking it would deadlock.
-        let window = focused
-            .map(|surface| self.popup_root(&surface).unwrap_or(surface))
-            .and_then(|surface| self.window_for_surface(&surface));
+        // Title bars and shadows show which window has focus: redraw only the
+        // window losing focus and the one gaining it (every output while the
+        // overview is open, which shows the focus highlight across outputs).
+        let previous = std::mem::replace(&mut self.last_focused, window.clone());
+        if self.overview_open() {
+            self.queue_redraw();
+        } else {
+            if let Some(prev) = previous.filter(|prev| Some(prev) != window.as_ref()) {
+                self.queue_redraw_window(&prev);
+            }
+            if let Some(window) = &window {
+                self.queue_redraw_window(window);
+            }
+        }
+        // The user is looking at it now (`urgency.rs`).
         if let Some(window) = window {
             self.set_urgent(&window, false);
         }

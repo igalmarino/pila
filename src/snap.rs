@@ -351,7 +351,7 @@ impl Pila {
             self.move_window(window, rect.loc);
         }
         self.x11_window_moved(window);
-        self.queue_redraw();
+        self.queue_redraw_window(window);
     }
 
     /// Snap `window` to `side`, or restore it if it's already there.

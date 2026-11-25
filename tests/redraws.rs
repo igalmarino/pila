@@ -512,3 +512,91 @@ fn the_bell_redraws_only_its_windows_output() {
         "A was redrawn for a bell on B"
     );
 }
+
+/// Opening, fullscreening (touching the neighboring output's edge), restoring,
+/// minimizing and closing a window on one output — with animations and shadows
+/// enabled — leaves the neighboring output untouched during open/minimize/close,
+/// and avoids trailing idle redraws when fullscreen/restore shadows cross the
+/// seam and pull back.
+#[test]
+fn a_window_opening_filling_and_closing_on_one_output_doesnt_redraw_another() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800@144,B:1024x768@144".into()),
+        config: "[animations]\nenabled = true\n\n[shadow]\nenabled = true\n".into(),
+        ..Options::default()
+    });
+    let client = pila.client();
+    pila.move_to(600.0, 400.0);
+    let before = pila.settle();
+
+    let window = client.window("a").size(400, 300).create();
+    pila.wait("a opened and animation finished", |s| {
+        window_in(s, "a").is_some_and(|w| w["output"] == "A") && s["animations"]["running"] == false
+    });
+    let after_open = pila.settle();
+    assert_eq!(
+        redraws(&after_open, "B"),
+        redraws(&before, "B"),
+        "B was redrawn while opening on A"
+    );
+
+    // Fullscreen/restore animations stretch a shadowed snapshot across the
+    // seam onto B for a few frames, then clear it without trailing idle storms.
+    client.request(window, |t| t.set_fullscreen(None));
+    pila.wait("a fullscreen and animation finished", |s| {
+        window_in(s, "a").is_some_and(|w| w["fullscreen"] == true)
+            && s["animations"]["running"] == false
+    });
+    client.request(window, |t| t.unset_fullscreen());
+    pila.wait("a restored and animation finished", |s| {
+        window_in(s, "a").is_some_and(|w| w["fullscreen"] == false)
+            && s["animations"]["running"] == false
+    });
+    let after_restore = pila.settle();
+    let idle_during_fill = redraws(&after_restore, "B").1 - redraws(&after_open, "B").1;
+    assert!(
+        idle_during_fill <= 3,
+        "B had {idle_during_fill} trailing idle redraws during fullscreen/restore on A"
+    );
+
+    client.request(window, |t| t.set_minimized());
+    pila.wait("a minimized and animation finished", |s| {
+        window_in(s, "a").is_some_and(|w| w["minimized"] == true)
+            && s["animations"]["running"] == false
+    });
+    client.destroy(window);
+    pila.wait("a gone and animation finished", |s| {
+        window_in(s, "a").is_none() && s["animations"]["running"] == false
+    });
+    let after_close = pila.settle();
+    assert_eq!(
+        redraws(&after_close, "B"),
+        redraws(&after_restore, "B"),
+        "B was redrawn while minimizing and closing on A"
+    );
+}
+
+/// Moving keyboard focus between windows on one output redraws only that
+/// output, not neighboring ones.
+#[test]
+fn changing_focus_on_one_output_doesnt_redraw_another() {
+    let mut pila = two_fast_outputs();
+    let client = pila.client();
+    pila.move_to(600.0, 400.0);
+    client.window("a1").size(400, 300).create();
+    pila.wait_focus("a1");
+    let a2 = client.window("a2").size(400, 300).create();
+    pila.wait_focus("a2");
+    client.roundtrip();
+    let before = pila.settle();
+
+    client.destroy(a2);
+    pila.wait_focus("a1");
+    client.roundtrip();
+    let after = pila.settle();
+    assert_eq!(
+        redraws(&after, "B"),
+        redraws(&before, "B"),
+        "B was redrawn when focus changed on A"
+    );
+}

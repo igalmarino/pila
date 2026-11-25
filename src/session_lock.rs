@@ -109,6 +109,16 @@ impl Pila {
             .map(|(_, s)| s)
     }
 
+    /// The output `surface` is a lock surface for, even while it's being
+    /// destroyed (`Pila::surface_outputs`).
+    pub fn lock_surface_output(&self, surface: &WlSurface) -> Option<Output> {
+        self.session_lock
+            .surfaces
+            .iter()
+            .find(|(_, lock)| *lock.wl_surface() == *surface)
+            .map(|(output, _)| output.clone())
+    }
+
     /// While locked: the (sub)surface of the lock surface under `pos`, with
     /// its origin.
     pub fn lock_surface_under(

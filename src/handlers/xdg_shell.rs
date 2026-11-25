@@ -487,7 +487,6 @@ impl Pila {
             self.focus_recent_window();
         }
         self.refresh_pointer_focus();
-        self.queue_redraw();
         true
     }
 

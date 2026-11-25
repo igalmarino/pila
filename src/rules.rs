@@ -503,7 +503,7 @@ impl Pila {
             // A title bar shown or hidden changes where filled windows go.
             self.refit_to_usable_area();
         }
-        self.queue_redraw();
+        self.queue_redraw_window(window);
     }
 
     /// The config changed: resolve the rules again for every window and

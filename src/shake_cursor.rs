@@ -254,10 +254,10 @@ impl Pila {
     /// shrinking is at rest after this frame; it needs one more there (nested,
     /// the host takes its cursor back).
     pub(crate) fn step_shake_cursor(&mut self) -> Option<Output> {
-        let now = self.animation_time();
         let Phase::Shrinking(shrink) = &self.shake_cursor.phase else {
             return None;
         };
+        let now = self.animation_time();
         if shrink.done(now) {
             self.shake_cursor.phase = Phase::Rest;
             self.cursor_magnified_changed();

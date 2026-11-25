@@ -287,7 +287,7 @@ impl Pila {
         } else {
             self.focus_window(Some(window.clone()), SERIAL_COUNTER.next_serial());
         }
-        self.queue_redraw();
+        self.queue_redraw_window(window);
     }
 }
 

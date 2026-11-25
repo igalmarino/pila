@@ -29,7 +29,10 @@
 //! animates, in a workspace slide, and in the picture of one that's closing.
 
 use crate::sync::Locked;
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use smithay::{
     backend::{
@@ -93,8 +96,11 @@ const BLUR_REACH: i32 = (2 << BLUR_PASSES) * 3;
 const BLUR_ALLOC_STEP: i32 = 128;
 
 /// The surface's blur region, double-buffered with the surface state.
+/// Shared behind an `Arc` so `commit` doesn't clone the region's rectangles
+/// and `client_blur` can reuse its decomposed rectangles across frames while
+/// the region and size stay the same.
 #[derive(Default, Clone, Debug)]
-pub struct BlurRegion(Option<RegionAttributes>);
+pub struct BlurRegion(Option<Arc<RegionAttributes>>);
 
 impl Cacheable for BlurRegion {
     fn commit(&mut self, _dh: &DisplayHandle) -> Self {
@@ -103,6 +109,20 @@ impl Cacheable for BlurRegion {
     fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
         *into = self;
     }
+}
+
+/// Cached decomposed blur rectangles for a surface.
+type BlurRects = Arc<[Rectangle<i32, Logical>]>;
+
+/// Decomposed client blur rectangles for a surface, cached across frames
+/// until a new region is committed or the surface changes size.
+#[derive(Default)]
+struct CachedBlurRects(Mutex<Option<BlurRectsCache>>);
+
+struct BlurRectsCache {
+    region: Arc<RegionAttributes>,
+    size: Size<i32, Logical>,
+    rects: BlurRects,
 }
 
 /// The surface's effect object, if it has one (one at a time).
@@ -114,22 +134,40 @@ pub fn init_global(dh: &DisplayHandle) {
     dh.create_global::<Pila, ExtBackgroundEffectManagerV1, ()>(1, ());
 }
 
-/// The client's region of `surface` and the surface's size, without a buffer
-/// `None`.
-fn client_region(surface: &WlSurface) -> Option<(Option<RegionAttributes>, Size<i32, Logical>)> {
+/// `surface`'s size and its decomposed client blur rectangles (clipped to the
+/// surface), cached until the region or size changes; `None` without a buffer.
+fn client_blur(surface: &WlSurface) -> Option<(Size<i32, Logical>, Option<BlurRects>)> {
     with_states(surface, |states| {
-        let region = states.cached_state.get::<BlurRegion>().current().0.clone();
         let size = states
             .data_map
             .get::<smithay::backend::renderer::utils::RendererSurfaceStateUserData>()
-            .and_then(|s| s.locked().surface_size());
-        size.map(|size| (region, size))
+            .and_then(|s| s.locked().surface_size())?;
+        let region = states.cached_state.get::<BlurRegion>().current().0.clone();
+        let Some(region) = region else {
+            return Some((size, None));
+        };
+        let slot = states
+            .data_map
+            .get_or_insert_threadsafe(CachedBlurRects::default);
+        let mut cache = slot.0.locked();
+        if let Some(entry) = cache.as_ref() {
+            if Arc::ptr_eq(&entry.region, &region) && entry.size == size {
+                return Some((size, Some(Arc::clone(&entry.rects))));
+            }
+        }
+        let rects: BlurRects = region_rects(&region, Rectangle::from_size(size)).into();
+        *cache = Some(BlurRectsCache {
+            region,
+            size,
+            rects: Arc::clone(&rects),
+        });
+        Some((size, Some(rects)))
     })
 }
 
 /// A client's region as rectangles, clipped to `bounds`.
-/// The most rectangles a region is drawn as: a client's region is
-/// decomposed on every frame, and past this it's drawn as its bounding box.
+/// The most rectangles a region is drawn as: past this it's drawn as its
+/// bounding box.
 const MAX_REGION_RECTS: usize = 64;
 
 fn region_rects(
@@ -170,14 +208,13 @@ fn region_rects(
 /// Layer rules may override the client: `blur = true` blurs behind all of
 /// it, `false` nowhere (`rules.rs`).
 pub fn blur_rects(layer: &LayerSurface) -> Vec<Rectangle<i32, Logical>> {
-    let Some((region, size)) = client_region(layer.wl_surface()) else {
+    let Some((size, rects)) = client_blur(layer.wl_surface()) else {
         return Vec::new();
     };
-    let bounds = Rectangle::from_size(size);
     match crate::rules::layer_props(layer).blur {
         Some(false) => Vec::new(),
-        Some(true) => vec![bounds],
-        None => region.map_or(Vec::new(), |region| region_rects(&region, bounds)),
+        Some(true) => vec![Rectangle::from_size(size)],
+        None => rects.map_or(Vec::new(), |rects| rects.to_vec()),
     }
 }
 
@@ -197,13 +234,13 @@ pub fn window_blur_rects(
     if rule == Some(false) {
         return Vec::new();
     }
-    let Some((region, size)) = client_region(&surface) else {
+    let Some((_, rects)) = client_blur(&surface) else {
         return Vec::new();
     };
-    match (rule, region) {
+    match (rule, rects) {
         (Some(true), _) => vec![frame],
-        (_, Some(region)) => region_rects(&region, Rectangle::from_size(size))
-            .into_iter()
+        (_, Some(rects)) => rects
+            .iter()
             .map(|rect| Rectangle::new(rect.loc + render_location, rect.size))
             .collect(),
         _ => Vec::new(),
@@ -267,16 +304,15 @@ fn popup_blurs(root: &WlSurface, origin: Point<i32, Logical>, area: PopupArea) -
         .enumerate()
         .filter_map(|(index, (popup, offset))| {
             let surface = popup.wl_surface();
-            let (region, size) = client_region(surface)?;
+            let (size, rects) = client_blur(surface)?;
             // Its surface's top-left.
             let loc = origin + offset - popup.geometry().loc;
             let (rects, rounding) = match area {
                 PopupArea::Client => {
-                    let rects: Vec<Rectangle<i32, Logical>> =
-                        region_rects(&region?, Rectangle::from_size(size))
-                            .into_iter()
-                            .map(|rect| Rectangle::new(rect.loc + loc, rect.size))
-                            .collect();
+                    let rects: Vec<Rectangle<i32, Logical>> = rects?
+                        .iter()
+                        .map(|rect| Rectangle::new(rect.loc + loc, rect.size))
+                        .collect();
                     (rects, None)
                 }
                 PopupArea::Geometry { radius } => {
@@ -1048,6 +1084,11 @@ impl BlurCache {
         Ok(())
     }
 
+    /// Whether no backdrop entries are cached (no hidden windows to keep).
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     /// What tests read (`Pila::state_json`): backdrops allocated, times they
     /// were blurred, and those kept now.
     pub fn stats(&self) -> (u32, u32, usize) {
@@ -1158,7 +1199,8 @@ impl Dispatch<ExtBackgroundEffectSurfaceV1, WlSurface> for Pila {
         let attributes = region.as_ref().map(get_region_attributes);
         debug!(surface = ?surface.id(), rects = ?attributes.as_ref().map(|a| a.rects.len()), "blur region set");
         with_states(surface, |states| {
-            *states.cached_state.get::<BlurRegion>().pending() = BlurRegion(attributes);
+            *states.cached_state.get::<BlurRegion>().pending() =
+                BlurRegion(attributes.map(Arc::new));
         });
     }
 

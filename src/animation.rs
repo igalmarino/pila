@@ -152,6 +152,17 @@ impl Style {
     }
 }
 
+/// How far `rect` reaches when `style` drops it downward (scaling is always
+/// inward, <= 1.0, and the offset is downward only).
+fn with_drop(rect: Rectangle<i32, Logical>, style: Style) -> Rectangle<i32, Logical> {
+    let drop = match style {
+        Style::Open => OPEN_DROP.ceil() as i32,
+        Style::Minimize => MINIMIZE_DROP.ceil() as i32,
+        Style::Layer => 0,
+    };
+    Rectangle::new(rect.loc, (rect.size.w, rect.size.h + drop).into())
+}
+
 /// A live window's animation: how visible it is.
 struct Appearing {
     window: Window,
@@ -256,6 +267,9 @@ struct Resizing {
     /// Its frame (geometry and title bar) and geometry size before.
     from: Rectangle<i32, Logical>,
     from_size: smithay::utils::Size<i32, Logical>,
+    /// Where it was last drawn (frame + shadow), so an output it just left
+    /// gets one redraw to clear it and no more.
+    last_rect: Rectangle<i32, Logical>,
     /// When it began, how long the move lasts, and the move once the
     /// client has answered (or `RESIZE_WAIT` went by).
     began: Duration,
@@ -555,7 +569,9 @@ impl Pila {
             visibility: Animation::new(now, duration, from, 1.0),
         });
         log_event(window_event(kind, true), &app_id(window), Outcome::Starts);
-        self.queue_redraw();
+        if let Some(rect) = self.window_visual_rect(window) {
+            self.queue_redraw_rect(with_drop(rect, style));
+        }
     }
 
     /// `window` is about to leave the space for good: keep a snapshot of it
@@ -612,6 +628,7 @@ impl Pila {
             behind_first.next();
             behind_first.next().cloned()
         };
+        let rect = with_drop(snapshot.rect, style);
         self.animations.ghosts.push(Ghost {
             window: window.clone(),
             snapshot,
@@ -621,7 +638,7 @@ impl Pila {
             visibility: Animation::new(now, duration, from, 0.0),
         });
         log_event(window_event(kind, false), &app_id(window), Outcome::Starts);
-        self.queue_redraw();
+        self.queue_redraw_rect(rect);
     }
 
     /// Draw a mapped `window` into a texture as it looks now, at the scale
@@ -757,22 +774,34 @@ impl Pila {
         // Locked too: it shows over the lock screen as well.
         let cursor = self.step_shake_cursor();
         if self.is_locked() {
-            self.drop_animations();
+            if self.animations_held() {
+                self.drop_animations();
+            }
             if let Some(output) = cursor {
                 self.redraw_after_frames(Some(vec![output]));
             }
             return;
         }
+        // Held until now: those that end get their last frame. Skip the
+        // clock read and output scan when nothing is running.
+        let held = self.animations_held();
+        if !held && cursor.is_none() {
+            return;
+        }
+        let now = self.animation_time();
         // Where they show, before those done now go: their last frame too.
-        let mut outputs = self.animation_outputs();
+        let mut outputs = self.animation_outputs(now);
         if let (Some(outputs), Some(output)) = (&mut outputs, &cursor) {
             if !outputs.contains(output) {
                 outputs.push(output.clone());
             }
         }
-        let now = self.animation_time();
-        // Held until now: those that end get their last frame.
-        let held = self.animations_held();
+        let resizing_rects: Vec<Rectangle<i32, Logical>> = self
+            .animations
+            .resizing
+            .iter()
+            .map(|r| self.resizing_bounds(r, now))
+            .collect();
         let animations = &mut self.animations;
         animations.appearing.retain(|a| {
             let done = a.visibility.done(now);
@@ -790,7 +819,8 @@ impl Pila {
             !done
         });
         animations.layer_ghosts.retain(|g| !g.visibility.done(now));
-        for resizing in &mut animations.resizing {
+        for (resizing, rect) in animations.resizing.iter_mut().zip(resizing_rects) {
+            resizing.last_rect = rect;
             // The client didn't answer in time: move anyway.
             if resizing.progress.is_none() && now >= resizing.began + RESIZE_WAIT {
                 resizing.progress = Some(Animation::new(now, resizing.duration, 0.0, 1.0));
@@ -829,25 +859,52 @@ impl Pila {
         });
     }
 
-    /// The outputs the animations in progress show on, `None` for every one
-    /// (a workspace slide). A window's or ghost's rectangle grows by its
-    /// shadow and by how far an animation moves it (`MINIMIZE_DROP`).
-    fn animation_outputs(&self) -> Option<Vec<Output>> {
+    /// Where a resizing window and its fading snapshot are drawn at `now`.
+    fn resizing_bounds(&self, resizing: &Resizing, now: Duration) -> Rectangle<i32, Logical> {
+        let Some(progress) = &resizing.progress else {
+            return resizing.snapshot.rect;
+        };
+        let Some(to) = self.frame_rect(&resizing.window) else {
+            return resizing.snapshot.rect;
+        };
+        let mapped = lerp_rect(resizing.from, to, progress.value(now));
+        let snap_frame = FrameMap {
+            from: resizing.from.to_f64(),
+            to: mapped,
+        };
+        let snap_rect = snap_frame
+            .apply(resizing.snapshot.rect.to_f64())
+            .to_i32_up();
+        let live_rect = if self.fills_output(&resizing.window) {
+            mapped.to_i32_up()
+        } else {
+            crate::redraw::grown(mapped.to_i32_up(), self.shadow_margin())
+        };
+        snap_rect.merge(live_rect)
+    }
+
+    /// The outputs the animations in progress show on at `now`, `None` for
+    /// every one (a workspace slide or overview glide). A window's or ghost's
+    /// rectangle grows downward by its style's drop (`with_drop`), without
+    /// spilling sideways onto neighboring outputs when it fills its own; a
+    /// resizing window follows where it is now and where it was on the
+    /// previous frame (`last_rect`).
+    fn animation_outputs(&self, now: Duration) -> Option<Vec<Output>> {
         if self.workspace_slide.is_some() || self.overview_moving() {
             return None;
         }
-        let margin = self.shadow_margin() + MINIMIZE_DROP.ceil() as i32;
-        let grow = |rect| crate::redraw::grown(rect, margin);
         let a = &self.animations;
         let mut rects: Vec<Rectangle<i32, Logical>> = Vec::new();
         for appearing in &a.appearing {
-            rects.extend(self.window_visual_rect(&appearing.window).map(grow));
+            rects.extend(
+                self.window_visual_rect(&appearing.window)
+                    .map(|rect| with_drop(rect, appearing.style)),
+            );
         }
-        rects.extend(a.ghosts.iter().map(|g| grow(g.snapshot.rect)));
+        rects.extend(a.ghosts.iter().map(|g| with_drop(g.snapshot.rect, g.style)));
         for resizing in &a.resizing {
-            rects.extend(self.window_visual_rect(&resizing.window).map(grow));
-            rects.push(grow(resizing.from));
-            rects.push(grow(resizing.snapshot.rect));
+            rects.push(resizing.last_rect);
+            rects.push(self.resizing_bounds(resizing, now));
         }
         rects.extend(a.layer_ghosts.iter().map(|g| g.snapshot.rect));
         let mut outputs: Vec<Output> = Vec::new();
@@ -972,16 +1029,19 @@ impl Pila {
             return;
         };
         log_event("maximize", &app_id(window), Outcome::Starts);
+        let snap_rect = snapshot.rect;
         self.animations.resizing.push(Resizing {
             window: window.clone(),
             snapshot,
             from,
             from_size,
+            last_rect: snap_rect,
             began: self.animation_time(),
             duration,
             progress: None,
         });
-        self.queue_redraw();
+        self.queue_redraw_window(window);
+        self.queue_redraw_rect(snap_rect);
     }
 
     /// `window` committed: if it was waiting for its new size and has it,
@@ -1019,7 +1079,24 @@ impl Pila {
             return;
         }
         resizing.progress = Some(Animation::new(now, resizing.duration, 0.0, 1.0));
-        self.queue_redraw();
+        let from = resizing.from;
+        let snap_rect = resizing.snapshot.rect;
+        let from_grown = if self.fills_output(window) {
+            from
+        } else {
+            crate::redraw::grown(from, self.shadow_margin())
+        };
+        if let Some(resizing) = self
+            .animations
+            .resizing
+            .iter_mut()
+            .find(|r| r.window == *window)
+        {
+            resizing.last_rect = snap_rect.merge(from_grown);
+        }
+        self.queue_redraw_window(window);
+        self.queue_redraw_rect(from_grown);
+        self.queue_redraw_rect(snap_rect);
     }
 
     /// How a resizing window is drawn: not at all while it waits (its
@@ -1073,7 +1150,9 @@ impl Pila {
             visibility: Animation::new(now, duration, from, 1.0),
         });
         log_event("layer-in", layer.namespace(), Outcome::Starts);
-        self.queue_redraw();
+        if let Some((output, _)) = self.layer_for_surface(layer.wl_surface()) {
+            self.queue_redraw_output(&output);
+        }
     }
 
     /// The layer surface `surface` is about to be hidden or destroyed: fade
@@ -1118,7 +1197,7 @@ impl Pila {
             snapshot,
             visibility: Animation::new(now, duration, from, 0.0),
         });
-        self.queue_redraw();
+        self.queue_redraw_output(&output);
     }
 
     /// Where `layer` is on `output`, in space coordinates: its place in the

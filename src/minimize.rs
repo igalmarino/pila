@@ -123,7 +123,6 @@ impl Pila {
                 went_with_parent(&child).set(true);
             }
         }
-        self.queue_redraw();
         true
     }
 
@@ -151,7 +150,6 @@ impl Pila {
                 self.show_window(&child);
             }
         }
-        self.queue_redraw();
     }
 
     /// Restore and focus a minimized window (an X11 unminimize request).

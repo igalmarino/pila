@@ -89,7 +89,9 @@ impl Pila {
         self.raise_in_order(&family);
         self.keep_on_top();
         self.refresh_pointer_focus();
-        self.queue_redraw();
+        for member in &family {
+            self.queue_redraw_window(member);
+        }
     }
 
     pub fn toggle_all_workspaces(&mut self, window: &Window) {
@@ -195,7 +197,6 @@ impl Pila {
         }
         self.keep_transients_above(&window);
         self.refresh_pointer_focus();
-        self.queue_redraw();
     }
 
     /// Go to another output: the pointer to its middle, unless a client holds
@@ -239,7 +240,7 @@ impl Pila {
             .find(|w| !is_override_redirect(w) && self.window_output(w).as_ref() == Some(&to))
             .cloned();
         self.focus_window(top, SERIAL_COUNTER.next_serial());
-        self.queue_redraw();
+        self.queue_redraw_pointer(at, middle, crate::redraw::Content::Sure);
     }
 }
 

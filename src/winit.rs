@@ -364,7 +364,8 @@ fn redraw(
 
     let cursor_surface = input.cursor_wl_surface();
     if let Some(states) = &render_states {
-        frame::update_primary_outputs(scene, cursor_surface, output, states);
+        state.hidden_frames_dirty |=
+            frame::update_primary_outputs(scene, cursor_surface, output, states);
         if submitted {
             // Nested, the host decides when the frame really reaches the
             // screen; "now" at submit is the best estimate available.

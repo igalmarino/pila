@@ -1187,7 +1187,8 @@ fn render_output(
         o.idle += 1;
     }
     let cursor_surface = input.cursor_wl_surface();
-    frame::update_primary_outputs(scene, cursor_surface, &output, &states);
+    state.hidden_frames_dirty |=
+        frame::update_primary_outputs(scene, cursor_surface, &output, &states);
     if damaged {
         frame::presentation_feedback(scene, cursor_surface, &output, &states).presented(
             state.clock.now(),
