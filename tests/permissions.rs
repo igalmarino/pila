@@ -761,3 +761,30 @@ fn locking_keeps_an_allowed_request_waiting_for_the_saved_permissions() {
     client.wait_logged("held", "Done");
     assert!(!client.has_logged("held", "Stopped"));
 }
+
+/// A program can't answer its own prompt with a virtual keyboard: Enter and
+/// R from one do nothing, and only the user's keys (or clicks) answer.
+#[test]
+fn a_virtual_keyboard_cant_answer_the_prompt() {
+    use common::protocols::{keymap_of, virtual_keyboard};
+    let mut pila = TestPila::with_config("[permissions]\nenforce = true\n");
+    let client = pila.client();
+    client.window("app").create();
+    pila.wait_focus("app");
+    pila.settle();
+    let _session = start_ext_session(&client, "HEADLESS-1", "typed");
+    wait_armed(&mut pila);
+    let keyboard = virtual_keyboard(&client, &keymap_of(&client));
+    // R (19), then Enter (28).
+    for (time, key, state) in [(1, 19, 1), (2, 19, 0), (3, 28, 1), (4, 28, 0)] {
+        keyboard.key(time, key, state);
+    }
+    client.flush();
+    pila.stays("still asking", Duration::from_millis(300), |s| {
+        s["capture_permission"]["shown"]["remember"] == false
+    });
+    client.roundtrip();
+    assert!(!client.has_logged("typed", "Done"));
+    pila.key("Escape");
+    client.wait_logged("typed", "Stopped");
+}

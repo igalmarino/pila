@@ -198,6 +198,10 @@ impl Pila {
         // from the physical ones; a physical key brings the configured keymap
         // back.
         let device = event.device();
+        // A program typing on a virtual keyboard mustn't answer Pila's modal
+        // panels (allow its own capture, share the screen with itself): they
+        // take its keys and do nothing with them.
+        let from_program = crate::virtual_keyboard::virtual_device(&device).is_some();
         let source = match crate::virtual_keyboard::virtual_device(&device) {
             Some(device) => device.source(),
             None => {
@@ -274,7 +278,7 @@ impl Pila {
                 {
                     state.input.suppressed_keys.insert(keycode);
                     let sym = handle.raw_latin_sym_or_raw_current_sym();
-                    if let Some(sym) = sym.filter(|sym| !sym.is_modifier_key()) {
+                    if let Some(sym) = sym.filter(|sym| !sym.is_modifier_key() && !from_program) {
                         shortcuts_key = Some((sym, *mods));
                     }
                     return FilterResult::Intercept(None);
@@ -283,7 +287,7 @@ impl Pila {
                 // modal (`color_pick.rs`).
                 if key_state == KeyState::Pressed && !state.is_locked() && state.color_pick_open() {
                     state.input.suppressed_keys.insert(keycode);
-                    pick_key = Some(handle.modified_sym());
+                    pick_key = (!from_program).then(|| handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The screen capture permission prompt takes every press while
@@ -293,7 +297,7 @@ impl Pila {
                     && state.capture_permission_open()
                 {
                     state.input.suppressed_keys.insert(keycode);
-                    perm_key = Some(handle.modified_sym());
+                    perm_key = (!from_program).then(|| handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The share picker takes every press while it's shown: it's
@@ -301,7 +305,7 @@ impl Pila {
                 if key_state == KeyState::Pressed && !state.is_locked() && state.share_picker_open()
                 {
                     state.input.suppressed_keys.insert(keycode);
-                    picker_key = Some(handle.modified_sym());
+                    picker_key = (!from_program).then(|| handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The window menu takes every press while it's open.

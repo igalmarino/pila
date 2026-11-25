@@ -548,6 +548,31 @@ fn the_output_picked_is_the_one_shared() {
     consumer.wait_frame("of B", |f| (f.width, f.height) == (800, 600));
 }
 
+/// An app can't answer the picker with a virtual keyboard: Enter from one
+/// shares nothing, and only the user's keys (or clicks) answer.
+#[test]
+fn a_virtual_keyboard_cant_answer_the_picker() {
+    use common::protocols::{keymap_of, virtual_keyboard};
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("app").create();
+    pila.wait_focus("app");
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("typed", "org.example.Browser", 1);
+    wait_picker(&mut pila);
+    let keyboard = virtual_keyboard(&client, &keymap_of(&client));
+    // Enter (28).
+    keyboard.key(1, 28, 1);
+    keyboard.key(2, 28, 0);
+    client.flush();
+    pila.stays("still asking", std::time::Duration::from_millis(300), |s| {
+        s["share_picker"]["shown"] == true
+    });
+    assert!(!started.answered());
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
+}
+
 #[test]
 fn nothing_reaches_the_apps_while_the_picker_is_shown() {
     let (mut pila, bus, _pipewire) = start();
@@ -1524,6 +1549,33 @@ fn the_shortcuts_panel_takes_the_keys_pressed() {
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+/// An app can't confirm its own shortcuts with a virtual keyboard, nor pick
+/// their keys: the panel takes its keys and does nothing with them.
+#[test]
+fn a_virtual_keyboard_cant_answer_the_shortcuts_panel() {
+    use common::protocols::{keymap_of, virtual_keyboard};
+    let (mut pila, bus, _pipewire) = start();
+    let client = pila.client();
+    client.window("app").create();
+    pila.wait_focus("app");
+    let mut portal = Portal::connect(&bus.address);
+    portal.shortcuts_session("typed", "org.example.Rec");
+    let bound = portal.bind_shortcuts("typed", &[("start", "Start recording", "")]);
+    pila.wait("the panel", |s| !s["app_shortcuts"]["panel"].is_null());
+    let keyboard = virtual_keyboard(&client, &keymap_of(&client));
+    // F9 (67), then Enter (28).
+    for (time, key, state) in [(1, 67, 1), (2, 67, 0), (3, 28, 1), (4, 28, 0)] {
+        keyboard.key(time, key, state);
+    }
+    client.flush();
+    pila.stays("still asking", std::time::Duration::from_millis(300), |s| {
+        !s["app_shortcuts"]["panel"].is_null()
+            && s["app_shortcuts"]["panel"]["rows"][0]["keys"].is_null()
+    });
+    pila.key("Escape");
+    assert_eq!(bound.join().unwrap().0, 1, "cancelled");
 }
 
 /// A bound shortcut does nothing while the screen is locked.

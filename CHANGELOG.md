@@ -7,6 +7,10 @@
   allowed or denied by `[[permission]]` rules on their executable path, or asked with a prompt
   (Allow, Deny, Remember); `pila msg capture-permissions` lists what's allowed and
   `pila msg forget-capture-permission <id>` (or `all`) revokes it. Portal sharing is unchanged.
+- **Fixed:** A program could answer Pila's screen share picker or global shortcuts panel by
+  typing on a virtual keyboard (as `wtype` does), sharing the screen with itself or confirming
+  its own shortcuts. Keys from virtual keyboards now answer none of Pila's prompts; the
+  keyboard and the pointer still do.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

@@ -134,7 +134,10 @@ Key flows and invariants:
   drops both. The input method's own (the client holding the keyboard grab,
   `InputMethodHandle::keyboard_grab_client`) is the exception: what it types are keys it
   hands back, and they go straight to the focus (`forward_input_method_key`; see "Input
-  methods").
+  methods"). Pila's modal panels that answer a program (the capture permission prompt, the
+  share picker, the global shortcuts panel, the color picker) take a virtual keyboard's keys and
+  do nothing with them (`on_keyboard`'s `from_program`): a program mustn't allow its own
+  capture or confirm its own shortcuts. The pointer still answers them.
 - **Input methods** (`input_method.rs`, text-input-v3 and input-method-v2, both Smithay's):
   text-input is for every client, input-method only for privileged ones (it reads everything
   typed). Smithay follows the keyboard focus: `KeyboardTarget` of a `WlSurface` (which
