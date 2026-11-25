@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.7 (2026-11-24)
 
 - **New:** The overview's hot corner can be any corner of the screen (`[overview]
   hot-corner-position`), and made harder to hit by accident: `hot-corner-pressure` asks for the
