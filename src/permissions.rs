@@ -812,23 +812,11 @@ impl Pila {
         self.after_capture_permission_closed();
     }
 
-    /// Cancel all open, queued, and resolving capture prompts (e.g. when the
-    /// session locks).
+    /// Cancel the open and queued capture prompts (when the session locks).
+    /// Requests still waiting for the saved permissions or an executable
+    /// aren't decided yet: they're decided once those are in, and those that
+    /// would ask are refused then, while locked (`decide_capture`).
     pub fn cancel_capture_permissions(&mut self) {
-        let waiting_store = std::mem::take(&mut self.capture_permissions.waiting_store);
-        for (_, request) in waiting_store {
-            if request.is_alive() {
-                self.deny_capture(request);
-            }
-        }
-        let resolving = std::mem::take(&mut self.capture_permissions.resolving);
-        for (_, requests) in resolving {
-            for request in requests {
-                if request.is_alive() {
-                    self.deny_capture(request);
-                }
-            }
-        }
         let waiting = std::mem::take(&mut self.capture_permissions.waiting);
         for queued in waiting {
             for request in queued.requests {

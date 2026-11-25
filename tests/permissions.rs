@@ -699,3 +699,65 @@ fn enforce_turned_on_stops_a_denied_capture() {
     ));
     client.wait_logged("running", "Stopped");
 }
+
+/// A state directory whose `capture-permissions.json` is a FIFO: Pila's
+/// startup read of it waits until the test writes it (`write_held_store`).
+fn held_store() -> (std::path::PathBuf, Vec<(String, String)>) {
+    let state_dir = std::env::temp_dir().join(format!(
+        "pila-perm-held-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let dir = state_dir.join("pila");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("capture-permissions.json");
+    let path = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    let env = vec![(
+        "XDG_STATE_HOME".to_string(),
+        state_dir.to_string_lossy().into_owned(),
+    )];
+    (fifo, env)
+}
+
+/// Let Pila's read of a `held_store` finish, with `grants` in it.
+fn write_held_store(fifo: &std::path::Path, grants: &str) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
+    write!(file, "{{\"version\": 1, \"grants\": {grants}}}").unwrap();
+}
+
+/// Locking leaves alone a request of an allowed program still waiting for
+/// the saved permissions to be read: it's decided once they are, and a rule
+/// allows it.
+#[test]
+fn locking_keeps_an_allowed_request_waiting_for_the_saved_permissions() {
+    let exe = current_exe();
+    let (fifo, env) = held_store();
+    let mut pila = TestPila::start_with(Options {
+        config: format!(
+            "[permissions]\nenforce = true\n\
+             [[permission]]\nexecutable = {exe:?}\naccess = \"allow\"\n"
+        ),
+        env,
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+    let _session = start_ext_session(&client, "HEADLESS-1", "held");
+    pila.settle();
+    client.roundtrip();
+    assert_eq!(pila.state()["capture_permission"]["loaded"], false);
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    let surf = locker.lock_surface(&lock, "HEADLESS-1", [255, 10, 20, 30]);
+    locker.wait_surface_configured(surf);
+    locker.wait_logged("lock", "Locked");
+    write_held_store(&fifo, "[]");
+    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
+    client.wait_logged("held", "Done");
+    assert!(!client.has_logged("held", "Stopped"));
+}

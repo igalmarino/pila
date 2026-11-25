@@ -1786,8 +1786,9 @@ Key flows and invariants:
   `permissions::ALLOW_DELAY` after its text is drawn (`Shown::visible_since`: an Enter typed into an
   app as it pops up). Deny (`Esc`) stops the session or fails the frame, and that connection's
   next requests that would ask are refused without asking (`CapturePermissions::client_denials`),
-  or a program retrying would bring the modal prompt back forever; locking cancels all pending
-  prompts (`cancel_capture_permissions`) and denies new prompts. The executable read drops the
+  or a program retrying would bring the modal prompt back forever; locking cancels the open and queued
+  prompts (`cancel_capture_permissions`) and denies new prompts; requests still waiting for the
+  saved permissions or an executable are decided once those are in, refused then if they'd ask. The executable read drops the
   kernel's ` (deleted)` (a program updated while running, `executable_path`). `pila msg capture-permissions` lists grants and `pila msg forget-capture-permission`
   revokes one or all (allowed while locked), stopping active sessions whose client is no longer
   allowed (`stop_denied_captures`); live reload re-evaluates open prompts and active sessions
