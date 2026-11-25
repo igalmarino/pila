@@ -16,6 +16,10 @@
 - **Smithay updated** (10 commits to `54cf9c10`, fork rebased; 0.9.6's pin preserved as tag
   `rev-afdce320`): drops the fork's zero-width text-cursor patch (now upstream) and stops
   re-broadcasting unchanged selections.
+- **Fixed:** A newly allocated 1440p shm buffer (such as `swaybg`'s first wallpaper on a 2560×1440
+  monitor) could still spike to ~15 ms on AMD APUs (`radeonsi`) with 128 KiB strips and a cold
+  upload path. Pila now warms up `glTexSubImage2D` at renderer startup and uploads shm buffers in
+  64 KiB strips, keeping 1440p uploads under 6 ms (and logs any upload over 8 ms as `slow upload`).
 
 ## 0.9.6 (2026-11-24)
 

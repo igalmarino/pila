@@ -189,11 +189,12 @@ Key flows and invariants:
   imports, `queue_redraw`/`queue_redraw_output`, `draws_cursor`, `cursor_changed`, LEDs, VT switch) rather than matching. All
   feed the same `scene()`, `render.rs`, `frame.rs` and `post_render`. `Pila::new`
   hard-codes a keyboard and pointer for all. Each renderer, when created, goes through
-  `render::warm_up` (the rounded-corner and blur shaders, and a draw into an offscreen texture of
-  what a window is made of: a solid, a rounded one, a texture uploaded from memory, blended),
-  so the first frame that needs them doesn't pay for it: a driver builds what a kind of draw needs
-  when it's first made, not when its shader is compiled, which more than doubled the first frame
-  of the first window opened.
+  `render::warm_up` (the rounded-corner and blur shaders, a draw into an offscreen texture of
+  what a window is made of: a solid, a rounded one, a texture uploaded from memory, blended, and
+  an `ImportMem::update_memory` subimage transfer so the driver's shm upload path starts warm),
+  so the first frame or shm commit that needs them doesn't pay for it: a driver builds what a kind
+  of draw needs when it's first made, not when its shader is compiled, which more than doubled the
+  first frame of the first window opened.
 - **Panics** (`sync.rs`, `main::log_panics`): past startup a panic ends the session, so the code has no
   `unwrap`/`expect` that rests on more than a local, stated invariant: mutexes go through
   `sync::Locked::locked` (a poisoned one only follows a panic that already ended Pila), user
@@ -668,10 +669,11 @@ Key flows and invariants:
   parent's commit), and once between frames (`UploadedAfter`, by `Pila::frames_drawn`, which
   `post_render` counts): a client committing faster than the outputs refresh leaves the rest to
   the frame, which gets the damage since the last commit copied (`damage_since`). Smithay
-  (Pila's fork) copies in strips of at most 128 KiB, a new texture allocated empty first: one
+  (Pila's fork) copies in strips of at most 64 KiB, a new texture allocated empty first: one
   call for a whole 1920x1080 buffer took radeonsi's slow path (a staging buffer of its size,
-  allocated anew while the last is busy), 10 to 22 ms about one time in three; `scripts/check`
-  fails a copy over 8 ms. Dmabufs are imported as before (no copy). The copy's time is counted apart, an `uploads` line on
+  allocated anew while the last is busy), 10 to 22 ms about one time in three, and 128 KiB strips
+  still hit ~13-16 ms on a fresh 2560x1440 buffer on a Renoir APU; `scripts/check` fails a copy
+  over 8 ms, and `record_upload` logs any upload over 8 ms on its own (`slow upload`). Dmabufs are imported as before (no copy). The copy's time is counted apart, an `uploads` line on
   `pila::frames` (`record_upload`), and `early_uploads` in `state_json` counts those commits.
   On headless, whose frames wait for the GPU, the GPU's part of the copy still lands in the
   frame that first draws the textures.

@@ -22,7 +22,7 @@ use smithay::{
             AsRenderElements, Kind,
         },
         gles::{GlesRenderer, GlesTexture},
-        Bind, Offscreen,
+        Bind, ImportMem, Offscreen,
     },
     desktop::{LayerSurface, PopupManager, Window},
     input::pointer::CursorIcon,
@@ -1199,6 +1199,13 @@ pub fn warm_up(renderer: &mut GlesRenderer) {
         ));
         elements.push(solid_element(renderer, &buffer, origin, None, 1.0, scale));
         target.draw(renderer, &elements);
+    }
+    // Warm up `glTexSubImage2D` (the shm upload path): the driver initializes
+    // its staging upload path on the first subimage transfer, which otherwise
+    // adds ~3-4 ms to the first large shm commit (such as swaybg's wallpaper).
+    let upload = vec![0u8; 128 * 128 * 4];
+    if let Ok(tex) = renderer.import_memory(&upload, Fourcc::Argb8888, (128, 128).into(), false) {
+        let _ = renderer.update_memory(&tex, &upload, Rectangle::from_size((128, 128).into()));
     }
     tracing::debug!(elapsed = ?start.elapsed(), "renderer warmed up");
 }

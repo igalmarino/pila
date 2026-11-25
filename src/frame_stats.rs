@@ -714,7 +714,17 @@ impl Pila {
     }
 
     /// A client's buffers, uploaded at its commit (`upload.rs`), took `cpu`.
-    pub fn record_upload(&mut self, cpu: Duration) {
+    pub fn record_upload(&mut self, cpu: Duration, size: Option<(i32, i32)>) {
+        // Matches `scripts/check`'s per-upload budget (half a 60 Hz period).
+        if cpu > Duration::from_millis(8) {
+            debug!(
+                target: "pila::frames",
+                cpu_ms = ms(cpu),
+                width = size.map(|(w, _)| w),
+                height = size.map(|(_, h)| h),
+                "slow upload"
+            );
+        }
         let now = self.animation_time();
         if let Some(report) = self.upload_stats.record(now, cpu) {
             log_upload_report(&report);

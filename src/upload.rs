@@ -79,6 +79,13 @@ impl Pila {
         if !needs_upload(surface, Some(&renderer.context_id())) {
             return;
         }
+        let size = with_states(surface, |states| {
+            states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .and_then(|s| s.locked().buffer_size())
+                .map(|sz| (sz.w, sz.h))
+        });
         let started = Instant::now();
         if let Err(err) = import_surface_tree(&mut *renderer, surface) {
             // The frame tries again.
@@ -94,7 +101,7 @@ impl Pila {
                 .set(Some(frame));
         });
         self.early_uploads += 1;
-        self.record_upload(cpu);
+        self.record_upload(cpu, size);
     }
 }
 

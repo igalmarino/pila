@@ -68,9 +68,10 @@ pipewire = "0.10"
 #   without its selection part (Xwayland on demand, `xwayland.rs`: Pila
 #   doesn't build without `XWaylandDisplay`;
 #   `x11::xwayland_stops_when_idle_if_asked` fails on the leaked sources);
-# - shm buffers uploaded to their textures in strips of at most 128 KiB: a
+# - shm buffers uploaded to their textures in strips of at most 64 KiB: a
 #   whole 1920x1080 buffer in one call took radeonsi's slow path, 10 to 22 ms
-#   of the event loop (`scripts/check`'s shm copies within 8 ms each fails
+#   of the event loop, and 128 KiB strips still took 13 to 16 ms on a fresh
+#   2560x1440 buffer (`scripts/check`'s shm copies within 8 ms each fails
 #   without, on bare metal);
 # - `XdgForeignState::exported_surface`: the surface exported as a handle, so
 #   the share picker names an app without an app id by the window it asks
@@ -81,7 +82,7 @@ pipewire = "0.10"
 # `https://github.com/Smithay/smithay.git` once it has them.
 [dependencies.smithay]
 git = "https://github.com/igalmarino/smithay.git"
-rev = "0f42cdb56e3f6316274a20159f94f9a02e58f225"
+rev = "55bb543cc34d5cc4db0dceef2decba28a9dcc71e"
 default-features = false
 features = [
     "backend_winit",
