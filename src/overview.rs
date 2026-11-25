@@ -406,9 +406,10 @@ impl Pila {
         }
     }
 
-    /// Open it, the focused window selected. Not while locked.
+    /// Open it, the focused window selected. Not while locked, nor behind
+    /// a modal panel (by the hot corner, a swipe or `pila msg`).
     pub fn open_overview(&mut self) {
-        if self.overview_open() || self.is_locked() {
+        if self.overview_open() || self.is_locked() || self.modal_panel_open() {
             return;
         }
         tracing::debug!("opening the overview");

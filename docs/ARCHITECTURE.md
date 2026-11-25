@@ -898,7 +898,9 @@ Key flows and invariants:
   long in the corner, the rest of it a timer removed on leaving (and that does nothing if the
   pointer left by other than motion meanwhile: a warp, its output unplugged). Not with a button held or a grab
   running (`is_grabbed`), over a fullscreen window, while locked, picking a color or a region, or
-  with `hot-corner = false`; and `[gestures]` binds `overview open`/`overview close` to 4-finger
+  with `hot-corner = false`; and the overview never opens behind a modal panel
+  (`Pila::modal_panel_open`: the share picker, the color picker, the shortcuts panel, the capture
+  prompt), whatever asks; and `[gestures]` binds `overview open`/`overview close` to 4-finger
   swipes up and down.
   A workspace switch while it's open shows the new windows in their places without a slide
   (`show_workspace`). The strip (`Pila::overview_strip`) shows each workspace's part of the

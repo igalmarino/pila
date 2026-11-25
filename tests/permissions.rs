@@ -856,3 +856,21 @@ fn forgetting_before_the_saved_permissions_are_read_fails() {
         "forgotten"
     );
 }
+
+/// The hot corner does nothing while the prompt is shown: it's modal, and
+/// the overview would open behind it.
+#[test]
+fn the_hot_corner_does_nothing_while_the_prompt_is_shown() {
+    let mut pila = TestPila::with_config("[permissions]\nenforce = true\n");
+    let client = pila.client();
+    pila.settle();
+    pila.move_to(100.0, 100.0);
+    let _session = start_ext_session(&client, "HEADLESS-1", "cornered");
+    wait_armed(&mut pila);
+    pila.move_to(0.0, 0.0);
+    pila.stays("no overview", Duration::from_millis(300), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.key("Escape");
+    client.wait_logged("cornered", "Stopped");
+}

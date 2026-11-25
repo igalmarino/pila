@@ -20,6 +20,8 @@
   are now written in the order they were made.
 - **Fixed:** With `hot-corner-delay` set, the overview could open after the pointer had left the
   corner by a jump rather than a move (`focus-output`, or the corner's monitor unplugged).
+- **Fixed:** The hot corner, a swipe or `pila msg` could open the overview behind the screen
+  share picker or the global shortcuts panel.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

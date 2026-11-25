@@ -725,6 +725,16 @@ impl Pila {
     /// What's under `pos`, in stacking order: layer surfaces above the
     /// windows, the windows, then layer surfaces below them. While locked,
     /// only the lock surface of the output under it: nothing else can be hit.
+    /// One of Pila's modal panels is shown (the share picker, the color
+    /// picker, the global shortcuts panel, the capture permission prompt):
+    /// it takes all input, and nothing opens over or behind it.
+    pub fn modal_panel_open(&self) -> bool {
+        self.share_picker_open()
+            || self.color_pick_open()
+            || self.app_shortcuts_open()
+            || self.capture_permission_open()
+    }
+
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
         if self.is_locked() {
             return self
@@ -732,11 +742,8 @@ impl Pila {
                 .map(|(surface, origin)| Under::Lock(surface, origin));
         }
         // Pila's switcher is in front of everything, and no client's; the
-        // share picker is modal: nothing is hit while it's shown.
-        if self.share_picker_open()
-            || self.color_pick_open()
-            || self.app_shortcuts_open()
-            || self.capture_permission_open()
+        // modal panels: nothing is hit while one is shown.
+        if self.modal_panel_open()
             || self.switcher_view_covers(pos)
             || self.shortcuts_view_covers(pos)
         {
