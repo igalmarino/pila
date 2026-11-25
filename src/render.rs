@@ -214,6 +214,8 @@ pub struct Scene {
     /// The modal prompt confirming direct Wayland screen capture
     /// (`permissions.rs`).
     pub capture_permission: Option<crate::permissions::ScenePrompt>,
+    /// The quit dialog, modal: the dim over every output (`quit_dialog.rs`).
+    pub quit_dialog: Option<crate::quit_dialog::SceneQuit>,
     /// The regions shared, by output, global: outlined on the screen alone
     /// (`screen_elements`), never in a capture (`share_region.rs`).
     pub shared_regions: Vec<(String, Rectangle<i32, Logical>)>,
@@ -247,6 +249,7 @@ impl Scene {
             color_pick: None,
             app_shortcuts: None,
             capture_permission: None,
+            quit_dialog: None,
             shared_regions: Vec::new(),
             outline_buffers: Default::default(),
             colors,
@@ -267,6 +270,7 @@ impl Scene {
             || self.color_pick.is_some()
             || self.app_shortcuts.is_some()
             || self.capture_permission.is_some()
+            || self.quit_dialog.is_some()
             || self
                 .shared_regions
                 .iter()
@@ -1966,6 +1970,19 @@ pub fn output_elements(
     if let Some(view) = scene.capture_permission.as_ref().filter(|_| !scene.locked) {
         // In front of everything of Pila's: it's modal.
         let mut front = crate::permissions::elements(
+            renderer,
+            view,
+            &scene.colors,
+            output_name,
+            Rectangle::new(origin, output_geo.size),
+            scale,
+        );
+        front.append(&mut elements);
+        elements = front;
+    }
+    if let Some(view) = scene.quit_dialog.as_ref().filter(|_| !scene.locked) {
+        // In front of everything of Pila's: it's modal.
+        let mut front = crate::quit_dialog::elements(
             renderer,
             view,
             &scene.colors,

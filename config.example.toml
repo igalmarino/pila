@@ -271,7 +271,8 @@ tap = true                       # tap to click
 #   ("workspace-next", "workspace-prev", "move-to-workspace-next", and
 #   "move-to-workspace-prev" also work; next/prev stop at the ends),
 #   switch-layout <n|next|prev> (wraps around),
-#   power-off-monitors, power-on-monitors, quit, none.
+#   power-off-monitors, power-on-monitors,
+#   confirm-quit (asks first), quit (at once), none.
 #
 # Mouse snapping: drag a window to the left/right edge for a half, near a
 # corner for a quarter, or to the top edge to maximize.
@@ -345,7 +346,7 @@ tap = true                       # tap to click
 "Mod+Shift+WheelScrollDown" = "move-to-workspace-next"
 "Mod+Shift+WheelScrollUp" = "move-to-workspace-prev"
 "Mod+Shift+Q" = "close"
-"Mod+Shift+E" = "quit"
+"Mod+Shift+E" = "confirm-quit"
 "Mod+Shift+slash" = "show-shortcuts"  # Mod+?
 
 # Screen capture permissions (wlr-screencopy and ext-image-copy-capture).

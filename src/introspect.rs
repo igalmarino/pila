@@ -292,7 +292,7 @@ impl Pila {
             _ => None,
         };
 
-        json!({
+        let mut state = json!({
             "windows": windows,
             "unmapped": unmapped,
             "focused": focused,
@@ -421,6 +421,9 @@ impl Pila {
             "xauthority": self.xwayland.authority.as_ref().map(|a| a.path()),
             "xwayland_running": self.xwayland.running(),
             "children": self.children.len(),
-        })
+        });
+        // Past `json!`'s recursion limit as one more field of the above.
+        state["quit_dialog"] = self.quit_dialog_json();
+        state
     }
 }

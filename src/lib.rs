@@ -55,6 +55,7 @@ pub mod permissions;
 pub mod pointer_constraints;
 pub mod pointer_warp;
 pub mod portal;
+pub mod quit_dialog;
 pub mod redraw;
 pub mod render;
 pub mod rounded;

@@ -221,6 +221,7 @@ impl Pila {
         let mut pick_key = None;
         let mut shortcuts_key = None;
         let mut perm_key = None;
+        let mut quit_key = None;
         let mut overview_key = None;
         let mut repeat_next = None;
         let mut tap_action = None;
@@ -300,6 +301,15 @@ impl Pila {
                     perm_key = (!from_program).then(|| handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
+                // The quit dialog takes every press while it's shown: it's
+                // modal (`quit_dialog.rs`).
+                if key_state == KeyState::Pressed && !state.is_locked() && state.quit_dialog_open()
+                {
+                    state.input.suppressed_keys.insert(keycode);
+                    let sym = handle.raw_latin_sym_or_raw_current_sym();
+                    quit_key = sym.filter(|_| !from_program).map(|sym| (sym, *mods));
+                    return FilterResult::Intercept(None);
+                }
                 // The share picker takes every press while it's shown: it's
                 // modal (`share_picker.rs`).
                 if key_state == KeyState::Pressed && !state.is_locked() && state.share_picker_open()
@@ -321,8 +331,8 @@ impl Pila {
                 // keep Quit to escape a nested session. A client inhibiting
                 // shortcuts gets them, but never Quit.
                 let allowed = |state: &Pila, action: &Action| {
-                    (!state.is_locked() || (cfg!(debug_assertions) && *action == Action::Quit))
-                        && (!inhibited || *action == Action::Quit)
+                    (!state.is_locked() || (cfg!(debug_assertions) && action.quits()))
+                        && (!inhibited || action.quits())
                 };
                 let sym = handle.raw_latin_sym_or_raw_current_sym();
                 match key_state {
@@ -438,6 +448,9 @@ impl Pila {
         if let Some(sym) = perm_key {
             self.capture_permission_key(sym);
         }
+        if let Some((sym, mods)) = quit_key {
+            self.quit_dialog_key(sym, &mods);
+        }
         if hide_shortcuts {
             self.hide_shortcuts();
         }
@@ -486,7 +499,7 @@ impl Pila {
             // The checks a press goes through (`on_keyboard`), again.
             let allowed = !state.is_locked()
                 && state.window_menu.is_none()
-                && (!state.shortcuts_inhibited() || action == Action::Quit);
+                && (!state.shortcuts_inhibited() || action.quits());
             if !allowed {
                 state.input.binding_repeat = None;
                 return TimeoutAction::Drop;
@@ -912,6 +925,12 @@ impl Pila {
         if button_state == ButtonState::Pressed && !self.is_locked() && self.color_pick_open() {
             self.input.suppressed_buttons.insert(button);
             self.color_pick_press(pointer.current_location());
+            return;
+        }
+        // The quit dialog takes every press, and its release: it's modal.
+        if button_state == ButtonState::Pressed && !self.is_locked() && self.quit_dialog_open() {
+            self.input.suppressed_buttons.insert(button);
+            self.quit_dialog_press(pointer.current_location());
             return;
         }
         // The screen capture permission prompt takes every press, and its

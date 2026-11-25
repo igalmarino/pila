@@ -4,7 +4,7 @@
 # (blur, animations). Run it from a TTY, like scripts/tty: it starts pila
 # there with what it says about layer rules in the log. Open what you want
 # a rule for (the bar, the launcher, a panel, a notification), quit pila with
-# Mod+Shift+E, and the namespaces are listed.
+# Mod+Shift+E (then Enter), and the namespaces are listed.
 #
 #   scripts/layer-namespaces [config.toml]
 #

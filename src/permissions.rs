@@ -662,7 +662,11 @@ impl Pila {
             }
             return;
         }
-        if self.share_picker_open() || self.color_pick_open() || self.app_shortcuts_open() {
+        if self.share_picker_open()
+            || self.color_pick_open()
+            || self.app_shortcuts_open()
+            || self.quit_dialog_open()
+        {
             return;
         }
         while let Some(mut queued) = self.capture_permissions.waiting.pop_front() {

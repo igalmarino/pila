@@ -102,6 +102,7 @@ impl Pila {
             || self.share_picker_open()
             || self.app_shortcuts_open()
             || self.capture_permission_open()
+            || self.quit_dialog_open()
         {
             return reply.send(Err(Refused::Cancelled));
         }

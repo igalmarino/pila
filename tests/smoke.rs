@@ -55,7 +55,12 @@ fn bindings_run_from_injected_keys() {
 #[test]
 fn quit_binding_exits() {
     let mut pila = TestPila::start();
+    // It asks first (`tests/quit_dialog.rs`).
     pila.combo("Super+Shift+e");
+    pila.wait("the quit dialog", |s| {
+        s["quit_dialog"]["shown"]["text"] == true
+    });
+    pila.key("Return");
     assert!(pila.wait_exit().success());
 }
 

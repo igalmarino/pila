@@ -460,7 +460,7 @@ fn nothing_but_the_lock_gets_input_or_shows_while_locked() {
     for (index, name) in actions.iter().enumerate() {
         // It ends Pila (and debug builds allow it while locked, to escape a
         // nested session).
-        if name == "Quit" {
+        if name == "Quit" || name == "ConfirmQuit" {
             continue;
         }
         pila.request(json!({ "cmd": "action", "index": index }));

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New:** Mod+Shift+E asks before quitting, in a dialog (Enter, Mod+Shift+E again or Quit to
+  quit; Esc or Cancel to stay): the new `confirm-quit` action, now its default. `quit` still
+  quits at once, for `pila msg action quit` and logout menus; a config that binds
+  `"Mod+Shift+E" = "quit"` keeps doing so.
 - **New:** Direct screen capture permissions (`[permissions] enforce = true`, off by default):
   programs capturing through wlr-screencopy or ext-image-copy-capture (grim, wf-recorder) are
   allowed or denied by `[[permission]]` rules on their executable path, or asked with a prompt

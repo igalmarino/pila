@@ -618,7 +618,8 @@ impl Pila {
         if !self.is_locked()
             && (self.color_pick_open()
                 || self.app_shortcuts_open()
-                || self.capture_permission_open())
+                || self.capture_permission_open()
+                || self.quit_dialog_open())
         {
             return;
         }

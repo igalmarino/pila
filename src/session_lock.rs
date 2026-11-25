@@ -253,6 +253,7 @@ impl SessionLockHandler for Pila {
         self.cancel_color_pick();
         self.cancel_app_shortcuts();
         self.cancel_capture_permissions();
+        self.cancel_quit_dialog();
         self.close_window_menu();
         self.hide_shortcuts();
         self.close_overview();

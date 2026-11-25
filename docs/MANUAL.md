@@ -66,7 +66,9 @@ launch twice. Under systemd, logs are also available via `journalctl --user -u p
 a second Pila session while one is running is prevented. Set `PILA_NO_SYSTEMD=1` to run Pila
 directly instead of through systemd, matching non-systemd behavior.
 
-**Exiting:** Press **Mod+Shift+E** to quit Pila and return to the display manager or TTY. If the
+**Exiting:** Press **Mod+Shift+E** to quit Pila and return to the display manager or TTY: a
+dialog asks first (Enter, Mod+Shift+E again or Quit to quit; Esc or Cancel to stay). To quit
+without asking, bind `quit` instead of `confirm-quit`, or run `pila msg action quit`. If the
 screen ever freezes, press **Ctrl+Alt+F1** through **F12** to switch to another TTY, log in, and
 run `pkill pila`.
 
@@ -113,7 +115,7 @@ or login session, and **Alt** when running nested. Set `mod` in your config to `
 | `XF86MonBrightnessUp`, `XF86MonBrightnessDown` | Adjust screen brightness ±5% (repeats while held, won't turn backlight completely off; requires `brightnessctl`) |
 | `XF86AudioPlay`, `XF86AudioPause`, `XF86AudioNext`, `XF86AudioPrev`, `XF86AudioStop` | Control media playback (requires `playerctl`) |
 | `Mod+Shift+Q` | Close the focused window |
-| `Mod+Shift+E` | Quit Pila |
+| `Mod+Shift+E` | Quit Pila, after asking (`confirm-quit`; `quit` doesn't ask) |
 | `Mod+Shift+slash` | `Mod+?`: toggle the shortcuts cheatsheet (any key or click dismisses it) |
 | `Mod` + left drag | Move a window from anywhere inside it |
 | `Mod` + right drag | Resize a window from its nearest corner |

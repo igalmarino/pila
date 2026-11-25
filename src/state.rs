@@ -197,6 +197,7 @@ pub struct Pila {
     /// Screen capture permissions for direct Wayland capture protocols
     /// (`permissions.rs`).
     pub capture_permissions: crate::permissions::CapturePermissions,
+    pub quit_dialog: crate::quit_dialog::QuitDialog,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -602,6 +603,7 @@ impl Pila {
             color_pick: Default::default(),
             app_shortcuts: Default::default(),
             capture_permissions: Default::default(),
+            quit_dialog: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -726,13 +728,15 @@ impl Pila {
     /// windows, the windows, then layer surfaces below them. While locked,
     /// only the lock surface of the output under it: nothing else can be hit.
     /// One of Pila's modal panels is shown (the share picker, the color
-    /// picker, the global shortcuts panel, the capture permission prompt):
-    /// it takes all input, and nothing opens over or behind it.
+    /// picker, the global shortcuts panel, the capture permission prompt,
+    /// the quit dialog): it takes all input, and nothing opens over or
+    /// behind it.
     pub fn modal_panel_open(&self) -> bool {
         self.share_picker_open()
             || self.color_pick_open()
             || self.app_shortcuts_open()
             || self.capture_permission_open()
+            || self.quit_dialog_open()
     }
 
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
@@ -899,6 +903,7 @@ impl Pila {
             color_pick: self.scene_color_pick(),
             app_shortcuts: self.scene_app_shortcuts(),
             capture_permission: self.scene_capture_permission(),
+            quit_dialog: self.scene_quit_dialog(),
             shared_regions: self.share_picker.outlined.clone(),
             outline_buffers: self.share_picker.outline_buffers.clone(),
             overview,
@@ -1999,11 +2004,12 @@ impl Pila {
     pub fn run_action(&mut self, action: Action, serial: Serial) {
         // Locked, only what gets past nothing (`runs_while_locked`), a VT
         // switch (the other VT has its own login) and, in debug builds, Quit
-        // to escape a nested session. Bindings, gestures and `pila msg`
-        // refuse the rest before getting here too.
+        // (or ConfirmQuit, which can't ask then) to escape a nested session.
+        // Bindings, gestures and `pila msg` refuse the rest before getting
+        // here too.
         let allowed = action.runs_while_locked()
             || matches!(action, Action::ChangeVt(_))
-            || (cfg!(debug_assertions) && action == Action::Quit);
+            || (cfg!(debug_assertions) && action.quits());
         if self.is_locked() && !allowed {
             debug!(?action, "refused while locked");
             return;
@@ -2119,6 +2125,12 @@ impl Pila {
                 info!("quit requested");
                 self.loop_signal.stop();
             }
+            // Locked (debug builds alone get here), nothing can ask.
+            Action::ConfirmQuit if self.is_locked() => {
+                info!("quit requested while locked");
+                self.loop_signal.stop();
+            }
+            Action::ConfirmQuit => self.ask_quit(),
             Action::ChangeVt(vt) => {
                 if let Some(backend) = &mut self.backend {
                     backend.change_vt(vt);

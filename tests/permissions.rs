@@ -874,3 +874,31 @@ fn the_hot_corner_does_nothing_while_the_prompt_is_shown() {
     pila.key("Escape");
     client.wait_logged("cornered", "Stopped");
 }
+
+#[test]
+fn the_quit_dialog_and_a_capture_prompt_wait_for_each_other() {
+    let mut pila = TestPila::with_config("[permissions]\nenforce = true\n");
+    let client = pila.client();
+    pila.settle();
+
+    // Asked while the quit dialog is shown, the prompt waits for it.
+    pila.combo("Super+Shift+e");
+    pila.wait("the quit dialog", |s| {
+        s["quit_dialog"]["shown"]["text"] == true
+    });
+    let _session = start_ext_session(&client, "HEADLESS-1", "waits");
+    pila.stays("the prompt waiting", Duration::from_millis(300), |s| {
+        s["capture_permission"]["shown"].is_null()
+    });
+    pila.key("Escape");
+    pila.wait("the prompt shown once the dialog closed", |s| {
+        s["quit_dialog"]["shown"].is_null() && s["capture_permission"]["shown"]["text"] == true
+    });
+
+    // While the prompt asks, `confirm-quit` shows nothing.
+    assert!(pila.msg(&["action", "confirm-quit"]).status.success());
+    pila.settle();
+    assert!(pila.state()["quit_dialog"]["shown"].is_null());
+    pila.key("Escape");
+    client.wait_logged("waits", "Stopped");
+}

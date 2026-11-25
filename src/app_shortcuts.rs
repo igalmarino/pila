@@ -518,6 +518,7 @@ impl Pila {
             || self.share_picker_open()
             || self.color_pick_open()
             || self.capture_permission_open()
+            || self.quit_dialog_open()
             || rows.is_empty()
         {
             if let Some(reply) = reply {
@@ -714,6 +715,7 @@ impl Pila {
             || self.share_picker_open()
             || self.color_pick_open()
             || self.capture_permission_open()
+            || self.quit_dialog_open()
         {
             return None;
         }

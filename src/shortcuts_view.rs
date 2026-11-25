@@ -273,7 +273,7 @@ const WELCOME: &[(&str, Matches)] = &[
     ("Open the launcher", |a| *a == Action::Launcher),
     ("Switch windows", |a| *a == Action::CycleFocus),
     ("Close a window", |a| *a == Action::CloseFocused),
-    ("Quit Pila", |a| *a == Action::Quit),
+    ("Quit Pila", Action::quits),
     ("All the shortcuts", |a| *a == Action::ShowShortcuts),
 ];
 
@@ -312,7 +312,7 @@ const SECTIONS: &[(&str, &[(&str, Matches)])] = &[
         "Pila",
         &[
             ("Show the desktop", |a| *a == Action::ShowDesktop),
-            ("Quit", |a| *a == Action::Quit),
+            ("Quit", Action::quits),
         ],
     ),
 ];

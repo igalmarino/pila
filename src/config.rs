@@ -324,6 +324,8 @@ pub enum Action {
     ToggleMaximize,
     ToggleFullscreen,
     Quit,
+    /// Ask first, in the quit dialog (`quit_dialog.rs`).
+    ConfirmQuit,
     /// Go to a workspace, or move the focused window there (`workspaces.rs`).
     Workspace(WorkspaceTarget),
     MoveToWorkspace(WorkspaceTarget),
@@ -411,6 +413,12 @@ impl Action {
             self,
             Action::PowerOffMonitors | Action::PowerOnMonitors | Action::SwitchLayout(_)
         )
+    }
+
+    /// `quit` or `confirm-quit`: neither a client inhibiting shortcuts
+    /// nor (in debug builds, to escape a nested session) the lock stops it.
+    pub(crate) fn quits(&self) -> bool {
+        matches!(self, Action::Quit | Action::ConfirmQuit)
     }
 
     /// `None` for `"none"`, which removes a binding.
@@ -527,6 +535,7 @@ const NAMED_ACTIONS: &[(&str, Action)] = &[
     ("power-off-monitors", Action::PowerOffMonitors),
     ("power-on-monitors", Action::PowerOnMonitors),
     ("quit", Action::Quit),
+    ("confirm-quit", Action::ConfirmQuit),
 ];
 
 /// The actions that take an argument, as written (`Action::parse` reads
@@ -597,6 +606,7 @@ action_examples! {
     Action::ToggleMaximize => Action::ToggleMaximize,
     Action::ToggleFullscreen => Action::ToggleFullscreen,
     Action::Quit => Action::Quit,
+    Action::ConfirmQuit => Action::ConfirmQuit,
     Action::Workspace(_) => Action::Workspace(WorkspaceTarget::Index(1)),
     Action::MoveToWorkspace(_) => Action::MoveToWorkspace(WorkspaceTarget::Index(1)),
     Action::ToggleAlwaysOnTop => Action::ToggleAlwaysOnTop,
@@ -2609,7 +2619,7 @@ mod tests {
         }
         assert_eq!(Action::parse("none"), Ok(None));
         let err = Action::parse("explode").unwrap_err();
-        assert!(err.contains("spawn <command>, terminal,") && err.ends_with("quit, focus-output <next|prev>, move-to-output <next|prev>, workspace <n|next|prev>, move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, snap <left|right|up|down>, overview <open|close> or none)"), "{err}");
+        assert!(err.contains("spawn <command>, terminal,") && err.ends_with("quit, confirm-quit, focus-output <next|prev>, move-to-output <next|prev>, workspace <n|next|prev>, move-to-workspace <n|next|prev>, switch-layout <n|next|prev>, snap <left|right|up|down>, overview <open|close> or none)"), "{err}");
         assert_eq!(
             Action::parse("snap up"),
             Ok(Some(Action::SnapToward(Direction::Up)))

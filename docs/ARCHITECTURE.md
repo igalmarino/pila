@@ -118,8 +118,9 @@ Key flows and invariants:
   xwayland-keyboard-grab, a global Smithay shows Xwayland alone: `xwayland::has_keyboard_grab`;
   not Smithay's keyboard grab, which would hold the focus where it is and take the device's one
   grab from an input method), or
-  while the session is locked; Quit is the exception to the inhibitor (and, in debug
-  builds, to the lock). Before either check, a key that wakes powered-off monitors does only
+  while the session is locked; Quit and ConfirmQuit (`Action::quits`) are the exception to the
+  inhibitor (and, in debug builds, to the lock, where ConfirmQuit quits at once: nothing can
+  ask then). Before either check, a key that wakes powered-off monitors does only
   that, Ctrl+Alt+F<N> (the keymap's `XF86_Switch_VT_<N>`) switches VT (`Action::ChangeVt`,
   which `run_action` also runs while locked), and an open window menu takes every press.
 - **Virtual keyboards** (`virtual_keyboard.rs`, zwp_virtual_keyboard_v1): Smithay hands
@@ -822,7 +823,7 @@ Key flows and invariants:
   `rounded-corners`; `render::solid_element`, the border's radius a pixel bigger to follow the
   curve; square where the shaders didn't compile), its buffers kept in `FrameBuffers`. What's
   selected sits on the accent (`panel::accent`, `snap-preview` made opaque), its text in
-  `hover-icon`. A modal panel (the cheatsheet and welcome, the share picker) dims every output
+  `hover-icon`. A modal panel (the cheatsheet and welcome, the share picker, the quit dialog) dims every output
   with `DIM` (`panel::dim`), so it redraws them all when it shows or goes. One type scale
   (`TITLE`, `WELCOME_TITLE`, `BODY`, `NOTE`, `SECTION`, `KEY`, `HINT_KEY`); a panel with a title
   has `PADDING` around its content, its title in the same place (`panel::title`) and a footer of
@@ -962,6 +963,20 @@ Key flows and invariants:
   its footer has the Esc hint and, on the welcome, where the settings are (`notes`). The image
   and the solid buffers are kept in `Buffers` while it's shown. The state dump has it
   (`shortcuts_view_json`: its rows, keys joined by "+", and sections).
+- **Quit dialog** (`quit_dialog.rs`): `confirm-quit` (Mod+Shift+E by default) asks before
+  quitting; `quit` never does (`pila msg action quit`, a logout menu's, SIGTERM). `ask_quit`
+  shows it on the output under the pointer, unless locked or another modal panel is open
+  (`modal_panel_open`, which counts it too, so none of the others opens over it: a share or
+  capture permission asked meanwhile waits and shows when it's cancelled); shown already, it
+  stays as it is (a repeating binding, a second `pila msg`). Opening it ends a switch and
+  closes the cheatsheet, the overview and the window menu. Modal: the keyboard filter gives it
+  every press (`quit_dialog_key`: Enter, or a press the bindings map to `confirm-quit`, quits;
+  Escape cancels; the rest does nothing), `pointer_button` every press (Quit, Cancel; elsewhere
+  nothing), `Pila::under` hits nothing, every output is dimmed, and no frame tears. Drawn as
+  the capture permission prompt is (`panel.rs`: title, note, two buttons, footer hints; the
+  text one image from a thread, the panel shown only once it's there), in front of Pila's
+  other panels but the color picker and the window menu. Locking cancels it. The state dump
+  has it (`quit_dialog_json`).
 - **Simple protocols** (viewporter, fractional-scale, data-control, xdg-foreign, …) live in
   `handlers/protocols.rs`: globals are created in `init_globals`, and only state a handler
   must return is kept (`Pila::globals`). Every Smithay protocol dispatches through its

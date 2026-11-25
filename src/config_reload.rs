@@ -214,6 +214,7 @@ impl Pila {
         // The shortcuts shown: its keys, colors and corners as they are now.
         self.shortcuts_config_changed();
         self.draw_capture_permission_text();
+        self.draw_quit_dialog_text();
         self.queue_redraw();
     }
 

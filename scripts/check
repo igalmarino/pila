@@ -103,7 +103,7 @@ if [ "${1:-}" = "--workload" ]; then
         if pid=$(pila_pid); then
             kill -TERM "$pid"
         else
-            mark "Pila not found among the ancestors; quit it with Mod+Shift+E"
+            mark "Pila not found among the ancestors; quit it with Mod+Shift+E, then Enter"
         fi
     }
     # `pila msg ...` with the Pila running this.
@@ -580,7 +580,7 @@ EOF
         echo "Log filter: $RUST_LOG"
     fi
     echo "Runs Pila with scripted scenarios for about a minute; it quits by itself."
-    echo "Nothing to do but wait (to stop early: Mod+Shift+E)."
+    echo "Nothing to do but wait (to stop early: Mod+Shift+E, then Enter)."
     workload="$(printf '%q' "$self") --workload"
     if $nested; then
         if ! $installed; then

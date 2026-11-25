@@ -99,5 +99,5 @@ export XDG_DESKTOP_PORTAL_DIR="$portal_dir"
 # Keep the last run's log: after a crash, it's the one that matters.
 [ -f pila-tty.log ] && mv -f pila-tty.log pila-tty.log.old
 
-echo "Starting $bin ${config_args[*]:-} ${pila_args[*]:-}; log in pila-tty.log. Quit with Mod+Shift+E."
+echo "Starting $bin ${config_args[*]:-} ${pila_args[*]:-}; log in pila-tty.log. Quit with Mod+Shift+E, then Enter."
 exec dbus-run-session -- "$bin" --backend udev "${config_args[@]}" "${pila_args[@]}" 2>pila-tty.log

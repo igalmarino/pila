@@ -470,7 +470,12 @@ fn quit_still_works_with_an_inhibitor() {
     );
     client.flush();
     client.wait_logged("inhibitor", "Active");
+    // Its dialog opens, and takes the keys from the inhibiting window.
     pila.combo("Super+Shift+e");
+    pila.wait("the quit dialog", |s| {
+        s["quit_dialog"]["shown"]["text"] == true
+    });
+    pila.key("Return");
     assert!(pila.wait_exit().success());
 }
 
