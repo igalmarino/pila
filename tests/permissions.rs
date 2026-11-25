@@ -516,7 +516,7 @@ fn a_request_given_up_takes_its_prompt_away() {
 fn forgetting_all_counts_what_was_listed() {
     let mut pila = TestPila::with_config("[permissions]\nenforce = true\n");
     let client = pila.client();
-    pila.settle();
+    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
     assert_eq!(
         msg_json(&pila, &["forget-capture-permission", "all"])["forgotten"],
         0
@@ -821,4 +821,38 @@ fn remember_toggled_after_the_prompts_monitor_is_unplugged_shows() {
     pila.wait_pixel_is(bx, by, "the box checked", |p| p != unchecked);
     pila.key("Escape");
     client.wait_logged("moved", "Stopped");
+}
+
+/// Forgetting before the saved permissions are read fails, saying why: it
+/// would forget nothing, and those read after would be back.
+#[test]
+fn forgetting_before_the_saved_permissions_are_read_fails() {
+    let exe = current_exe();
+    let (fifo, env) = held_store();
+    let mut pila = TestPila::start_with(Options {
+        config: "[permissions]\nenforce = true\n".into(),
+        env,
+        ..Default::default()
+    });
+    pila.settle();
+    for args in [
+        ["forget-capture-permission", "all"],
+        ["forget-capture-permission", "0123"],
+    ] {
+        let out = pila.msg(&args);
+        assert!(!out.status.success(), "{args:?} succeeded");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not read yet"), "{args:?}: {stderr}");
+    }
+    write_held_store(
+        &fifo,
+        &format!("[{{\"id\": \"0123\", \"executable\": {exe:?}}}]"),
+    );
+    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
+    msg_json(&pila, &["forget-capture-permission", "0123"]);
+    assert_eq!(
+        pila.state()["capture_permission"]["grants"],
+        json!([]),
+        "forgotten"
+    );
 }

@@ -286,6 +286,12 @@ impl Pila {
         }
     }
 
+    /// Whether the remembered shares are read (when the portal starts
+    /// serving): forgetting waits for it.
+    pub(crate) fn screen_grants_read(&self) -> bool {
+        self.screencast.grants.store.is_some()
+    }
+
     /// Forget grant `id`; whether there was one.
     pub(crate) fn forget_screen_grant(&mut self, id: &str) -> bool {
         let Some(store) = self.screencast.grants.store.as_mut() else {

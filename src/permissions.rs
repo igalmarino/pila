@@ -1060,6 +1060,11 @@ impl Pila {
             .collect()
     }
 
+    /// Whether the saved permissions are read (forgetting waits for it).
+    pub(crate) fn capture_permissions_read(&self) -> bool {
+        self.capture_permissions.loaded
+    }
+
     /// Forget one remembered or session capture permission by `id`. Returns
     /// `true` if one was found and removed.
     pub(crate) fn forget_capture_permission(&mut self, id: &str) -> bool {

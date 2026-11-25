@@ -437,6 +437,16 @@ fn handle(
             "protocol": PROTOCOL,
             "screen_shares": state.ipc_screen_shares(),
         })),
+        // Forgetting what isn't read yet would forget nothing, and it would
+        // be back once read.
+        Request::ForgetScreenShare(_) if !state.screen_grants_read() => Err(
+            "the remembered screen shares are not read yet: Pila reads them once it serves \
+             the desktop portal"
+                .to_string(),
+        ),
+        Request::ForgetCapturePermission(_) if !state.capture_permissions_read() => {
+            Err("the saved capture permissions are not read yet: try again".to_string())
+        }
         // Forgetting takes access away: allowed while locked too.
         Request::ForgetScreenShare(Some(id)) => match state.forget_screen_grant(&id) {
             true => Ok(json!({})),

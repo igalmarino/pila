@@ -86,9 +86,9 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `close` | `id` | — |
 | `minimize` | `id` | — (succeeds even if already minimized; `focus` restores it) |
 | `screen-shares` | — | `protocol`, `screen_shares` |
-| `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
+| `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the remembered shares (it does once it serves the portal) |
 | `capture-permissions` | — | `protocol`, `capture_permissions` |
-| `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
+| `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the saved permissions (at startup) |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
 `quit`), while queries continue to work, and so do `forget-screen-share` and

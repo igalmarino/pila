@@ -2033,6 +2033,23 @@ fn a_forgotten_share_is_asked_for_again() {
     assert!(screen_shares(&pila).is_empty());
 }
 
+/// With no portal served (no session bus), the remembered shares aren't
+/// read: forgetting them fails, saying why, rather than forget nothing.
+#[test]
+fn forgetting_shares_before_they_are_read_fails() {
+    let mut pila = TestPila::start();
+    for args in [
+        ["forget-screen-share", "all"],
+        ["forget-screen-share", "0123"],
+    ] {
+        let out = pila.msg(&args);
+        assert!(!out.status.success(), "{args:?} succeeded");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not read yet"), "{args:?}: {stderr}");
+    }
+    pila.settle();
+}
+
 /// Grants kept on disk from before (another run of Pila) restore: a
 /// region, at its place.
 #[test]
