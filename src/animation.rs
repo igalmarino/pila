@@ -800,7 +800,26 @@ impl Pila {
             .animations
             .resizing
             .iter()
-            .map(|r| self.resizing_bounds(r, now))
+            .map(|r| {
+                let rect = self.resizing_bounds(r, now);
+                if r.progress.is_some() || now < r.began + RESIZE_WAIT {
+                    return rect;
+                }
+                // It starts moving below (the client didn't answer in
+                // time): where its first frame draws it, shadow stretched,
+                // as when it answers (`geometry_committed`).
+                let start = self
+                    .resizing_bounds_at(r, 0.0)
+                    .map_or(rect, |s| s.merge(rect));
+                if let Some(outputs) = &mut outputs {
+                    for output in self.outputs_overlapping(start) {
+                        if !outputs.contains(&output) {
+                            outputs.push(output);
+                        }
+                    }
+                }
+                start
+            })
             .collect();
         let animations = &mut self.animations;
         animations.appearing.retain(|a| {

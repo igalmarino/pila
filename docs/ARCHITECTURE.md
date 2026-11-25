@@ -998,7 +998,9 @@ Key flows and invariants:
   `committed_size`: an X11 window's buffer, since X applies a configure at once; or
   `RESIZE_WAIT`) the live window is hidden (alpha 0) and the snapshot stands at the old
   rect; then both are stretched onto a rect moving to the new one (`FrameMap`), the
-  snapshot fading out in front. Textures are always drawn with their whole `src`
+  snapshot fading out in front; its first frame redraws every output its stretched shadow
+  reaches (`resizing_bounds_at` at 0), whether the client answered or `RESIZE_WAIT` ran
+  out. Textures are always drawn with their whole `src`
   (`texture_element`): without it Smithay samples a destination-sized corner, which
   crops a shrunk texture and repeats a stretched one. Window and layer rules can turn them off
   (`animates_window`, `animates_layer`; see "Window and layer rules"). Transient layer
