@@ -1128,7 +1128,9 @@ Key flows and invariants:
   every share's first frame), so the read-back's mapping goes, with what to write
   (`capture::Write::OffLoop`), to the copy thread (`copy_thread.rs`: one, started at the
   first copy, jobs in order, results back through a calloop channel in the same order,
-  `copies_off_loop` in the state), and `ready` follows from there; a frame destroyed once
+  `copies_off_loop` in the state), and `ready` follows from there (with no thread to be had
+  the write happens on the event loop, and what follows it still after the call,
+  `then_later`); a frame destroyed once
   its write started gets it all the same, but no `ready`. Smithay's shm pools may be
   written from any thread (locked while written, a SIGBUS caught there); the mapping stays
   valid while the job holds it, and the renderer outlives the thread (`Captures`, which

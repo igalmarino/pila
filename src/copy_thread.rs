@@ -58,7 +58,9 @@ impl Drop for CopyThread {
 
 impl Pila {
     /// Run `job` on the copy thread, then `then` on the event loop with its
-    /// result; on the event loop right away if the thread can't be started.
+    /// result; on the event loop right away if the thread can't be started,
+    /// `then` still after this call (as from the thread: its caller may hold
+    /// what `then` looks for, `Pila::when_copied`).
     pub(crate) fn write_off_loop(
         &mut self,
         job: Job,
@@ -67,18 +69,29 @@ impl Pila {
         if self.capture.copy_thread.jobs.is_none() {
             if let Err(err) = self.start_copy_thread() {
                 warn!(err, "capture: no copy thread; copying on the event loop");
-                return then(self, job());
+                return self.then_later(then, job());
             }
         }
         let thread = &mut self.capture.copy_thread;
         let Some(jobs) = &thread.jobs else {
-            return then(self, job());
+            return self.then_later(then, job());
         };
         match jobs.send(job) {
             Ok(()) => thread.waiting.push_back(Box::new(then)),
             // Gone since: its `Closed` fails what it left.
-            Err(mpsc::SendError(job)) => then(self, job()),
+            Err(mpsc::SendError(job)) => self.then_later(then, job()),
         }
+    }
+
+    /// Run `then` with `result` after this iteration of the event loop.
+    fn then_later(
+        &mut self,
+        then: impl FnOnce(&mut Pila, Result<(), CopyError>) + 'static,
+        result: Result<(), CopyError>,
+    ) {
+        self.loop_handle
+            .insert_idle(move |state| then(state, result));
+        self.wake.ping();
     }
 
     fn start_copy_thread(&mut self) -> Result<(), String> {
