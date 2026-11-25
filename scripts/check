@@ -47,9 +47,10 @@
 #
 # pila quits by itself when the scenarios are done (about a minute). On a
 # TTY the base is your config (~/.config/pila/config.toml: monitors,
-# keyboard, input) without its [animations], rules and workspaces, so that
-# what the checks expect doesn't depend on them: animations on, their own
-# rules, four workspaces.
+# keyboard, input) without its [animations], rules, workspaces and capture
+# permissions, so that what the checks expect doesn't depend on them:
+# animations on, their own rules, four workspaces, grim and the stream
+# capturing unasked (a prompt would hold the scenarios).
 # Nested there's no base. Programs it uses when installed: kitty or foot
 # (needed), xterm, python3 (minimize, maximize, workspaces, the capture stream, the
 # wallpaper's picture), swaybg (wallpaper), fuzzel (launcher), grim (capture), waybar
@@ -426,7 +427,8 @@ but wait; it quits by itself.
 
   (no option)  on bare metal: run it from a TTY (Ctrl+Alt+F3, log in), not
                from a graphical session, which can keep running on its VT;
-               the base config is yours, without animations and rules
+               the base config is yours, without animations, rules and
+               capture permissions
   --nested     in a window of the current session
   --vrr        on bare metal, with adaptive sync asked of every monitor
   --judge      judge an existing log again
@@ -517,10 +519,10 @@ if ! $judge_only; then
             ;;
     esac
     if [ -n "$base_config" ]; then
-        awk '/^[ \t]*\[/ { table = 1; skip = ($0 ~ /^[ \t]*\[(animations\]|\[window-rule\]\]|\[layer-rule\]\])/) }
+        awk '/^[ \t]*\[/ { table = 1; skip = ($0 ~ /^[ \t]*\[(animations\]|permissions\]|\[permission\]\]|\[window-rule\]\]|\[layer-rule\]\])/) }
              !table && /^[ \t]*(workspaces|render-late)[ \t]*=/ { next }
              !skip' "$base_config" >>"$config"
-        echo "Base config: $base_config (without its [animations], rules and workspaces)."
+        echo "Base config: $base_config (without its [animations], rules, workspaces and capture permissions)."
     fi
     if $vrr; then
         # The first [[output]] that matches a monitor applies: each of yours
