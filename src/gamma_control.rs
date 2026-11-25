@@ -88,11 +88,18 @@ impl Pila {
         }
     }
 
-    /// An output went away: its control is over.
-    pub fn gamma_output_removed(&mut self, output: &Output) {
+    /// The ramps a control set no longer fit its output (the CRTC's gamma
+    /// size changed): the control is over, and its client can make another,
+    /// told the new size.
+    pub fn gamma_control_lost(&mut self, output: &Output) {
         if let Some(control) = self.outputs.gamma.remove(output) {
             control.failed();
         }
+    }
+
+    /// An output went away: its control is over.
+    pub fn gamma_output_removed(&mut self, output: &Output) {
+        self.gamma_control_lost(output);
     }
 }
 

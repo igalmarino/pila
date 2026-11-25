@@ -694,7 +694,18 @@ pub(super) fn frame_finish(
     let Some(surface) = data.outputs.get_mut(&id) else {
         return;
     };
-    surface.crtc_state.frame_pending = false;
+    // Every commit on its way sets it (a frame, `queue_frame`; a gamma
+    // change): one that didn't is from before the CRTC was cleared and set
+    // up again (an output turned off and on at once, `retrain_bad_links`),
+    // delivered late. Taken for the new setup's, it would mark a frame not
+    // yet queued as shown, or confirm a lock before its frame is.
+    if !std::mem::take(&mut surface.crtc_state.frame_pending) {
+        debug!(
+            name = surface.output.name(),
+            "a vblank from before the output was set up again: ignored"
+        );
+        return;
+    }
     // A gamma change's vblank (`gamma.rs`), not a frame's: nothing new was
     // shown, and `last_vblank` stays the last frame's, so a running
     // animation counts this refresh as missed.

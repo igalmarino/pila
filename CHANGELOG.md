@@ -27,6 +27,9 @@
 - **Fixed:** A monitor whose DisplayPort link went bad and that couldn't be turned back on stayed
   off for good; it now comes back with input or `power-on-monitors`, and power clients are told
   it's off.
+- **Fixed:** A monitor set up again on a CRTC with another gamma size lost its night light
+  (wlsunset) until the client set its ramps again on its own; the client is now told at once,
+  so it does.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

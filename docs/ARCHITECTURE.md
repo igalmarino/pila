@@ -319,7 +319,9 @@ Key flows and invariants:
   then, so no frame reads a file). Redraws are per output (see "Redraws are on demand"):
   a request marks its outputs (`OutputSurface::ask_redraw`) and schedules one idle
   `render_all`, which renders those; an output with a frame in flight renders at its vblank
-  (`frame_finish`), which also sends presentation feedback with the kernel's timestamp. A
+  (`frame_finish`), which also sends presentation feedback with the kernel's timestamp; a vblank
+  with no commit on its way (`frame_pending` unset) is one from before the CRTC was cleared and
+  set up again, delivered late, and is ignored. A
   redraw that finds nothing new queues no frame, so nothing would pace the next: a client
   committing nothing in a loop of frame callbacks (no new picture: no buffer or one without
   damage, `redraw::brings_content`) or the pointer moving with the cursor hidden would make Pila
@@ -386,7 +388,8 @@ Key flows and invariants:
   releases held keys; `ActivateSession` takes DRM master, resets each device (`activate(true)`:
   every connector off, one modeset, since another compositor may have left them on other
   CRTCs), starts each output's `CrtcState` over, re-applies gamma (`reapply_gamma`, which drops
-  ramps that no longer fit the CRTC's gamma size, `ramp_fits`, rather than read past them),
+  ramps that no longer fit the CRTC's gamma size, `ramp_fits`, rather than read past them, and
+  fails their control, `Pila::gamma_control_lost`, so its client makes one of the new size),
   powers on the outputs asked to come on while away (`power_on_when_active`: without DRM master
   `set_output_power` can't set a CRTC up, so it remembers and says yes; `output_power` counts
   it as on, so `power-off-monitors` meanwhile turns it back off), then scans the

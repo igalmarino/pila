@@ -852,6 +852,11 @@ impl UdevData {
                 size, "the CRTC's gamma size changed: its ramps go back to linear"
             );
             surface.gamma = None;
+            // Its client is told, to make a control of the new size and set
+            // its ramps again (wlsunset does), not to think them still set.
+            let lost = output.clone();
+            self.loop_handle
+                .insert_idle(move |state| state.gamma_control_lost(&lost));
         }
         let surface = &self.outputs[&id];
         let linear;
