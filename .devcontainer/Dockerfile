@@ -34,6 +34,8 @@ ENV TZ="${TZ}" \
 #   - GStreamer's PipeWire source and the elements after it in Kooha's
 #     recording pipeline (videoflip, videorate): to take a portal share as
 #     GStreamer recorders do (discussion #12: Kooha recorded 0 seconds)
+#   - wf-recorder: a wlr-screencopy recorder, to record alongside a portal
+#     share (discussion #17: it exited when Kooha started recording)
 #   - swayidle, ironbar and nwg-panel: desktop tools to try on Pila for the
 #     manual's list of what works ("Building your desktop")
 RUN pacman -Syu --noconfirm --needed \
@@ -45,7 +47,7 @@ RUN pacman -Syu --noconfirm --needed \
         fuzzel waybar otf-font-awesome swaybg mako libnotify swaylock swayidle wl-clipboard wlr-randr \
         ironbar nwg-panel \
         xorg-xwayland xterm xorg-xeyes xorg-xdpyinfo \
-        grim slurp wtype wlopm wlsunset ffmpeg \
+        grim slurp wtype wlopm wlsunset ffmpeg wf-recorder \
         gst-plugin-pipewire gst-plugins-base gst-plugins-good \
         fcitx5 fcitx5-rime rime-luna-pinyin wqy-microhei noto-fonts-cjk \
     && rm -rf /var/cache/pacman/pkg/* \
