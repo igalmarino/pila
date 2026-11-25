@@ -755,7 +755,8 @@ prompt appears, so an `Enter` typed into an app as it pops up doesn't allow anyt
 program isn't asked again until it starts over (connects again). While the screen is locked,
 programs that would be asked are refused. List grants with `pila msg capture-permissions`, and
 revoke one with `pila msg forget-capture-permission <id>` (or `all`), which also stops active
-captures from that program. Portal screen sharing and screenshots are unaffected and always use
+captures from that program. Turning `enforce` on while programs capture stops those that no rule
+or grant allows, without asking. Portal screen sharing and screenshots are unaffected and always use
 Pila's picker.
 
 The executable path is what's checked, so this guards against programs you didn't expect, not

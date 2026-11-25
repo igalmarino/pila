@@ -5,6 +5,7 @@ mod common;
 
 use common::protocols::read_pixel;
 use common::*;
+use std::time::Duration;
 use wayland_client::protocol::wl_shm::Format;
 use wayland_protocols::ext::{
     image_capture_source::v1::client::{
@@ -656,4 +657,45 @@ fn a_deny_rule_reloaded_fails_a_waiting_screencopy() {
          [[permission]]\nexecutable = {exe:?}\naccess = \"deny\"\n"
     ));
     client.wait_logged("second", "Failed");
+}
+
+/// Turning `enforce` on with a reload keeps a capture a rule allows going:
+/// one started while `enforce` was off never had its executable read.
+#[test]
+fn enforce_turned_on_keeps_an_allowed_capture() {
+    let exe = current_exe();
+    let mut pila = TestPila::with_config("[permissions]\nenforce = false\n");
+    let client = pila.client();
+    pila.settle();
+    let _session = start_ext_session(&client, "HEADLESS-1", "running");
+    client.wait_logged("running", "Done");
+    pila.write_config(&format!(
+        "[permissions]\nenforce = true\n\
+         [[permission]]\nexecutable = {exe:?}\naccess = \"allow\"\n"
+    ));
+    pila.wait("reloaded", |s| s["capture_permission"]["enforce"] == true);
+    // The executable is read on a thread.
+    pila.stays("no prompt", Duration::from_millis(300), |s| {
+        s["capture_permission"]["shown"].is_null()
+    });
+    pila.settle();
+    client.roundtrip();
+    assert!(!client.has_logged("running", "Stopped"));
+}
+
+/// Turning `enforce` on with a reload stops a capture a rule denies, once
+/// its executable is read.
+#[test]
+fn enforce_turned_on_stops_a_denied_capture() {
+    let exe = current_exe();
+    let mut pila = TestPila::with_config("[permissions]\nenforce = false\n");
+    let client = pila.client();
+    pila.settle();
+    let _session = start_ext_session(&client, "HEADLESS-1", "running");
+    client.wait_logged("running", "Done");
+    pila.write_config(&format!(
+        "[permissions]\nenforce = true\n\
+         [[permission]]\nexecutable = {exe:?}\naccess = \"deny\"\n"
+    ));
+    client.wait_logged("running", "Stopped");
 }

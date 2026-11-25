@@ -511,26 +511,27 @@ impl Pila {
             self.decide_capture(client_id, identity, request);
             return;
         }
-        let pid = client.get_data::<ClientState>().and_then(|s| s.pid);
-        let Some(pid) = pid else {
-            let identity = ClientIdentity { executable: None };
-            if let Some(data) = client.get_data::<ClientState>() {
-                let _ = data.executable.set(identity.clone());
-            }
-            self.decide_capture(client_id, identity, request);
-            return;
-        };
-
         let first = !self.capture_permissions.resolving.contains_key(&client_id);
         self.capture_permissions
             .resolving
-            .entry(client_id.clone())
+            .entry(client_id)
             .or_default()
             .push(request);
-        if !first {
-            return;
+        if first {
+            self.resolve_executable(client);
         }
+    }
 
+    /// Read `client`'s executable on a thread, then decide the requests
+    /// waiting for it in `resolving` and stop its captures if it isn't
+    /// allowed (`stop_denied_captures`).
+    fn resolve_executable(&mut self, client: &Client) {
+        let pid = client.get_data::<ClientState>().and_then(|s| s.pid);
+        let Some(pid) = pid else {
+            let identity = ClientIdentity { executable: None };
+            self.client_executable_resolved(client.clone(), identity);
+            return;
+        };
         let (sender, channel) = calloop::channel::channel();
         let spawned = std::thread::Builder::new()
             .name("pila-client-exe".into())
@@ -564,9 +565,11 @@ impl Pila {
             let _ = data.executable.set(identity.clone());
         }
         let client_id = client.id();
-        let Some(requests) = self.capture_permissions.resolving.remove(&client_id) else {
-            return;
-        };
+        let requests = self
+            .capture_permissions
+            .resolving
+            .remove(&client_id)
+            .unwrap_or_default();
         for request in requests {
             if !request.is_alive() {
                 continue;
@@ -577,6 +580,8 @@ impl Pila {
                 self.decide_capture(client_id.clone(), identity.clone(), request);
             }
         }
+        // Its captures started while `enforce` was off, unchecked.
+        self.stop_denied_captures();
     }
 
     fn decide_capture(
@@ -1017,40 +1022,42 @@ impl Pila {
         if !self.config.permissions.enforce {
             return;
         }
-        let client_exe = |dh: &smithay::reexports::wayland_server::DisplayHandle,
-                          id: smithay::reexports::wayland_server::backend::ObjectId|
-         -> Option<(ClientId, Option<String>)> {
-            let client = dh.get_client(id).ok()?;
-            let exe = client
-                .get_data::<ClientState>()
-                .and_then(|s| s.executable.get())
-                .and_then(|id| id.executable.clone());
-            Some((client.id(), exe))
-        };
-
         let rules = &self.config.permission_rules;
         let grants = &self.capture_permissions.grants;
         let client_grants = &self.capture_permissions.client_grants;
-        let allowed = |(cid, exe): &(ClientId, Option<String>)| -> bool {
-            if exe.is_none() && client_grants.contains(cid) {
-                return true;
-            }
-            evaluate(rules, grants, exe.as_deref()) == Decision::Allow
+        // Whether the client of `id` may capture: `None` while its
+        // executable isn't known yet (it captured while `enforce` was off),
+        // to be read and checked then (`resolve_executable`).
+        let mut unresolved = Vec::new();
+        let mut allowed = |dh: &smithay::reexports::wayland_server::DisplayHandle,
+                           id: smithay::reexports::wayland_server::backend::ObjectId|
+         -> Option<bool> {
+            let client = dh.get_client(id).ok()?;
+            let Some(identity) = client
+                .get_data::<ClientState>()
+                .and_then(|s| s.executable.get())
+            else {
+                unresolved.push(client);
+                return None;
+            };
+            let exe = identity.executable.as_deref();
+            Some(
+                (exe.is_none() && client_grants.contains(&client.id()))
+                    || evaluate(rules, grants, exe) == Decision::Allow,
+            )
         };
 
         let mut stopped = Vec::new();
         for session in &self.capture.sessions {
-            if session.is_authorized() {
-                if let Some(info) = client_exe(&self.display_handle, session.resource_id()) {
-                    if !allowed(&info) {
-                        stopped.push(session.resource());
-                    }
-                }
+            if session.is_authorized()
+                && allowed(&self.display_handle, session.resource_id()) == Some(false)
+            {
+                stopped.push(session.resource());
             }
         }
         let dh = &self.display_handle;
         self.capture.screencopies.retain(|frame| {
-            let keep = client_exe(dh, frame.id()).is_none_or(|info| allowed(&info));
+            let keep = allowed(dh, frame.id()) != Some(false);
             if !keep && frame.is_alive() {
                 frame.failed();
             }
@@ -1058,6 +1065,13 @@ impl Pila {
         });
         for resource in stopped {
             self.deny_capture_session(&resource);
+        }
+        for client in unresolved {
+            let entry = self.capture_permissions.resolving.entry(client.id());
+            if let std::collections::hash_map::Entry::Vacant(entry) = entry {
+                entry.insert(Vec::new());
+                self.resolve_executable(&client);
+            }
         }
     }
 

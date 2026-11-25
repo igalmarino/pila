@@ -1791,7 +1791,9 @@ Key flows and invariants:
   kernel's ` (deleted)` (a program updated while running, `executable_path`). `pila msg capture-permissions` lists grants and `pila msg forget-capture-permission`
   revokes one or all (allowed while locked), stopping active sessions whose client is no longer
   allowed (`stop_denied_captures`); live reload re-evaluates open prompts and active sessions
-  (`permissions_config_changed`).
+  (`permissions_config_changed`). A capture started while `enforce` was off has no executable
+  read yet: turning it on reads it then (`resolve_executable`) and stops the capture only if it
+  isn't allowed, never before it's known.
 - **IPC** (`ipc.rs`, `ipc_client.rs`; public format in `docs/IPC.md`): a Unix socket on the event
   loop, for `pila msg`, opened on every backend and removed on the way out. Nothing a client does may
   hold the loop: reads and writes don't block, a client gets `READS_PER_WAKE` reads per wake, what
