@@ -14,6 +14,10 @@
 - **Fixed:** `pila msg forget-screen-share` answered "forgot 0" before Pila had read the
   remembered shares (it does once it serves the portal), and those read after were back; it now
   fails, saying why.
+- **Fixed:** A remembered screen share forgotten right after one was remembered (or app
+  shortcuts changed twice in quick succession) could be back after a restart: two saves of the
+  same file could finish in the wrong order, or write the same temporary file at once. Saves
+  are now written in the order they were made.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

@@ -403,22 +403,12 @@ fn save_store(grants: Vec<Grant>) {
     let Some(path) = state_file::path(FILE_NAME) else {
         return;
     };
-    let Some(text) = format_store(&grants) else {
-        return;
-    };
-    let spawned = std::thread::Builder::new()
-        .name("pila-permissions-save".into())
-        .spawn(move || {
-            if let Err(err) = state_file::write(&path, &text) {
-                warn!(path = %path.display(), ?err, "permissions: can't save capture permissions");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(
-            ?err,
-            "permissions: can't spawn thread to save capture permissions"
-        );
-    }
+    state_file::save(
+        "pila-permissions-save",
+        path,
+        "the capture permissions",
+        move || format_store(&grants).ok_or_else(|| std::io::Error::other("not serializable")),
+    );
 }
 
 impl Pila {

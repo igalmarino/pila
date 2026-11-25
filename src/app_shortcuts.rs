@@ -187,20 +187,15 @@ fn save_store(store: Store) {
     let Some(path) = store_path() else {
         return;
     };
-    let spawned = std::thread::Builder::new()
-        .name("pila-app-shortcuts".into())
-        .spawn(move || {
+    crate::state_file::save(
+        "pila-app-shortcuts",
+        path,
+        "the apps' shortcuts",
+        move || {
             let file = HashMap::from([("apps".to_string(), store)]);
-            let written = serde_json::to_string_pretty(&file)
-                .map_err(std::io::Error::other)
-                .and_then(|text| crate::state_file::write(&path, &text));
-            if let Err(err) = written {
-                warn!(%err, path = %path.display(), "can't save the apps' shortcuts");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(?err, "can't save the apps' shortcuts");
-    }
+            serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
+        },
+    );
 }
 
 /// A signal to the app's session.

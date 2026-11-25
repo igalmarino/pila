@@ -110,20 +110,15 @@ fn save_store(store: &Store) {
         .filter(|(_, grant)| grant.persistent)
         .map(|(id, grant)| (id.clone(), grant.clone()))
         .collect();
-    let spawned = std::thread::Builder::new()
-        .name("pila-screen-shares".into())
-        .spawn(move || {
+    crate::state_file::save(
+        "pila-screen-shares",
+        path,
+        "the screen shares remembered",
+        move || {
             let file = HashMap::from([("grants".to_string(), kept)]);
-            let written = serde_json::to_string_pretty(&file)
-                .map_err(std::io::Error::other)
-                .and_then(|text| crate::state_file::write(&path, &text));
-            if let Err(err) = written {
-                warn!(%err, path = %path.display(), "can't save the screen shares remembered");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(?err, "can't save the screen shares remembered");
-    }
+            serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
+        },
+    );
 }
 
 /// A share's grant, as `Start` answers it: its id, the `persist_mode`

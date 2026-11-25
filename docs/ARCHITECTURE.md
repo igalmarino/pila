@@ -1351,10 +1351,12 @@ Key flows and invariants:
   `restore_data` and `persist_mode`); a new one is kept only then (`keep_screen_grant`, from
   `handle_cast_events`), so a share that never started leaves none. `persist_mode` 2 grants are
   saved to `$XDG_STATE_HOME/pila/screen-shares.json` (`save_store`, on a thread, whole or not at
-  all, mode 0600, `state_file::write`), read by the portal's thread at startup
+  all, mode 0600, `state_file::save`: saves are numbered as asked and one written after a later
+  one is skipped, so a revoked grant never comes back; the app shortcuts and capture permissions
+  save the same way), read by the portal's thread at startup
   (`Request::ScreenGrants`, merged with any made meanwhile); mode 1 grants stay in memory.
   `pila msg screen-shares` lists them, `forget-screen-share` forgets one or all (allowed while
-  locked: it only takes access away).
+  locked: it only takes access away; refused until the file is read).
 - **Toplevel management** (`toplevel_management.rs`, wlr-foreign-toplevel-management v3):
   taskbars act on windows named by their ext-foreign-toplevel-list identifier
   (`foreign_toplevel::window_for_identifier`). Listeners are updated by diffing in
