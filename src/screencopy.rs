@@ -71,6 +71,10 @@ pub type FrameData = Mutex<Option<FrameState>>;
 /// the region (as x, y, w, h: `Rectangle` isn't hashable).
 pub type TrackerKey = (ObjectId, String, (i32, i32, i32, i32), u64);
 
+/// What a frame's presentation time is kept by, the next frame waiting for a
+/// later refresh: the manager, the output and the region (x, y, w, h).
+pub type PresentedKey = (ObjectId, String, (i32, i32, i32, i32));
+
 /// Create the global. Called once from `Pila::new`.
 pub fn init_global(dh: &DisplayHandle) {
     dh.create_global::<Pila, ZwlrScreencopyManagerV1, ()>(VERSION, ());
@@ -171,8 +175,8 @@ impl Pila {
     }
 
     /// Copy every frame whose client asked for it: all of them, or (with
-    /// damage) the ones whose region changed since that client's last copy.
-    /// Called after each rendered frame and when a plain copy is requested.
+    /// damage) the ones whose region changed since that client's last copy,
+    /// one per refresh. Called from `after_frames`.
     /// `input`: the scene of this pass, built by the first copy that needs it
     /// (shared with the captures, `after_frames`).
     pub fn process_screencopies(&mut self, input: &mut Option<crate::render::FrameInput>) {
@@ -191,7 +195,8 @@ impl Pila {
         }
     }
 
-    /// Copy one frame; `false` if it's still waiting for a change.
+    /// Copy one frame; `false` if it's still waiting for its output's next
+    /// refresh or for a change.
     fn process_screencopy(
         &mut self,
         frame: &ZwlrScreencopyFrameV1,
@@ -229,6 +234,26 @@ impl Pila {
         if physical_size(&output, region, geo.size) != Some(size) {
             frame.failed();
             return true;
+        }
+        // A frame per refresh: another output drawing or another capture
+        // (`capture_due`: a portal share starting, an ext frame) would copy
+        // a second frame presented at the same time as the last, which stops
+        // recorders (#17). It waits for its output's next frame, before its
+        // damage is taken.
+        let shown: std::time::Duration = self.presented_at(Some(&output)).into();
+        let presented_key = (
+            manager.id(),
+            output.name(),
+            (region.loc.x, region.loc.y, region.size.w, region.size.h),
+        );
+        if self
+            .capture
+            .screencopy_presented
+            .get(&presented_key)
+            .is_some_and(|&last| shown <= last)
+        {
+            self.request_redraw_as(&output, crate::redraw::Content::Maybe);
+            return false;
         }
 
         // Everything taken from `self` before borrowing the renderer.
@@ -307,8 +332,10 @@ impl Pila {
                 return true;
             }
         };
-        let shown = self.presented_at(Some(&output));
-        let (hi, lo, nanos) = capture::split_timestamp(shown.into());
+        self.capture
+            .screencopy_presented
+            .insert(presented_key, shown);
+        let (hi, lo, nanos) = capture::split_timestamp(shown);
         let frame = frame.clone();
         let wanted = frame.clone();
         self.when_copied(
@@ -353,6 +380,9 @@ impl Pila {
         self.capture
             .screencopy_trackers
             .retain(|(_, name, ..), _| name != output.name().as_str());
+        self.capture
+            .screencopy_presented
+            .retain(|(_, name, _), _| name != output.name().as_str());
     }
 }
 
@@ -424,6 +454,10 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for Pila {
         state
             .capture
             .screencopy_trackers
+            .retain(|(m, ..), _| *m != resource.id());
+        state
+            .capture
+            .screencopy_presented
             .retain(|(m, ..), _| *m != resource.id());
     }
 }

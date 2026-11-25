@@ -72,13 +72,16 @@ impl Backend {
     }
 
     /// When a frame of `output` built `now` would show, for commits that ask
-    /// to appear no earlier than a given moment (`commit_pacing.rs`). Nested
-    /// and headless have no vblank to go by.
+    /// to appear no earlier than a given moment (`commit_pacing.rs`) and for
+    /// captures' presentation times (`Pila::presented_at`). The next vblank on
+    /// bare metal; headless counts from its last redraw the same way (its
+    /// timer is its vblank); nested has no vblank to go by: a period from now.
     pub fn next_frame_time(&self, output: &Output, now: Time<Monotonic>) -> Time<Monotonic> {
         let period = crate::frame_stats::refresh_period(output);
         let vblank = match self {
             Backend::Udev(data) => data.last_vblank_time(output),
-            Backend::Winit(_) | Backend::Headless(_) => None,
+            Backend::Headless(data) => data.last_render_time(output),
+            Backend::Winit(_) => None,
         };
         match vblank {
             Some(last) => crate::commit_pacing::next_vblank(last, now.into(), period).into(),

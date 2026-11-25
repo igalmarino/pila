@@ -1141,8 +1141,15 @@ Key flows and invariants:
   that blit. Their time counts as captures, not as the output's frame.
   A frame's presentation time (ext's `presentation_time`, screencopy's `ready`) is when its
   content shows (`Pila::presented_at`: `Backend::next_frame_time` of its output, since copies
-  follow the frame just queued there; now for a window off every output), which recorders
-  use to keep sound and picture in step.
+  follow the frame just queued there; headless counts from its last redraw as bare metal does
+  from its vblank, `HeadlessData::last_render_time`; now for a window off every output), which
+  recorders use to keep sound and picture in step. A frame per refresh: a copy whose
+  presentation time isn't after its session's last (`Session::last_presented`), or its screencopy
+  manager's for that output and region (`Captures::screencopy_presented`), waits for its output's
+  next frame, checked before its damage is taken; a copy another pass would make in the same
+  period (another output drawing, `capture_due`) would repeat the time, which recorders refuse
+  (wf-recorder writing mp4 quits). A composited copy that would repeat it isn't sent, and starts
+  over (`finish_composited`).
   A dma-buf must have a format and modifier the session offered
   (`dmabuf_offered`: renderable, a subset of what linux-dmabuf imports), else the frame
   fails with `buffer_constraints`, so the client allocates another, rather than `unknown`
@@ -1152,7 +1159,7 @@ Key flows and invariants:
   output-local); Pila answers `buffer` (shm Xrgb8888), `linux_dmabuf` when captures may
   use dma-bufs, `buffer_done`. `copy` is rendered from the scene with `capture::copy_frame`
   after the next pass that draws an output or is `capture_due` (it asks for its own output's, as one
-  that may bring nothing), so not faster than redraws; `copy_with_damage` waits in `Pila::capture.screencopies` until that
+  that may bring nothing), one per refresh of its output (above); `copy_with_damage` waits in `Pila::capture.screencopies` until that
   manager's damage tracker for the output/region (`Captures::screencopy_trackers`) sees a change,
   checked from `after_frames`; a copy that fails drops that tracker, for the same reason as
   `Session::start_over`. A mode/scale change or a removed output fails the frame: a copy

@@ -215,10 +215,13 @@ pub struct Captures {
     pub sessions: Vec<Session>,
     /// Where captures may use dma-bufs (set by the backend).
     pub dmabuf: Option<DmabufTarget>,
-    /// wlr-screencopy frames waiting to be copied, and the damage trackers
-    /// of `copy_with_damage` (`screencopy.rs`).
+    /// wlr-screencopy frames waiting to be copied, the damage trackers of
+    /// `copy_with_damage` and the presentation time of each manager's last
+    /// frame of an output's region, the next waiting for a later refresh
+    /// (`screencopy.rs`).
     pub screencopies: Vec<ZwlrScreencopyFrameV1>,
     pub screencopy_trackers: HashMap<crate::screencopy::TrackerKey, OutputDamageTracker>,
+    pub screencopy_presented: HashMap<crate::screencopy::PresentedKey, Duration>,
     /// When the frame being processed started to be built (its scene and
     /// elements, then the copy if it changed), for `Pila::record_capture`;
     /// `None` if it went no further than its checks.
@@ -367,6 +370,9 @@ pub struct Session {
     /// frame in this event-loop iteration (`Captures::take_composited`):
     /// `process_captures` leaves it.
     composited: bool,
+    /// The presentation time of the last frame sent: the next waits for a
+    /// later refresh (`process_capture`).
+    last_presented: Option<Duration>,
 }
 
 /// A frame's buffer and whether `capture` was sent.
@@ -605,6 +611,16 @@ impl Pila {
             Target::Output(output) | Target::Region(output, _) => output.upgrade(),
             _ => window.as_ref().and_then(|w| self.window_output(w)),
         };
+        // A frame per refresh: one presented at the same time as the last
+        // would stop recorders (#17); it waits for its output's next frame,
+        // before its damage is taken.
+        let shown: Duration = self.presented_at(shown_on.as_ref()).into();
+        if session.last_presented.is_some_and(|last| shown <= last) {
+            if let Some(output) = &shown_on {
+                self.request_redraw_as(output, crate::redraw::Content::Maybe);
+            }
+            return;
+        }
         let clear = match window {
             Some(_) => TRANSPARENT,
             None => render::clear_color(scene),
@@ -688,7 +704,8 @@ impl Pila {
         };
         session.pending = false;
         let resource = session.resource.clone();
-        self.send_copied(resource, frame, damage, copied, shown_on.as_ref());
+        session.last_presented = Some(shown);
+        self.send_copied(resource, frame, damage, copied, shown);
     }
 
     /// Send a copied frame's events once the copy is complete: its damage,
@@ -700,9 +717,9 @@ impl Pila {
         frame: ExtImageCopyCaptureFrameV1,
         damage: Vec<Rectangle<i32, Physical>>,
         copied: Copied,
-        shown_on: Option<&Output>,
+        shown: Duration,
     ) {
-        let (hi, lo, nanos) = split_timestamp(self.presented_at(shown_on).into());
+        let (hi, lo, nanos) = split_timestamp(shown);
         let wanted = frame.clone();
         self.when_copied(
             copied,
@@ -733,6 +750,7 @@ impl Pila {
         copied: Result<Copied, CopyError>,
         output: &Output,
     ) {
+        let presented: Duration = self.presented_at(Some(output)).into();
         let Some(session) = self
             .capture
             .sessions
@@ -750,8 +768,17 @@ impl Pila {
                 return;
             }
         };
+        // Already presented at that refresh (a copy from the scene this
+        // period): not sent, and drawn whole at the next, since its damage
+        // was taken.
+        if session.last_presented.is_some_and(|last| presented <= last) {
+            session.start_over();
+            self.request_redraw_as(output, crate::redraw::Content::Maybe);
+            return;
+        }
         session.pending = false;
-        self.send_copied(job.resource, job.frame, job.damage, copied, Some(output));
+        session.last_presented = Some(presented);
+        self.send_copied(job.resource, job.frame, job.damage, copied, presented);
     }
 
     /// When a frame copied now shows on `output`: copies follow the frame
@@ -1514,6 +1541,7 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     pending: false,
                     stopped: false,
                     composited: false,
+                    last_presented: None,
                 };
                 match state.capture_geometry(&session.target, None) {
                     Some(geometry) => {
@@ -1567,6 +1595,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
                     pending: false,
                     stopped: false,
                     composited: false,
+                    last_presented: None,
                 };
                 session.stop();
                 state.capture.sessions.push(session);

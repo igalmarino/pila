@@ -397,11 +397,17 @@ fn capture_textures_are_kept_while_captures_go_on() {
 
 /// The presentation time a frame got, from its logged event.
 fn presentation_time(client: &Client, tag: &str) -> Duration {
+    event_time(client, tag, "PresentationTime")
+}
+
+/// The time an event of `tag` named `name` carries (ext's
+/// `PresentationTime`, wlr-screencopy's `Ready`).
+fn event_time(client: &Client, tag: &str, name: &str) -> Duration {
     let event = client
         .logged(tag)
         .into_iter()
-        .find(|e| e.starts_with("PresentationTime"))
-        .expect("a presentation time");
+        .find(|e| e.starts_with(name))
+        .unwrap_or_else(|| panic!("no {name} for {tag}"));
     let field = |name: &str| -> u64 {
         let at = event.find(&format!("{name}: ")).unwrap() + name.len() + 2;
         event[at..]
@@ -1097,4 +1103,97 @@ fn turning_a_captured_output_changes_its_buffer_size() {
     });
     let (_frame, _) = capture(&client, &session, (800, 1280), "new");
     client.wait_logged("new", "Ready");
+}
+
+/// Two wlr-screencopy frames of one refresh period would be presented at the
+/// same time (its vblank): recorders that stamp frames with it, such as
+/// wf-recorder writing mp4, abort on a timestamp that doesn't advance (#17).
+/// Another capture (`capture_due`: a portal share's picker or stream
+/// starting, an ext-image-copy-capture frame) or another output drawing
+/// copied a frame waiting for damage within the period of the last one: it
+/// now waits for its output's next refresh.
+#[test]
+fn screencopy_frames_are_one_per_refresh() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("SLOW:640x480@2,FAST:640x480@60".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    let a = client.window("a").size(200, 150).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let slow = client.output("SLOW");
+    let first = manager.capture_output(0, &slow, &client.qh, "first".into());
+    client.flush();
+    client.wait_logged("first", "BufferDone");
+    let (buffer, _) = client.capture_buffer((640, 480), Format::Xrgb8888);
+    first.copy_with_damage(&buffer);
+    client.flush();
+    client.wait_logged("first", "Ready");
+
+    // A change on SLOW and the next frame asked at once, as wf-recorder
+    // does; then, within SLOW's period, an ext capture of it and FAST drawing.
+    client.with_window(a, |w| w.color = [255, 0, 255, 0]);
+    client.draw(a, None);
+    let second = manager.capture_output(0, &slow, &client.qh, "second".into());
+    client.flush();
+    client.wait_logged("second", "BufferDone");
+    let (buffer, _) = client.capture_buffer((640, 480), Format::Xrgb8888);
+    second.copy_with_damage(&buffer);
+    client.flush();
+    let source = output_source(&client, "SLOW");
+    let (session, size) = session(&client, &source, "ext");
+    let (_frame, _) = capture(&client, &session, size, "ext_frame");
+    client.wait_logged("ext_frame", "Ready");
+    pila.move_to(700.0, 100.0);
+    client.roundtrip();
+
+    client.wait_logged("second", "Ready");
+    let (first, second) = (
+        event_time(&client, "first", "Ready"),
+        event_time(&client, "second", "Ready"),
+    );
+    assert!(
+        second >= first + Duration::from_millis(400),
+        "presented {:?} after the frame before, in the same refresh",
+        second.saturating_sub(first)
+    );
+}
+
+/// The same for an ext-image-copy-capture session: a frame asked for within
+/// the refresh period of the one before (a capture request is processed at
+/// once, `capture_due`) waits for the next refresh rather than being
+/// presented at the same time.
+#[test]
+fn capture_frames_are_one_per_refresh() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("SLOW:640x480@2".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    let a = client.window("a").size(200, 150).color(RED).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let source = output_source(&client, "SLOW");
+    let (session, size) = session(&client, &source, "session");
+    let (first, _) = capture(&client, &session, size, "first");
+    client.wait_logged("first", "Ready");
+    first.destroy();
+    // A change, and the next frame asked at once.
+    client.with_window(a, |w| w.color = [255, 0, 255, 0]);
+    client.draw(a, None);
+    let (_second, _) = capture(&client, &session, size, "second");
+    client.wait_logged("second", "Ready");
+    let (first, second) = (
+        presentation_time(&client, "first"),
+        presentation_time(&client, "second"),
+    );
+    assert!(
+        second >= first + Duration::from_millis(400),
+        "presented {:?} after the frame before, in the same refresh",
+        second.saturating_sub(first)
+    );
+    let _ = pila;
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
+  started, such as a portal share's picker or grim: a second frame copied in the same refresh
+  was presented at the same time as the first, which the recorder refused. Captures now get one
+  frame per refresh of their output.
 - **Fixed:** A window restored from full screen or maximized next to another monitor could leave
   a strip of its shadow on that monitor until something else redrew it (since 0.9.7): stretched
   with the window, the shadow reached further than the monitors asked to redraw.

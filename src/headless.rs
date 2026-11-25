@@ -171,6 +171,11 @@ pub struct HeadlessOutput {
     /// The last redraw, with something new or not: an output redraws at most
     /// once per refresh.
     last_render: Option<Instant>,
+    /// When it last redrew, on Pila's clock: the frames' vblank, which
+    /// `Backend::next_frame_time` counts from as bare metal does from its
+    /// last vblank, so a frame presented in a refresh period is presented at
+    /// the same time however many passes copy it.
+    rendered_at: Option<Duration>,
     /// `PILA_HEADLESS_CHECK_REDRAWS`: a damage tracker of its own, and since
     /// when it has found damage no redraw was asked for (`check_redraws`).
     check: Option<(OutputDamageTracker, Option<Instant>)>,
@@ -314,6 +319,11 @@ impl HeadlessData {
         for o in &mut self.outputs {
             o.gamma = None;
         }
+    }
+
+    /// When `output` last redrew, its last "vblank" (`rendered_at`).
+    pub fn last_render_time(&self, output: &Output) -> Option<Duration> {
+        self.find(output).and_then(|o| o.rendered_at)
     }
 
     pub fn output_power(&self, output: &Output) -> Option<bool> {
@@ -612,6 +622,7 @@ pub fn add_output(state: &mut Pila, spec: &OutputSpec) -> bool {
         redraw_needed: true,
         drawn: false,
         last_render: None,
+        rendered_at: None,
         check,
         frames: 0,
         idle: 0,
@@ -1097,6 +1108,7 @@ fn render_output(
     let o = &mut outputs[index];
     o.redraw_needed = false;
     o.last_render = Some(Instant::now());
+    o.rendered_at = Some(rendering_started);
 
     let Some(mode) = output.current_mode() else {
         return false;
