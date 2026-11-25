@@ -301,6 +301,27 @@ fn a_minimized_window_being_captured_keeps_drawing() {
     assert!(took < Duration::from_secs(4), "6 frames in {took:?}");
 }
 
+/// A window minimized right after a frame of it was captured on screen
+/// still gets its next frame: off every output, the frame isn't held for a
+/// refresh of none (the last was timed at the screen's next refresh).
+#[test]
+fn a_window_minimized_right_after_a_frame_gets_the_next() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let window = client.window("a").size(400, 300).create();
+    pila.wait_focus("a");
+    pila.settle();
+    let (session, size) = shared_window(&client, "a");
+    client.request(window, |t| t.set_minimized());
+    client.draw(window, None);
+    let (_frame, _) = capture(&client, &session, size, "hidden");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    pila.settle();
+    client.wait_logged("hidden", "Ready");
+}
+
 #[test]
 fn a_window_on_another_workspace_being_captured_keeps_drawing() {
     let mut pila = TestPila::start();
