@@ -10,7 +10,8 @@
 //! stay there, counted from reaching the corner (`Visit::since`), not from
 //! the push: a push slower than the delay fires as soon as it's far enough.
 //! Once pushed far enough, a delay still to run is a timer
-//! (`HotCorner::timer`), removed when the pointer leaves. Nothing happens
+//! (`Visit::timer`), removed when the pointer leaves, and ending in
+//! nothing if it's gone from the corner by other means. Nothing happens
 //! with a button held or a grab running, over a fullscreen window, while
 //! locked, or while picking a color or a region.
 
@@ -102,6 +103,14 @@ impl Pila {
             .insert_source(Timer::from_duration(left), |_, _, state| {
                 if let Some(visit) = state.overview.hot_corner.visit.as_mut() {
                     visit.timer = None;
+                }
+                // Moved out by other than motion (a warp, its output gone),
+                // which doesn't end the visit (`hot_corner`): it ends now.
+                let here = state.hot_corner_output(state.pointer_location());
+                let visit = state.overview.hot_corner.visit.as_ref();
+                if !visit.is_some_and(|visit| here.as_ref() == Some(&visit.output)) {
+                    state.leave_hot_corner();
+                    return TimeoutAction::Drop;
                 }
                 let held = state
                     .seat

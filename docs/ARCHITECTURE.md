@@ -895,7 +895,8 @@ Key flows and invariants:
   per visit (`HotCorner`, ended when the pointer leaves). `hot-corner-pressure` asks for that much
   relative motion pushed past the corner first: `on_pointer_motion` passes the part
   `clamp_to_outputs` dropped as `pushed` (absolute input never pushes); `hot-corner-delay` for that
-  long in the corner, the rest of it a timer removed on leaving. Not with a button held or a grab
+  long in the corner, the rest of it a timer removed on leaving (and that does nothing if the
+  pointer left by other than motion meanwhile: a warp, its output unplugged). Not with a button held or a grab
   running (`is_grabbed`), over a fullscreen window, while locked, picking a color or a region, or
   with `hot-corner = false`; and `[gestures]` binds `overview open`/`overview close` to 4-finger
   swipes up and down.

@@ -864,3 +864,31 @@ fn a_window_closing_while_held_in_it_is_let_go() {
     assert_eq!(state["workspace"], 1);
     assert!(pila.alive());
 }
+
+/// The delay runs out where the pointer is then: moved out of the corner by
+/// something other than motion (`focus-output`'s warp, its monitor
+/// unplugged), it doesn't open the overview.
+#[test]
+fn the_hot_corner_delay_ends_with_the_pointer_moved_away() {
+    for moved in ["warped", "unplugged"] {
+        let mut pila = TestPila::start_with(Options {
+            config: "[overview]\nhot-corner-delay = 400\n\
+                     [bindings]\n\"Mod+F8\" = \"focus-output next\"\n"
+                .into(),
+            outputs: Some("A:640x480,B:640x480".into()),
+            ..Default::default()
+        });
+        let _client = windows(&mut pila, &["a"]);
+        pila.move_to(100.0, 100.0);
+        pila.move_to(0.0, 0.0);
+        match moved {
+            "warped" => pila.combo("Super+F8"),
+            _ => {
+                pila.request(json!({ "cmd": "output_remove", "name": "A" }));
+            }
+        }
+        pila.stays(moved, Duration::from_millis(700), |s| {
+            s["overview"]["open"] == false
+        });
+    }
+}
