@@ -348,6 +348,16 @@ tap = true                       # tap to click
 "Mod+Shift+E" = "quit"
 "Mod+Shift+slash" = "show-shortcuts"  # Mod+?
 
+# Screen capture permissions (wlr-screencopy and ext-image-copy-capture).
+# Off by default: any unsandboxed program may capture the screen (sandboxed
+# apps, such as Flatpak, never see these protocols). Set `enforce = true` to
+# prompt before an unlisted program captures the screen, and add
+# `[[permission]]` rules below for tools you want to allow or deny outright.
+# Portal screen sharing and screenshots always use Pila's own picker.
+[permissions]
+# enforce = true
+enforce = false
+
 [gestures]
 # Touchpad swipes (bare metal): "swipe-<fingers>-<direction>", where fingers is
 # 3, 4, or 5 and direction is left, right, up, or down (finger movement
@@ -464,3 +474,15 @@ tap = true                       # tap to click
 # [[layer-rule]]
 # namespace = "waybar"
 # blur = true                      # blur behind panel (false: disable; unset: honor app request)
+#
+# # Screen capture permission rules (used when `[permissions] enforce = true`).
+# # Matches a client's executable path with `*` wildcards; rules apply in order,
+# # and the last match wins. `access` is "allow", "ask" or "deny".
+#
+# [[permission]]
+# executable = "/usr/bin/grim"
+# access = "allow"
+#
+# [[permission]]
+# executable = "/usr/bin/wf-recorder"
+# access = "allow"

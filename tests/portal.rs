@@ -2130,3 +2130,52 @@ fn the_region_guide_shown_before_the_fonts_gets_its_text_when_they_come() {
     pila.key("Escape");
     assert_eq!(answered_with(started), 1);
 }
+
+/// The share picker and a capture permission prompt (`[permissions]
+/// enforce`) are both modal: whichever comes second waits for the first to
+/// be answered, then shows.
+#[test]
+fn the_share_picker_and_a_capture_prompt_wait_for_each_other() {
+    use wayland_protocols::ext::{
+        image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
+        image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::{
+            ExtImageCopyCaptureManagerV1, Options as CaptureOptions,
+        },
+    };
+    let (mut pila, bus, _pipewire) = start();
+    pila.write_config("[permissions]\nenforce = true\n");
+    pila.wait("enforced", |s| s["capture_permission"]["enforce"] == true);
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("first", "org.example.Browser", 1);
+    wait_picker(&mut pila);
+
+    let client = pila.client();
+    let sources: ExtOutputImageCaptureSourceManagerV1 =
+        client.bind("ext_output_image_capture_source_manager_v1", 1);
+    let source = sources.create_source(&client.output("HEADLESS-1"), &client.qh, "source".into());
+    let manager: ExtImageCopyCaptureManagerV1 = client.bind("ext_image_copy_capture_manager_v1", 1);
+    let _session =
+        manager.create_session(&source, CaptureOptions::empty(), &client.qh, "ext".into());
+    client.flush();
+    pila.wait("the prompt waits for the picker", |s| {
+        s["capture_permission"]["waiting"] == 1 && s["capture_permission"]["shown"].is_null()
+    });
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
+    pila.wait("the prompt shown once the picker is gone", |s| {
+        s["share_picker"]["shown"] == false && !s["capture_permission"]["shown"].is_null()
+    });
+
+    // The other way round: a share asked while the prompt is shown waits.
+    let started = portal.request("second", "org.example.Browser", 1);
+    pila.stays(
+        "the picker waits for the prompt",
+        std::time::Duration::from_millis(300),
+        |s| s["share_picker"]["shown"] == false,
+    );
+    pila.key("Escape");
+    client.wait_logged("ext", "Stopped");
+    wait_picker(&mut pila);
+    pila.key("Escape");
+    assert_eq!(answered_with(started), 1);
+}

@@ -328,6 +328,10 @@ pub enum Request {
     ScreenShares,
     /// Forget one, by its id, or all of them (`None`).
     ForgetScreenShare(Option<String>),
+    /// The direct Wayland screen capture permissions (`permissions.rs`).
+    CapturePermissions,
+    /// Forget one capture permission, by its id, or all of them (`None`).
+    ForgetCapturePermission(Option<String>),
 }
 
 /// A line of the protocol as a request, or why it isn't one. Reads it and
@@ -367,6 +371,11 @@ pub fn parse_request(line: &[u8]) -> Result<Request, String> {
         "minimize" => Request::Minimize(string_field(&request, "id")?.to_string()),
         "screen-shares" => Request::ScreenShares,
         "forget-screen-share" => Request::ForgetScreenShare(match request.get("all") {
+            Some(Value::Bool(true)) => None,
+            _ => Some(string_field(&request, "id")?.to_string()),
+        }),
+        "capture-permissions" => Request::CapturePermissions,
+        "forget-capture-permission" => Request::ForgetCapturePermission(match request.get("all") {
             Some(Value::Bool(true)) => None,
             _ => Some(string_field(&request, "id")?.to_string()),
         }),
@@ -435,6 +444,18 @@ fn handle(
         },
         Request::ForgetScreenShare(None) => {
             Ok(json!({ "forgotten": state.forget_screen_grants() }))
+        }
+        Request::CapturePermissions => Ok(json!({
+            "protocol": PROTOCOL,
+            "capture_permissions": state.ipc_capture_permissions(),
+        })),
+        // Forgetting takes access away: allowed while locked too.
+        Request::ForgetCapturePermission(Some(id)) => match state.forget_capture_permission(&id) {
+            true => Ok(json!({})),
+            false => Err(format!("no capture permission remembered as {id:?}")),
+        },
+        Request::ForgetCapturePermission(None) => {
+            Ok(json!({ "forgotten": state.forget_capture_permissions() }))
         }
     }
 }

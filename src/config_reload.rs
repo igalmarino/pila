@@ -167,6 +167,11 @@ impl Pila {
         {
             self.refresh_rule_props();
         }
+        if old.permissions != self.config.permissions
+            || old.permission_rules != self.config.permission_rules
+        {
+            self.permissions_config_changed();
+        }
         let outputs_changed = old.outputs != self.config.outputs;
         if outputs_changed {
             // An edited [[output]] section takes over from what a display
@@ -208,6 +213,7 @@ impl Pila {
         }
         // The shortcuts shown: its keys, colors and corners as they are now.
         self.shortcuts_config_changed();
+        self.draw_capture_permission_text();
         self.queue_redraw();
     }
 

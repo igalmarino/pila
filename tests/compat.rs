@@ -101,6 +101,11 @@ fn the_config_with_every_key_has_every_key() {
         ("input.touchpad", "[input.touchpad]"),
         ("input.mouse", "[input.mouse]"),
         ("output", "[[output]]\nname = \"X\""),
+        ("permissions", "[permissions]"),
+        (
+            "permission",
+            "[[permission]]\nexecutable = \"/usr/bin/grim\"\naccess = \"allow\"",
+        ),
         ("window-rule", "[[window-rule]]"),
         ("layer-rule", "[[layer-rule]]"),
     ];
@@ -294,6 +299,9 @@ fn ipc_answers_and_events_keep_their_fields() {
     has_fields("the colors", &ask(&mut ipc, "colors")["colors"], COLORS);
     // Its objects' fields need the portal: `portal::a_share_remembered_is_shared_again_without_asking`.
     assert!(ask(&mut ipc, "screen-shares")["screen_shares"].is_array());
+    // Its objects' fields need a prompt answered:
+    // `permissions::prompt_allows_and_denies_capture_and_blocks_app_input`.
+    assert!(ask(&mut ipc, "capture-permissions")["capture_permissions"].is_array());
     assert!(ask(&mut ipc, "switch")["switch"].is_null());
     pila.key_press("Alt");
     pila.key("Tab");

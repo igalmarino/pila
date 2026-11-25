@@ -522,6 +522,7 @@ impl Pila {
             || self.app_shortcuts.panel.is_some()
             || self.share_picker_open()
             || self.color_pick_open()
+            || self.capture_permission_open()
             || rows.is_empty()
         {
             if let Some(reply) = reply {
@@ -568,8 +569,9 @@ impl Pila {
         self.app_shortcuts.pending = None;
         *self.app_shortcuts.buffers.borrow_mut() = Buffers::default();
         self.queue_redraw();
-        // A share asked meanwhile waited for it.
+        // A share or capture permission asked meanwhile waited for it.
         self.show_share_picker();
+        self.show_capture_permission();
         Some(panel)
     }
 
@@ -716,6 +718,7 @@ impl Pila {
             || self.app_shortcuts.panel.is_some()
             || self.share_picker_open()
             || self.color_pick_open()
+            || self.capture_permission_open()
         {
             return None;
         }

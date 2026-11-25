@@ -524,6 +524,7 @@ impl crate::Pila {
         self.draw_region_text();
         self.draw_color_pick_text();
         self.draw_app_shortcuts_text();
+        self.draw_capture_permission_text();
     }
 }
 

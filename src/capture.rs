@@ -92,7 +92,7 @@ use smithay::{
         },
         wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
         wayland_server::{
-            backend::ClientId,
+            backend::{ClientId, ObjectId},
             protocol::{wl_buffer::WlBuffer, wl_output, wl_shm},
             Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
         },
@@ -296,6 +296,7 @@ impl Captures {
         for session in &mut self.sessions {
             let ours = matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output));
             if !ours
+                || !session.authorized
                 || !session.pending
                 || session.stopped
                 || session.geometry != Some(geometry)
@@ -365,6 +366,8 @@ pub struct Session {
     frame: Option<ExtImageCopyCaptureFrameV1>,
     /// `frame` asked to be captured and hasn't been yet.
     pending: bool,
+    /// Allowed to send buffer constraints and capture frames (`permissions.rs`).
+    authorized: bool,
     stopped: bool,
     /// The frame its output just composited filled or checked its pending
     /// frame in this event-loop iteration (`Captures::take_composited`):
@@ -396,6 +399,18 @@ pub fn init_globals(dh: &DisplayHandle) {
 }
 
 impl Session {
+    pub(crate) fn is_authorized(&self) -> bool {
+        self.authorized && !self.stopped
+    }
+
+    pub(crate) fn resource(&self) -> ExtImageCopyCaptureSessionV1 {
+        self.resource.clone()
+    }
+
+    pub(crate) fn resource_id(&self) -> ObjectId {
+        self.resource.id()
+    }
+
     fn stop(&mut self) {
         if self.stopped {
             return;
@@ -530,6 +545,43 @@ impl Pila {
             .unwrap_or_else(|| Scale::from(1.0))
     }
 
+    /// Permission granted for `resource`: advertise buffer constraints (or
+    /// stop if its target went away meanwhile).
+    pub(crate) fn authorize_capture_session(&mut self, resource: &ExtImageCopyCaptureSessionV1) {
+        let Some(index) = self
+            .capture
+            .sessions
+            .iter()
+            .position(|s| s.resource == *resource)
+        else {
+            return;
+        };
+        if self.capture.sessions[index].stopped || self.capture.sessions[index].authorized {
+            return;
+        }
+        let target = self.capture.sessions[index].target.clone();
+        let geometry = self.capture_geometry(&target, None);
+        let dmabuf = self.capture.dmabuf.as_ref();
+        let session = &mut self.capture.sessions[index];
+        session.authorized = true;
+        match geometry {
+            Some(geometry) => session.send_constraints(geometry, dmabuf),
+            None => session.stop(),
+        }
+    }
+
+    /// Permission denied or revoked for `resource`: stop the session.
+    pub(crate) fn deny_capture_session(&mut self, resource: &ExtImageCopyCaptureSessionV1) {
+        if let Some(session) = self
+            .capture
+            .sessions
+            .iter_mut()
+            .find(|s| s.resource == *resource)
+        {
+            session.stop();
+        }
+    }
+
     /// Copy every pending frame whose source changed (or that is a
     /// session's first), from `after_frames`: after a frame drawn, or with
     /// `capture_due`. `input` is the scene of this pass, built by the first
@@ -558,6 +610,9 @@ impl Pila {
         session: &mut Session,
         input: &mut Option<crate::render::FrameInput>,
     ) {
+        if !session.authorized {
+            return;
+        }
         let Some(geometry) = self.capture_geometry(&session.target, session.geometry) else {
             session.stop();
             return;
@@ -1506,7 +1561,7 @@ impl Dispatch<ExtImageCaptureSourceV1, Target> for Pila {
 impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
     fn request(
         state: &mut Self,
-        _: &Client,
+        client: &Client,
         resource: &ExtImageCopyCaptureManagerV1,
         request: manager::Request,
         _: &(),
@@ -1530,27 +1585,30 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                     }
                 };
                 let target = source.data::<Target>().cloned().unwrap_or(Target::Gone);
+                let kind = match &target {
+                    Target::Toplevel(_) => crate::permissions::CaptureKind::Window,
+                    _ => crate::permissions::CaptureKind::Screen,
+                };
                 let resource = data_init.init(session, ());
-                let mut session = Session {
-                    resource,
+                let session = Session {
+                    resource: resource.clone(),
                     target,
                     paint_cursors: options.contains(manager::Options::PaintCursors),
                     geometry: None,
                     tracker: None,
                     frame: None,
                     pending: false,
+                    authorized: false,
                     stopped: false,
                     composited: false,
                     last_presented: None,
                 };
-                match state.capture_geometry(&session.target, None) {
-                    Some(geometry) => {
-                        session.send_constraints(geometry, state.capture.dmabuf.as_ref())
-                    }
-                    None => session.stop(),
-                }
                 debug!(target = ?session.target, paint_cursors = session.paint_cursors, "capture session");
                 state.capture.sessions.push(session);
+                state.authorize_capture(
+                    client,
+                    crate::permissions::PendingCapture::Session { resource, kind },
+                );
             }
             manager::Request::CreatePointerCursorSession { session, .. } => {
                 data_init.init(session, Mutex::new(false));
@@ -1593,6 +1651,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
                     tracker: None,
                     frame: None,
                     pending: false,
+                    authorized: false,
                     stopped: false,
                     composited: false,
                     last_presented: None,
@@ -1657,6 +1716,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for Pila {
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ExtImageCopyCaptureSessionV1, _: &()) {
         state.capture.sessions.retain(|s| s.resource != *resource);
+        state.cancel_pending_capture_session(resource);
     }
 }
 

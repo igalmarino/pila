@@ -364,6 +364,29 @@ impl Pila {
         true
     }
 
+    /// Queue a screencopy frame whose permission was granted (`permissions.rs`).
+    pub(crate) fn enqueue_screencopy(&mut self, resource: &ZwlrScreencopyFrameV1) {
+        if !resource.is_alive() {
+            return;
+        }
+        let output = resource.data::<FrameData>().and_then(|data| {
+            data.locked()
+                .as_ref()?
+                .output
+                .upgrade()
+                .filter(|output| self.space.output_geometry(output).is_some())
+        });
+        let Some(output) = output else {
+            resource.failed();
+            return;
+        };
+        self.capture.screencopies.push(resource.clone());
+        // Copied after the next frame (`after_frames`): at most once per
+        // refresh however fast a client asks, as with damage. Its output's
+        // frame, which may well have nothing new (`redraw::Content::Maybe`).
+        self.request_redraw_as(&output, crate::redraw::Content::Maybe);
+    }
+
     /// Fail the pending frames of an output that went away.
     pub fn fail_screencopies_of(&mut self, output: &Output) {
         self.capture.screencopies.retain(|frame| {
@@ -465,7 +488,7 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for Pila {
 impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
     fn request(
         state: &mut Self,
-        _: &Client,
+        client: &Client,
         resource: &ZwlrScreencopyFrameV1,
         request: frame::Request,
         data: &FrameData,
@@ -477,43 +500,45 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for Pila {
             frame::Request::CopyWithDamage { buffer } => (buffer, true),
             _ => return,
         };
-        let mut frame_state = data.locked();
-        let Some(frame_state) = frame_state.as_mut() else {
-            // Failed at creation; nothing to copy into.
-            return;
+        let output = {
+            let mut frame_state = data.locked();
+            let Some(frame_state) = frame_state.as_mut() else {
+                // Failed at creation; nothing to copy into.
+                return;
+            };
+            if frame_state.buffer.is_some() {
+                resource.post_error(frame::Error::AlreadyUsed, "copy sent twice");
+                return;
+            }
+            if !buffer_matches(&buffer, frame_state.size) {
+                resource.post_error(
+                    frame::Error::InvalidBuffer,
+                    "the buffer doesn't match the advertised size or formats",
+                );
+                return;
+            }
+            frame_state.buffer = Some(buffer);
+            frame_state.with_damage = with_damage;
+            // An output unplugged since the frame was set up has no frame of its
+            // own to come: fail now (`fail_screencopies_of` only fails the copies
+            // already waiting when it goes).
+            frame_state
+                .output
+                .upgrade()
+                .filter(|output| state.space.output_geometry(output).is_some())
         };
-        if frame_state.buffer.is_some() {
-            resource.post_error(frame::Error::AlreadyUsed, "copy sent twice");
-            return;
-        }
-        if !buffer_matches(&buffer, frame_state.size) {
-            resource.post_error(
-                frame::Error::InvalidBuffer,
-                "the buffer doesn't match the advertised size or formats",
-            );
-            return;
-        }
-        frame_state.buffer = Some(buffer);
-        frame_state.with_damage = with_damage;
-        // An output unplugged since the frame was set up has no frame of its
-        // own to come: fail now (`fail_screencopies_of` only fails the copies
-        // already waiting when it goes).
-        let output = frame_state
-            .output
-            .upgrade()
-            .filter(|output| state.space.output_geometry(output).is_some());
-        let Some(output) = output else {
+        if output.is_none() {
             resource.failed();
             return;
-        };
-        state.capture.screencopies.push(resource.clone());
-        // Copied after the next frame (`after_frames`): at most once per
-        // refresh however fast a client asks, as with damage. Its output's
-        // frame, which may well have nothing new (`redraw::Content::Maybe`).
-        state.request_redraw_as(&output, crate::redraw::Content::Maybe);
+        }
+        state.authorize_capture(
+            client,
+            crate::permissions::PendingCapture::Screencopy(resource.clone()),
+        );
     }
 
     fn destroyed(state: &mut Self, _: ClientId, resource: &ZwlrScreencopyFrameV1, _: &FrameData) {
         state.capture.screencopies.retain(|f| f != resource);
+        state.cancel_pending_screencopy(resource);
     }
 }

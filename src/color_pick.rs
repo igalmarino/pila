@@ -101,6 +101,7 @@ impl Pila {
             || self.color_pick_open()
             || self.share_picker_open()
             || self.app_shortcuts_open()
+            || self.capture_permission_open()
         {
             return reply.send(Err(Refused::Cancelled));
         }
@@ -133,8 +134,9 @@ impl Pila {
         *self.color_pick.buffers.borrow_mut() = Buffers::default();
         self.set_cursor(CursorImageStatus::default_named());
         self.redraw_color_pick();
-        // A share asked meanwhile waited for it.
+        // A share or capture permission asked meanwhile waited for it.
         self.show_share_picker();
+        self.show_capture_permission();
         Some(reply)
     }
 

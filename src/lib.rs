@@ -51,6 +51,7 @@ pub mod output_management;
 pub mod output_power;
 pub mod overview;
 pub mod panel;
+pub mod permissions;
 pub mod pointer_constraints;
 pub mod pointer_warp;
 pub mod portal;

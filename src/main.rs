@@ -344,6 +344,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let display: Display<Pila> = Display::new()?;
     let mut state = Pila::new(&mut event_loop, display, config);
+    state.load_capture_permissions();
     // Before the event loop: it reads the font directories. The tools the
     // example starts get these by their command line (`Pila::spawn`).
     if state.config.tool_configs {

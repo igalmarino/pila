@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **New:** Direct screen capture permissions (`[permissions] enforce = true`, off by default):
+  programs capturing through wlr-screencopy or ext-image-copy-capture (grim, wf-recorder) are
+  allowed or denied by `[[permission]]` rules on their executable path, or asked with a prompt
+  (Allow, Deny, Remember); `pila msg capture-permissions` lists what's allowed and
+  `pila msg forget-capture-permission <id>` (or `all`) revokes it. Portal sharing is unchanged.
 - **Fixed:** wf-recorder could quit while recording (with an mp4 file) when another capture
   started, such as a portal share's picker or grim: a second frame copied in the same refresh
   was presented at the same time as the first, which the recorder refused. Captures now get one

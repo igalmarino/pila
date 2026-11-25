@@ -216,6 +216,7 @@ impl Pila {
         let mut picker_key = None;
         let mut pick_key = None;
         let mut shortcuts_key = None;
+        let mut perm_key = None;
         let mut overview_key = None;
         let mut repeat_next = None;
         let mut tap_action = None;
@@ -283,6 +284,16 @@ impl Pila {
                 if key_state == KeyState::Pressed && !state.is_locked() && state.color_pick_open() {
                     state.input.suppressed_keys.insert(keycode);
                     pick_key = Some(handle.modified_sym());
+                    return FilterResult::Intercept(None);
+                }
+                // The screen capture permission prompt takes every press while
+                // it's shown: it's modal (`permissions.rs`).
+                if key_state == KeyState::Pressed
+                    && !state.is_locked()
+                    && state.capture_permission_open()
+                {
+                    state.input.suppressed_keys.insert(keycode);
+                    perm_key = Some(handle.modified_sym());
                     return FilterResult::Intercept(None);
                 }
                 // The share picker takes every press while it's shown: it's
@@ -419,6 +430,9 @@ impl Pila {
         }
         if let Some((sym, mods)) = shortcuts_key {
             self.app_shortcuts_key(sym, &mods);
+        }
+        if let Some(sym) = perm_key {
+            self.capture_permission_key(sym);
         }
         if hide_shortcuts {
             self.hide_shortcuts();
@@ -894,6 +908,16 @@ impl Pila {
         if button_state == ButtonState::Pressed && !self.is_locked() && self.color_pick_open() {
             self.input.suppressed_buttons.insert(button);
             self.color_pick_press(pointer.current_location());
+            return;
+        }
+        // The screen capture permission prompt takes every press, and its
+        // release: it's modal.
+        if button_state == ButtonState::Pressed
+            && !self.is_locked()
+            && self.capture_permission_open()
+        {
+            self.input.suppressed_buttons.insert(button);
+            self.capture_permission_press(pointer.current_location());
             return;
         }
         // The share picker takes every press, and its release: it's modal.

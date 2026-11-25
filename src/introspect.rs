@@ -309,6 +309,7 @@ impl Pila {
             "share_picker": self.share_picker_json(),
             "color_pick": self.color_pick_json(),
             "app_shortcuts": self.app_shortcuts_json(),
+            "capture_permission": self.capture_permission_json(),
             "screencast": {
                 "casts": self.screencast.cast_count(),
                 "pipewire": self.screencast.connected(),

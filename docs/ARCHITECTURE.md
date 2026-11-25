@@ -1593,9 +1593,9 @@ Key flows and invariants:
   move/resize grabs are refused, bindings, gestures and `pila msg` don't run their actions,
   nor does `run_action` itself, save `runs_while_locked`, a VT switch and Quit in debug
   builds). `lock` ends grabs before the state changes (ending one sends its focus a motion).
-  Pila's own panels (share picker, color picker, app shortcuts, window menu) take input before
+  Pila's own panels (share picker, color picker, app shortcuts, capture permission prompt, window menu) take input before
   the focus types see it, so the focus types don't guard them: `lock` closes them, cancelling
-  the portal requests waiting first (else cancelling the shown picker would show the next one,
+  the portal and capture permission requests waiting first (else cancelling the shown picker would show the next one,
   the session not locked yet), the input paths skip them while locked, and `start_cast` and
   `take_screenshot` refuse while locked. A Mod+Tab in progress ends (`end_switch`), and the
   switcher's tiles take no click while locked.
@@ -1769,6 +1769,29 @@ Key flows and invariants:
 - **Show desktop** (`Pila::show_desktop`, `minimize.rs`): minimizes the workspace's windows without
   a transient parent and remembers them (`Windows::desktop_shown`); again, `show_window` in their
   order. `show_window` and `place_new_window` forget them, so the next press starts over.
+- **Screen capture permissions** (`permissions.rs`): opt-in (`[permissions] enforce = false`)
+  gating of direct Wayland capture protocols (`ext-image-copy-capture` at `CreateSession`,
+  `wlr-screencopy` at `Copy`/`CopyWithDamage`; portal screen sharing and screenshots keep using
+  `share_picker.rs` and `screen_grants.rs`). When `enforce` is off, `Pila::authorize_capture`
+  approves immediately with no I/O. When on, each client's `/proc/<pid>/exe` is read once off
+  the event loop and cached in `ClientState::executable` (`OnceLock`), then evaluated by
+  `permissions::evaluate` against `[[permission]]` rules (`rules::wildcard_match`, last match
+  winning: `allow`, `ask`, `deny`) and grants (in memory for the session, or persisted in
+  `$XDG_STATE_HOME/pila/capture-permissions.json` via `state_file.rs`, loaded and saved on
+  threads). Unlisted clients open a modal panel (`panel.rs`, `Scene::capture_permission`,
+  blocking `Pila::under` and `Scene::tears`, coalescing concurrent requests from the same
+  executable and queuing alongside `share_picker`, `color_pick` and `app_shortcuts`): Allow
+  (`Enter`) grants for this session (or persistently if Remember `R` is checked) and proceeds
+  after the panel closes so the captured frame excludes it; it takes no Allow until
+  `permissions::ALLOW_DELAY` after its text is drawn (`Shown::visible_since`: an Enter typed into an
+  app as it pops up). Deny (`Esc`) stops the session or fails the frame, and that connection's
+  next requests that would ask are refused without asking (`CapturePermissions::client_denials`),
+  or a program retrying would bring the modal prompt back forever; locking cancels all pending
+  prompts (`cancel_capture_permissions`) and denies new prompts. The executable read drops the
+  kernel's ` (deleted)` (a program updated while running, `executable_path`). `pila msg capture-permissions` lists grants and `pila msg forget-capture-permission`
+  revokes one or all (allowed while locked), stopping active sessions whose client is no longer
+  allowed (`stop_denied_captures`); live reload re-evaluates open prompts and active sessions
+  (`permissions_config_changed`).
 - **IPC** (`ipc.rs`, `ipc_client.rs`; public format in `docs/IPC.md`): a Unix socket on the event
   loop, for `pila msg`, opened on every backend and removed on the way out. Nothing a client does may
   hold the loop: reads and writes don't block, a client gets `READS_PER_WAKE` reads per wake, what

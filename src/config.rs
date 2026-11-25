@@ -1380,6 +1380,9 @@ struct ConfigFile {
     idle: IdleFile,
     wallpaper: WallpaperFile,
     environment: BTreeMap<String, EnvFile>,
+    permissions: PermissionsFile,
+    #[serde(rename = "permission")]
+    permission_rules: Vec<PermissionRuleFile>,
     #[serde(rename = "window-rule")]
     window_rules: Vec<crate::rules::WindowRuleFile>,
     #[serde(rename = "layer-rule")]
@@ -1715,6 +1718,72 @@ impl OverviewFile {
     }
 }
 
+/// `[permissions]`, validated (`permissions.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PermissionsConfig {
+    /// Enforce screen capture permissions for direct Wayland capture protocols.
+    pub enforce: bool,
+}
+
+/// `[permissions]` as written.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct PermissionsFile {
+    enforce: Option<bool>,
+}
+
+impl PermissionsFile {
+    fn or_example(self, example: Self) -> Self {
+        or_example!(self, example, PermissionsFile { enforce })
+    }
+
+    fn validate(self) -> Result<PermissionsConfig, String> {
+        Ok(PermissionsConfig {
+            enforce: need(self.enforce, "permissions.enforce")?,
+        })
+    }
+}
+
+/// What a `[[permission]]` rule decides for matching executables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionAccess {
+    Allow,
+    Ask,
+    Deny,
+}
+
+/// A validated `[[permission]]` rule (`permissions.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionRule {
+    /// Executable path pattern (`*` wildcards).
+    pub executable: String,
+    pub access: PermissionAccess,
+}
+
+/// `[[permission]]` as written.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+struct PermissionRuleFile {
+    executable: Option<String>,
+    access: Option<PermissionAccess>,
+}
+
+impl PermissionRuleFile {
+    fn validate(self, index: usize) -> Result<PermissionRule, String> {
+        let executable = self
+            .executable
+            .filter(|e| !e.trim().is_empty())
+            .ok_or_else(|| {
+                format!("permission {index}: no executable (e.g. executable = \"/usr/bin/grim\")")
+            })?;
+        let access = self
+            .access
+            .ok_or_else(|| format!("permission {index}: no access (allow, ask or deny)"))?;
+        Ok(PermissionRule { executable, access })
+    }
+}
+
 /// A time in seconds as written, or `false` for never.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(
@@ -1916,6 +1985,10 @@ pub struct Config {
     pub xwayland: XwaylandConfig,
     /// `[overview]`: how it opens besides its binding (`overview.rs`).
     pub overview: OverviewConfig,
+    /// `[permissions]` and `[[permission]]`: screen capture permissions
+    /// (`permissions.rs`).
+    pub permissions: PermissionsConfig,
+    pub permission_rules: Vec<PermissionRule>,
     /// `[[window-rule]]` and `[[layer-rule]]`, in order (`rules.rs`).
     pub window_rules: Vec<crate::rules::WindowRule>,
     pub layer_rules: Vec<crate::rules::LayerRule>,
@@ -2178,6 +2251,16 @@ impl Config {
         let cursor = file.cursor.or_example(example.cursor).validate()?;
         let xwayland = file.xwayland.or_example(example.xwayland).validate()?;
         let overview = file.overview.or_example(example.overview).validate()?;
+        let permissions = file
+            .permissions
+            .or_example(example.permissions)
+            .validate()?;
+        let permission_rules = file
+            .permission_rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, rule)| rule.validate(i + 1))
+            .collect::<Result<Vec<_>, _>>()?;
         let idle_warning = file.idle.warning();
         let wallpaper_warning = file.wallpaper.warning();
         let window_rules = file
@@ -2335,6 +2418,8 @@ impl Config {
             cursor,
             xwayland,
             overview,
+            permissions,
+            permission_rules,
             window_rules,
             layer_rules: file.layer_rules,
             warnings,
@@ -3920,6 +4005,53 @@ mod tests {
         };
         assert!(config.window_rules.len() >= 3);
         assert!(config.layer_rules.len() >= 2);
+        assert!(config.permission_rules.len() >= 2);
+    }
+
+    #[test]
+    fn permissions_config_and_rules_are_parsed_and_validated() {
+        let defaults = Config::default();
+        assert!(!defaults.permissions.enforce);
+        assert!(defaults.permission_rules.is_empty());
+
+        let config = Config::from_toml(
+            r#"
+            [permissions]
+            enforce = true
+
+            [[permission]]
+            executable = "/usr/bin/grim"
+            access = "allow"
+
+            [[permission]]
+            executable = "/usr/bin/wf-*"
+            access = "ask"
+
+            [[permission]]
+            executable = "*"
+            access = "deny"
+            "#,
+            &no_env,
+        )
+        .unwrap();
+        assert!(config.permissions.enforce);
+        assert_eq!(config.permission_rules.len(), 3);
+        assert_eq!(config.permission_rules[0].executable, "/usr/bin/grim");
+        assert_eq!(config.permission_rules[0].access, PermissionAccess::Allow);
+        assert_eq!(config.permission_rules[1].access, PermissionAccess::Ask);
+        assert_eq!(config.permission_rules[2].access, PermissionAccess::Deny);
+
+        let err = |text| Config::from_toml(text, &no_env).unwrap_err();
+        assert!(err("[[permission]]\naccess = \"allow\"").contains("no executable"));
+        assert!(
+            err("[[permission]]\nexecutable = \"  \"\naccess = \"allow\"")
+                .contains("no executable")
+        );
+        assert!(err("[[permission]]\nexecutable = \"/usr/bin/grim\"").contains("no access"));
+        assert!(
+            err("[[permission]]\nexecutable = \"/usr/bin/grim\"\naccess = \"maybe\"")
+                .contains("unknown variant")
+        );
     }
 
     /// xkbcommon panics on a name with a NUL in it (TOML's "\u0000"), which

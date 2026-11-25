@@ -71,6 +71,9 @@ hot-corner-position = "bottom-right"
 hot-corner-pressure = 100
 hot-corner-delay = 250
 
+[permissions]
+enforce = false
+
 [idle]
 monitors-off = 900
 
@@ -236,3 +239,7 @@ animations = false
 [[layer-rule]]
 namespace = "waybar"
 blur = true
+
+[[permission]]
+executable = "/usr/bin/grim"
+access = "allow"

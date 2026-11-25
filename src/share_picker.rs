@@ -615,7 +615,11 @@ impl Pila {
         if self.share_picker.shown.is_some() || self.screencast.waiting.is_empty() {
             return;
         }
-        if !self.is_locked() && (self.color_pick_open() || self.app_shortcuts_open()) {
+        if !self.is_locked()
+            && (self.color_pick_open()
+                || self.app_shortcuts_open()
+                || self.capture_permission_open())
+        {
             return;
         }
         if self.is_locked() {
@@ -812,6 +816,9 @@ impl Pila {
         info!("portal: sharing cancelled");
         shown.ask.cancel();
         self.show_share_picker();
+        if !self.share_picker_open() {
+            self.show_capture_permission();
+        }
     }
 
     /// The app closed the session whose picker is shown: it goes, and the
@@ -825,6 +832,9 @@ impl Pila {
         {
             self.take_share_picker();
             self.show_share_picker();
+            if !self.share_picker_open() {
+                self.show_capture_permission();
+            }
         }
     }
 
@@ -875,6 +885,9 @@ impl Pila {
             (None, ask) => ask.cancel(),
         }
         self.show_share_picker();
+        if !self.share_picker_open() {
+            self.show_capture_permission();
+        }
     }
 
     /// Show `tab` (with both kinds), what was selected on it selected again.

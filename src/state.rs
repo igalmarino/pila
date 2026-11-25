@@ -194,6 +194,9 @@ pub struct Pila {
     /// Apps' global shortcuts and the panel that confirms them
     /// (`app_shortcuts.rs`).
     pub app_shortcuts: crate::app_shortcuts::AppShortcuts,
+    /// Screen capture permissions for direct Wayland capture protocols
+    /// (`permissions.rs`).
+    pub capture_permissions: crate::permissions::CapturePermissions,
     /// Taskbar listeners of wlr-foreign-toplevel-management (`toplevel_management.rs`).
     pub toplevel_management: crate::toplevel_management::ToplevelManagement,
     /// Workspaces (`workspaces.rs`) and their ext-workspace listeners
@@ -598,6 +601,7 @@ impl Pila {
             share_picker: Default::default(),
             color_pick: Default::default(),
             app_shortcuts: Default::default(),
+            capture_permissions: Default::default(),
             outputs: Default::default(),
             xwayland: crate::xwayland::XwaylandState::new(xwayland_shell_state),
             pending_startup: Vec::new(),
@@ -732,6 +736,7 @@ impl Pila {
         if self.share_picker_open()
             || self.color_pick_open()
             || self.app_shortcuts_open()
+            || self.capture_permission_open()
             || self.switcher_view_covers(pos)
             || self.shortcuts_view_covers(pos)
         {
@@ -886,6 +891,7 @@ impl Pila {
             share_picker: self.scene_share_picker(),
             color_pick: self.scene_color_pick(),
             app_shortcuts: self.scene_app_shortcuts(),
+            capture_permission: self.scene_capture_permission(),
             shared_regions: self.share_picker.outlined.clone(),
             outline_buffers: self.share_picker.outline_buffers.clone(),
             overview,
@@ -2598,6 +2604,9 @@ pub struct ClientState {
     pub security_context: Option<SecurityContext>,
     /// The client's process (its socket's peer credentials), for the log.
     pub pid: Option<i32>,
+    /// Resolved executable path from `/proc/<pid>/exe`, cached on first
+    /// permission check (`permissions.rs`).
+    pub executable: std::sync::OnceLock<crate::permissions::ClientIdentity>,
 }
 
 impl ClientState {

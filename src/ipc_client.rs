@@ -33,6 +33,10 @@ Requests:
                       get again without asking
   forget-screen-share <id>|all
                       Forget one, by its id in `screen-shares`, or all
+  capture-permissions Direct screen capture permissions remembered for
+                      programs (wlr-screencopy, ext-image-copy-capture)
+  forget-capture-permission <id>|all
+                      Forget one, by its id in `capture-permissions`, or all
 
 Options:
   --json              Print Pila's answer as it is (docs/IPC.md)";
@@ -72,15 +76,31 @@ fn request(args: &[String]) -> Result<Value, String> {
         _ => Err(format!("{name} takes one window id")),
     };
     match name.as_str() {
-        "windows" | "outputs" | "workspaces" | "keyboard" | "colors" | "switch" | "focused"
-        | "version" | "screen-shares"
+        "windows"
+        | "outputs"
+        | "workspaces"
+        | "keyboard"
+        | "colors"
+        | "switch"
+        | "focused"
+        | "version"
+        | "screen-shares"
+        | "capture-permissions"
             if rest.is_empty() =>
         {
             Ok(json!({ "request": name }))
         }
-        "windows" | "outputs" | "workspaces" | "keyboard" | "colors" | "switch" | "focused"
-        | "version" | "screen-shares" => Err(format!("{name} takes no arguments")),
-        "forget-screen-share" => match rest {
+        "windows"
+        | "outputs"
+        | "workspaces"
+        | "keyboard"
+        | "colors"
+        | "switch"
+        | "focused"
+        | "version"
+        | "screen-shares"
+        | "capture-permissions" => Err(format!("{name} takes no arguments")),
+        "forget-screen-share" | "forget-capture-permission" => match rest {
             [all] if all == "all" => Ok(json!({ "request": name, "all": true })),
             [id] => Ok(json!({ "request": name, "id": id })),
             _ => Err(format!("{name} takes one id, or all")),
@@ -318,9 +338,27 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
             shares if shares.is_empty() => vec!["no screen share remembered".to_string()],
             shares => shares.iter().map(screen_share_line).collect(),
         },
-        "forget-screen-share" if answer["forgotten"].is_u64() => {
+        "forget-screen-share" | "forget-capture-permission" if answer["forgotten"].is_u64() => {
             vec![format!("forgot {}", answer["forgotten"])]
         }
+        "capture-permissions" => match list("capture_permissions") {
+            grants if grants.is_empty() => vec!["no capture permission remembered".to_string()],
+            grants => grants
+                .iter()
+                .map(|g| {
+                    format!(
+                        "{}  {}{}",
+                        plain(&g["id"]),
+                        plain(&g["executable"]),
+                        if g["persistent"] == true {
+                            ""
+                        } else {
+                            "  [this session]"
+                        }
+                    )
+                })
+                .collect(),
+        },
         _ => Vec::new(),
     }
 }

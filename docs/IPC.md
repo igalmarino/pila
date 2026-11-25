@@ -21,6 +21,8 @@ pila msg close <id>                  Ask a window to close
 pila msg minimize <id>               Minimize a window (use focus to restore it)
 pila msg [--json] screen-shares      List the screen shares remembered for apps
 pila msg forget-screen-share <id>|all  Forget one remembered screen share, or all of them
+pila msg [--json] capture-permissions  List direct screen capture permissions
+pila msg forget-capture-permission <id>|all  Forget one capture permission, or all of them
 ```
 
 Examples:
@@ -85,10 +87,12 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `minimize` | `id` | — (succeeds even if already minimized; `focus` restores it) |
 | `screen-shares` | — | `protocol`, `screen_shares` |
 | `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
+| `capture-permissions` | — | `protocol`, `capture_permissions` |
+| `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
-`quit`), while queries continue to work, and so does `forget-screen-share`, which only takes access
-away. The only actions allowed while locked are
+`quit`), while queries continue to work, and so do `forget-screen-share` and
+`forget-capture-permission`, which only take access away. The only actions allowed while locked are
 `power-off-monitors`, `power-on-monitors`, and `switch-layout`, so idle daemons can turn off
 monitors after locking and lock screens can switch keyboard layouts. Note that `spawn` actions run
 commands as your user, which any process running under your account can already do.
@@ -164,6 +168,14 @@ sharing"), sorted by app:
   `output` and `x`, `y`, `width`, `height` in logical pixels, from the monitor's top-left), or
   `"window"` (with `app_id` and `title`)
 - `persistent`: `true` if it's kept until revoked (saved), `false` while the app runs
+
+**Capture permission (`capture-permissions`):**
+A direct Wayland capture permission granted through the confirmation prompt (see the manual,
+"Direct screen capture permissions"), sorted by executable:
+- `id`: the grant's id, for `forget-capture-permission`
+- `executable`: the client's executable path (from `/proc/<pid>/exe`)
+- `persistent`: `true` if saved across restarts (`capture-permissions.json`), `false` for this
+  session only
 
 ## Events
 

@@ -726,6 +726,45 @@ grant. Nothing is shared while the screen is locked. Grants the app asked to kee
 List them with `pila msg screen-shares`, and revoke one with `pila msg forget-screen-share <id>`
 (or `all`).
 
+**Direct screen capture permissions:** Unsandboxed Wayland tools such as `grim`, `wf-recorder`, and
+screen lockers that blur a screenshot capture the screen directly via `wlr-screencopy` or
+`ext-image-copy-capture` without going through the desktop portal (sandboxed apps, such as
+Flatpaks, never see these protocols). By default, any unsandboxed program is allowed. To require confirmation before an unlisted program
+captures the screen, enable `[permissions]` and add `[[permission]]` rules for tools you trust:
+
+```toml
+[permissions]
+enforce = true
+
+[[permission]]
+executable = "/usr/bin/grim"
+access = "allow"
+
+[[permission]]
+executable = "/usr/bin/wf-recorder"
+access = "allow"
+```
+
+Rules match the client's executable path with `*` wildcards; they apply in order and the last match
+wins (`access` is `"allow"`, `"ask"`, or `"deny"`). When an unlisted program (or one matched by
+`access = "ask"`) tries to capture, Pila opens a modal prompt showing its name and executable path.
+Press `Enter` (or click **Allow**) to allow it for the current session, `Esc` (or click **Deny**) to
+refuse it, or toggle **Remember** (`R` or click) before allowing to save the choice in
+`~/.local/state/pila/capture-permissions.json`. Allow takes effect only half a second after the
+prompt appears, so an `Enter` typed into an app as it pops up doesn't allow anything. A denied
+program isn't asked again until it starts over (connects again). While the screen is locked,
+programs that would be asked are refused. List grants with `pila msg capture-permissions`, and
+revoke one with `pila msg forget-capture-permission <id>` (or `all`), which also stops active
+captures from that program. Portal screen sharing and screenshots are unaffected and always use
+Pila's picker.
+
+The executable path is what's checked, so this guards against programs you didn't expect, not
+against a program set on getting around it: any unsandboxed process running as you can also edit
+the configuration or run its code inside an allowed program. Interpreters are one program for all
+their scripts (allowing `python3` allows every Python script), and on Nix the store path changes
+with each update (match it with `*`, such as `/nix/store/*-grim-*/bin/grim`). A program updated
+while running keeps its path.
+
 ## Portals, polkit, and the keyring
 
 Desktop apps expect three session services that full desktop environments start automatically:
@@ -943,6 +982,8 @@ pila msg minimize <id>           # minimize a window (focus restores it)
 pila msg switch                  # inspect active Mod+Tab switcher state
 pila msg screen-shares           # list the screen shares remembered for apps
 pila msg forget-screen-share <id> # revoke one (or all)
+pila msg capture-permissions     # list direct screen capture permissions
+pila msg forget-capture-permission <id> # revoke one (or all)
 pila msg --json subscribe        # stream live window, workspace, and output changes
 ```
 
