@@ -456,6 +456,32 @@ fn follow(mut reader: BufReader<UnixStream>, json_output: bool) -> i32 {
 mod tests {
     use super::*;
 
+    /// The man page lists every request `pila msg` takes, in its PILA MSG
+    /// section.
+    #[test]
+    fn the_man_page_has_every_request() {
+        let man = include_str!("../docs/pila.1").replace("\\-", "-");
+        let section = man.split(".SH PILA MSG").nth(1).unwrap();
+        let section = section.split("\n.SH ").next().unwrap();
+        let words: Vec<&str> = section
+            .split(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+            .collect();
+        let requests = USAGE.split("Requests:").nth(1).unwrap();
+        let requests = requests.split("Options:").next().unwrap();
+        for line in requests.lines() {
+            // A request starts its line, two spaces in.
+            let Some(name) = line.strip_prefix("  ").and_then(|l| l.split(' ').next()) else {
+                continue;
+            };
+            if !name.is_empty() {
+                assert!(
+                    words.contains(&name),
+                    "docs/pila.1 doesn't list `pila msg {name}`"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_title_cant_send_a_terminal_escapes() {
         assert_eq!(plain(&json!("evil\u{1b}[2Jtitle\n")), "evil?[2Jtitle?");
