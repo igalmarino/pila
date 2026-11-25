@@ -864,23 +864,33 @@ impl Pila {
         let Some(progress) = &resizing.progress else {
             return resizing.snapshot.rect;
         };
-        let Some(to) = self.frame_rect(&resizing.window) else {
-            return resizing.snapshot.rect;
-        };
-        let mapped = lerp_rect(resizing.from, to, progress.value(now));
-        let snap_frame = FrameMap {
+        self.resizing_bounds_at(resizing, progress.value(now))
+            .unwrap_or(resizing.snapshot.rect)
+    }
+
+    /// Where a resizing window and its snapshot are drawn `t` of the way
+    /// (0 to 1). Both are stretched as a whole (`resizing_effect`), shadows
+    /// too: the live window's visual rect maps from its frame to the
+    /// stretched one, so its shadow reaches as far past that as it's
+    /// stretched (three times its margin from a full screen to a small
+    /// window).
+    fn resizing_bounds_at(&self, resizing: &Resizing, t: f64) -> Option<Rectangle<i32, Logical>> {
+        let to = self.frame_rect(&resizing.window)?;
+        let mapped = lerp_rect(resizing.from, to, t);
+        let snap_rect = FrameMap {
             from: resizing.from.to_f64(),
             to: mapped,
-        };
-        let snap_rect = snap_frame
-            .apply(resizing.snapshot.rect.to_f64())
-            .to_i32_up();
-        let live_rect = if self.fills_output(&resizing.window) {
-            mapped.to_i32_up()
-        } else {
-            crate::redraw::grown(mapped.to_i32_up(), self.shadow_margin())
-        };
-        snap_rect.merge(live_rect)
+        }
+        .apply(resizing.snapshot.rect.to_f64())
+        .to_i32_up();
+        let visual = self.window_visual_rect(&resizing.window).unwrap_or(to);
+        let live_rect = FrameMap {
+            from: to.to_f64(),
+            to: mapped,
+        }
+        .apply(visual.to_f64())
+        .to_i32_up();
+        Some(snap_rect.merge(live_rect))
     }
 
     /// The outputs the animations in progress show on at `now`, `None` for
@@ -1079,24 +1089,25 @@ impl Pila {
             return;
         }
         resizing.progress = Some(Animation::new(now, resizing.duration, 0.0, 1.0));
-        let from = resizing.from;
         let snap_rect = resizing.snapshot.rect;
-        let from_grown = if self.fills_output(window) {
-            from
-        } else {
-            crate::redraw::grown(from, self.shadow_margin())
-        };
+        // Where its first frame draws it: the old rect, shadow stretched.
+        let start = self
+            .animations
+            .resizing
+            .iter()
+            .find(|r| r.window == *window)
+            .and_then(|r| self.resizing_bounds_at(r, 0.0))
+            .map_or(snap_rect, |rect| rect.merge(snap_rect));
         if let Some(resizing) = self
             .animations
             .resizing
             .iter_mut()
             .find(|r| r.window == *window)
         {
-            resizing.last_rect = snap_rect.merge(from_grown);
+            resizing.last_rect = start;
         }
         self.queue_redraw_window(window);
-        self.queue_redraw_rect(from_grown);
-        self.queue_redraw_rect(snap_rect);
+        self.queue_redraw_rect(start);
     }
 
     /// How a resizing window is drawn: not at all while it waits (its

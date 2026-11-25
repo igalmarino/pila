@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** A window restored from full screen or maximized next to another monitor could leave
+  a strip of its shadow on that monitor until something else redrew it (since 0.9.7): stretched
+  with the window, the shadow reached further than the monitors asked to redraw.
+
 ## 0.9.7 (2026-11-24)
 
 - **New:** The overview's hot corner can be any corner of the screen (`[overview]
@@ -19,7 +25,7 @@
 - **Fixed:** A newly allocated 1440p shm buffer (such as `swaybg`'s first wallpaper on a 2560×1440
   monitor) could still spike to ~15 ms on AMD APUs (`radeonsi`) with 128 KiB strips and a cold
   upload path. Pila now warms up `glTexSubImage2D` at renderer startup and uploads shm buffers in
-  64 KiB strips, keeping 1440p uploads under 6 ms (and logs any upload over 8 ms as `slow upload`).
+  64 KiB strips, keeping 1440p uploads under 8 ms (and logs any upload over 8 ms as `slow upload`).
 - **Improved:** Lowered CPU overhead in the event loop (`after_frames`), per-frame scene building,
   and multi-monitor redraws: housekeeping skips animation stepping, slide-pool trimming, capture
   timing, and hidden-surface scans when nothing needs them; focus changes, animations, fill states,

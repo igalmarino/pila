@@ -13,7 +13,7 @@ Two more files go with this one: `tests/CLAUDE.md` (how the integration tests wo
 `scripts/CLAUDE.md` (`scripts/check`, `scripts/apps`, the demo video); read the one for the
 directory before working in `tests/` or `scripts/`. Releases and packaging are in the
 `release` skill (`.claude/skills/release`). `AGENTS.md` inlines this file for other agents
-(Antigravity), which cut it past 24,000 bytes: `docs_names` checks it fits.
+(Antigravity, which cuts a rule file past 24,000 bytes: `docs_names` checks it fits).
 
 ## Environment
 

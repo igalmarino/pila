@@ -1033,8 +1033,11 @@ Key flows and invariants:
   as fast as the loop goes), of the outputs they show on
   (`animation_outputs`: windows' and snapshots' rectangles grown downward by their style's
   drop, `with_drop`, without spilling sideways onto neighboring outputs when filling an output;
-  layers' outputs; every output during a workspace slide or overview glide), taken before
-  pruning so the last frame is asked for too; locking drops all.
+  a resizing window's where it's drawn now and where it was last drawn (`resizing_bounds`,
+  `last_rect`): its visual rect, shadow included, stretched with it, so a shadow stretched past
+  its margin still clears the output it reached; layers' outputs; every output during a
+  workspace slide or overview glide), taken before pruning so the last frame is asked for too;
+  locking drops all.
   Animations are visual only: input sees the real geometry.
 - **Window and layer rules** (`rules.rs`, `[[window-rule]]` / `[[layer-rule]]`): match
   windows by app id (`foreign_toplevel::title_and_app_id`: xdg `app_id` or X11
