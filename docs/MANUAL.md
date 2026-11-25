@@ -764,7 +764,8 @@ Pila's picker.
 
 The executable path is what's checked, so this guards against programs you didn't expect, not
 against a program set on getting around it: any unsandboxed process running as you can also edit
-the configuration or run its code inside an allowed program. Interpreters are one program for all
+the configuration, run its code inside an allowed program, or connect and then start an allowed
+program in its own process (the path is read when the program first captures). Interpreters are one program for all
 their scripts (allowing `python3` allows every Python script), and on Nix the store path changes
 with each update (match it with `*`, such as `/nix/store/*-grim-*/bin/grim`). A program updated
 while running keeps its path.
