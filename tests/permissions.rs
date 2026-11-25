@@ -790,3 +790,35 @@ fn a_virtual_keyboard_cant_answer_the_prompt() {
     pila.key("Escape");
     client.wait_logged("typed", "Stopped");
 }
+
+/// The prompt shown on a monitor unplugged moves to another, and Remember
+/// toggled there is drawn checked.
+#[test]
+fn remember_toggled_after_the_prompts_monitor_is_unplugged_shows() {
+    let mut pila = TestPila::start_with(Options {
+        config: "[permissions]\nenforce = true\n".into(),
+        outputs: Some("A:640x480,B:640x480".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+    pila.move_to(900.0, 200.0);
+    let _session = start_ext_session(&client, "A", "moved");
+    pila.wait("asked on B", |s| {
+        s["capture_permission"]["shown"]["output"] == "B"
+            && s["capture_permission"]["shown"]["text"] == true
+    });
+    pila.request(json!({ "cmd": "output_remove", "name": "B" }));
+    pila.wait("asked on A", |s| {
+        s["capture_permission"]["shown"]["output"] == "A"
+    });
+    let state = pila.settle();
+    // The checkbox: the start of the Remember row.
+    let (x, y, _, h) = rect(&state["capture_permission"]["shown"]["remember_rect"]);
+    let (bx, by) = ((x + 9) as f64, (y + h / 2) as f64);
+    let unchecked = pila.pixel(bx, by);
+    pila.key("r");
+    pila.wait_pixel_is(bx, by, "the box checked", |p| p != unchecked);
+    pila.key("Escape");
+    client.wait_logged("moved", "Stopped");
+}
