@@ -207,7 +207,9 @@ wallpaper while keeping your bar visible.
   `top-right`, `bottom-left` or `bottom-right`; on several monitors, only a corner of the whole
   layout counts), and two settings keep it from firing by accident: `hot-corner-pressure` (logical
   pixels the pointer must be pushed past the corner, with a mouse or touchpad; try 100) and
-  `hot-corner-delay` (milliseconds it must stay there; try 250). `hot-corner = false` turns it off.
+  `hot-corner-delay` (milliseconds it must stay there; try 250). With both, the delay counts from
+  reaching the corner, not from the push: a push that takes longer than the delay opens it as soon
+  as it's far enough. `hot-corner = false` turns it off.
 - Other keybindings close the overview and run normally, except workspace-switching bindings
   (`Mod+1`–`Mod+9`, etc.), which switch workspaces while keeping the overview open.
 - When you have more than one workspace, a live workspace strip appears at the top of each monitor

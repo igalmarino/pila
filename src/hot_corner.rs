@@ -7,7 +7,9 @@
 //! how far relative motion must push the pointer past the corner (the part
 //! clamping to the outputs drops, `Pila::hot_corner`'s `pushed`; absolute
 //! input never pushes), and `hot-corner-delay`, how long the pointer must
-//! stay there. Once pushed far enough, a delay still to run is a timer
+//! stay there, counted from reaching the corner (`Visit::since`), not from
+//! the push: a push slower than the delay fires as soon as it's far enough.
+//! Once pushed far enough, a delay still to run is a timer
 //! (`HotCorner::timer`), removed when the pointer leaves. Nothing happens
 //! with a button held or a grab running, over a fullscreen window, while
 //! locked, or while picking a color or a region.

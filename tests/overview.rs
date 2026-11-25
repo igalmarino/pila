@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Windows `names` opened in order (the last one focused).
 fn windows(pila: &mut TestPila, names: &[&str]) -> (Client, Vec<common::client::Window>) {
@@ -779,6 +779,39 @@ fn with_a_delay_the_pointer_must_stay_in_the_corner() {
     pila.stays("still open", Duration::from_millis(600), |s| {
         s["overview"]["open"] == true
     });
+}
+
+/// The delay counts from reaching the corner, not from the push: pushed
+/// past the pressure once it's over, the overview opens at once.
+#[test]
+fn with_pressure_and_a_delay_the_delay_counts_from_reaching_the_corner() {
+    let mut pila =
+        TestPila::with_config("[overview]\nhot-corner-pressure = 100\nhot-corner-delay = 1000\n");
+    let _client = windows(&mut pila, &["a"]);
+    pila.move_to(100.0, 100.0);
+    pila.move_to(0.0, 0.0);
+    // The delay goes by with no push: nothing.
+    pila.stays("closed: not pushed", Duration::from_millis(1200), |s| {
+        s["overview"]["open"] == false
+    });
+    let pushed = Instant::now();
+    pila.move_by(-60.0, -60.0);
+    pila.wait("pushed 120", |s| s["overview"]["open"] == true);
+    assert!(
+        pushed.elapsed() < Duration::from_millis(1000),
+        "the delay started over at the push ({:?})",
+        pushed.elapsed()
+    );
+    pila.key("Escape");
+    pila.wait("closed", |s| s["overview"]["open"] == false);
+    // Pushed at once, it still waits for the delay.
+    pila.move_to(60.0, 60.0);
+    pila.move_to(0.0, 0.0);
+    pila.move_by(-60.0, -60.0);
+    pila.stays("closed: delay running", Duration::from_millis(400), |s| {
+        s["overview"]["open"] == false
+    });
+    pila.wait("opened after the delay", |s| s["overview"]["open"] == true);
 }
 
 fn swipe(pila: &mut TestPila, fingers: u32, steps: &[(f64, f64)]) {

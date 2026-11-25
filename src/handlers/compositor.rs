@@ -86,10 +86,22 @@ impl CompositorHandler for Pila {
     // Destroying a subsurface takes it off its parent at once, no commit
     // needed (and a role's destruction may come with no commit either). A
     // surface whose role already unmapped it has `surface_outputs == None`
-    // and was already redrawn there.
+    // and was already redrawn there. One with a role `surface_outputs`
+    // doesn't place redraws nothing either: logged, in case a role is
+    // destroyed while it still shows.
     fn destroyed(&mut self, surface: &WlSurface) {
-        if let Some(outputs) = self.surface_outputs(surface) {
-            outputs.iter().for_each(|o| self.queue_redraw_output(o));
+        match self.surface_outputs(surface) {
+            Some(outputs) => outputs.iter().for_each(|o| self.queue_redraw_output(o)),
+            None => {
+                if let Some(role) = smithay::wayland::compositor::get_role(surface) {
+                    tracing::debug!(
+                        target: "pila::frames",
+                        surface = ?surface.id(),
+                        role,
+                        "destroyed surface placed nowhere: no redraw"
+                    );
+                }
+            }
         }
     }
 }
