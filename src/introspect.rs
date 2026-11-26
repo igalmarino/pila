@@ -292,6 +292,12 @@ impl Pila {
             _ => None,
         };
 
+        let idle_inhibitors: Vec<Value> = self
+            .idle_inhibitors
+            .dbus
+            .iter()
+            .map(|i| json!({ "app": i.app, "reason": i.reason }))
+            .collect();
         let mut state = json!({
             "windows": windows,
             "unmapped": unmapped,
@@ -424,6 +430,11 @@ impl Pila {
         });
         // Past `json!`'s recursion limit as one more field of the above.
         state["quit_dialog"] = self.quit_dialog_json();
+        // Whether idle is inhibited, and the apps holding a D-Bus cookie
+        // (`screensaver.rs`): out of the `json!` above, at its recursion
+        // limit.
+        state["idle_inhibited"] = self.idle_inhibited().into();
+        state["idle_inhibitors"] = idle_inhibitors.into();
         state
     }
 }

@@ -161,6 +161,9 @@ pub enum Request {
     },
     /// Show the panel for a session's shortcuts again.
     ConfigureShortcuts { session: String },
+    /// The apps holding an `org.freedesktop.ScreenSaver` inhibit cookie
+    /// now (`screensaver.rs`): idle is inhibited while there's one.
+    DbusInhibitors(Vec<crate::screensaver::Inhibitor>),
 }
 
 /// A stream started for a session, as `Start` answers it.
@@ -217,6 +220,12 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
                     .serve_at(PATH, shortcuts)
                     .build(),
             );
+            // Apps' requests to keep the screen on, on the same connection
+            // under a name of their own (one someone else has only costs
+            // this).
+            if let Ok(connection) = &built {
+                zbus::block_on(crate::screensaver::serve(connection, send.clone()));
+            }
             // Off the event loop, what its connection to PipeWire would
             // otherwise load from a cold disk (10 ms on bare metal), before
             // it connects (as Pila serves).

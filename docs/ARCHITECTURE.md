@@ -1647,7 +1647,14 @@ Key flows and invariants:
   1000 Hz mouse); Smithay runs the notification timers on `loop_handle`. Idle inhibitors
   only count while their surface is part of a mapped window or layer surface and the
   session isn't locked; `update_idle_inhibit` re-checks in `after_frames` (after a frame,
-  a client dispatch or input). A new input path
+  a client dispatch or input). Apps also inhibit over D-Bus (`screensaver.rs`:
+  `org.freedesktop.ScreenSaver`'s `Inhibit`/`UnInhibit` at `/org/freedesktop/ScreenSaver` and
+  `/ScreenSaver`, served on the portal's connection, so on udev and headless only; the name is
+  taken with `DO_NOT_QUEUE`, and a program that has it already keeps it). A cookie counts
+  wherever its app is (no surface) but not while locked; only the app that got it can give
+  it back, and an app's cookies go when it leaves the bus (`NameOwnerChanged`, on a thread of
+  its own). The event loop gets the list of holders (`portal::Request::DbusInhibitors`) on
+  each change. A new input path
   must go through `process_input_event` (or set `input_activity`) to count as activity.
   Pila has no idle action of its own: locking and turning the monitors off are swayidle's
   (the example's `autostart`), through `power-off-monitors` (`power_off_monitors`: the next

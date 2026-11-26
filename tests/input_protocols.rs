@@ -83,6 +83,118 @@ fn an_inhibitor_on_a_minimized_window_doesnt_count() {
     client.wait_logged("idle", "Idled");
 }
 
+/// Pila on a session bus of the test's own, where it serves
+/// `org.freedesktop.ScreenSaver` (`screensaver.rs`), and a client.
+fn on_a_bus() -> (TestPila, notifications::Bus, Client) {
+    let bus = notifications::Bus::start();
+    let pila = TestPila::start_with(Options {
+        env: vec![bus.env()],
+        ..Default::default()
+    });
+    let client = pila.client();
+    (pila, bus, client)
+}
+
+/// An app on `bus`, as Firefox calls the screensaver.
+fn app_on(bus: &notifications::Bus) -> zbus::Connection {
+    zbus::block_on(zbus::connection::Builder::address(bus.address.as_str()).build()).unwrap()
+}
+
+/// `Inhibit` at `path`: tried again until Pila has taken the name.
+fn inhibit(app: &zbus::Connection, path: &str) -> u32 {
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    loop {
+        let reply = zbus::block_on(app.call_method(
+            Some("org.freedesktop.ScreenSaver"),
+            path,
+            Some("org.freedesktop.ScreenSaver"),
+            "Inhibit",
+            &("Firefox", "video-playing"),
+        ));
+        match reply {
+            Ok(reply) => return reply.body().deserialize().unwrap(),
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(err) => panic!("no screensaver on the bus: {err}"),
+        }
+    }
+}
+
+fn uninhibit(app: &zbus::Connection, path: &str, cookie: u32) {
+    zbus::block_on(app.call_method(
+        Some("org.freedesktop.ScreenSaver"),
+        path,
+        Some("org.freedesktop.ScreenSaver"),
+        "UnInhibit",
+        &(cookie,),
+    ))
+    .unwrap();
+}
+
+/// An idle notification of 100 ms.
+fn idle_notification(
+    client: &Client,
+) -> wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::ExtIdleNotificationV1
+{
+    let notifier: ExtIdleNotifierV1 = client.bind("ext_idle_notifier_v1", 1);
+    let n = notifier.get_idle_notification(100, &client.seat(), &client.qh, "idle".into());
+    client.flush();
+    n
+}
+
+#[test]
+fn a_dbus_screensaver_inhibit_stops_idling() {
+    let (mut pila, bus, client) = on_a_bus();
+    let app = app_on(&bus);
+    for path in ["/org/freedesktop/ScreenSaver", "/ScreenSaver"] {
+        let cookie = inhibit(&app, path);
+        let state = pila.wait("inhibited", |s| s["idle_inhibited"] == true);
+        assert_eq!(state["idle_inhibitors"][0]["app"], "Firefox");
+        assert_eq!(state["idle_inhibitors"][0]["reason"], "video-playing");
+        let _n = idle_notification(&client);
+        std::thread::sleep(Duration::from_millis(400));
+        client.roundtrip();
+        assert!(
+            !client.has_logged("idle", "Idled"),
+            "idled despite the inhibit at {path}"
+        );
+        uninhibit(&app, path, cookie);
+        client.wait_logged("idle", "Idled");
+        pila.wait("not inhibited", |s| s["idle_inhibited"] == false);
+        client.lock().log.clear();
+    }
+}
+
+#[test]
+fn a_dbus_inhibit_ends_when_its_app_leaves_the_bus() {
+    let (mut pila, bus, client) = on_a_bus();
+    let app = app_on(&bus);
+    inhibit(&app, "/org/freedesktop/ScreenSaver");
+    pila.wait("inhibited", |s| s["idle_inhibited"] == true);
+    drop(app);
+    pila.wait("not inhibited", |s| {
+        s["idle_inhibited"] == false && s["idle_inhibitors"] == serde_json::json!([])
+    });
+    let _n = idle_notification(&client);
+    client.wait_logged("idle", "Idled");
+}
+
+#[test]
+fn a_dbus_inhibit_cookie_is_given_back_only_by_its_app() {
+    let (mut pila, bus, _client) = on_a_bus();
+    let app = app_on(&bus);
+    let other = app_on(&bus);
+    let cookie = inhibit(&app, "/org/freedesktop/ScreenSaver");
+    pila.wait("inhibited", |s| s["idle_inhibited"] == true);
+    uninhibit(&other, "/org/freedesktop/ScreenSaver", cookie);
+    pila.stays("inhibited", Duration::from_millis(300), |s| {
+        s["idle_inhibited"] == true
+    });
+    uninhibit(&app, "/org/freedesktop/ScreenSaver", cookie);
+    pila.wait("not inhibited", |s| s["idle_inhibited"] == false);
+}
+
 // --- Pointer constraints -----------------------------------------------------
 
 #[test]

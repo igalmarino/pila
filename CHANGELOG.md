@@ -11,6 +11,10 @@
   allowed or denied by `[[permission]]` rules on their executable path, or asked with a prompt
   (Allow, Deny, Remember); `pila msg capture-permissions` lists what's allowed and
   `pila msg forget-capture-permission <id>` (or `all`) revokes it. Portal sharing is unchanged.
+- **New:** Apps that ask over D-Bus to keep the screen on (`org.freedesktop.ScreenSaver`'s
+  `Inhibit`, as Firefox, Chromium, mpv and call apps do, and Flatpaks through the portal) now
+  keep swayidle from locking the session and turning the monitors off, as apps using the Wayland
+  idle-inhibit protocol already did. Pila's log names each app that asks.
 - **Changed:** Pila's panels no longer show key hints (the welcome screen, the quit dialog, the
   capture prompt, the share picker, the app shortcuts panel, the shortcuts cheatsheet, the color
   picker and region banners), for a cleaner look. The keys work as before and are in the

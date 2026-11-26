@@ -841,8 +841,12 @@ are disabled (`Ctrl+Alt+F1..F12` VT switching still works).
 
 Idle timeouts are handled by `swayidle`, which the default `autostart` runs to lock the screen with
 `swaylock` after 5 minutes of inactivity and before system sleep, and to power off monitors after
-10 minutes. Any input wakes the monitors (consuming that first key or click). Visible video players
-that request idle inhibition keep the session awake. To change timings or disable automatic
+10 minutes. Any input wakes the monitors (consuming that first key or click). Apps that ask to
+keep the screen on keep the session awake: through the Wayland idle-inhibit protocol while their
+window is visible (on the current workspace, not minimized), or through D-Bus
+(`org.freedesktop.ScreenSaver`, as Firefox, Chromium, mpv and call apps do, and Flatpaks through
+the portal) wherever their window is. Pila's log names each app that asks ("an app inhibits
+idling"). Whether an app asks is up to it: a web page that draws its video itself may not. To change timings or disable automatic
 locking, customize the `swayidle` entry in `autostart` (takes effect on next login or manual
 restart):
 

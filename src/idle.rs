@@ -1,5 +1,8 @@
 //! ext-idle-notify and idle-inhibit: tell clients such as swayidle when the
-//! user has been idle, unless something visible (a video player) inhibits it.
+//! user has been idle, unless something visible (a video player) inhibits it,
+//! or an app holds an `org.freedesktop.ScreenSaver` inhibit cookie
+//! (`screensaver.rs`: browsers, players, call apps, Flatpaks through the
+//! portal).
 //!
 //! Every input event counts as activity (`Pila::process_input_event`), told
 //! the notifier once per event-loop iteration (`Pila::after_frames`).
@@ -22,11 +25,16 @@ use smithay::{
     },
 };
 
-use crate::Pila;
+use crate::{screensaver::Inhibitor, Pila};
 
-/// Surfaces with an idle inhibitor, visible or not.
+/// What inhibits idle.
 #[derive(Default)]
-pub struct IdleInhibitors(HashSet<WlSurface>);
+pub struct IdleInhibitors {
+    /// Surfaces with an idle inhibitor, visible or not.
+    surfaces: HashSet<WlSurface>,
+    /// Apps holding a D-Bus cookie (`screensaver.rs`).
+    pub dbus: Vec<Inhibitor>,
+}
 
 impl Pila {
     /// Count user input as activity: idle notifications resume and restart
@@ -38,19 +46,38 @@ impl Pila {
 
     /// Recompute whether a visible surface inhibits idle. Call after each frame.
     pub fn update_idle_inhibit(&mut self) {
-        self.idle_inhibitors.0.retain(|surface| surface.is_alive());
-        let inhibited = !self.is_locked()
-            && self
-                .idle_inhibitors
-                .0
-                .iter()
-                .any(|surface| self.is_visible(surface));
+        self.idle_inhibitors
+            .surfaces
+            .retain(|surface| surface.is_alive());
+        let inhibited = self.idle_inhibited();
         // A no-op unless it changed.
         self.globals.idle_notifier.set_is_inhibited(inhibited);
     }
 
-    /// Whether `surface` belongs to a mapped window or a layer surface.
-    fn is_visible(&self, surface: &WlSurface) -> bool {
+    /// The apps holding a D-Bus inhibit cookie now.
+    pub fn set_dbus_inhibitors(&mut self, inhibitors: Vec<Inhibitor>) {
+        self.idle_inhibitors.dbus = inhibitors;
+        self.update_idle_inhibit();
+    }
+
+    /// Whether something inhibits idle now: a D-Bus cookie or a visible
+    /// surface's inhibitor, unless locked.
+    pub fn idle_inhibited(&self) -> bool {
+        !self.is_locked()
+            && (!self.idle_inhibitors.dbus.is_empty()
+                || self
+                    .idle_inhibitors
+                    .surfaces
+                    .iter()
+                    .any(|surface| self.surface_alive_and_visible(surface)))
+    }
+
+    /// Whether `surface` is alive and belongs to a mapped window or a layer
+    /// surface.
+    fn surface_alive_and_visible(&self, surface: &WlSurface) -> bool {
+        if !surface.is_alive() {
+            return false;
+        }
         let root = crate::redraw::root_surface(surface);
         let mapped_window = self
             .space
@@ -70,12 +97,12 @@ impl IdleNotifierHandler for Pila {
 // zwp_idle_inhibit_manager_v1
 impl IdleInhibitHandler for Pila {
     fn inhibit(&mut self, surface: WlSurface) {
-        self.idle_inhibitors.0.insert(surface);
+        self.idle_inhibitors.surfaces.insert(surface);
         self.update_idle_inhibit();
     }
 
     fn uninhibit(&mut self, surface: WlSurface) {
-        self.idle_inhibitors.0.remove(&surface);
+        self.idle_inhibitors.surfaces.remove(&surface);
         self.update_idle_inhibit();
     }
 }

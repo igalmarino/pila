@@ -323,6 +323,7 @@ impl Pila {
                 reply.send(self.list_app_shortcuts(&session))
             }
             Request::ConfigureShortcuts { session } => self.configure_app_shortcuts(session),
+            Request::DbusInhibitors(inhibitors) => self.set_dbus_inhibitors(inhibitors),
             Request::Screenshot {
                 ask,
                 app,
