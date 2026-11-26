@@ -91,57 +91,14 @@ const REMEMBER_GAP: i32 = 20;
 const REMEMBER_HEIGHT: i32 = 28;
 const REMEMBER_BOX: i32 = 20;
 const REMEMBER_LABEL_AT: i32 = 32;
-/// The footer: the buttons, as tall as they are, the hints beside them.
+/// The footer: the buttons, as tall as they are, at its right.
 const BUTTON_HEIGHT: i32 = 36;
 const SHARE_WIDTH: i32 = 120;
 const CANCEL_WIDTH: i32 = 110;
 const BUTTON_GAP: i32 = 12;
-/// Room between the hints and the buttons.
-const FOOTER_SPACE: i32 = 24;
-/// The narrowest panel (one source) with `hints` key hints: its footer, the
-/// hints then the buttons.
-const fn min_width(hints: usize) -> i32 {
-    2 * PADDING
-        + crate::panel::hints_width(hints)
-        + FOOTER_SPACE
-        + CANCEL_WIDTH
-        + BUTTON_GAP
-        + SHARE_WIDTH
-}
-/// The key hints in the footer, for a share or a screenshot, without tabs
-/// and with them.
-const HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "share"), ("Esc", "cancel")];
-const SCREENSHOT_HINTS: [(&str, &str); 3] = [("← →", "pick"), ("Enter", "take"), ("Esc", "cancel")];
-const TABBED_HINTS: [(&str, &str); 4] = [
-    ("← →", "pick"),
-    ("Tab", "switch"),
-    ("Enter", "share"),
-    ("Esc", "cancel"),
-];
-const TABBED_SCREENSHOT_HINTS: [(&str, &str); 4] = [
-    ("← →", "pick"),
-    ("Tab", "switch"),
-    ("Enter", "take"),
-    ("Esc", "cancel"),
-];
-/// With the Remember toggle: its key, before Enter's.
-const REMEMBER_HINT: (&str, &str) = ("R", "remember");
-
-/// The footer's hints: for a share or a screenshot, with tabs or not, with
-/// the Remember toggle or not.
-fn hints(screenshot: bool, tabbed: bool, remember: bool) -> Vec<(&'static str, &'static str)> {
-    let hints: &[(&str, &str)] = match (screenshot, tabbed) {
-        (false, false) => &HINTS,
-        (true, false) => &SCREENSHOT_HINTS,
-        (false, true) => &TABBED_HINTS,
-        (true, true) => &TABBED_SCREENSHOT_HINTS,
-    };
-    let mut hints = hints.to_vec();
-    if remember {
-        hints.insert(hints.len() - 2, REMEMBER_HINT);
-    }
-    hints
-}
+/// The narrowest panel (one source): room for its title, its note and the
+/// buttons.
+const MIN_WIDTH: i32 = 694;
 
 /// A tab of the picker that offers both kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -341,8 +298,6 @@ pub struct Layout {
     pub tab: Option<Tab>,
     pub share: Rectangle<i32, Logical>,
     pub cancel: Rectangle<i32, Logical>,
-    /// The key hints, left of the buttons.
-    pub hints: Rectangle<i32, Logical>,
     /// The Remember row, with the toggle.
     pub remember: Option<Rectangle<i32, Logical>>,
 }
@@ -396,8 +351,7 @@ pub fn layout(
         .into_iter()
         .flatten()
         .fold((0, 0), |(w, h), (cw, ch)| (w.max(cw), h.max(ch)));
-    let hints = hints(false, tabbed, remember).len();
-    let width = (2 * PADDING + content.0).max(min_width(hints));
+    let width = (2 * PADDING + content.0).max(MIN_WIDTH);
     let top = if tabbed {
         TILES_AT + BUTTON_HEIGHT + TABS_GAP
     } else {
@@ -485,10 +439,6 @@ pub fn layout(
         share.loc - Point::from((BUTTON_GAP + CANCEL_WIDTH, 0)),
         Size::from((CANCEL_WIDTH, BUTTON_HEIGHT)),
     );
-    let hints = Rectangle::new(
-        panel.loc + Point::from((PADDING, buttons_y)),
-        Size::from((crate::panel::hints_width(hints), BUTTON_HEIGHT)),
-    );
     let remember = remember.then(|| {
         Rectangle::new(
             panel.loc + Point::from((PADDING, top + content.1 + REMEMBER_GAP)),
@@ -503,7 +453,6 @@ pub fn layout(
         tab: tabbed.then_some(shows),
         share,
         cancel,
-        hints,
         remember,
     }
 }
@@ -1441,15 +1390,6 @@ fn items(
             color: text,
         });
     }
-    let hints_y = local(layout.share).1 + (BUTTON_HEIGHT - crate::panel::FOOTER_HEIGHT) / 2;
-    let hints = hints(screenshot, layout.tab.is_some(), layout.remember.is_some());
-    items.extend(crate::panel::footer(
-        &hints,
-        None,
-        hints_y,
-        panel.size.w,
-        colors,
-    ));
     items
 }
 
@@ -1679,11 +1619,10 @@ pub fn elements(
 mod tests {
     use super::*;
 
-    /// The picker's title, type and footer are the other titled panels'
-    /// (`panel.rs`): its title where theirs is, in the same font, and its
-    /// footer's hints.
+    /// The picker's title and type are the other titled panels'
+    /// (`panel.rs`): its title where theirs is, in the same font.
     #[test]
-    fn it_has_the_titled_panels_title_and_footer() {
+    fn it_has_the_titled_panels_title() {
         let colors = crate::config::Config::parse("", &|_| None, crate::config::ModKey::Super)
             .unwrap()
             .colors;
@@ -1704,11 +1643,6 @@ mod tests {
         };
         assert_eq!(*at, (crate::panel::PADDING, crate::panel::TITLE_AT));
         assert_eq!(*font, crate::panel::TITLE);
-        let hints = picker
-            .iter()
-            .filter(|item| matches!(item, Item::Hint { .. }))
-            .count();
-        assert_eq!(hints, HINTS.len());
     }
 
     fn area() -> Rectangle<i32, Logical> {
@@ -1719,7 +1653,7 @@ mod tests {
     fn assert_inside(layout: &Layout, what: &str) {
         let panel = layout.panel;
         let tabs = layout.tabs.iter().map(|(_, rect)| *rect);
-        let controls: Vec<_> = [layout.share, layout.cancel, layout.hints]
+        let controls: Vec<_> = [layout.share, layout.cancel]
             .into_iter()
             .chain(tabs)
             .chain(layout.remember)
@@ -1760,7 +1694,7 @@ mod tests {
     }
 
     /// The Remember row, where it's offered: under the tiles, above the
-    /// footer, the panel taller by it and its key's hint.
+    /// footer, the panel taller by it.
     #[test]
     fn the_remember_row_is_between_the_tiles_and_the_footer() {
         for (outputs, windows, tab) in [(1, 0, Tab::Screens), (2, 7, Tab::Windows)] {
@@ -1776,11 +1710,6 @@ mod tests {
             assert!(with.tiles.iter().all(|t| t.loc.y < row.loc.y));
             assert!(row.loc.y + row.size.h < with.share.loc.y);
             assert!(row.contains_rect(remember_box(row)));
-        }
-        for tabbed in [false, true] {
-            let hints = hints(false, tabbed, true);
-            let at = |key: &str| hints.iter().position(|(k, _)| *k == key).unwrap();
-            assert_eq!(at("R") + 1, at("Enter"), "R before Enter: {hints:?}");
         }
     }
 

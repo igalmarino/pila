@@ -32,7 +32,7 @@ const FIT_MARGIN: i32 = 32;
 
 /// The welcome: its width, where its rows start, each row's height, where
 /// the keys and what they do go, and the room under the rows (the
-/// footer's, as the cheatsheet's).
+/// footer's: where the settings are).
 const WELCOME_WIDTH: i32 = 560;
 const WELCOME_ROWS_AT: i32 = 120;
 const WELCOME_ROW: i32 = 38;
@@ -42,8 +42,8 @@ const WELCOME_BOTTOM: i32 = panel::FOOTER - (WELCOME_ROW - panel::CAP_HEIGHT);
 
 /// The full cheatsheet: its width, its columns, where its sections start,
 /// a section's heading and row heights, where what a row does goes (from
-/// its column) and the room under the columns (the footer's: the last
-/// row's own room under its keys is part of it).
+/// its column) and the room under the columns (`PADDING` under the last
+/// row's keys: it has no footer, its keys are in the manual).
 const SHORTCUTS_WIDTH: i32 = 860;
 const COLUMNS_AT: [i32; 2] = [panel::PADDING, 448];
 const SECTIONS_AT: i32 = 72;
@@ -51,7 +51,7 @@ const SECTION_HEADING: i32 = 22;
 const SECTION_ROW: i32 = 32;
 const SECTION_GAP: i32 = 14;
 const SECTION_WHAT_AT: i32 = 200;
-const SHORTCUTS_BOTTOM: i32 = panel::FOOTER - (SECTION_ROW - panel::CAP_HEIGHT);
+const SHORTCUTS_BOTTOM: i32 = panel::PADDING - (SECTION_ROW - panel::CAP_HEIGHT);
 
 /// What the panel is shown as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,9 +120,6 @@ pub struct Section {
     pub rows: Vec<Row>,
 }
 
-/// The footer's hint, the same on both.
-const HINTS: &[(&str, &str)] = &[("Esc", "close")];
-
 /// The welcome's items: the title, a line under it, its rows centered, and
 /// the footer with `notes`, for a panel `height` high.
 fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -> Vec<Item> {
@@ -164,18 +161,21 @@ fn welcome_items(rows: &[Row], notes: &[String], height: i32, colors: &Colors) -
             color: text,
         });
     }
-    items.extend(footer(notes, WELCOME_WIDTH, height, colors));
+    if !notes.is_empty() {
+        let y = height - panel::PADDING - panel::FOOTER_HEIGHT;
+        items.push(panel::footer(
+            &notes.join("  ·  "),
+            y,
+            WELCOME_WIDTH,
+            colors,
+        ));
+    }
     items
 }
 
-/// The full cheatsheet's items: the title, its sections in two columns,
-/// and the footer with `notes`, for a panel `height` high.
-fn shortcuts_items(
-    columns: &[Vec<Section>; 2],
-    notes: &[String],
-    height: i32,
-    colors: &Colors,
-) -> Vec<Item> {
+/// The full cheatsheet's items: the title and its sections in two
+/// columns.
+fn shortcuts_items(columns: &[Vec<Section>; 2], colors: &Colors) -> Vec<Item> {
     let (text, _, accent) = panel::text_colors(colors);
     let mut items = vec![panel::title(
         Heading::Shortcuts.text(),
@@ -216,15 +216,7 @@ fn shortcuts_items(
             y += SECTION_GAP;
         }
     }
-    items.extend(footer(notes, SHORTCUTS_WIDTH, height, colors));
     items
-}
-
-/// The footer of a panel `width` by `height`: the hint, and `notes`.
-fn footer(notes: &[String], width: i32, height: i32, colors: &Colors) -> Vec<Item> {
-    let note = (!notes.is_empty()).then(|| notes.join("  ·  "));
-    let y = height - panel::PADDING - panel::FOOTER_HEIGHT;
-    panel::footer(HINTS, note.as_deref(), y, width, colors)
 }
 
 /// A column's height: its sections' headings and rows, a gap between them.
@@ -595,12 +587,7 @@ impl Pila {
                 let rows: Vec<Row> = view.rows().cloned().collect();
                 welcome_items(&rows, &view.notes, view.layout_size.h, colors)
             }
-            Heading::Shortcuts => shortcuts_items(
-                &columns(&view.sections),
-                &view.notes,
-                view.layout_size.h,
-                colors,
-            ),
+            Heading::Shortcuts => shortcuts_items(&columns(&view.sections), colors),
         };
         let key = TextKey {
             items,
@@ -981,6 +968,33 @@ mod tests {
         assert_eq!(merged(&caps(&[&["Super", "1"]])), None);
         assert_eq!(merged(&caps(&[&["Super", "1"], &["Super", "3"]])), None);
         assert_eq!(merged(&caps(&[&["Super", "1"], &["Alt", "2"]])), None);
+    }
+
+    /// The welcome's footer says where the settings are, at its right, in
+    /// the footer's row; no key hints (no panel has them).
+    #[test]
+    fn the_welcome_footer_says_where_the_settings_are() {
+        let config = config("", ModKey::Super);
+        let notes = vec!["Settings: ~/.config/pila/config.toml".to_string()];
+        let height = 400;
+        let welcome = welcome_items(&welcome_rows(&config), &notes, height, &config.colors);
+        let footer = welcome.iter().find_map(|item| match item {
+            Item::Text {
+                text, at, align, ..
+            } if *text == notes[0] => Some((at.1, *align)),
+            _ => None,
+        });
+        assert_eq!(
+            footer,
+            Some((
+                height - panel::PADDING - panel::FOOTER_HEIGHT + 1,
+                Align::Right
+            )),
+            "{welcome:?}"
+        );
+        // Without a settings file to name, nothing there.
+        let bare = welcome_items(&welcome_rows(&config), &[], height, &config.colors);
+        assert_eq!(bare.len(), welcome.len() - 1);
     }
 
     #[test]

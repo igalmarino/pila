@@ -15,9 +15,9 @@
 //!   panel, a single texture.
 //! - One type scale (`TITLE`, `BODY`, `NOTE`, ...) and, on a panel with a
 //!   title, the same room around its content (`PADDING`), the title in the
-//!   same place (`title`) and a footer of key hints at its bottom
-//!   (`footer`). The switcher and the window menu have no title: their room
-//!   is their own, tighter.
+//!   same place (`title`) and a footer at its bottom (`footer`: a note).
+//!   None shows key hints: their keys are in the manual. The switcher and
+//!   the window menu have no title: their room is their own, tighter.
 
 use std::collections::HashMap;
 
@@ -58,16 +58,11 @@ const CAP_GAP: i32 = 18;
 pub const PADDING: i32 = 28;
 pub const TITLE_AT: i32 = 20;
 pub const TITLE_HEIGHT: i32 = 34;
-/// The footer: its row (the keycaps' height), and the room above it.
+/// The footer: its row (a keycap's height), and the room above it.
 pub const FOOTER_HEIGHT: i32 = CAP_HEIGHT;
 pub const FOOTER_GAP: i32 = 32;
 /// What a titled panel keeps under its content: the footer and its room.
 pub const FOOTER: i32 = FOOTER_GAP + FOOTER_HEIGHT + PADDING;
-/// A hint in the footer: its keycap's room, then its word's.
-const HINT_CAP: i32 = 54;
-const HINT_WORD: i32 = 70;
-/// Between a hint's keycap and its word.
-const HINT_SPACE: i32 = 8;
 
 /// The type scale. A panel's title; the welcome's, larger; what it says;
 /// a note, dimmed; a section's heading, in the accent and capitals.
@@ -91,9 +86,8 @@ pub const SECTION: Font = Font {
     size: 11,
     bold: true,
 };
-/// A keycap's label in a list of shortcuts, and in the footer's hints.
+/// A keycap's label in a list of shortcuts.
 pub const KEY: u8 = 13;
-pub const HINT_KEY: u8 = 12;
 
 /// A corner radius and which corners it rounds; `None`: square.
 pub type Shape = Option<(f64, Corners)>;
@@ -297,15 +291,6 @@ pub enum Item {
         w: i32,
         size: u8,
     },
-    /// A footer's hint: a keycap (its label at `HINT_KEY` px), then what it
-    /// does right after it, in `NOTE`, within `w`.
-    Hint {
-        cap: String,
-        what: String,
-        at: (i32, i32),
-        w: i32,
-        color: [u32; 3],
-    },
 }
 
 /// What a content image shows: its items in the panel's palette, the
@@ -426,48 +411,18 @@ pub fn title(text: &str, width: i32, colors: &Colors) -> Item {
     }
 }
 
-/// The width of `count` hints in the footer.
-pub const fn hints_width(count: usize) -> i32 {
-    count as i32 * (HINT_CAP + HINT_WORD)
-}
-
-/// A titled panel's footer, its row at `y`, across a panel `width` wide:
-/// `hints` (a key's cap and what it does, dimmed) from the left, and a
-/// `note` at the right, dimmed.
-pub fn footer(
-    hints: &[(&str, &str)],
-    note: Option<&str>,
-    y: i32,
-    width: i32,
-    colors: &Colors,
-) -> Vec<Item> {
-    let (_, dimmed, _) = text_colors(colors);
-    let mut items = Vec::new();
-    let mut x = PADDING;
-    for (cap, what) in hints {
-        items.push(Item::Hint {
-            cap: cap.to_string(),
-            what: what.to_string(),
-            at: (x, y),
-            w: HINT_CAP + HINT_WORD - 16,
-            color: dimmed,
-        });
-        x += HINT_CAP + HINT_WORD;
+/// A titled panel's footer, its row at `y`, across a panel `width` wide: a
+/// `note` at the right, dimmed (a long settings path ends in "…").
+pub fn footer(note: &str, y: i32, width: i32, colors: &Colors) -> Item {
+    Item::Text {
+        text: note.into(),
+        at: (PADDING, y + 1),
+        w: width - 2 * PADDING,
+        h: 20,
+        font: NOTE,
+        align: Align::Right,
+        color: text_colors(colors).1,
     }
-    if let Some(note) = note {
-        // With room after the hints: a long settings path ends in "…".
-        let from = x + 16;
-        items.push(Item::Text {
-            text: note.into(),
-            at: (from, y + 1),
-            w: (width - PADDING - from).max(0),
-            h: 20,
-            font: NOTE,
-            align: Align::Right,
-            color: dimmed,
-        });
-    }
-    items
 }
 
 /// A keycap `cap_w` wide at (`x`, `y`) (physical pixels) with `text` on
@@ -593,33 +548,6 @@ fn draw_items(key: &TextKey) -> Option<Vec<u8>> {
                     }
                     draw_cap(&mut pixels, width, &text, x, y, cap_w, scale, [fill, edge]);
                     x += cap_w;
-                }
-            }
-            Item::Hint {
-                cap,
-                what,
-                at,
-                w,
-                color,
-            } => {
-                let key = Style {
-                    size: f32::from(HINT_KEY),
-                    bold: false,
-                };
-                let text = render_text(cap, label, *w, CAP_HEIGHT, scale, key)?;
-                let cap_w = (text.width + 2 * CAP_PADDING * scale).max(CAP_HEIGHT * scale);
-                let (x, y) = (at.0 * scale, at.1 * scale);
-                draw_cap(&mut pixels, width, &text, x, y, cap_w, scale, [fill, edge]);
-                let style = Style {
-                    size: f32::from(NOTE.size),
-                    bold: NOTE.bold,
-                };
-                let room = (w * scale - cap_w) / scale - HINT_SPACE;
-                if room > 0 {
-                    let line =
-                        render_text(what, color.map(f32::from_bits), room, 20, scale, style)?;
-                    let after = x + cap_w + HINT_SPACE * scale;
-                    blit_text(&mut pixels, width, &line, after, y + scale);
                 }
             }
         }

@@ -52,7 +52,6 @@ const BUTTON_HEIGHT: i32 = 36;
 const SAVE_WIDTH: i32 = 120;
 const CANCEL_WIDTH: i32 = 110;
 const BUTTON_GAP: i32 = 12;
-const HINTS: [(&str, &str); 3] = [("↑ ↓", "pick"), ("Bksp", "clear"), ("Esc", "cancel")];
 
 /// A shortcut an app asks for: its id, what it does, the keys it would like
 /// (the shortcuts XDG specification's text).
@@ -960,8 +959,6 @@ fn items(panel: &Panel, layout: &Layout, colors: &Colors) -> Vec<Item> {
             color,
         });
     }
-    let hints_y = local(layout.save).1 + (BUTTON_HEIGHT - panel::FOOTER_HEIGHT) / 2;
-    items.extend(panel::footer(&HINTS, None, hints_y, width, colors));
     items
 }
 

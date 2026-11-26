@@ -825,10 +825,10 @@ Key flows and invariants:
   selected sits on the accent (`panel::accent`, `snap-preview` made opaque), its text in
   `hover-icon`. A modal panel (the cheatsheet and welcome, the share picker, the quit dialog) dims every output
   with `DIM` (`panel::dim`), so it redraws them all when it shows or goes. One type scale
-  (`TITLE`, `WELCOME_TITLE`, `BODY`, `NOTE`, `SECTION`, `KEY`, `HINT_KEY`); a panel with a title
-  has `PADDING` around its content, its title in the same place (`panel::title`) and a footer of
-  key hints at its bottom (`panel::footer`: each an `Item::Hint`, a keycap and what it does right
-  after it, from the left; a note at the right), `FOOTER` under its content. The switcher and
+  (`TITLE`, `WELCOME_TITLE`, `BODY`, `NOTE`, `SECTION`, `KEY`); a panel with a title
+  has `PADDING` around its content, its title in the same place (`panel::title`) and a footer at
+  its bottom (`panel::footer`: a note at the right), `FOOTER` under its content. No panel shows
+  key hints: their keys are in the manual. The switcher and
   the window menu have no title, and tighter room of their own. Texts and keycaps are `Item`s
   drawn by `draw_text` on a thread into one image the size of the panel (`TextKey` says what it
   shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`. A draw that finds
@@ -960,7 +960,8 @@ Key flows and invariants:
   changes. The panel is drawn only once its content is there, never empty. Its background and
   border are the panels' (`panel::frame`), and while its content is there it dims every output
   (`shortcuts_view::elements` is called for each; `redraw_shortcuts_view` redraws them all);
-  its footer has the Esc hint and, on the welcome, where the settings are (`notes`). The image
+  the welcome's footer says where the settings are (`notes`); the cheatsheet has no footer,
+  `PADDING` under its last row. The image
   and the solid buffers are kept in `Buffers` while it's shown. The state dump has it
   (`shortcuts_view_json`: its rows, keys joined by "+", and sections).
 - **Quit dialog** (`quit_dialog.rs`): `confirm-quit` (Mod+Shift+E by default) asks before
@@ -973,7 +974,7 @@ Key flows and invariants:
   every press (`quit_dialog_key`: Enter, or a press the bindings map to `confirm-quit`, quits;
   Escape cancels; the rest does nothing), `pointer_button` every press (Quit, Cancel; elsewhere
   nothing), `Pila::under` hits nothing, every output is dimmed, and no frame tears. Drawn as
-  the capture permission prompt is (`panel.rs`: title, note, two buttons, footer hints; the
+  the capture permission prompt is (`panel.rs`: title, note, two buttons, no key hints; the
   text one image from a thread, the panel shown only once it's there), in front of Pila's
   other panels but the color picker and the window menu. Locking cancels it. The state dump
   has it (`quit_dialog_json`).
@@ -1326,7 +1327,7 @@ Key flows and invariants:
   preview is the switcher's (`switcher_view::preview`, drawn with the panel); the windows shown
   get frame callbacks from the panel's output (`frame::send_frames`) and a commit of one redraws
   it (`share_picker_committed`). It's drawn as Pila's other panels are (`panel.rs`): their
-  frame, title and footer of key hints, the selected tile on a block of the accent (the
+  frame and title (no key hints), the selected tile on a block of the accent (the
   switcher's), buttons (and tabs, the one shown as Share) rounded as the cheatsheet's keys,
   Share's label in `hover-icon`. Modal: every key goes to it (`input.rs`, before the window
   menu's), every press too (its controls act, the rest does nothing), `Pila::under` hits nothing,

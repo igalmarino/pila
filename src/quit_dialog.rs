@@ -21,8 +21,7 @@ use crate::{
     Pila,
 };
 
-/// Panel geometry (logical pixels): wide enough for the footer's two hints
-/// beside the two buttons.
+/// Panel geometry (logical pixels): the two buttons at the bottom right.
 const WIDTH: i32 = 520;
 const NOTE_AT: i32 = 62;
 const NOTE_HEIGHT: i32 = 20;
@@ -32,7 +31,6 @@ const BUTTON_GAP: i32 = 10;
 
 const TITLE: &str = "Quit Pila?";
 const NOTE: &str = "Every window will close.";
-const HINTS: [(&str, &str); 2] = [("Enter", "quit"), ("Esc", "cancel")];
 
 /// The dialog's state (`Pila::quit_dialog`).
 #[derive(Default)]
@@ -302,8 +300,6 @@ fn items(layout: &Layout, colors: &Colors) -> Vec<Item> {
             color,
         });
     }
-    let hints_y = local(layout.quit).1 + (BUTTON_HEIGHT - panel::FOOTER_HEIGHT) / 2;
-    items.extend(panel::footer(&HINTS, None, hints_y, width, colors));
     items
 }
 
@@ -376,13 +372,10 @@ mod tests {
     }
 
     #[test]
-    fn the_panel_is_centered_with_its_buttons_and_hints_inside() {
+    fn the_panel_is_centered_with_its_buttons_inside() {
         let wide = Rectangle::new((1920, 0).into(), (1920, 1080).into());
         let l = assert_fits(wide);
         assert_eq!(l.panel.size.w, WIDTH);
-        // The footer's hints, from the left, end before Cancel starts.
-        let hints_end = l.panel.loc.x + panel::PADDING + panel::hints_width(HINTS.len());
-        assert!(hints_end < l.cancel.loc.x, "{hints_end} vs {l:?}");
         assert_eq!(
             l.panel.loc.x + l.panel.size.w / 2,
             wide.loc.x + wide.size.w / 2

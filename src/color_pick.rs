@@ -67,30 +67,18 @@ pub struct ScenePick {
     buffers: Rc<RefCell<Buffers>>,
 }
 
-/// The panel's line and hint.
+/// The panel's line.
 fn items(colors: &Colors) -> Vec<Item> {
-    let (text, dimmed, _) = panel::text_colors(colors);
-    vec![
-        Item::Text {
-            text: "Click to pick a color".into(),
-            at: (INSET, (HEIGHT - 20) / 2),
-            w: WIDTH - 2 * INSET - panel::hints_width(1),
-            h: 20,
-            font: panel::BODY,
-            align: Align::Left,
-            color: text,
-        },
-        Item::Hint {
-            cap: "Esc".into(),
-            what: "cancel".into(),
-            at: (
-                WIDTH - INSET - panel::hints_width(1) + 16,
-                (HEIGHT - panel::CAP_HEIGHT) / 2,
-            ),
-            w: panel::hints_width(1) - 16,
-            color: dimmed,
-        },
-    ]
+    let (text, _, _) = panel::text_colors(colors);
+    vec![Item::Text {
+        text: "Click to pick a color".into(),
+        at: (INSET, (HEIGHT - 20) / 2),
+        w: WIDTH - 2 * INSET,
+        h: 20,
+        font: panel::BODY,
+        align: Align::Left,
+        color: text,
+    }]
 }
 
 impl Pila {

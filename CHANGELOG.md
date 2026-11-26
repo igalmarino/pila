@@ -11,6 +11,10 @@
   allowed or denied by `[[permission]]` rules on their executable path, or asked with a prompt
   (Allow, Deny, Remember); `pila msg capture-permissions` lists what's allowed and
   `pila msg forget-capture-permission <id>` (or `all`) revokes it. Portal sharing is unchanged.
+- **Changed:** Pila's panels no longer show key hints (the welcome screen, the quit dialog, the
+  capture prompt, the share picker, the app shortcuts panel, the shortcuts cheatsheet, the color
+  picker and region banners), for a cleaner look. The keys work as before and are in the
+  manual. The cheatsheet is shorter, without its footer.
 - **Fixed:** A program could answer Pila's screen share picker or global shortcuts panel by
   typing on a virtual keyboard (as `wtype` does), sharing the screen with itself or confirming
   its own shortcuts. Keys from virtual keyboards now answer none of Pila's prompts; the

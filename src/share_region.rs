@@ -146,37 +146,24 @@ fn clamp(point: Point<f64, Logical>, geo: Rectangle<i32, Logical>) -> Point<f64,
     ))
 }
 
-/// The guide's line and hints: what to do, then the rectangle's size in the
-/// stream's pixels (`size`) once there is one.
+/// The guide's line: what to do, then the rectangle's size in the stream's
+/// pixels (`size`) once there is one.
 fn items(colors: &Colors, screenshot: bool, size: Option<(i32, i32)>) -> Vec<Item> {
-    let (text, dimmed, _) = panel::text_colors(colors);
+    let (text, _, _) = panel::text_colors(colors);
     let act = if screenshot { "take" } else { "share" };
     let line = match size {
         Some((w, h)) => format!("{w} × {h}: let go to {act} it"),
         None => format!("Drag over what to {act}"),
     };
-    let hints = panel::hints_width(1);
-    vec![
-        Item::Text {
-            text: line,
-            at: (INSET, (GUIDE_HEIGHT - 20) / 2),
-            w: GUIDE_WIDTH - 2 * INSET - hints,
-            h: 20,
-            font: panel::BODY,
-            align: Align::Left,
-            color: text,
-        },
-        Item::Hint {
-            cap: "Esc".into(),
-            what: "back".into(),
-            at: (
-                GUIDE_WIDTH - INSET - hints + 16,
-                (GUIDE_HEIGHT - panel::CAP_HEIGHT) / 2,
-            ),
-            w: hints - 16,
-            color: dimmed,
-        },
-    ]
+    vec![Item::Text {
+        text: line,
+        at: (INSET, (GUIDE_HEIGHT - 20) / 2),
+        w: GUIDE_WIDTH - 2 * INSET,
+        h: 20,
+        font: panel::BODY,
+        align: Align::Left,
+        color: text,
+    }]
 }
 
 impl Pila {

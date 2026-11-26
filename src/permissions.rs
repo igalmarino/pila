@@ -60,8 +60,8 @@ use crate::{
 const FILE_NAME: &str = "capture-permissions.json";
 const STORE_VERSION: u32 = 1;
 
-/// Panel geometry (logical pixels): wide enough for long executable paths and
-/// the three footer hints alongside the Allow/Deny buttons.
+/// Panel geometry (logical pixels): wide enough for long executable paths,
+/// the Allow/Deny buttons at the bottom right.
 const WIDTH: i32 = 640;
 const PATH_AT: i32 = 58;
 const NOTE_AT: i32 = 82;
@@ -78,10 +78,6 @@ const BUTTON_GAP: i32 = 10;
 /// the user is typing, and an Enter meant for the app mustn't allow a capture.
 /// Deny works at once.
 pub const ALLOW_DELAY: Duration = Duration::from_millis(500);
-
-const HINTS_WITH_REMEMBER: [(&str, &str); 3] =
-    [("R", "remember"), ("Enter", "allow"), ("Esc", "deny")];
-const HINTS_WITHOUT_REMEMBER: [(&str, &str); 2] = [("Enter", "allow"), ("Esc", "deny")];
 
 /// Resolved executable identity for a Wayland client, cached on `ClientState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1337,14 +1333,6 @@ fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
             color,
         });
     }
-
-    let hints_y = local(layout.allow).1 + (BUTTON_HEIGHT - panel::FOOTER_HEIGHT) / 2;
-    let hints: &[(&str, &str)] = if layout.remember.is_some() {
-        &HINTS_WITH_REMEMBER
-    } else {
-        &HINTS_WITHOUT_REMEMBER
-    };
-    items.extend(panel::footer(hints, None, hints_y, width, colors));
     items
 }
 
@@ -1519,7 +1507,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_layout_fits_inside_panel_without_overlapping_hints_and_buttons() {
+    fn prompt_layout_fits_inside_panel_without_overlapping_buttons() {
         let narrow = Rectangle::new((0, 0).into(), (480, 800).into());
         let l = layout(narrow, true);
         assert!(narrow.contains_rect(l.panel));
@@ -1536,17 +1524,6 @@ mod tests {
                 assert!(!rem.overlaps(l.allow));
                 assert!(!rem.overlaps(l.deny));
             }
-            let hint_count = if with_remember {
-                HINTS_WITH_REMEMBER.len()
-            } else {
-                HINTS_WITHOUT_REMEMBER.len()
-            };
-            let hints_end = l.panel.loc.x + panel::PADDING + panel::hints_width(hint_count);
-            assert!(
-                hints_end < l.deny.loc.x,
-                "hints end ({hints_end}) overlap deny button ({})",
-                l.deny.loc.x
-            );
         }
     }
 
