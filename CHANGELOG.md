@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.8 (2026-11-26)
 
 - **New:** Mod+Shift+E asks before quitting, in a dialog (Enter, Mod+Shift+E again or Quit to
   quit; Esc or Cancel to stay): the new `confirm-quit` action, now its default. `quit` still
