@@ -29,7 +29,8 @@ User-requested features get priority here.
 
 Pila is developed on a single AMD laptop with an external monitor. These items are either
 implemented or ready to work on once someone can test them on real hardware; comment on
-[issue #1](https://github.com/igalmarino/pila/issues/1) if you can help.
+[issue #1](https://github.com/igalmarino/pila/issues/1) if you can help. What has been tested so
+far, and by whom, is in [TESTERS.md](TESTERS.md).
 
 - **Monitors on a second GPU** (`other-gpus = true`, disabled by default): Untested on a real
   dual-GPU machine; direct scanout on secondary-GPU outputs will follow once basic multi-GPU is

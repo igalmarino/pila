@@ -72,6 +72,9 @@ dual-GPU laptops, non-systemd setups, high refresh rates, 4K displays, and mixed
 3. Submit a [test report](https://github.com/igalmarino/pila/issues/new?template=test_report.yml)
    (even if everything works cleanly) or a [bug report](#reporting-bugs).
 
+The people who have tested Pila so far, and what their reports changed, are listed in
+[TESTERS.md](https://github.com/igalmarino/pila/blob/main/docs/TESTERS.md).
+
 ## Documentation
 
 - [User manual](https://github.com/igalmarino/pila/blob/main/docs/MANUAL.md) (also `man pila`):
@@ -81,6 +84,8 @@ dual-GPU laptops, non-systemd setups, high refresh rates, 4K displays, and mixed
 - [What sets Pila apart](https://github.com/igalmarino/pila/blob/main/docs/WHY-PILA.md): full
   feature list, design choices, and how Pila compares to other compositors.
 - [`pila msg`](https://github.com/igalmarino/pila/blob/main/docs/IPC.md): IPC and scripting.
+- [Testers](https://github.com/igalmarino/pila/blob/main/docs/TESTERS.md): who has tested Pila,
+  and on what.
 - [CHANGELOG](https://github.com/igalmarino/pila/blob/main/CHANGELOG.md).
 
 ## Reporting bugs
