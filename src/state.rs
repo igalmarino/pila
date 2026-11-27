@@ -1139,6 +1139,20 @@ impl Pila {
             .cloned()
     }
 
+    /// The output named `name`, or the first output (without a name, or
+    /// once it's gone), and its geometry: where a panel shows.
+    pub fn output_named_or_first(
+        &self,
+        name: Option<&str>,
+    ) -> Option<(Output, Rectangle<i32, Logical>)> {
+        let output = name
+            .and_then(|name| self.space.outputs().find(|o| o.name() == name))
+            .or_else(|| self.space.outputs().next())?
+            .clone();
+        let area = self.space.output_geometry(&output)?;
+        Some((output, area))
+    }
+
     /// Geometry of the output under `pos`, or the first output.
     pub fn output_geometry_at(&self, pos: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
         self.space.output_geometry(&self.output_at(pos)?)

@@ -62,7 +62,6 @@ use crate::{
 /// the note under its title goes.
 const PADDING: i32 = crate::panel::PADDING;
 const NOTE_AT: i32 = 56;
-const NOTE_HEIGHT: i32 = 20;
 /// The tiles: a preview's box, the label under it, the room between them.
 /// With tabs, the tabs are where the tiles would start, the tiles under them.
 const TILES_AT: i32 = 100;
@@ -363,10 +362,7 @@ pub fn layout(
     };
     let height =
         top + content.1 + remember_row + crate::panel::FOOTER_GAP + BUTTON_HEIGHT + PADDING;
-    let panel = Rectangle::new(
-        area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
-        Size::from((width, height)),
-    );
+    let panel = crate::panel::centered(area, Size::from((width, height)));
     // `count` tiles of `tile` in rows of `columns` from the top, sources
     // `sources`: each row centered, or (`grid`) the rows as a grid in the
     // middle.
@@ -429,14 +425,11 @@ pub fn layout(
     } else {
         Vec::new()
     };
-    let buttons_y = height - PADDING - BUTTON_HEIGHT;
-    let share = Rectangle::new(
-        panel.loc + Point::from((width - PADDING - SHARE_WIDTH, buttons_y)),
-        Size::from((SHARE_WIDTH, BUTTON_HEIGHT)),
-    );
-    let cancel = Rectangle::new(
-        share.loc - Point::from((BUTTON_GAP + CANCEL_WIDTH, 0)),
-        Size::from((CANCEL_WIDTH, BUTTON_HEIGHT)),
+    let (share, cancel) = crate::panel::footer_buttons(
+        panel,
+        (SHARE_WIDTH, CANCEL_WIDTH),
+        BUTTON_HEIGHT,
+        BUTTON_GAP,
     );
     let remember = remember.then(|| {
         Rectangle::new(
@@ -960,22 +953,10 @@ impl Pila {
         }
     }
 
-    fn queue_redraw_named_output(&mut self, name: &str) {
-        let output = self.space.outputs().find(|o| o.name() == name).cloned();
-        if let Some(output) = output {
-            self.queue_redraw_output(&output);
-        }
-    }
-
     /// The picker for `Pila::scene`, while it's shown and not locked.
     pub(crate) fn scene_share_picker(&self) -> Option<ScenePicker> {
         let shown = self.share_picker.shown.as_ref()?;
-        let output = self
-            .space
-            .outputs()
-            .find(|o| o.name() == shown.output)
-            .or_else(|| self.space.outputs().next())?;
-        let area = self.space.output_geometry(output)?;
+        let (output, area) = self.output_named_or_first(Some(&shown.output))?;
         let (outputs, windows) = shown.counts();
         let layout = layout(
             area,
@@ -1242,11 +1223,10 @@ fn items(
     labels: &[String],
     colors: &Colors,
 ) -> Vec<Item> {
-    use crate::panel::{BODY, NOTE};
+    use crate::panel::BODY;
     let panel = layout.panel;
-    let width = panel.size.w - 2 * PADDING;
     let local = |r: Rectangle<i32, Logical>| (r.loc.x - panel.loc.x, r.loc.y - panel.loc.y);
-    let (text, dimmed, _) = crate::panel::text_colors(colors);
+    let (text, _, _) = crate::panel::text_colors(colors);
     let what = match (sources.monitors, sources.windows) {
         (true, false) => "a screen",
         (false, true) => "a window",
@@ -1270,15 +1250,7 @@ fn items(
     };
     let mut items = vec![
         crate::panel::title(&title, panel.size.w, colors),
-        Item::Text {
-            text: note.into(),
-            at: (PADDING, NOTE_AT),
-            w: width,
-            h: NOTE_HEIGHT,
-            font: NOTE,
-            align: Align::Left,
-            color: dimmed,
-        },
+        crate::panel::note(note, NOTE_AT, panel.size.w, colors),
     ];
     for (tile, label) in layout.tiles.iter().zip(labels) {
         let (x, y) = local(*tile);
@@ -1304,24 +1276,15 @@ fn items(
         };
         (*rect, tab.name(), color)
     });
-    for (rect, label, color) in [
-        (layout.share, act, on_accent),
-        (layout.cancel, "Cancel", text),
-    ]
-    .into_iter()
-    .chain(tabs)
-    {
-        let (x, y) = local(rect);
-        items.push(Item::Text {
-            text: label.into(),
-            at: (x, y + (BUTTON_HEIGHT - LABEL_HEIGHT) / 2),
-            w: rect.size.w,
-            h: LABEL_HEIGHT,
-            font: BODY,
-            align: Align::Center,
-            color,
-        });
-    }
+    items.extend(crate::panel::button_labels(
+        panel,
+        (layout.share, act),
+        (layout.cancel, "Cancel"),
+        colors,
+    ));
+    items.extend(
+        tabs.map(|(rect, label, color)| crate::panel::button_label(panel, rect, label, color)),
+    );
     if let Some(row) = layout.remember {
         let (x, y) = local(row);
         let label = match app {

@@ -215,15 +215,8 @@ impl Pila {
     fn switcher_layout(&self) -> Option<(Rectangle<i32, Logical>, Vec<SceneTile>, String)> {
         let switch = self.windows.switch.as_ref()?;
         let (order, index) = switch.order();
-        let output = switch
-            .output()
-            .and_then(|name| self.space.outputs().find(|o| o.name() == name))
-            .or_else(|| self.space.outputs().next())?
-            .clone();
-        let area = self.space.output_geometry(&output)?;
-        let size = panel_size(order.len());
-        let loc = area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
-        let rect = Rectangle::new(loc, size);
+        let (output, area) = self.output_named_or_first(switch.output())?;
+        let rect = crate::panel::centered(area, panel_size(order.len()));
         let rows = order.len().div_ceil(COLUMNS);
         let first = first_shown(rows, ROWS, Some(index / COLUMNS));
         let tiles = order
@@ -234,7 +227,7 @@ impl Pila {
             .map(|(i, window)| {
                 let shown = i - first * COLUMNS;
                 let (column, row) = ((shown % COLUMNS) as i32, (shown / COLUMNS) as i32);
-                let at = loc
+                let at = rect.loc
                     + Point::from((
                         PADDING + column * (TILE.0 + SPACING),
                         PADDING + row * (TILE.1 + SPACING),
@@ -443,10 +436,7 @@ pub(crate) fn preview(
         ((f64::from(geometry.size.w) * fit).round() as i32).max(1),
         ((f64::from(geometry.size.h) * fit).round() as i32).max(1),
     ));
-    let rect = Rectangle::new(
-        area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2)),
-        size,
-    );
+    let rect = crate::panel::centered(area, size);
     let size_now = crate::render::texture_size(rect, scale);
     let index = match previews.iter().position(|(w, _)| w == window) {
         Some(i) if previews[i].1.fits(rect, scale) => i,

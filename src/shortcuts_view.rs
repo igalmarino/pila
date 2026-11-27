@@ -667,13 +667,7 @@ impl Pila {
         String,
     )> {
         let shown = self.shortcuts_view.shown.as_ref()?;
-        let output = shown
-            .output
-            .as_ref()
-            .and_then(|name| self.space.outputs().find(|o| &o.name() == name))
-            .or_else(|| self.space.outputs().next())?
-            .clone();
-        let area = self.space.output_geometry(&output)?;
+        let (output, area) = self.output_named_or_first(shown.output.as_deref())?;
         let sections = match shown.heading {
             Heading::Welcome => vec![Section {
                 title: "",
@@ -693,7 +687,7 @@ impl Pila {
             (f64::from(layout_size.w) * scale).round() as i32,
             (f64::from(layout_size.h) * scale).round() as i32,
         ));
-        let loc = area.loc + Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
+        let loc = crate::panel::centered(area, size).loc;
         Some((
             Rectangle::new(loc, size),
             layout_size,

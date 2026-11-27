@@ -33,7 +33,7 @@ use std::{
 
 use serde_json::{json, Value};
 use smithay::{
-    backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
+    backend::renderer::gles::GlesRenderer,
     input::keyboard::Keysym,
     reexports::{
         wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
@@ -46,7 +46,7 @@ use tracing::{debug, info};
 
 use crate::{
     config::{Colors, PermissionAccess, PermissionRule},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, Item, ModalBuffers, TextKey},
     render::PilaRenderElement,
     rules::wildcard_match,
     state::ClientState,
@@ -150,14 +150,6 @@ impl Shown {
     }
 }
 
-#[derive(Default)]
-struct Buffers {
-    frame: FrameBuffers,
-    solids: HashMap<&'static str, SolidColorBuffer>,
-    dims: HashMap<String, SolidColorBuffer>,
-    text: Option<ContentImage>,
-}
-
 /// Where the prompt panel and its interactive controls sit, global logical
 /// coordinates.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,18 +165,12 @@ pub fn layout(area: Rectangle<i32, Logical>) -> Layout {
     let width = WIDTH.min(area.size.w - 2 * panel::PADDING);
     let body_bottom = LASTS_AT + NOTE_HEIGHT;
     let height = body_bottom + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
-    let panel = Rectangle::new(
-        area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
-        Size::from((width, height)),
-    );
-    let buttons_y = height - panel::PADDING - BUTTON_HEIGHT;
-    let allow = Rectangle::new(
-        panel.loc + Point::from((width - panel::PADDING - BUTTON_WIDTH, buttons_y)),
-        Size::from((BUTTON_WIDTH, BUTTON_HEIGHT)),
-    );
-    let deny = Rectangle::new(
-        allow.loc - Point::from((BUTTON_GAP + BUTTON_WIDTH, 0)),
-        Size::from((BUTTON_WIDTH, BUTTON_HEIGHT)),
+    let panel = panel::centered(area, Size::from((width, height)));
+    let (allow, deny) = panel::footer_buttons(
+        panel,
+        (BUTTON_WIDTH, BUTTON_WIDTH),
+        BUTTON_HEIGHT,
+        BUTTON_GAP,
     );
     Layout { panel, allow, deny }
 }
@@ -195,7 +181,7 @@ pub struct ScenePrompt {
     pub output: String,
     pub layout: Layout,
     pub rounding: panel::Shape,
-    buffers: Rc<RefCell<Buffers>>,
+    buffers: Rc<RefCell<ModalBuffers>>,
 }
 
 /// Capture permission state (`Pila::capture_permissions`).
@@ -221,7 +207,7 @@ pub struct CapturePermissions {
     shown: Option<Shown>,
     /// Text key currently being rendered on a thread.
     pending_text: Option<TextKey>,
-    buffers: Rc<RefCell<Buffers>>,
+    buffers: Rc<RefCell<ModalBuffers>>,
 }
 
 /// The decision of policy evaluation for an executable.
@@ -511,7 +497,7 @@ impl Pila {
                 visible_since: None,
             });
             self.capture_permissions.pending_text = None;
-            *self.capture_permissions.buffers.borrow_mut() = Buffers::default();
+            *self.capture_permissions.buffers.borrow_mut() = ModalBuffers::default();
             self.queue_redraw();
             self.draw_capture_permission_text();
             return;
@@ -533,7 +519,7 @@ impl Pila {
     fn take_capture_permission(&mut self) -> Option<Shown> {
         let shown = self.capture_permissions.shown.take()?;
         self.capture_permissions.pending_text = None;
-        *self.capture_permissions.buffers.borrow_mut() = Buffers::default();
+        *self.capture_permissions.buffers.borrow_mut() = ModalBuffers::default();
         self.queue_redraw();
         Some(shown)
     }
@@ -942,12 +928,7 @@ impl Pila {
     /// The prompt for `Pila::scene`, while it's open.
     pub(crate) fn scene_capture_permission(&self) -> Option<ScenePrompt> {
         let shown = self.capture_permissions.shown.as_ref()?;
-        let output = self
-            .space
-            .outputs()
-            .find(|o| o.name() == shown.output)
-            .or_else(|| self.space.outputs().next())?;
-        let area = self.space.output_geometry(output)?;
+        let (output, area) = self.output_named_or_first(Some(&shown.output))?;
         Some(ScenePrompt {
             output: output.name(),
             layout: layout(area),
@@ -1020,7 +1001,6 @@ impl Pila {
 }
 
 fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
-    let (text, dimmed, _) = panel::text_colors(colors);
     let width = layout.panel.size.w;
     let title = title(shown.executable.as_deref());
     let path_line = shown
@@ -1033,53 +1013,16 @@ fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
     let lasts = "Allowed until you log out. To always allow it, add a [[permission]] rule.";
     let mut items = vec![
         panel::title(&title, width, colors),
-        Item::Text {
-            text: path_line,
-            at: (panel::PADDING, PATH_AT),
-            w: width - 2 * panel::PADDING,
-            h: NOTE_HEIGHT,
-            font: panel::NOTE,
-            align: Align::Left,
-            color: dimmed,
-        },
-        Item::Text {
-            text: detail.into(),
-            at: (panel::PADDING, NOTE_AT),
-            w: width - 2 * panel::PADDING,
-            h: NOTE_HEIGHT,
-            font: panel::NOTE,
-            align: Align::Left,
-            color: dimmed,
-        },
-        Item::Text {
-            text: lasts.into(),
-            at: (panel::PADDING, LASTS_AT),
-            w: width - 2 * panel::PADDING,
-            h: NOTE_HEIGHT,
-            font: panel::NOTE,
-            align: Align::Left,
-            color: dimmed,
-        },
+        panel::note(&path_line, PATH_AT, width, colors),
+        panel::note(detail, NOTE_AT, width, colors),
+        panel::note(lasts, LASTS_AT, width, colors),
     ];
-
-    let local =
-        |r: Rectangle<i32, Logical>| (r.loc.x - layout.panel.loc.x, r.loc.y - layout.panel.loc.y);
-
-    for (rect, label, color) in [
-        (layout.allow, "Allow", panel::bits(colors.hover_icon)),
-        (layout.deny, "Deny", text),
-    ] {
-        let (x, y) = local(rect);
-        items.push(Item::Text {
-            text: label.into(),
-            at: (x, y + (BUTTON_HEIGHT - 20) / 2),
-            w: rect.size.w,
-            h: 20,
-            font: panel::BODY,
-            align: Align::Center,
-            color,
-        });
-    }
+    items.extend(panel::button_labels(
+        layout.panel,
+        (layout.allow, "Allow"),
+        (layout.deny, "Deny"),
+        colors,
+    ));
     items
 }
 
@@ -1093,43 +1036,19 @@ pub fn elements(
     output_geo: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    let origin = output_geo.loc;
-    let mut buffers = view.buffers.borrow_mut();
-    let buffers = &mut *buffers;
-    let dim = panel::dim(
-        &mut buffers.dims,
-        output_name,
-        output_geo,
-        1.0,
-        origin,
-        scale,
-    );
-    let Some(text) = buffers.text.as_mut().filter(|_| output_name == view.output) else {
-        return vec![dim];
-    };
     let layout = &view.layout;
-    let mut elements: Vec<PilaRenderElement> = text
-        .element(renderer, layout.panel, origin, scale)
-        .into_iter()
-        .collect();
-    elements.extend(panel::solids(
+    panel::modal_elements(
         renderer,
-        &mut buffers.solids,
-        panel::buttons(layout.allow, layout.deny, colors),
-        origin,
-        scale,
-    ));
-    elements.extend(panel::frame(
-        renderer,
-        &mut buffers.frame,
+        &mut view.buffers.borrow_mut(),
+        &view.output,
         layout.panel,
         view.rounding,
+        panel::buttons(layout.allow, layout.deny, colors),
         colors,
-        origin,
+        output_name,
+        output_geo,
         scale,
-    ));
-    elements.push(dim);
-    elements
+    )
 }
 
 #[cfg(test)]

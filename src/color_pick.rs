@@ -23,19 +23,15 @@ use tracing::{info, warn};
 use crate::{
     capture::{Source, Write},
     config::Colors,
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, ContentImage, FrameBuffers, Item, TextKey},
     portal::{Refused, Reply},
     render::{self, PilaRenderElement},
     scale::output_scale,
     Pila,
 };
 
-/// The panel's size, its room around its line, and how far from the top of
-/// its output it sits.
+/// The panel's width (a `panel::banner`).
 const WIDTH: i32 = 360;
-const HEIGHT: i32 = 54;
-const INSET: i32 = 16;
-const FROM_TOP: i32 = 24;
 
 /// A color, each channel from 0 to 1, as the portal answers it.
 pub type Color = [f64; 3];
@@ -68,16 +64,7 @@ pub struct ScenePick {
 
 /// The panel's line.
 fn items(colors: &Colors) -> Vec<Item> {
-    let (text, _, _) = panel::text_colors(colors);
-    vec![Item::Text {
-        text: "Click to pick a color".into(),
-        at: (INSET, (HEIGHT - 20) / 2),
-        w: WIDTH - 2 * INSET,
-        h: 20,
-        font: panel::BODY,
-        align: Align::Left,
-        color: text,
-    }]
+    vec![panel::banner("Click to pick a color".into(), WIDTH, colors)]
 }
 
 impl Pila {
@@ -227,10 +214,7 @@ impl Pila {
         self.color_pick.reply.as_ref()?;
         let output = self.output_at(self.pointer_location())?;
         let area = self.space.output_geometry(&output)?;
-        let rect = Rectangle::new(
-            area.loc + Point::from(((area.size.w - WIDTH) / 2, FROM_TOP)),
-            Size::from((WIDTH, HEIGHT)),
-        );
+        let rect = panel::banner_rect(area, WIDTH);
         Some(ScenePick {
             output: output.name(),
             rect,
@@ -250,10 +234,7 @@ impl Pila {
             .into_iter()
             .flatten()
         {
-            let output = self.space.outputs().find(|o| o.name() == name).cloned();
-            if let Some(output) = output {
-                self.queue_redraw_output(&output);
-            }
+            self.queue_redraw_named_output(&name);
         }
         self.color_pick.drawn = now;
     }
@@ -281,7 +262,7 @@ impl Pila {
         let key = TextKey {
             items: items(&self.config.colors),
             caps: panel::key_caps(&self.config.colors),
-            size: (WIDTH, HEIGHT),
+            size: (WIDTH, panel::BANNER_HEIGHT),
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);

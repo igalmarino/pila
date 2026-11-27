@@ -3,11 +3,11 @@
 //! `confirm-quit` binding pressed again quit; Escape or Cancel close it.
 //! `quit` itself never asks (`pila msg action quit`, a logout menu's).
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use serde_json::{json, Value};
 use smithay::{
-    backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
+    backend::renderer::gles::GlesRenderer,
     input::keyboard::{Keysym, ModifiersState},
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
@@ -15,7 +15,7 @@ use tracing::{debug, info};
 
 use crate::{
     config::{Action, Colors},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{self, Item, ModalBuffers, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -36,16 +36,8 @@ const NOTE: &str = "Every window will close.";
 pub struct QuitDialog {
     /// The output it's on, by name, while it's shown.
     shown: Option<String>,
-    buffers: Rc<RefCell<Buffers>>,
+    buffers: Rc<RefCell<ModalBuffers>>,
     pending_text: Option<TextKey>,
-}
-
-#[derive(Default)]
-struct Buffers {
-    frame: FrameBuffers,
-    solids: HashMap<&'static str, SolidColorBuffer>,
-    dims: HashMap<String, SolidColorBuffer>,
-    text: Option<ContentImage>,
 }
 
 /// Where the panel and its buttons are, global.
@@ -60,18 +52,12 @@ pub struct Layout {
 pub fn layout(area: Rectangle<i32, Logical>) -> Layout {
     let width = WIDTH.min(area.size.w - 2 * panel::PADDING);
     let height = NOTE_AT + NOTE_HEIGHT + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
-    let panel = Rectangle::new(
-        area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
-        Size::from((width, height)),
-    );
-    let buttons_y = height - panel::PADDING - BUTTON_HEIGHT;
-    let quit = Rectangle::new(
-        panel.loc + Point::from((width - panel::PADDING - BUTTON_WIDTH, buttons_y)),
-        Size::from((BUTTON_WIDTH, BUTTON_HEIGHT)),
-    );
-    let cancel = Rectangle::new(
-        quit.loc - Point::from((BUTTON_GAP + BUTTON_WIDTH, 0)),
-        Size::from((BUTTON_WIDTH, BUTTON_HEIGHT)),
+    let panel = panel::centered(area, Size::from((width, height)));
+    let (quit, cancel) = panel::footer_buttons(
+        panel,
+        (BUTTON_WIDTH, BUTTON_WIDTH),
+        BUTTON_HEIGHT,
+        BUTTON_GAP,
     );
     Layout {
         panel,
@@ -86,7 +72,7 @@ pub struct SceneQuit {
     pub output: String,
     pub layout: Layout,
     pub rounding: panel::Shape,
-    buffers: Rc<RefCell<Buffers>>,
+    buffers: Rc<RefCell<ModalBuffers>>,
 }
 
 impl Pila {
@@ -115,7 +101,7 @@ impl Pila {
         info!("asking whether to quit");
         self.quit_dialog.shown = Some(output.name());
         self.quit_dialog.pending_text = None;
-        *self.quit_dialog.buffers.borrow_mut() = Buffers::default();
+        *self.quit_dialog.buffers.borrow_mut() = ModalBuffers::default();
         // It dims every output.
         self.queue_redraw();
         self.draw_quit_dialog_text();
@@ -132,7 +118,7 @@ impl Pila {
         }
         info!("quit cancelled");
         self.quit_dialog.pending_text = None;
-        *self.quit_dialog.buffers.borrow_mut() = Buffers::default();
+        *self.quit_dialog.buffers.borrow_mut() = ModalBuffers::default();
         self.queue_redraw();
         // A share or capture permission asked meanwhile waited for it.
         self.show_share_picker();
@@ -177,12 +163,7 @@ impl Pila {
     /// The dialog for `Pila::scene`, while it's shown.
     pub(crate) fn scene_quit_dialog(&self) -> Option<SceneQuit> {
         let shown = self.quit_dialog.shown.as_ref()?;
-        let output = self
-            .space
-            .outputs()
-            .find(|o| o.name() == *shown)
-            .or_else(|| self.space.outputs().next())?;
-        let area = self.space.output_geometry(output)?;
+        let (output, area) = self.output_named_or_first(Some(shown))?;
         Some(SceneQuit {
             output: output.name(),
             layout: layout(area),
@@ -234,37 +215,17 @@ impl Pila {
 }
 
 fn items(layout: &Layout, colors: &Colors) -> Vec<Item> {
-    let (text, dimmed, _) = panel::text_colors(colors);
     let width = layout.panel.size.w;
     let mut items = vec![
         panel::title(TITLE, width, colors),
-        Item::Text {
-            text: NOTE.into(),
-            at: (panel::PADDING, NOTE_AT),
-            w: width - 2 * panel::PADDING,
-            h: NOTE_HEIGHT,
-            font: panel::NOTE,
-            align: Align::Left,
-            color: dimmed,
-        },
+        panel::note(NOTE, NOTE_AT, width, colors),
     ];
-    let local =
-        |r: Rectangle<i32, Logical>| (r.loc.x - layout.panel.loc.x, r.loc.y - layout.panel.loc.y);
-    for (rect, label, color) in [
-        (layout.quit, "Quit", panel::bits(colors.hover_icon)),
-        (layout.cancel, "Cancel", text),
-    ] {
-        let (x, y) = local(rect);
-        items.push(Item::Text {
-            text: label.into(),
-            at: (x, y + (BUTTON_HEIGHT - 20) / 2),
-            w: rect.size.w,
-            h: 20,
-            font: panel::BODY,
-            align: Align::Center,
-            color,
-        });
-    }
+    items.extend(panel::button_labels(
+        layout.panel,
+        (layout.quit, "Quit"),
+        (layout.cancel, "Cancel"),
+        colors,
+    ));
     items
 }
 
@@ -278,43 +239,19 @@ pub fn elements(
     output_geo: Rectangle<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    let origin = output_geo.loc;
-    let mut buffers = view.buffers.borrow_mut();
-    let buffers = &mut *buffers;
-    let dim = panel::dim(
-        &mut buffers.dims,
-        output_name,
-        output_geo,
-        1.0,
-        origin,
-        scale,
-    );
-    let Some(text) = buffers.text.as_mut().filter(|_| output_name == view.output) else {
-        return vec![dim];
-    };
     let layout = &view.layout;
-    let mut elements: Vec<PilaRenderElement> = text
-        .element(renderer, layout.panel, origin, scale)
-        .into_iter()
-        .collect();
-    elements.extend(panel::solids(
+    panel::modal_elements(
         renderer,
-        &mut buffers.solids,
-        panel::buttons(layout.quit, layout.cancel, colors),
-        origin,
-        scale,
-    ));
-    elements.extend(panel::frame(
-        renderer,
-        &mut buffers.frame,
+        &mut view.buffers.borrow_mut(),
+        &view.output,
         layout.panel,
         view.rounding,
+        panel::buttons(layout.quit, layout.cancel, colors),
         colors,
-        origin,
+        output_name,
+        output_geo,
         scale,
-    ));
-    elements.push(dim);
-    elements
+    )
 }
 
 #[cfg(test)]

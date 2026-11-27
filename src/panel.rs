@@ -201,6 +201,159 @@ pub fn buttons(
     ]
 }
 
+/// A banner's height (the color picker's, the region guide's): one line,
+/// `BANNER_INSET` from its left, `BANNER_FROM_TOP` down its output.
+pub const BANNER_HEIGHT: i32 = 54;
+const BANNER_INSET: i32 = 16;
+const BANNER_FROM_TOP: i32 = 24;
+
+/// A banner `width` wide at the top of `area`, in the middle.
+pub fn banner_rect(area: Rectangle<i32, Logical>, width: i32) -> Rectangle<i32, Logical> {
+    Rectangle::new(
+        area.loc + Point::from(((area.size.w - width) / 2, BANNER_FROM_TOP)),
+        Size::from((width, BANNER_HEIGHT)),
+    )
+}
+
+/// A banner's line, `text`, on one `width` wide.
+pub fn banner(text: String, width: i32, colors: &Colors) -> Item {
+    Item::Text {
+        text,
+        at: (BANNER_INSET, (BANNER_HEIGHT - 20) / 2),
+        w: width - 2 * BANNER_INSET,
+        h: 20,
+        font: BODY,
+        align: Align::Left,
+        color: text_colors(colors).0,
+    }
+}
+
+/// A panel of `size` in the middle of `area`.
+pub fn centered(
+    area: Rectangle<i32, Logical>,
+    size: Size<i32, Logical>,
+) -> Rectangle<i32, Logical> {
+    let at = Point::from(((area.size.w - size.w) / 2, (area.size.h - size.h) / 2));
+    Rectangle::new(area.loc + at, size)
+}
+
+/// A dialog's two buttons in its bottom right corner, `PADDING` in, both
+/// `height` high: the primary (`primary` wide) at the right, the secondary
+/// (`secondary` wide) `gap` left of it. (primary, secondary).
+pub fn footer_buttons(
+    panel: Rectangle<i32, Logical>,
+    (primary, secondary): (i32, i32),
+    height: i32,
+    gap: i32,
+) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
+    let y = panel.size.h - PADDING - height;
+    let primary = Rectangle::new(
+        panel.loc + Point::from((panel.size.w - PADDING - primary, y)),
+        Size::from((primary, height)),
+    );
+    let secondary = Rectangle::new(
+        primary.loc - Point::from((gap + secondary, 0)),
+        Size::from((secondary, height)),
+    );
+    (primary, secondary)
+}
+
+/// A button's `label` in `color`, in the middle of `button` (global) on the
+/// panel at `panel`.
+pub fn button_label(
+    panel: Rectangle<i32, Logical>,
+    button: Rectangle<i32, Logical>,
+    label: &str,
+    color: [u32; 3],
+) -> Item {
+    let at = button.loc - panel.loc;
+    Item::Text {
+        text: label.into(),
+        at: (at.x, at.y + (button.size.h - 20) / 2),
+        w: button.size.w,
+        h: 20,
+        font: BODY,
+        align: Align::Center,
+        color,
+    }
+}
+
+/// The labels of a dialog's two buttons (`buttons`): the primary's on the
+/// accent, the secondary's in the text's color.
+pub fn button_labels(
+    panel: Rectangle<i32, Logical>,
+    (primary, primary_label): (Rectangle<i32, Logical>, &str),
+    (secondary, secondary_label): (Rectangle<i32, Logical>, &str),
+    colors: &Colors,
+) -> [Item; 2] {
+    [
+        button_label(panel, primary, primary_label, bits(colors.hover_icon)),
+        button_label(panel, secondary, secondary_label, text_colors(colors).0),
+    ]
+}
+
+/// A dialog's buffers kept between frames: its frame, its solids by name,
+/// the dim over each output, and its text once drawn.
+#[derive(Default)]
+pub struct ModalBuffers {
+    pub frame: FrameBuffers,
+    pub solids: HashMap<&'static str, SolidColorBuffer>,
+    pub dims: HashMap<String, SolidColorBuffer>,
+    pub text: Option<ContentImage>,
+}
+
+/// A modal dialog's elements for the output `output_name` at `output_geo`,
+/// front to back: on its output `on`, once its text is drawn, the panel at
+/// `rect` (its text, `solids`, its frame); the dim on every output.
+#[allow(clippy::too_many_arguments)]
+pub fn modal_elements(
+    renderer: &mut GlesRenderer,
+    buffers: &mut ModalBuffers,
+    on: &str,
+    rect: Rectangle<i32, Logical>,
+    rounding: Shape,
+    solids: impl IntoIterator<Item = Solid>,
+    colors: &Colors,
+    output_name: &str,
+    output_geo: Rectangle<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let origin = output_geo.loc;
+    let dim = dim(
+        &mut buffers.dims,
+        output_name,
+        output_geo,
+        1.0,
+        origin,
+        scale,
+    );
+    let Some(text) = buffers.text.as_mut().filter(|_| output_name == on) else {
+        return vec![dim];
+    };
+    let mut elements: Vec<PilaRenderElement> = text
+        .element(renderer, rect, origin, scale)
+        .into_iter()
+        .collect();
+    elements.extend(self::solids(
+        renderer,
+        &mut buffers.solids,
+        solids,
+        origin,
+        scale,
+    ));
+    elements.extend(frame(
+        renderer,
+        &mut buffers.frame,
+        rect,
+        rounding,
+        colors,
+        origin,
+        scale,
+    ));
+    elements.push(dim);
+    elements
+}
+
 /// `solids` drawn, front to back, relative to `origin`; their buffers kept
 /// in `buffers` by name.
 pub fn solids(
@@ -409,6 +562,20 @@ pub fn title(text: &str, width: i32, colors: &Colors) -> Item {
         font: TITLE,
         align: Align::Left,
         color: text_colors(colors).0,
+    }
+}
+
+/// A dimmed line under a panel's title, its row at `y`, across a panel
+/// `width` wide.
+pub fn note(text: &str, y: i32, width: i32, colors: &Colors) -> Item {
+    Item::Text {
+        text: text.into(),
+        at: (PADDING, y),
+        w: width - 2 * PADDING,
+        h: 20,
+        font: NOTE,
+        align: Align::Left,
+        color: text_colors(colors).1,
     }
 }
 

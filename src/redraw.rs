@@ -145,6 +145,14 @@ impl Pila {
         self.request_redraw_as(output, Content::Sure);
     }
 
+    /// `queue_redraw_output` for the output named `name`, if it's there.
+    pub(crate) fn queue_redraw_named_output(&mut self, name: &str) {
+        let output = self.space.outputs().find(|o| o.name() == name).cloned();
+        if let Some(output) = output {
+            self.queue_redraw_output(&output);
+        }
+    }
+
     /// Ask for a redraw of `output`, bringing `content`.
     pub fn request_redraw_as(&mut self, output: &Output, content: Content) {
         if let Some(deferred) = &mut self.deferred_redraws {

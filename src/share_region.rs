@@ -19,24 +19,20 @@ use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::{keyboard::Keysym, pointer::CursorIcon, pointer::CursorImageStatus},
     reexports::calloop,
-    utils::{Logical, Point, Rectangle, Scale, Size},
+    utils::{Logical, Point, Rectangle, Scale},
 };
 use tracing::{info, warn};
 
 use crate::{
     capture::Target,
     config::Colors,
-    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, ContentImage, FrameBuffers, Item, NoText, TextKey},
     render::PilaRenderElement,
     Pila,
 };
 
-/// The guide's size, its room around its line, and how far from the top of
-/// its output it sits.
+/// The guide's width (a `panel::banner`).
 const GUIDE_WIDTH: i32 = 440;
-const GUIDE_HEIGHT: i32 = 54;
-const INSET: i32 = 16;
-const FROM_TOP: i32 = 24;
 /// The outline's width, outside the rectangle.
 pub const OUTLINE: i32 = 2;
 /// A drag shorter than this either way is a click: nothing is selected.
@@ -149,21 +145,12 @@ fn clamp(point: Point<f64, Logical>, geo: Rectangle<i32, Logical>) -> Point<f64,
 /// The guide's line: what to do, then the rectangle's size in the stream's
 /// pixels (`size`) once there is one.
 fn items(colors: &Colors, screenshot: bool, size: Option<(i32, i32)>) -> Vec<Item> {
-    let (text, _, _) = panel::text_colors(colors);
     let act = if screenshot { "take" } else { "share" };
     let line = match size {
         Some((w, h)) => format!("{w} × {h}: let go to {act} it"),
         None => format!("Drag over what to {act}"),
     };
-    vec![Item::Text {
-        text: line,
-        at: (INSET, (GUIDE_HEIGHT - 20) / 2),
-        w: GUIDE_WIDTH - 2 * INSET,
-        h: 20,
-        font: panel::BODY,
-        align: Align::Left,
-        color: text,
-    }]
+    vec![panel::banner(line, GUIDE_WIDTH, colors)]
 }
 
 impl Pila {
@@ -331,10 +318,7 @@ impl Pila {
         }
         .or_else(|| self.space.outputs().next().cloned())?;
         let area = self.space.output_geometry(&output)?;
-        let guide = Rectangle::new(
-            area.loc + Point::from(((area.size.w - GUIDE_WIDTH) / 2, FROM_TOP)),
-            Size::from((GUIDE_WIDTH, GUIDE_HEIGHT)),
-        );
+        let guide = panel::banner_rect(area, GUIDE_WIDTH);
         Some(SceneRegion {
             guide_output: output.name(),
             guide,
@@ -390,7 +374,7 @@ impl Pila {
         let key = TextKey {
             items: items(&self.config.colors, screenshot, self.region_size()),
             caps: panel::key_caps(&self.config.colors),
-            size: (GUIDE_WIDTH, GUIDE_HEIGHT),
+            size: (GUIDE_WIDTH, panel::BANNER_HEIGHT),
             scale,
         };
         let Some(selecting) = self.share_picker.region.as_mut() else {

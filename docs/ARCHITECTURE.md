@@ -824,10 +824,16 @@ Key flows and invariants:
   curve; square where the shaders didn't compile), its buffers kept in `FrameBuffers`. What's
   selected sits on the accent (`panel::accent`, `snap-preview` made opaque), its text in
   `hover-icon`. A modal panel (the cheatsheet and welcome, the share picker, the quit dialog) dims every output
-  with `DIM` (`panel::dim`), so it redraws them all when it shows or goes. One type scale
+  with `DIM` (`panel::dim`), so it redraws them all when it shows or goes. The dialogs that ask
+  one question (the quit dialog, the capture prompt, the apps' shortcuts) are drawn alike by
+  `panel::modal_elements` from their `ModalBuffers`, centered (`panel::centered`) with their two
+  buttons in the bottom right corner (`panel::footer_buttons`, `panel::buttons`,
+  `panel::button_labels`, as the share picker's); the color picker and the region guide are
+  banners at the top of their output (`panel::banner_rect`, `panel::banner`). One type scale
   (`TITLE`, `WELCOME_TITLE`, `BODY`, `NOTE`, `SECTION`, `KEY`); a panel with a title
   has `PADDING` around its content, its title in the same place (`panel::title`) and a footer at
-  its bottom (`panel::footer`: a note at the right), `FOOTER` under its content. No panel shows
+  its bottom (`panel::footer`: a note at the right), `FOOTER` under its content, and its
+  dimmed lines under the title are `panel::note`s. No panel shows
   key hints: their keys are in the manual. The switcher and
   the window menu have no title, and tighter room of their own. Texts and keycaps are `Item`s
   drawn by `draw_text` on a thread into one image the size of the panel (`TextKey` says what it
