@@ -307,6 +307,8 @@ fn ipc_answers_and_events_keep_their_fields() {
     // Its objects' fields need a capture:
     // `capture::an_output_being_captured_is_listed_and_lit_on_the_screen_alone`.
     assert!(ask(&mut ipc, "captures")["captures"].is_array());
+    // `null` until a capture ends: `capture::the_last_capture_is_named_after_it_ends`.
+    assert!(ask(&mut ipc, "captures").get("last").is_some());
     assert!(ask(&mut ipc, "switch")["switch"].is_null());
     pila.key_press("Alt");
     pila.key("Tab");
@@ -337,7 +339,10 @@ fn ipc_answers_and_events_keep_their_fields() {
             "outputs" => all_have("an outputs event", &event["outputs"], OUTPUT),
             "keyboard" => all_have("a keyboard event", &event["layouts"], LAYOUT),
             "colors" => has_fields("a colors event", &event["colors"], COLORS),
-            "captures" => assert!(event["captures"].is_array(), "{event}"),
+            "captures" => {
+                assert!(event["captures"].is_array(), "{event}");
+                assert!(event.get("last").is_some(), "{event}");
+            }
             "switch" => {
                 let switch = &event["switch"];
                 if !switch.is_null() {

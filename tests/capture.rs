@@ -1321,6 +1321,65 @@ fn a_screenshot_is_listed_for_a_moment() {
     pila.wait("unlisted", |s| captures(s).is_empty());
 }
 
+/// A screenshot over before anyone could look is still named afterwards:
+/// `captures`' `last` is the capture that ended most recently, with when,
+/// and `pila msg captures` says so.
+#[test]
+fn the_last_capture_is_named_after_it_ends() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pila.settle();
+    let json = |pila: &TestPila| -> Value {
+        let out = pila.msg(&["--json", "captures"]);
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    assert!(json(&pila)["last"].is_null(), "nothing captured yet");
+
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output(0, &client.output("HEADLESS-1"), &client.qh, "shot".into());
+    client.flush();
+    client.wait_logged("shot", "BufferDone");
+    let (buffer, _file) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("shot", "Ready");
+    frame.destroy();
+    client.flush();
+    pila.wait("unlisted", |s| captures(s).is_empty());
+
+    let answer = json(&pila);
+    assert_eq!(answer["captures"], serde_json::json!([]));
+    let last = &answer["last"];
+    assert_eq!(last["app"], own_name().as_str(), "{last}");
+    assert_eq!(last["protocol"], "wlr-screencopy");
+    assert_eq!(last["target"]["kind"], "output");
+    assert_eq!(last["target"]["output"], "HEADLESS-1");
+    let ended = last["ended"].as_u64().expect("ended, in Unix seconds");
+    assert!(
+        ended >= before && ended <= before + 30,
+        "{ended} vs {before}"
+    );
+
+    let out = pila.msg(&["captures"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.starts_with("nothing is capturing the screen\n"),
+        "{text}"
+    );
+    let expected = format!(
+        "last: {}  screen HEADLESS-1  (wlr-screencopy), ",
+        own_name()
+    );
+    assert!(
+        text.contains(&expected) && text.trim_end().ends_with(" ago"),
+        "{text}"
+    );
+}
+
 /// A window captured: listed by its app id and id, the monitor it's on lit.
 #[test]
 fn a_window_being_captured_lights_the_monitor_it_is_on() {

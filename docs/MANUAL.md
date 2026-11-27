@@ -781,9 +781,10 @@ Kooha) or directly (`grim`, `wf-recorder`), with or without permissions enforced
   (for a window, the monitor it's on). It's drawn on the screen only, never in what's captured. A
   screenshot lights it for about a second. Turn it off with `indicator = false` in
   `[permissions]`; it also keeps a fullscreen game from tearing while it's being recorded.
-- `pila msg captures` lists who captures what, and how. Pila's own waybar configuration shows it
-  in the bar: the app's name in the accent (or how many apps), each capture in the tooltip,
-  nothing while nothing captures. With a waybar configuration of your own, add the module:
+- `pila msg captures` lists who captures what, and how, and the capture that ended last, with how
+  long ago (a screenshot over before you could look is still named). Pila's own waybar
+  configuration shows it in the bar: the app's name in the accent (or how many apps), each capture
+  in the tooltip, nothing while nothing captures. With a waybar configuration of your own, add the module:
 
 ```jsonc
 "modules-right": ["custom/pila-captures", ...],

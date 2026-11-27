@@ -1847,7 +1847,8 @@ Key flows and invariants:
   executable, read on a thread once (`ClientState::executable`, shared with `permissions.rs`; its
   process id until then). A capture is the same capture whatever it's named (`Capturer::same`: its
   client, protocol and target), and stays listed `HOLD` (1 s) after it ends, so a one-shot
-  screenshot shows; a calloop timer at the first hold's end wakes the loop (it changes what's
+  screenshot shows; the one that ended last stays in `CaptureIndicator::last`, with the time, for
+  the `captures` answer and event's `last` (renamed too when its name is read late); a calloop timer at the first hold's end wakes the loop (it changes what's
   shown, it paces no frame). `Pila::update_capture_indicator` runs at the end of each iteration
   (`after_frames`, beside the switch events) when `dirty` (a session allowed, a screencopy queued,
   a cast started, a name read, the timer) or while anything is listed (an ending capture, a window

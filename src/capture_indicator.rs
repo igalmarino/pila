@@ -6,7 +6,9 @@
 //! capture. `[permissions] indicator` turns the light off; the list stays.
 //!
 //! A capture is listed while it runs and for `HOLD` after it ends, so a
-//! one-shot screenshot (grim: one frame, then gone) shows too. A window's
+//! one-shot screenshot (grim: one frame, then gone) shows too; the one that
+//! ended last is kept, with when (`CaptureIndicator::last`), so a capture
+//! over before anyone looked can still be named. A window's
 //! light is on the monitor it's on (`Pila::window_output`), or the one a new
 //! window would open on if it's on none (minimized, another workspace).
 //!
@@ -19,7 +21,7 @@
 
 use std::{
     collections::HashSet,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use serde_json::{json, Value};
@@ -137,6 +139,8 @@ pub struct CaptureIndicator {
     current: Vec<Capturer>,
     /// What ended, and until when it's still listed.
     held: Vec<(Capturer, Instant)>,
+    /// The capture that ended last, and when.
+    last: Option<(Capturer, SystemTime)>,
     /// The outputs with a light, by name, and where it is (global).
     pub lights: Vec<(String, Rectangle<i32, Logical>)>,
     /// Recompute at the end of this iteration.
@@ -179,7 +183,8 @@ impl Pila {
             .collect();
         for capturer in ended {
             indicator.held.retain(|(held, _)| !held.same(&capturer));
-            indicator.held.push((capturer, now + HOLD));
+            indicator.held.push((capturer.clone(), now + HOLD));
+            indicator.last = Some((capturer, SystemTime::now()));
         }
         indicator
             .held
@@ -241,6 +246,20 @@ impl Pila {
             .iter()
             .map(Capturer::json)
             .collect()
+    }
+
+    /// The capture that ended last for `pila msg captures`, with `ended` in
+    /// Unix seconds; `null` before one has.
+    pub(crate) fn ipc_last_capture(&self) -> Value {
+        let Some((capturer, ended)) = &self.capture_indicator.last else {
+            return Value::Null;
+        };
+        let mut value = capturer.json();
+        let ended = ended
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        value["ended"] = ended.into();
+        value
     }
 
     /// Wake the loop at `at`, when a held capture runs out (none: no wake).
@@ -448,9 +467,11 @@ impl Pila {
                 state.capture_indicator.resolving.remove(&id);
                 // A capture that ended before its name was read is named
                 // too, while it's still listed.
-                for (held, _) in &mut state.capture_indicator.held {
-                    if held.client.as_ref() == Some(&id) {
-                        held.app = name.clone();
+                let indicator = &mut state.capture_indicator;
+                let last = indicator.last.as_mut().map(|(last, _)| last);
+                for ended in indicator.held.iter_mut().map(|(held, _)| held).chain(last) {
+                    if ended.client.as_ref() == Some(&id) {
+                        ended.app = name.clone();
                     }
                 }
                 state.capture_indicator.dirty = true;

@@ -93,7 +93,7 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `capture-permissions` | — | `protocol`, `capture_permissions` |
 | `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
 | `idle-inhibitors` | — | `protocol`, `idle_inhibitors` |
-| `captures` | — | `protocol`, `captures` |
+| `captures` | — | `protocol`, `captures`, `last` |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
 `quit`), while queries continue to work, and so do `forget-screen-share` and
@@ -204,6 +204,10 @@ things is listed twice.
   `output` and `x`, `y`, `width`, `height` in logical pixels, from the monitor's top-left), or
   `"window"` (with `id`, as in `windows`, `app_id`, and `output`: the monitor it's on, or `null`)
 
+`last` is the capture that ended most recently, as above plus `ended` (when, in Unix seconds), so
+a screenshot over before anyone looked can still be named; `null` until one has ended. Only the
+last one is kept, in memory.
+
 `pila msg --waybar captures` subscribes to `captures` and prints a line of JSON for a waybar
 custom module (`"return-type": "json"`) now and at each change: `text` (empty while nothing
 captures, which hides the module; the app's name, or how many apps, after a `●`), `tooltip` (a
@@ -223,7 +227,7 @@ category, followed by a new event whenever that category changes:
 
 Each event carries the full current state in the same shape as the matching query (`keyboard`
 events carry `layouts`, `colors` events carry `colors`, `switch` events carry `switch` or
-`null`, and `captures` events carry `captures`), so subscribers can simply replace their cached
+`null`, and `captures` events carry `captures` and `last`), so subscribers can simply replace their cached
 state.
 
 Timing details:

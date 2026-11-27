@@ -25,6 +25,9 @@
   false` turns it off). `pila msg captures` lists who captures what, and Pila's waybar
   configuration shows it in the bar through `pila msg --waybar captures`, which a waybar
   configuration of your own can use too.
+- **New:** `pila msg captures` also names the capture that ended last, and how long ago (`last`,
+  with `ended` in Unix seconds, in the JSON answer and the `captures` event), so a screenshot over
+  before you could look at the indicator can still be told apart.
 - **New:** `pila msg idle-inhibitors` lists the apps keeping the screen on now: those that asked
   over D-Bus (`org.freedesktop.ScreenSaver`), with the reason they gave, and the visible windows
   with a Wayland idle inhibitor. Handy to find a forgotten browser tab keeping the session awake.

@@ -239,6 +239,17 @@ fn capture_line(capture: &Value) -> String {
     )
 }
 
+/// How long ago, `seconds` back, roughly: "12 s ago", "5 min ago",
+/// "3 h ago", "2 days ago".
+fn ago(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds} s ago"),
+        60..3600 => format!("{} min ago", seconds / 60),
+        3600..86400 => format!("{} h ago", seconds / 3600),
+        _ => format!("{} days ago", seconds / 86400),
+    }
+}
+
 /// A line for a waybar custom module (`return-type: json`) about `captures`:
 /// no text when nothing captures (waybar hides the module), the app when one
 /// does, how many when several do; each capture in the tooltip.
@@ -398,10 +409,25 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
         "forget-screen-share" | "forget-capture-permission" if answer["forgotten"].is_u64() => {
             vec![format!("forgot {}", answer["forgotten"])]
         }
-        "captures" => match list("captures") {
-            captures if captures.is_empty() => vec!["nothing is capturing the screen".to_string()],
-            captures => captures.iter().map(capture_line).collect(),
-        },
+        "captures" => {
+            let mut lines = match list("captures") {
+                captures if captures.is_empty() => {
+                    vec!["nothing is capturing the screen".to_string()]
+                }
+                captures => captures.iter().map(capture_line).collect(),
+            };
+            if let Some(ended) = answer["last"]["ended"].as_u64() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(ended, |now| now.as_secs());
+                lines.push(format!(
+                    "last: {}, {}",
+                    capture_line(&answer["last"]),
+                    ago(now.saturating_sub(ended))
+                ));
+            }
+            lines
+        }
         "idle-inhibitors" => match list("idle_inhibitors") {
             inhibitors if inhibitors.is_empty() => vec!["nothing keeps the screen on".to_string()],
             inhibitors => inhibitors
@@ -599,6 +625,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn how_long_ago_is_said_in_its_unit() {
+        assert_eq!(ago(0), "0 s ago");
+        assert_eq!(ago(59), "59 s ago");
+        assert_eq!(ago(60), "1 min ago");
+        assert_eq!(ago(3599), "59 min ago");
+        assert_eq!(ago(7200), "2 h ago");
+        assert_eq!(ago(86400 * 3), "3 days ago");
     }
 
     /// Hidden with nothing captured; the app, or how many apps, with each

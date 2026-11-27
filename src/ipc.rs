@@ -477,6 +477,7 @@ fn handle(
         Request::Captures => Ok(json!({
             "protocol": PROTOCOL,
             "captures": state.ipc_captures(),
+            "last": state.ipc_last_capture(),
         })),
     }
 }
@@ -757,6 +758,10 @@ impl Pila {
         let mut event = serde_json::Map::new();
         event.insert("event".into(), kind.name().into());
         event.insert(kind.field().into(), value);
+        // As the request answers it.
+        if kind == Kind::Captures {
+            event.insert("last".into(), self.ipc_last_capture());
+        }
         Value::Object(event).to_string()
     }
 
