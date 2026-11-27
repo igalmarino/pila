@@ -252,6 +252,11 @@ pub(crate) struct Composited {
 const MAX_SHM_TEXTURES: usize = 4;
 
 impl Captures {
+    /// The session of `resource`, if it's still there.
+    fn session_mut(&mut self, resource: &ExtImageCopyCaptureSessionV1) -> Option<&mut Session> {
+        self.sessions.iter_mut().find(|s| s.resource == *resource)
+    }
+
     /// The sessions capturing: allowed, not stopped, their clients' and
     /// targets (`capture_indicator.rs`).
     pub(crate) fn capturing(
@@ -325,25 +330,10 @@ impl Captures {
                 continue;
             };
             let (size, scale) = geometry;
-            let tracker = session
-                .tracker
-                .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-            let damage = match tracker.damage_output(1, elements) {
-                Ok((damage, _)) => Some(damage.cloned().unwrap_or_default()),
-                Err(err) => {
-                    warn!(?err, "capture: damage tracking failed");
-                    None
-                }
-            };
+            let damage = session.take_damage(size, scale, elements);
             session.composited = true;
-            let damage = match damage {
-                // A new tracker's first damage is all of it.
-                Some(damage) if damage.is_empty() => continue,
-                Some(damage) => damage,
-                None => {
-                    session.tracker = None;
-                    vec![Rectangle::from_size(size)]
-                }
+            let Some(damage) = damage else {
+                continue;
             };
             jobs.push(Composited {
                 buffer,
@@ -364,6 +354,62 @@ impl Captures {
 }
 
 /// A capture session (`Captures::sessions`).
+/// A window's elements for a capture of it alone: the buffer's origin at
+/// the top-left of its geometry.
+pub(crate) fn window_elements(
+    renderer: &mut GlesRenderer,
+    window: &Window,
+    scale: Scale<f64>,
+) -> Vec<PilaRenderElement> {
+    let loc: Point<i32, Physical> =
+        (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
+    AsRenderElements::<GlesRenderer>::render_elements(window, renderer, loc, scale, 1.0)
+}
+
+/// What a capture is cleared to: transparent around a window, the
+/// desktop's background under outputs.
+pub(crate) fn clear_for(window: Option<&Window>, scene: &render::Scene) -> [f32; 4] {
+    match window {
+        Some(_) => TRANSPARENT,
+        None => render::clear_color(scene),
+    }
+}
+
+/// An output's whole size in pixels, in its orientation (a monitor turned
+/// a quarter is captured upright, taller than wide).
+pub(crate) fn output_pixels(output: &Output) -> Option<Size<i32, Physical>> {
+    Some(
+        output
+            .current_transform()
+            .transform_size(output.current_mode()?.size),
+    )
+}
+
+/// What changed in a capture since its tracker's last frame (`damage_of`).
+pub(crate) enum Damage {
+    Unchanged,
+    Rects(Vec<Rectangle<i32, Physical>>),
+    /// The tracker failed: all of it may have.
+    Unknown,
+}
+
+/// `elements` compared with what `tracker` saw last; `what` names the
+/// capture in the log.
+pub(crate) fn damage_of(
+    tracker: &mut OutputDamageTracker,
+    elements: &[PilaRenderElement],
+    what: &str,
+) -> Damage {
+    match tracker.damage_output(1, elements) {
+        Ok((Some(rects), _)) if !rects.is_empty() => Damage::Rects(rects.clone()),
+        Ok(_) => Damage::Unchanged,
+        Err(err) => {
+            warn!(?err, what, "damage tracking failed");
+            Damage::Unknown
+        }
+    }
+}
+
 pub struct Session {
     resource: ExtImageCopyCaptureSessionV1,
     target: Target,
@@ -410,6 +456,22 @@ pub fn init_globals(dh: &DisplayHandle) {
 }
 
 impl Session {
+    fn new(resource: ExtImageCopyCaptureSessionV1, target: Target, paint_cursors: bool) -> Self {
+        Self {
+            resource,
+            target,
+            paint_cursors,
+            geometry: None,
+            tracker: None,
+            frame: None,
+            pending: false,
+            authorized: false,
+            stopped: false,
+            composited: false,
+            last_presented: None,
+        }
+    }
+
     pub(crate) fn is_authorized(&self) -> bool {
         self.authorized && !self.stopped
     }
@@ -438,6 +500,28 @@ impl Session {
     /// still source would never send it.
     fn start_over(&mut self) {
         self.tracker = None;
+    }
+
+    /// What changed in `elements` since the frame copied last, `None` if
+    /// nothing did; all of it, with a new tracker, when that's unknown. A
+    /// new tracker's first damage is all of it.
+    fn take_damage(
+        &mut self,
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+        elements: &[PilaRenderElement],
+    ) -> Option<Vec<Rectangle<i32, Physical>>> {
+        let tracker = self
+            .tracker
+            .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
+        match damage_of(tracker, elements, "capture") {
+            Damage::Unchanged => None,
+            Damage::Rects(rects) => Some(rects),
+            Damage::Unknown => {
+                self.start_over();
+                Some(vec![Rectangle::from_size(size)])
+            }
+        }
     }
 
     fn fail(&mut self, reason: FailureReason) {
@@ -485,12 +569,7 @@ impl Pila {
                 let output = output.upgrade()?;
                 // Not mapped any more: unplugged.
                 self.space.output_geometry(&output)?;
-                // In the output's orientation: a monitor turned a quarter is
-                // captured upright, taller than wide.
-                let size = output
-                    .current_transform()
-                    .transform_size(output.current_mode()?.size);
-                Some((size, output_scale(&output)))
+                Some((output_pixels(&output)?, output_scale(&output)))
             }
             Target::Region(..) => {
                 let TargetArea { output, area, .. } = self.target_area(target)?;
@@ -584,12 +663,7 @@ impl Pila {
 
     /// Permission denied or revoked for `resource`: stop the session.
     pub(crate) fn deny_capture_session(&mut self, resource: &ExtImageCopyCaptureSessionV1) {
-        if let Some(session) = self
-            .capture
-            .sessions
-            .iter_mut()
-            .find(|s| s.resource == *resource)
-        {
+        if let Some(session) = self.capture.session_mut(resource) {
             session.stop();
         }
     }
@@ -674,24 +748,11 @@ impl Pila {
             Target::Gone => return,
         };
         // Where the frame's content shows, for its presentation time.
-        let shown_on = match &session.target {
-            Target::Output(output) | Target::Region(output, _) => output.upgrade(),
-            _ => window.as_ref().and_then(|w| self.window_output(w)),
-        };
-        // A frame per refresh: one presented at the same time as the last
-        // would stop recorders (#17); it waits for its output's next frame,
-        // before its damage is taken.
-        let shown: Duration = self.presented_at(shown_on.as_ref()).into();
-        if session.last_presented.is_some_and(|last| shown <= last) {
-            if let Some(output) = &shown_on {
-                self.request_redraw_as(output, crate::redraw::Content::Maybe);
-            }
+        let shown_on = self.target_output(&session.target);
+        let Some(shown) = self.next_presentation(shown_on.as_ref(), session.last_presented) else {
             return;
-        }
-        let clear = match window {
-            Some(_) => TRANSPARENT,
-            None => render::clear_color(scene),
         };
+        let clear = clear_for(window.as_ref(), scene);
 
         let output_for_blur = self
             .target_area(&session.target)
@@ -716,14 +777,7 @@ impl Pila {
             elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);
         }
         match (&window, &output_for_blur) {
-            (Some(window), _) => {
-                // The buffer's origin is the window geometry's top-left.
-                let loc: Point<i32, Physical> =
-                    (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
-                elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
-                    PilaRenderElement,
-                >(window, renderer, loc, scale, 1.0));
-            }
+            (Some(window), _) => elements.extend(window_elements(renderer, window, scale)),
             // Blurred backdrops are part of the screen; they're prepared
             // for this output as the backends do.
             (None, Some((name, geo))) => elements.extend(render::output_elements(
@@ -734,27 +788,8 @@ impl Pila {
         }
 
         // Changes since the last copied frame; later frames wait for one.
-        let tracker = session
-            .tracker
-            .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-        let damage: Option<Vec<Rectangle<i32, Physical>>> =
-            match tracker.damage_output(1, &elements) {
-                Ok((Some(damage), _)) => Some(damage.clone()),
-                Ok((None, _)) => Some(Vec::new()),
-                Err(err) => {
-                    warn!(?err, "capture: damage tracking failed");
-                    None
-                }
-            };
-        let damage = match damage {
-            // A new tracker's first damage is all of it.
-            Some(damage) if damage.is_empty() => return,
-            Some(damage) => damage,
-            // What changed is unknown: all of it, with a new tracker.
-            None => {
-                session.tracker = None;
-                vec![Rectangle::from_size(size)]
-            }
+        let Some(damage) = session.take_damage(size, scale, &elements) else {
+            return;
         };
 
         let source = Source::Elements {
@@ -793,8 +828,7 @@ impl Pila {
             move || wanted.is_alive(),
             move |state, result| {
                 if let Err(err) = result {
-                    let sessions = &mut state.capture.sessions;
-                    if let Some(session) = sessions.iter_mut().find(|s| s.resource == resource) {
+                    if let Some(session) = state.capture.session_mut(&resource) {
                         session.start_over();
                     }
                     frame.failed(copy_failure(err));
@@ -818,12 +852,7 @@ impl Pila {
         output: &Output,
     ) {
         let presented: Duration = self.presented_at(Some(output)).into();
-        let Some(session) = self
-            .capture
-            .sessions
-            .iter_mut()
-            .find(|s| s.resource == job.resource)
-        else {
+        let Some(session) = self.capture.session_mut(&job.resource) else {
             return;
         };
         session.composited = false;
@@ -859,6 +888,37 @@ impl Pila {
         match (output, &self.backend) {
             (Some(output), Some(backend)) => backend.next_frame_time(output, now),
             _ => now,
+        }
+    }
+
+    /// When a frame copied now shows on `output` (`presented_at`), unless
+    /// that's when the frame sent `last` showed: one frame per refresh, as
+    /// one presented at the same time as the last would stop recorders
+    /// (#17). Then it waits for the output's next frame (asked for here),
+    /// before its damage is taken.
+    pub(crate) fn next_presentation(
+        &mut self,
+        output: Option<&Output>,
+        last: Option<Duration>,
+    ) -> Option<Duration> {
+        let shown: Duration = self.presented_at(output).into();
+        if last.is_some_and(|last| shown <= last) {
+            if let Some(output) = output {
+                self.request_redraw_as(output, crate::redraw::Content::Maybe);
+            }
+            return None;
+        }
+        Some(shown)
+    }
+
+    /// The output `target` shows on: its own, or the window's.
+    pub(crate) fn target_output(&self, target: &Target) -> Option<Output> {
+        match target {
+            Target::Output(output) | Target::Region(output, _) => output.upgrade(),
+            Target::Toplevel(identifier) => self
+                .window_for_identifier(identifier)
+                .and_then(|window| self.window_output(&window)),
+            Target::Gone => None,
         }
     }
 
@@ -922,6 +982,20 @@ pub(crate) enum Copied {
 pub(crate) type Finish = Box<dyn FnOnce(&mut GlesRenderer) -> Result<Option<Job>, CopyError>>;
 
 impl Pila {
+    /// `when_copied` for a copy that may not have started: `then` gets its
+    /// error at once.
+    pub(crate) fn when_copied_or(
+        &mut self,
+        copied: Result<Copied, CopyError>,
+        wanted: impl Fn() -> bool + 'static,
+        then: impl FnOnce(&mut Pila, Result<(), CopyError>) + 'static,
+    ) {
+        match copied {
+            Ok(copied) => self.when_copied(copied, wanted, then),
+            Err(err) => then(self, Err(err)),
+        }
+    }
+
     /// Run `then` once `copied` is complete: now, or when the GPU (and the
     /// copy thread, for a write off the event loop) is done with it, without
     /// waiting on the event loop. A copy still on the GPU or the copy thread
@@ -1598,19 +1672,8 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for Pila {
                 };
                 let target = source.data::<Target>().cloned().unwrap_or(Target::Gone);
                 let resource = data_init.init(session, ());
-                let session = Session {
-                    resource: resource.clone(),
-                    target,
-                    paint_cursors: options.contains(manager::Options::PaintCursors),
-                    geometry: None,
-                    tracker: None,
-                    frame: None,
-                    pending: false,
-                    authorized: false,
-                    stopped: false,
-                    composited: false,
-                    last_presented: None,
-                };
+                let paint_cursors = options.contains(manager::Options::PaintCursors);
+                let session = Session::new(resource.clone(), target, paint_cursors);
                 debug!(target = ?session.target, paint_cursors = session.paint_cursors, "capture session");
                 state.capture.sessions.push(session);
                 state.authorize_capture(
@@ -1651,19 +1714,7 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Mutex<bool>> for Pila {
                 // Cursor capture isn't supported: the session is stopped
                 // from the start (clients use `paint_cursors` instead).
                 let resource = data_init.init(session, ());
-                let mut session = Session {
-                    resource,
-                    target: Target::Gone,
-                    paint_cursors: false,
-                    geometry: None,
-                    tracker: None,
-                    frame: None,
-                    pending: false,
-                    authorized: false,
-                    stopped: false,
-                    composited: false,
-                    last_presented: None,
-                };
+                let mut session = Session::new(resource, Target::Gone, false);
                 session.stop();
                 state.capture.sessions.push(session);
             }
@@ -1685,12 +1736,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for Pila {
     ) {
         match request {
             session::Request::CreateFrame { frame } => {
-                let Some(session) = state
-                    .capture
-                    .sessions
-                    .iter_mut()
-                    .find(|s| s.resource == *resource)
-                else {
+                let Some(session) = state.capture.session_mut(resource) else {
                     data_init.init(
                         frame,
                         FrameData {
@@ -1772,12 +1818,7 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                 }
                 frame_state.captured = true;
                 drop(frame_state);
-                let Some(session) = state
-                    .capture
-                    .sessions
-                    .iter_mut()
-                    .find(|s| s.resource == data.session)
-                else {
+                let Some(session) = state.capture.session_mut(&data.session) else {
                     resource.failed(FailureReason::Stopped);
                     return;
                 };

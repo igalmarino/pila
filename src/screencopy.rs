@@ -96,8 +96,7 @@ fn physical_size(
     logical: Size<i32, Logical>,
 ) -> Option<Size<i32, Physical>> {
     if region == Rectangle::from_size(logical) {
-        let mode = output.current_mode()?;
-        return Some(output.current_transform().transform_size(mode.size));
+        return capture::output_pixels(output);
     }
     Some(
         region
@@ -248,21 +247,19 @@ impl Pila {
         // a second frame presented at the same time as the last, which stops
         // recorders (#17). It waits for its output's next frame, before its
         // damage is taken.
-        let shown: std::time::Duration = self.presented_at(Some(&output)).into();
         let presented_key = (
             manager.id(),
             output.name(),
             (region.loc.x, region.loc.y, region.size.w, region.size.h),
         );
-        if self
+        let last = self
             .capture
             .screencopy_presented
             .get(&presented_key)
-            .is_some_and(|&last| shown <= last)
-        {
-            self.request_redraw_as(&output, crate::redraw::Content::Maybe);
+            .copied();
+        let Some(shown) = self.next_presentation(Some(&output), last) else {
             return false;
-        }
+        };
 
         // Everything taken from `self` before borrowing the renderer.
         self.capture.building = Some(Instant::now());
@@ -314,11 +311,10 @@ impl Pila {
                 .screencopy_trackers
                 .entry(key.clone())
                 .or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-            match tracker.damage_output(1, &elements) {
-                Ok((Some(rects), _)) if !rects.is_empty() => damage = rects.clone(),
-                Ok(_) => return false,
-                Err(err) => {
-                    warn!(?err, "screencopy: damage tracking failed");
+            match capture::damage_of(tracker, &elements, "screencopy") {
+                capture::Damage::Rects(rects) => damage = rects,
+                capture::Damage::Unchanged => return false,
+                capture::Damage::Unknown => {
                     frame.failed();
                     return true;
                 }

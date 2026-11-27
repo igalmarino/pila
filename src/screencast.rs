@@ -40,14 +40,11 @@ use pipewire::{
     stream::{StreamFlags, StreamListener, StreamRc, StreamState},
 };
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{damage::OutputDamageTracker, element::AsRenderElements, gles::GlesRenderer},
-    },
+    backend::{allocator::Fourcc, renderer::damage::OutputDamageTracker},
     reexports::calloop::{
         channel::Event, generic::Generic, Interest, Mode, PostAction, RegistrationToken,
     },
-    utils::{Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Physical, Rectangle, Scale, Size, Transform},
 };
 use tracing::{debug, info, warn};
 
@@ -488,14 +485,7 @@ impl Pila {
     /// The rate a stream of `target` is offered at: its output's refresh
     /// (a window's: the output it's drawn for, else the first output's).
     fn cast_fps(&self, target: &Target) -> u32 {
-        let output = match target {
-            Target::Output(output) | Target::Region(output, _) => output.upgrade(),
-            Target::Toplevel(identifier) => self
-                .window_for_identifier(identifier)
-                .and_then(|window| self.window_output(&window)),
-            Target::Gone => None,
-        };
-        output
+        self.target_output(target)
             .or_else(|| self.space.outputs().next().cloned())
             .and_then(|o| o.current_mode())
             .map_or(60, fps_of)
@@ -822,10 +812,7 @@ impl Pila {
                     .contains(input.pointer)
             }),
         };
-        let clear = match window {
-            Some(_) => crate::capture::TRANSPARENT,
-            None => render::clear_color(&input.scene),
-        };
+        let clear = crate::capture::clear_for(window.as_ref(), &input.scene);
         let cursor_frame = (cast.cursor == CursorMode::Metadata).then(|| {
             let frame = self.cursor_frame(input.pointer, origin, scale);
             if pointer_over {
@@ -857,11 +844,7 @@ impl Pila {
         }
         match (&window, &output) {
             (Some(window), _) => {
-                let loc: Point<i32, Physical> =
-                    (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
-                elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
-                    PilaRenderElement,
-                >(window, renderer, loc, scale, 1.0));
+                elements.extend(crate::capture::window_elements(renderer, window, scale))
             }
             (None, Some((name, geo, area))) => elements.extend(render::output_elements(
                 renderer,
@@ -878,11 +861,10 @@ impl Pila {
         let tracker = cast
             .tracker
             .get_or_insert_with(|| OutputDamageTracker::new(size, scale, Transform::Normal));
-        let changed = match tracker.damage_output(1, &elements) {
-            Ok((Some(damage), _)) => !damage.is_empty(),
-            Ok(_) => false,
-            Err(err) => {
-                warn!(?err, "portal: damage tracking failed");
+        let changed = match crate::capture::damage_of(tracker, &elements, "portal") {
+            crate::capture::Damage::Rects(_) => true,
+            crate::capture::Damage::Unchanged => false,
+            crate::capture::Damage::Unknown => {
                 cast.tracker = None;
                 true
             }

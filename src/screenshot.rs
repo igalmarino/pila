@@ -13,11 +13,8 @@
 use std::path::{Path, PathBuf};
 
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{element::AsRenderElements, gles::GlesRenderer},
-    },
-    utils::{Logical, Physical, Point, Rectangle, Scale, Size},
+    backend::allocator::Fourcc,
+    utils::{Logical, Physical, Rectangle, Scale, Size},
 };
 use tracing::{info, warn};
 
@@ -123,10 +120,7 @@ impl Pila {
                 .map(|r| r.loc)
                 .unwrap_or_default(),
         };
-        let clear = match window {
-            Some(_) => crate::capture::TRANSPARENT,
-            None => render::clear_color(&input.scene),
-        };
+        let clear = crate::capture::clear_for(window.as_ref(), &input.scene);
         let Pila {
             backend,
             blur,
@@ -143,12 +137,7 @@ impl Pila {
         let mut elements: Vec<PilaRenderElement> = Vec::new();
         match &window {
             Some(window) => {
-                // The buffer's origin is the window geometry's top-left.
-                let loc: Point<i32, Physical> =
-                    (Point::default() - window.geometry().loc).to_physical_precise_round(scale);
-                elements.extend(AsRenderElements::<GlesRenderer>::render_elements::<
-                    PilaRenderElement,
-                >(window, renderer, loc, scale, 1.0));
+                elements.extend(crate::capture::window_elements(renderer, window, scale))
             }
             None => {
                 for (name, geo) in &shown {
@@ -183,14 +172,7 @@ impl Pila {
                 read.write_into(&mut pixels, 0, w * 4)
             })),
         );
-        let copied = match copied {
-            Ok(copied) => copied,
-            Err(err) => {
-                failed(err);
-                return reply.send(Err(Refused::Failed));
-            }
-        };
-        self.when_copied(
+        self.when_copied_or(
             copied,
             || true,
             move |_, result| {

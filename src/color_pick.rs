@@ -175,14 +175,7 @@ impl Pila {
                 pixels.write_into(&mut read.borrow_mut()[..], 0, 4)
             })),
         );
-        let copied = match copied {
-            Ok(copied) => copied,
-            Err(_) => {
-                warn!("portal: can't read the color");
-                return reply.send(Err(Refused::Failed));
-            }
-        };
-        self.when_copied(
+        self.when_copied_or(
             copied,
             || true,
             move |_, result| {
