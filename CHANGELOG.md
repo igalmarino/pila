@@ -33,6 +33,10 @@
   session is locked; both used to fail as unknown methods.
 - **Fixed:** A window title cut short ("…") on a narrow window stayed cut once the window was
   widened or maximized, until the title changed.
+- **Fixed:** The capture prompt's question was cut short ("…") for programs with names as long as
+  `wf-recorder`. It now reads "Allow wf-recorder to capture your screen?" (the line below still
+  says it can see any window), and the prompt is a little wider, so it fits whole for names as
+  long as `gpu-screen-recorder`.
 - **Fixed:** When another program already owned `org.freedesktop.ScreenSaver`, Pila left its
   interface registered on its own D-Bus connection anyway; it now removes it.
 - **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in

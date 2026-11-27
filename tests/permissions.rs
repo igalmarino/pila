@@ -608,7 +608,7 @@ fn an_allowed_program_captures_while_locked() {
 /// A program allowed once may capture the screen and any window: a window
 /// capture's prompt says so, as a screen capture's does.
 #[test]
-fn a_window_capture_asks_about_the_screen_and_windows() {
+fn a_window_capture_asks_about_the_screen() {
     use wayland_protocols::ext::{
         foreign_toplevel_list::v1::client::{
             ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
@@ -634,9 +634,9 @@ fn a_window_capture_asks_about_the_screen_and_windows() {
     let asks = |s: &Value| {
         s["capture_permission"]["shown"]["title"]
             .as_str()
-            .is_some_and(|title| title.ends_with("to capture your screen and windows?"))
+            .is_some_and(|title| title.ends_with("to capture your screen?"))
     };
-    pila.wait("asked about the screen and windows", asks);
+    pila.wait("asked about the screen", asks);
     let _screen = start_ext_session(&client, "HEADLESS-1", "screen");
     pila.wait("the same prompt", |s| {
         asks(s) && s["capture_permission"]["shown"]["requests"] == 2

@@ -54,9 +54,10 @@ use crate::{
     state_file, Pila,
 };
 
-/// Panel geometry (logical pixels): wide enough for long executable paths,
-/// the Allow/Deny buttons at the bottom right.
-const WIDTH: i32 = 640;
+/// Panel geometry (logical pixels): wide enough for the question whole with a
+/// long program name (`the_question_fits_for_a_long_program_name`), the
+/// Allow/Deny buttons at the bottom right.
+const WIDTH: i32 = 720;
 const PATH_AT: i32 = 58;
 const NOTE_AT: i32 = 82;
 const LASTS_AT: i32 = 106;
@@ -252,15 +253,13 @@ pub fn evaluate(rules: &[PermissionRule], grants: &[Grant], executable: Option<&
     }
 }
 
-/// The prompt's question. A permission is a program's, for every capture
-/// (the screen or any window), whatever it asked for first.
+/// The prompt's question, short enough to fit whole for a long program
+/// name. A permission is a program's, for every capture (the screen or any
+/// window), whatever it asked for first: the note under it says so.
 fn title(executable: Option<&str>) -> String {
     match executable {
-        Some(exe) => format!(
-            "Allow {} to capture your screen and windows?",
-            program_name(exe)
-        ),
-        None => "Allow an unknown program to capture your screen and windows?".to_string(),
+        Some(exe) => format!("Allow {} to capture your screen?", program_name(exe)),
+        None => "Allow an unknown program to capture your screen?".to_string(),
     }
 }
 
@@ -1211,6 +1210,23 @@ mod tests {
         assert!(!l.allow.overlaps(l.deny));
         // The buttons sit below the notes.
         assert!(l.allow.loc.y >= l.panel.loc.y + LASTS_AT + NOTE_HEIGHT);
+    }
+
+    /// The question fits the prompt whole for a long program name (it used
+    /// to end in "…" for one as long as wf-recorder).
+    #[test]
+    fn the_question_fits_for_a_long_program_name() {
+        let style = crate::text::Style {
+            size: f32::from(panel::TITLE.size),
+            bold: panel::TITLE.bold,
+        };
+        for question in [title(Some("/usr/bin/gpu-screen-recorder")), title(None)] {
+            let Some(fits) = crate::text::fits(&question, style, WIDTH - 2 * panel::PADDING) else {
+                eprintln!("no fonts: skipped");
+                return;
+            };
+            assert!(fits, "{question:?} is cut");
+        }
     }
 
     #[test]
