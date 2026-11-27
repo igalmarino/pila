@@ -71,23 +71,14 @@ impl Pila {
     /// The portal asks for a color: the picker is on until a click or
     /// Escape. Refused while locked or while another question is asked.
     pub(crate) fn start_color_pick(&mut self, reply: Reply<Result<Color, Refused>>) {
-        if self.is_locked()
-            || self.color_pick_open()
-            || self.share_picker_open()
-            || self.app_shortcuts_open()
-            || self.capture_permission_open()
-            || self.quit_dialog_open()
-        {
+        if self.is_locked() || self.modal_panel_open() {
             return reply.send(Err(Refused::Cancelled));
         }
         if crate::text::unavailable() {
             info!("no fonts: the color picker isn't shown");
             return reply.send(Err(Refused::Cancelled));
         }
-        self.end_switch();
-        self.hide_shortcuts();
-        self.close_overview();
-        self.close_window_menu();
+        self.close_transient_panels();
         info!("portal: picking a color");
         self.color_pick.reply = Some(reply);
         self.color_pick.pending = None;
@@ -110,8 +101,7 @@ impl Pila {
         self.set_cursor(CursorImageStatus::default_named());
         self.redraw_color_pick();
         // A share or capture permission asked meanwhile waited for it.
-        self.show_share_picker();
-        self.show_capture_permission();
+        self.show_waiting_panels();
         Some(reply)
     }
 

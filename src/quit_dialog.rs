@@ -94,10 +94,7 @@ impl Pila {
             debug!("quit dialog refused: no output");
             return;
         };
-        self.end_switch();
-        self.hide_shortcuts();
-        self.close_overview();
-        self.close_window_menu();
+        self.close_transient_panels();
         info!("asking whether to quit");
         self.quit_dialog.shown = Some(output.name());
         self.quit_dialog.pending_text = None;
@@ -120,9 +117,7 @@ impl Pila {
         self.quit_dialog.pending_text = None;
         *self.quit_dialog.buffers.borrow_mut() = ModalBuffers::default();
         self.queue_redraw();
-        // A share or capture permission asked meanwhile waited for it.
-        self.show_share_picker();
-        self.show_capture_permission();
+        self.show_waiting_panels();
     }
 
     fn confirm_quit(&mut self) {

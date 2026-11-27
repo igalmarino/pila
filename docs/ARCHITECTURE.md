@@ -122,7 +122,13 @@ Key flows and invariants:
   inhibitor (and, in debug builds, to the lock, where ConfirmQuit quits at once: nothing can
   ask then). Before either check, a key that wakes powered-off monitors does only
   that, Ctrl+Alt+F<N> (the keymap's `XF86_Switch_VT_<N>`) switches VT (`Action::ChangeVt`,
-  which `run_action` also runs while locked), and an open window menu takes every press.
+  which `run_action` also runs while locked), and an open window menu takes every press, as
+  does a modal panel (`Pila::modal_panel_open`): the filter keeps the key (`ModalKey`) for
+  `Pila::modal_panel_key`, which hands it to the panel shown after the filter, and
+  `pointer_button` gives it every press (`Pila::modal_panel_press`). A modal panel that opens
+  closes the switcher, the cheatsheet, the overview and a window menu
+  (`Pila::close_transient_panels`); one that closes shows a share or a capture permission that
+  waited for it (`Pila::show_waiting_panels`).
 - **Virtual keyboards** (`virtual_keyboard.rs`, zwp_virtual_keyboard_v1): Smithay hands
   their events in like a device's, and they are keyboards: keys go through
   `process_input_event` (bindings, `suppressed_keys`, idle activity) with the device's own

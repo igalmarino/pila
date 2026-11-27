@@ -493,14 +493,7 @@ impl Pila {
         rows: Vec<Bound>,
         reply: Option<Reply<Result<Vec<Bound>, Refused>>>,
     ) {
-        if self.is_locked()
-            || self.app_shortcuts.panel.is_some()
-            || self.share_picker_open()
-            || self.color_pick_open()
-            || self.capture_permission_open()
-            || self.quit_dialog_open()
-            || rows.is_empty()
-        {
+        if self.is_locked() || self.modal_panel_open() || rows.is_empty() {
             if let Some(reply) = reply {
                 reply.send(Err(Refused::Cancelled));
             }
@@ -513,10 +506,7 @@ impl Pila {
             }
             return;
         };
-        self.end_switch();
-        self.hide_shortcuts();
-        self.close_overview();
-        self.close_window_menu();
+        self.close_transient_panels();
         info!(
             app = app.as_deref().unwrap_or("?"),
             "portal: asking for shortcuts' keys"
@@ -546,8 +536,7 @@ impl Pila {
         *self.app_shortcuts.buffers.borrow_mut() = ModalBuffers::default();
         self.queue_redraw();
         // A share or capture permission asked meanwhile waited for it.
-        self.show_share_picker();
-        self.show_capture_permission();
+        self.show_waiting_panels();
         Some(panel)
     }
 
@@ -690,13 +679,7 @@ impl Pila {
         sym: Keysym,
         mods: &ModifiersState,
     ) -> Option<(String, String)> {
-        if self.is_locked()
-            || self.app_shortcuts.panel.is_some()
-            || self.share_picker_open()
-            || self.color_pick_open()
-            || self.capture_permission_open()
-            || self.quit_dialog_open()
-        {
+        if self.is_locked() || self.modal_panel_open() {
             return None;
         }
         let keys = KeyCombo {

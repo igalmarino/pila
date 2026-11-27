@@ -746,6 +746,67 @@ impl Pila {
             || self.quit_dialog_open()
     }
 
+    /// A key pressed while a modal panel is shown, for the one shown: the
+    /// shortcuts panel and the quit dialog read the key as the keymap's
+    /// latin layout has it, with the modifiers (the shortcuts panel no
+    /// modifier alone: they make up the keys it's given), the others the
+    /// keysym it types.
+    pub(crate) fn modal_panel_key(&mut self, key: crate::input::ModalKey) {
+        let crate::input::ModalKey {
+            modified,
+            raw,
+            mods,
+        } = key;
+        if self.app_shortcuts_open() {
+            if let Some(sym) = raw.filter(|sym| !sym.is_modifier_key()) {
+                self.app_shortcuts_key(sym, &mods);
+            }
+        } else if self.color_pick_open() {
+            self.color_pick_key(modified);
+        } else if self.capture_permission_open() {
+            self.capture_permission_key(modified);
+        } else if self.quit_dialog_open() {
+            if let Some(sym) = raw {
+                self.quit_dialog_key(sym, &mods);
+            }
+        } else if self.share_picker_open() {
+            self.share_picker_key(modified);
+        }
+    }
+
+    /// A press at `location` while a modal panel is shown, for the one
+    /// shown.
+    pub(crate) fn modal_panel_press(&mut self, location: Point<f64, Logical>) {
+        if self.app_shortcuts_open() {
+            self.app_shortcuts_press(location);
+        } else if self.color_pick_open() {
+            self.color_pick_press(location);
+        } else if self.quit_dialog_open() {
+            self.quit_dialog_press(location);
+        } else if self.capture_permission_open() {
+            self.capture_permission_press(location);
+        } else if self.share_picker_open() {
+            self.share_picker_press(location);
+        }
+    }
+
+    /// A modal panel opens: what of Pila's own is open and would sit under
+    /// it goes (the switcher, the cheatsheet, the overview, a window menu).
+    pub(crate) fn close_transient_panels(&mut self) {
+        self.end_switch();
+        self.hide_shortcuts();
+        self.close_overview();
+        self.close_window_menu();
+    }
+
+    /// A modal panel closed: a share or a capture permission asked
+    /// meanwhile, which waited for it, is asked now (each waits while the
+    /// other is shown).
+    pub(crate) fn show_waiting_panels(&mut self) {
+        self.show_share_picker();
+        self.show_capture_permission();
+    }
+
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
         if self.is_locked() {
             return self

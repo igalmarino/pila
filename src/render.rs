@@ -1949,94 +1949,86 @@ pub fn output_elements(
         output_geo.size,
         scale,
     );
-    let mut elements = match scene
-        .switcher
-        .as_ref()
-        .filter(|view| !scene.locked && view.output == output_name)
-    {
-        Some(view) => crate::switcher_view::elements(renderer, view, &scene.colors, origin, scale),
-        None => Vec::new(),
-    };
-    if let Some(view) = scene.shortcuts.as_ref().filter(|_| !scene.locked) {
-        // In front of the switcher: it's first, front to back. It dims
-        // every output.
-        let mut front = crate::shortcuts_view::elements(
-            renderer,
-            view,
-            &scene.colors,
-            output_name,
-            Rectangle::new(origin, output_geo.size),
-            scale,
-        );
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(view) = scene.share_picker.as_ref().filter(|_| !scene.locked) {
-        // In front of everything of Pila's: it's modal.
-        let mut front = crate::share_picker::elements(
-            renderer,
-            view,
-            &scene.colors,
-            output_name,
-            Rectangle::new(origin, output_geo.size),
-            scale,
-        );
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(view) = scene.app_shortcuts.as_ref().filter(|_| !scene.locked) {
-        // In front of everything of Pila's: it's modal.
-        let mut front = crate::app_shortcuts::elements(
-            renderer,
-            view,
-            &scene.colors,
-            output_name,
-            Rectangle::new(origin, output_geo.size),
-            scale,
-        );
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(view) = scene.capture_permission.as_ref().filter(|_| !scene.locked) {
-        // In front of everything of Pila's: it's modal.
-        let mut front = crate::permissions::elements(
-            renderer,
-            view,
-            &scene.colors,
-            output_name,
-            Rectangle::new(origin, output_geo.size),
-            scale,
-        );
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(view) = scene.quit_dialog.as_ref().filter(|_| !scene.locked) {
-        // In front of everything of Pila's: it's modal.
-        let mut front = crate::quit_dialog::elements(
-            renderer,
-            view,
-            &scene.colors,
-            output_name,
-            Rectangle::new(origin, output_geo.size),
-            scale,
-        );
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(view) = scene
-        .color_pick
-        .as_ref()
-        .filter(|view| !scene.locked && view.output == output_name)
-    {
-        let mut front = crate::color_pick::elements(renderer, view, &scene.colors, origin, scale);
-        front.append(&mut elements);
-        elements = front;
-    }
-    if let Some(menu) = scene.window_menu.as_ref().filter(|_| !scene.locked) {
-        // In front of all of them: it's first, front to back.
-        let mut front = crate::window_menu::elements(renderer, menu, &scene.colors, origin, scale);
-        front.append(&mut elements);
-        elements = front;
+    // Pila's own panels, front to back, none while locked: the window menu
+    // in front of all of them, then the modal panels (one shown at a time),
+    // the cheatsheet (it dims every output) and the switcher.
+    let mut elements = Vec::new();
+    if !scene.locked {
+        let colors = &scene.colors;
+        let geo = Rectangle::new(origin, output_geo.size);
+        if let Some(menu) = scene.window_menu.as_ref() {
+            elements.extend(crate::window_menu::elements(
+                renderer, menu, colors, origin, scale,
+            ));
+        }
+        if let Some(view) = scene
+            .color_pick
+            .as_ref()
+            .filter(|view| view.output == output_name)
+        {
+            elements.extend(crate::color_pick::elements(
+                renderer, view, colors, origin, scale,
+            ));
+        }
+        if let Some(view) = scene.quit_dialog.as_ref() {
+            elements.extend(crate::quit_dialog::elements(
+                renderer,
+                view,
+                colors,
+                output_name,
+                geo,
+                scale,
+            ));
+        }
+        if let Some(view) = scene.capture_permission.as_ref() {
+            elements.extend(crate::permissions::elements(
+                renderer,
+                view,
+                colors,
+                output_name,
+                geo,
+                scale,
+            ));
+        }
+        if let Some(view) = scene.app_shortcuts.as_ref() {
+            elements.extend(crate::app_shortcuts::elements(
+                renderer,
+                view,
+                colors,
+                output_name,
+                geo,
+                scale,
+            ));
+        }
+        if let Some(view) = scene.share_picker.as_ref() {
+            elements.extend(crate::share_picker::elements(
+                renderer,
+                view,
+                colors,
+                output_name,
+                geo,
+                scale,
+            ));
+        }
+        if let Some(view) = scene.shortcuts.as_ref() {
+            elements.extend(crate::shortcuts_view::elements(
+                renderer,
+                view,
+                colors,
+                output_name,
+                geo,
+                scale,
+            ));
+        }
+        if let Some(view) = scene
+            .switcher
+            .as_ref()
+            .filter(|view| view.output == output_name)
+        {
+            elements.extend(crate::switcher_view::elements(
+                renderer, view, colors, origin, scale,
+            ));
+        }
     }
     elements.extend(dnd_icon_elements(renderer, scene, origin, scale));
     elements.extend(scene_elements(

@@ -556,12 +556,8 @@ impl Pila {
         if self.share_picker.shown.is_some() || self.screencast.waiting.is_empty() {
             return;
         }
-        if !self.is_locked()
-            && (self.color_pick_open()
-                || self.app_shortcuts_open()
-                || self.capture_permission_open()
-                || self.quit_dialog_open())
-        {
+        // Its own isn't (just above): another one.
+        if !self.is_locked() && self.modal_panel_open() {
             return;
         }
         if self.is_locked() {
@@ -622,10 +618,7 @@ impl Pila {
             0
         };
         // Modal, in front of everything: nothing else of Pila's stays open.
-        self.end_switch();
-        self.hide_shortcuts();
-        self.close_overview();
-        self.close_window_menu();
+        self.close_transient_panels();
         // An app the portal doesn't name (one outside a sandbox) goes by the
         // window it asked from, if it said which.
         let mut app = ask.app().map(str::to_string);
@@ -745,10 +738,7 @@ impl Pila {
         };
         info!("portal: sharing cancelled");
         shown.ask.cancel();
-        self.show_share_picker();
-        if !self.share_picker_open() {
-            self.show_capture_permission();
-        }
+        self.show_waiting_panels();
     }
 
     /// The app closed the session whose picker is shown: it goes, and the
@@ -761,10 +751,7 @@ impl Pila {
             .is_some_and(|shown| shown.ask.session() == Some(session))
         {
             self.take_share_picker();
-            self.show_share_picker();
-            if !self.share_picker_open() {
-                self.show_capture_permission();
-            }
+            self.show_waiting_panels();
         }
     }
 
@@ -814,10 +801,7 @@ impl Pila {
             (Some(target), Ask::Screenshot(shot)) => self.take_screenshot(Some(target), shot.reply),
             (None, ask) => ask.cancel(),
         }
-        self.show_share_picker();
-        if !self.share_picker_open() {
-            self.show_capture_permission();
-        }
+        self.show_waiting_panels();
     }
 
     /// Show `tab` (with both kinds), what was selected on it selected again.

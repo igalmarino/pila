@@ -463,11 +463,8 @@ impl Pila {
             }
             return;
         }
-        if self.share_picker_open()
-            || self.color_pick_open()
-            || self.app_shortcuts_open()
-            || self.quit_dialog_open()
-        {
+        // Its own isn't (just above): another one.
+        if self.modal_panel_open() {
             return;
         }
         while let Some(mut queued) = self.capture_permissions.waiting.pop_front() {
@@ -481,10 +478,7 @@ impl Pila {
                 }
                 continue;
             };
-            self.end_switch();
-            self.hide_shortcuts();
-            self.close_overview();
-            self.close_window_menu();
+            self.close_transient_panels();
             info!(
                 executable = queued.executable.as_deref().unwrap_or("?"),
                 "asking for screen capture permission"
