@@ -165,6 +165,19 @@ pub struct CaptureIndicator {
 }
 
 impl CaptureIndicator {
+    /// Name `name` the captures `of` picks, wherever they're kept: those
+    /// capturing at the last update too, since one that ends before the
+    /// next is held and kept as `last` under the name it had then.
+    fn rename(&mut self, of: impl Fn(&Capturer) -> bool, name: &str) {
+        let last = self.last.as_mut().map(|(last, _)| last);
+        let held = self.held.iter_mut().map(|(held, _)| held);
+        for capturer in self.current.iter_mut().chain(held).chain(last) {
+            if of(capturer) {
+                capturer.app = name.to_string();
+            }
+        }
+    }
+
     /// Whether the next iteration must recompute.
     fn due(&self) -> bool {
         self.dirty || !self.shown.is_empty()
@@ -491,15 +504,11 @@ impl Pila {
                 }
                 let id = client.id();
                 state.capture_indicator.resolving.remove(&id);
-                // A capture that ended before its name was read is named
-                // too, while it's still listed.
-                let indicator = &mut state.capture_indicator;
-                let last = indicator.last.as_mut().map(|(last, _)| last);
-                for ended in indicator.held.iter_mut().map(|(held, _)| held).chain(last) {
-                    if ended.client.as_ref() == Some(&id) {
-                        ended.app = name.clone();
-                    }
-                }
+                // A capture that ended (or ends before the next update)
+                // before its name was read is named too.
+                state
+                    .capture_indicator
+                    .rename(|c| c.client.as_ref() == Some(&id), &name);
                 state.capture_indicator.dirty = true;
             });
         if let Err(err) = inserted {
@@ -522,6 +531,32 @@ fn unknown(pid: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A name read while the capture still runs reaches the capture as it
+    /// was at the last update: if it ends before the next one, it's held
+    /// and kept as `last` by name, not by process id (it was, on CI).
+    #[test]
+    fn a_name_read_while_capturing_names_what_ends() {
+        let capturer = |app: &str| Capturer {
+            app: app.into(),
+            protocol: Protocol::WlrScreencopy,
+            target: Captured::Output("DP-1".into()),
+            client: None,
+        };
+        let mut indicator = CaptureIndicator {
+            current: vec![capturer("process 7")],
+            held: vec![(capturer("process 7"), Instant::now())],
+            last: Some((capturer("process 7"), SystemTime::now())),
+            ..Default::default()
+        };
+        indicator.rename(|c| c.app == "process 7", "grim");
+        assert_eq!(indicator.current[0].app, "grim");
+        assert_eq!(indicator.held[0].0.app, "grim");
+        assert_eq!(
+            indicator.last.as_ref().map(|(c, _)| c.app.as_str()),
+            Some("grim")
+        );
+    }
 
     #[test]
     fn a_capturer_is_listed_as_the_ipc_documents() {
