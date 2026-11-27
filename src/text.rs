@@ -261,7 +261,9 @@ fn render_with(
     let mut buffer = buffer.borrow_with(system);
     buffer.set_wrap(Wrap::None);
     buffer.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
-    buffer.set_size(Some(width as f32), Some(height as f32));
+    // First with no width: how wide the whole text is, which the line cut
+    // to fit ("…", a few pixels short of the room) doesn't tell.
+    buffer.set_size(None, Some(height as f32));
     // Titles are one line; newlines and other control characters become spaces.
     let title: String = title
         .chars()
@@ -279,6 +281,14 @@ fn render_with(
         Shaping::Advanced,
         None,
     );
+    let line_width = |buffer: &mut cosmic_text::BorrowedWithFontSystem<'_, Buffer>| {
+        buffer
+            .layout_runs()
+            .map(|run| run.line_w)
+            .fold(0.0, f32::max)
+    };
+    let full_width = line_width(&mut buffer);
+    buffer.set_size(Some(width as f32), Some(height as f32));
 
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let text_color = Color::rgb(byte(color[0]), byte(color[1]), byte(color[2]));
@@ -305,14 +315,11 @@ fn render_with(
     });
 
     // Crop to the laid-out text, plus a pixel for anti-aliasing overhang.
-    let text_width = buffer
-        .layout_runs()
-        .map(|run| run.line_w)
-        .fold(0.0, f32::max);
+    let text_width = line_width(&mut buffer);
     // A whole number of logical pixels, so the buffer's logical size is exact.
     let natural = (text_width.ceil() as i32) + 1;
-    // Short of the room by more than the pixel: nothing was cut ("…").
-    let whole = natural < width;
+    // The whole text fits, with the pixel: nothing was cut ("…").
+    let whole = (full_width.ceil() as i32) < width;
     let cropped = natural.clamp(1, width);
     let cropped = ((cropped + scale - 1) / scale * scale).min(width);
     let pixels = pixels
@@ -325,6 +332,20 @@ fn render_with(
         width: cropped,
         whole,
     })
+}
+
+/// Whether `text` in `style` fits on one line `max_width` logical pixels
+/// wide, uncut ("…"), in fontconfig's sans-serif: for tests of text a panel
+/// must show whole. `None` without fonts.
+#[cfg(test)]
+pub(crate) fn fits(text: &str, style: Style, max_width: i32) -> Option<bool> {
+    let mut system = FontSystem::new();
+    if system.db().is_empty() {
+        return None;
+    }
+    follow_fontconfig(&mut system);
+    let mut fonts = prepare(system)?;
+    render_with(&mut fonts, text, [1.0; 3], max_width, 40, 1, style).map(|t| t.whole)
 }
 
 #[cfg(test)]
@@ -372,6 +393,24 @@ mod tests {
         assert!(!use_sans_serif(&mut system, "No Such Family"));
         assert!(!use_sans_serif(&mut system, ""));
         assert_eq!(system.db().family_name(&Family::SansSerif), before);
+    }
+
+    /// A text cut to fit ("…") isn't whole: a title bar keeps a whole title
+    /// when its window widens (`decoration.rs`), and a cut one would stay cut.
+    #[test]
+    fn a_text_cut_to_fit_is_not_whole() {
+        let style = Style {
+            size: 22.0,
+            bold: true,
+        };
+        let long = "Allow wf-recorder to capture your screen and windows?";
+        let (Some(cut), Some(roomy)) = (fits(long, style, 400), fits(long, style, 2000)) else {
+            eprintln!("no fonts: skipped");
+            return;
+        };
+        assert!(!cut, "cut to 400 px, yet whole");
+        assert!(roomy);
+        assert_eq!(fits("short", style, 400), Some(true));
     }
 
     /// A title as wide as `i32::MAX` px (scaled, it overflows) or with no

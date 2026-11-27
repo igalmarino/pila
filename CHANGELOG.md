@@ -31,6 +31,8 @@
 - **New:** Apps calling `org.freedesktop.ScreenSaver`'s `SimulateUserActivity` (remote desktops,
   some players) now count as user activity, as input does, and `GetActive` answers whether the
   session is locked; both used to fail as unknown methods.
+- **Fixed:** A window title cut short ("…") on a narrow window stayed cut once the window was
+  widened or maximized, until the title changed.
 - **Fixed:** When another program already owned `org.freedesktop.ScreenSaver`, Pila left its
   interface registered on its own D-Bus connection anyway; it now removes it.
 - **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in
