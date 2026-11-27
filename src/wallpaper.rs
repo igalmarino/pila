@@ -1,9 +1,9 @@
 //! Pila's default wallpaper, which swaybg draws (`tool_configs.rs` hands it
 //! the file): `background`, plain, with a small mark in the bottom-right
-//! corner, three outlined rectangles piled like the windows of Pila's icon,
-//! in greys a third and two thirds of the way to `hover` and `hover` in
-//! front, with its top edge in the accent (`snap-preview`). Square, flat and
-//! in the user's `[colors]`: drawn again when they change.
+//! corner, a pile of three flat bars, the widest at the bottom in a
+//! grey halfway to `hover`, then `hover`, and the shortest on top in the
+//! accent (`snap-preview`). Square, flat and in the user's `[colors]`: drawn
+//! again when they change.
 //!
 //! It's a PNG, which every gdk-pixbuf (swaybg's image loader) reads: built in
 //! up to 2.42, through glycin's loaders since, where SVG would need a loader
@@ -18,16 +18,14 @@ pub const SIZE: (u32, u32) = (3840, 2160);
 /// The design is laid out on a 1920x1080 grid, drawn at this many pixels a
 /// unit.
 const UNIT: u32 = SIZE.0 / 1920;
-/// The three rectangles, back to front, as (x, y, width, height) on the grid
-/// (the icon's, shifted by 25 and 28), and their outline's width.
-const RECTS: [(u32, u32, u32, u32); 3] = [
-    (1750, 900, 100, 80),
-    (1725, 928, 100, 80),
-    (1700, 956, 100, 80),
+/// The three bars, bottom to top, as (x, y, width, height) on the grid:
+/// right-aligned, each 24 shorter and 16 higher than the one below, 80
+/// from the picture's right and bottom edges.
+const BARS: [(u32, u32, u32, u32); 3] = [
+    (1720, 990, 120, 10),
+    (1744, 974, 96, 10),
+    (1768, 958, 72, 10),
 ];
-const STROKE: u32 = 2;
-/// The accent's height on the front rectangle's top edge.
-const ACCENT: u32 = 4;
 
 /// A premultiplied color as opaque 8-bit RGB (the accent, `snap-preview`, is
 /// translucent in Pila; drawn opaque, as the tools draw it).
@@ -50,26 +48,25 @@ fn mix(from: [u8; 3], to: [u8; 3], step: f32) -> [u8; 3] {
     ]
 }
 
-/// The wallpaper's colors: the background, each rectangle's outline (back to
-/// front) and the accent.
-fn palette(colors: &Colors) -> ([u8; 3], [[u8; 3]; 3], [u8; 3]) {
+/// The wallpaper's colors: the background and each bar's, bottom to top.
+fn palette(colors: &Colors) -> ([u8; 3], [[u8; 3]; 3]) {
     let background = rgb8(colors.background);
     let [r, g, b] = colors.hover;
-    let front = rgb8([r, g, b, 1.0]);
-    let outlines = [
-        mix(background, front, 1.0 / 3.0),
-        mix(background, front, 2.0 / 3.0),
-        front,
+    let hover = rgb8([r, g, b, 1.0]);
+    let bars = [
+        mix(background, hover, 0.5),
+        hover,
+        rgb8(colors.snap_preview),
     ];
-    (background, outlines, rgb8(colors.snap_preview))
+    (background, bars)
 }
 
 /// The wallpaper in `colors`, as RGB rows of `SIZE`.
 pub fn pixels(colors: &Colors) -> Vec<u8> {
     let (width, height) = SIZE;
-    let (background, outlines, accent) = palette(colors);
+    let (background, bars) = palette(colors);
     let mut pixels = background.repeat((width * height) as usize);
-    let mut fill = |(x, y, w, h): (u32, u32, u32, u32), color: [u8; 3]| {
+    for (&(x, y, w, h), &color) in BARS.iter().zip(&bars) {
         let (x, y, w, h) = (x * UNIT, y * UNIT, w * UNIT, h * UNIT);
         for row in y..(y + h).min(height) {
             let start = (row * width + x) as usize * 3;
@@ -78,16 +75,7 @@ pub fn pixels(colors: &Colors) -> Vec<u8> {
                 *pixel = color;
             }
         }
-    };
-    for (&(x, y, w, h), &color) in RECTS.iter().zip(&outlines) {
-        // Its four edges, inside its bounds.
-        fill((x, y, w, STROKE), color);
-        fill((x, y + h - STROKE, w, STROKE), color);
-        fill((x, y, STROKE, h), color);
-        fill((x + w - STROKE, y, STROKE, h), color);
     }
-    let (x, y, w, _) = RECTS[2];
-    fill((x, y, w, ACCENT), accent);
     pixels
 }
 
@@ -123,9 +111,9 @@ mod tests {
         [pixels[i], pixels[i + 1], pixels[i + 2]]
     }
 
-    /// The defaults: the background, plain but for the mark in the
-    /// bottom-right corner: the outlines a third, two thirds and all the way
-    /// to `hover`, the accent on the front one's top edge.
+    /// The defaults: the background, plain but for the pile in the
+    /// bottom-right corner: the bottom bar halfway to `hover`, the middle one
+    /// `hover`, the top one the accent, the background between them.
     #[test]
     fn the_default_wallpaper_is_in_the_default_colors() {
         let pixels = pixels(&colors(""));
@@ -134,28 +122,34 @@ mod tests {
         assert_eq!(at(&pixels, 0, 0), background);
         assert_eq!(at(&pixels, unit(960), unit(540)), background);
         assert_eq!(at(&pixels, SIZE.0 - 1, SIZE.1 - 1), background);
-        // Inside the front rectangle, below the middle one: background.
-        assert_eq!(at(&pixels, unit(1750), unit(1020)), background);
-        // The left edges, back to front.
-        assert_eq!(at(&pixels, unit(1750), unit(950)), [0x2a, 0x2c, 0x32]);
-        assert_eq!(at(&pixels, unit(1725), unit(940)), [0x34, 0x37, 0x3d]);
-        assert_eq!(at(&pixels, unit(1700), unit(1000)), [0x3f, 0x42, 0x49]);
-        // The accent, opaque.
-        assert_eq!(at(&pixels, unit(1710), unit(957)), [0x44, 0x77, 0xcc]);
-        // Just under it, the front one's inside.
-        assert_eq!(at(&pixels, unit(1710), unit(956 + ACCENT) + 1), background);
+        // The bars, bottom to top, at their left and right ends.
+        assert_eq!(at(&pixels, unit(1720), unit(995)), [0x2f, 0x32, 0x38]);
+        assert_eq!(at(&pixels, unit(1839), unit(995)), [0x2f, 0x32, 0x38]);
+        assert_eq!(at(&pixels, unit(1744), unit(979)), [0x3f, 0x42, 0x49]);
+        assert_eq!(at(&pixels, unit(1839), unit(979)), [0x3f, 0x42, 0x49]);
+        assert_eq!(at(&pixels, unit(1768), unit(963)), [0x44, 0x77, 0xcc]);
+        assert_eq!(at(&pixels, unit(1839), unit(963)), [0x44, 0x77, 0xcc]);
+        // Before each shorter bar's start, between the bars, right of and
+        // below the pile: background.
+        assert_eq!(at(&pixels, unit(1743), unit(979)), background);
+        assert_eq!(at(&pixels, unit(1767), unit(963)), background);
+        assert_eq!(at(&pixels, unit(1800), unit(986)), background);
+        assert_eq!(at(&pixels, unit(1840), unit(995)), background);
+        assert_eq!(at(&pixels, unit(1800), unit(1000)), background);
     }
 
-    /// The mark stays inside the picture, with room around it.
+    /// A pile: right-aligned, each bar shorter than the one below, in the
+    /// bottom-right corner with room around it.
     #[test]
-    fn the_mark_is_in_the_corner_with_a_margin() {
-        let right = RECTS.iter().map(|(x, _, w, _)| x + w).max().unwrap();
-        let bottom = RECTS.iter().map(|(_, y, _, h)| y + h).max().unwrap();
-        assert!(
-            1920 - right >= 40 && 1080 - bottom >= 40,
-            "{right}, {bottom}"
-        );
-        assert!(RECTS.iter().all(|(x, y, ..)| *x > 1600 && *y > 850));
+    fn the_bars_pile_up_in_the_corner_with_a_margin() {
+        for pair in BARS.windows(2) {
+            let [(x0, y0, w0, h0), (x1, y1, w1, _)] = [pair[0], pair[1]];
+            assert_eq!(x0 + w0, x1 + w1);
+            assert!(w1 < w0 && y1 < y0 && y1 + h0 < y0, "{pair:?}");
+        }
+        let (x, y, w, h) = BARS[0];
+        assert!(1920 - (x + w) >= 40 && 1080 - (y + h) >= 40, "{x}, {y}");
+        assert!(BARS.iter().all(|(x, y, ..)| *x > 1600 && *y > 850));
     }
 
     /// The user's `[colors]` draw it.
@@ -166,9 +160,9 @@ mod tests {
         ));
         let unit = |v: u32| v * UNIT;
         assert_eq!(at(&pixels, 0, 0), [0, 0, 0]);
-        assert_eq!(at(&pixels, unit(1750), unit(950)), [0x55, 0x55, 0x55]);
-        assert_eq!(at(&pixels, unit(1700), unit(1000)), [0xff, 0xff, 0xff]);
-        assert_eq!(at(&pixels, unit(1710), unit(957)), [0xff, 0, 0]);
+        assert_eq!(at(&pixels, unit(1839), unit(995)), [0x80, 0x80, 0x80]);
+        assert_eq!(at(&pixels, unit(1839), unit(979)), [0xff, 0xff, 0xff]);
+        assert_eq!(at(&pixels, unit(1839), unit(963)), [0xff, 0, 0]);
     }
 
     /// A PNG of `SIZE` that decodes to the same pixels, and small.

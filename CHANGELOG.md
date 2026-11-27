@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in
+  the bottom-right corner (halfway to `hover`, `hover`, and the `snap-preview` accent on top), in
+  place of the outlined window stack. Still drawn from `[colors]`.
+
 ## 0.9.8 (2026-11-26)
 
 - **New:** Mod+Shift+E asks before quitting, in a dialog (Enter, Mod+Shift+E again or Quit to

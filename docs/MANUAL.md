@@ -254,8 +254,8 @@ overview, and portal panels automatically inherit `[colors]`, and external tools
 
 **Wallpaper.** Pila delegates wallpaper rendering to `swaybg` (or your desktop shell). By default,
 `autostart` runs bare `swaybg` and Pila passes it a generated minimalist wallpaper matching your
-`[colors]`: solid `background` with a subtle three-window stack emblem in the bottom-right corner
-accented with `snap-preview`. It regenerates automatically whenever `[colors]` changes (applied on
+`[colors]`: solid `background` with a small pile of three bars in the bottom-right corner, the top
+one in `snap-preview`. It regenerates automatically whenever `[colors]` changes (applied on
 the next `swaybg` start) and scales cleanly to any aspect ratio (`-m fit`).
 
 To use your own image, replace `"swaybg"` in `autostart` with a `swaybg` command specifying `-i`
