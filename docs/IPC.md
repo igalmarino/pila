@@ -91,7 +91,7 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `screen-shares` | — | `protocol`, `screen_shares` |
 | `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the remembered shares (it does once it serves the portal) |
 | `capture-permissions` | — | `protocol`, `capture_permissions` |
-| `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the saved permissions (at startup) |
+| `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id` |
 | `idle-inhibitors` | — | `protocol`, `idle_inhibitors` |
 | `captures` | — | `protocol`, `captures` |
 
@@ -175,12 +175,13 @@ sharing"), sorted by app:
 - `persistent`: `true` if it's kept until revoked (saved), `false` while the app runs
 
 **Capture permission (`capture-permissions`):**
-A direct Wayland capture permission granted through the confirmation prompt (see the manual,
-"Direct screen capture permissions"), sorted by executable:
+A direct Wayland capture permission granted through the confirmation prompt, until Pila exits
+(see the manual, "Direct screen capture permissions"; `[[permission]]` rules aren't listed),
+sorted by executable:
 - `id`: the grant's id, for `forget-capture-permission`
 - `executable`: the client's executable path (from `/proc/<pid>/exe`)
-- `persistent`: `true` if saved across restarts (`capture-permissions.json`), `false` for this
-  session only
+- `persistent`: always `false` (only the configuration keeps a permission across restarts; up to
+  0.9.8, `true` for one remembered in `capture-permissions.json`)
 
 **Idle inhibitor (`idle-inhibitors`):**
 Something keeping the screen on now (swayidle neither locks nor turns the monitors off): first

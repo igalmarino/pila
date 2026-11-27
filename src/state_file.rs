@@ -1,7 +1,7 @@
 //! Files Pila keeps in `$XDG_STATE_HOME/pila` (`~/.local/state/pila`): what
 //! apps' sessions placed (`session_management.rs`), the keys confirmed for
 //! apps' shortcuts (`app_shortcuts.rs`), the screen shares remembered for apps
-//! (`screen_grants.rs`), the capture permissions saved (`permissions.rs`).
+//! (`screen_grants.rs`).
 //! Each is written whole or not at all, in the order asked, for the user
 //! alone: some hold secrets (ids an app keeps to get something back).
 

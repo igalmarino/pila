@@ -167,10 +167,10 @@ returned by
 or all of them.
 .TP
 .BR "pila msg " [ \-\-json ] " capture\-permissions"
-List the programs allowed to capture the screen directly (wlr-screencopy, ext-image-copy-capture)
-when
+List the programs allowed in the prompt to capture the screen directly (wlr-screencopy,
+ext-image-copy-capture) when
 .B [permissions] enforce
-is on.
+is on, until you log out; rules in the configuration aren't listed.
 .TP
 .BI "pila msg forget\-capture\-permission " id\fR|\fBall
 Forget a capture permission by the
@@ -451,10 +451,6 @@ Persisted global shortcut assignments confirmed through the GlobalShortcuts port
 .IR ~/.local/state/pila/screen\-shares.json " (or " $XDG_STATE_HOME/pila/screen\-shares.json )
 Screen shares remembered for apps through the ScreenCast portal's Remember toggle (listed by
 .BR "pila msg screen\-shares" ).
-.TP
-.IR ~/.local/state/pila/capture\-permissions.json " (or " $XDG_STATE_HOME/pila/capture\-permissions.json )
-Direct screen capture permissions remembered from the prompt (listed by
-.BR "pila msg capture\-permissions" ).
 .TP
 .I $XDG_RUNTIME_DIR/pila\-screenshots/
 Temporary storage for portal screenshots (last 10 kept until logout).

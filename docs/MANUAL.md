@@ -748,19 +748,20 @@ access = "allow"
 ```
 
 Rules match the client's executable path with `*` wildcards; they apply in order and the last match
-wins (`access` is `"allow"`, `"ask"`, or `"deny"`). When an unlisted program (or one matched by
+wins (`access` is `"allow"`, `"ask"`, or `"deny"`). The configuration is the only place a
+permission is kept across sessions. When an unlisted program (or one matched by
 `access = "ask"`) tries to capture, Pila opens a modal prompt showing its name and executable path.
 A program allowed may capture the screen and any window, whichever it asked for first.
 Press `Enter` (or click **Allow**) to allow it until you log out (or Pila restarts), even if it
-quits and starts again, `Esc` (or click **Deny**) to refuse it, or toggle **Remember** (`R` or
-click) before allowing to keep the choice across sessions in
-`~/.local/state/pila/capture-permissions.json`. Allow takes effect only half a second after the
-prompt appears, so an `Enter` typed into an app as it pops up doesn't allow anything, and keys
+quits and starts again, or `Esc` (or click **Deny**) to refuse it. To allow it for good, add an
+`access = "allow"` rule for it; a rule added or changed applies at once (the configuration is
+reloaded when saved), also to programs allowed in the prompt. Allow takes effect only half a
+second after the prompt appears, so an `Enter` typed into an app as it pops up doesn't allow anything, and keys
 from a virtual keyboard (`wtype`, an on-screen keyboard) answer none of Pila's prompts: a program
 can't allow itself, so answer with the keyboard or a click. A denied
 program isn't asked again until it starts over (connects again). While the screen is locked,
-programs that would be asked are refused. List grants with `pila msg capture-permissions`, and
-revoke one with `pila msg forget-capture-permission <id>` (or `all`), which also stops active
+programs that would be asked are refused. List the programs allowed in the prompt with
+`pila msg capture-permissions`, and revoke one with `pila msg forget-capture-permission <id>` (or `all`), which also stops active
 captures from that program. Turning `enforce` on while programs capture stops those that no rule
 or grant allows, without asking. Portal screen sharing and screenshots are unaffected and always use
 Pila's picker.

@@ -34,8 +34,9 @@ Requests:
                       get again without asking
   forget-screen-share <id>|all
                       Forget one, by its id in `screen-shares`, or all
-  capture-permissions Direct screen capture permissions remembered for
-                      programs (wlr-screencopy, ext-image-copy-capture)
+  capture-permissions Programs allowed in the prompt to capture the screen
+                      directly (wlr-screencopy, ext-image-copy-capture),
+                      until you log out
   forget-capture-permission <id>|all
                       Forget one, by its id in `capture-permissions`, or all
   idle-inhibitors     The apps keeping the screen on now: over D-Bus
@@ -419,21 +420,10 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
                 .collect(),
         },
         "capture-permissions" => match list("capture_permissions") {
-            grants if grants.is_empty() => vec!["no capture permission remembered".to_string()],
+            grants if grants.is_empty() => vec!["no capture permission allowed".to_string()],
             grants => grants
                 .iter()
-                .map(|g| {
-                    format!(
-                        "{}  {}{}",
-                        plain(&g["id"]),
-                        plain(&g["executable"]),
-                        if g["persistent"] == true {
-                            ""
-                        } else {
-                            "  [this session]"
-                        }
-                    )
-                })
+                .map(|g| format!("{}  {}", plain(&g["id"]), plain(&g["executable"])))
                 .collect(),
         },
         _ => Vec::new(),

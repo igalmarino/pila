@@ -1,5 +1,5 @@
 //! Direct Wayland screen capture permissions (`[permissions]`, `[[permission]]`,
-//! modal prompt, persistence, and `pila msg` management).
+//! modal prompt, and `pila msg` management).
 
 mod common;
 
@@ -165,7 +165,6 @@ fn prompt_allows_and_denies_capture_and_blocks_app_input() {
         state["capture_permission"]["shown"]["executable"],
         current_exe()
     );
-    assert_eq!(state["capture_permission"]["shown"]["remember"], false);
     assert!(!client.has_logged("denied_ext", "Done"));
     assert!(!client.has_logged("denied_ext", "Stopped"));
 
@@ -232,8 +231,11 @@ fn prompt_allows_and_denies_capture_and_blocks_app_input() {
     assert_eq!(grants[0]["persistent"], false);
 }
 
+/// Allow lasts until Pila exits (the user logs out), for the program
+/// whatever connection it captures from; forgetting it asks again, and
+/// nothing is written to keep it.
 #[test]
-fn remembered_permission_persists_across_restart_and_can_be_forgotten_via_ipc() {
+fn a_permission_lasts_until_pila_restarts_and_can_be_forgotten() {
     let state_dir = std::env::temp_dir().join(format!(
         "pila-perm-state-{}-{}",
         std::process::id(),
@@ -248,87 +250,108 @@ fn remembered_permission_persists_across_restart_and_can_be_forgotten_via_ipc() 
         "XDG_STATE_HOME".to_string(),
         state_dir.to_string_lossy().into_owned(),
     )];
+    let options = || Options {
+        config: "[permissions]\nenforce = true\n".into(),
+        env: state_env.clone(),
+        ..Default::default()
+    };
 
     {
-        let mut pila = TestPila::start_with(Options {
-            config: "[permissions]\nenforce = true\n".into(),
-            env: state_env.clone(),
-            ..Default::default()
-        });
+        let mut pila = TestPila::start_with(options());
         let client = pila.client();
         pila.settle();
-
         let _session = start_ext_session(&client, "HEADLESS-1", "first");
         let state = wait_armed(&mut pila);
-        let (rx, ry) = center(&state["capture_permission"]["shown"]["remember_rect"]);
         let (ax, ay) = center(&state["capture_permission"]["shown"]["allow"]);
-
-        // Click the Remember toggle, then click Allow.
-        click_at(&mut pila, rx, ry);
-        pila.wait("remember checked", |s| {
-            s["capture_permission"]["shown"]["remember"] == true
-        });
         click_at(&mut pila, ax, ay);
         client.wait_logged("first", "Done");
-        pila.wait("prompt closed", |s| {
-            s["capture_permission"]["shown"].is_null()
-        });
 
-        let listed = msg_json(&pila, &["capture-permissions"]);
-        let grants = listed["capture_permissions"].as_array().unwrap();
-        assert_eq!(grants.len(), 1);
-        assert_eq!(grants[0]["persistent"], true);
-        // Wait for the background writer to flush the file before restarting.
-        let file = state_dir.join("pila/capture-permissions.json");
-        pila.wait("permissions file written", |_| file.exists());
-    }
-
-    // Second Pila instance sharing XDG_STATE_HOME restores the remembered permission.
-    {
-        let mut pila = TestPila::start_with(Options {
-            config: "[permissions]\nenforce = true\n".into(),
-            env: state_env,
-            ..Default::default()
-        });
-        pila.wait("permissions loaded", |s| {
-            s["capture_permission"]["loaded"] == true
-        });
-        let client = pila.client();
-        pila.settle();
-
-        let _active = start_ext_session(&client, "HEADLESS-1", "restored");
-        client.wait_logged("restored", "Done");
+        // The program connecting again isn't asked.
+        let again = pila.client();
+        let _active = start_ext_session(&again, "HEADLESS-1", "again");
+        again.wait_logged("again", "Done");
         assert!(pila.state()["capture_permission"]["shown"].is_null());
 
+        // Forgetting it stops its captures and asks next time.
         let listed = msg_json(&pila, &["capture-permissions"]);
         let id = listed["capture_permissions"][0]["id"]
             .as_str()
             .unwrap()
             .to_string();
-
-        // Forgetting the grant stops the active session and forces a prompt next time.
         let forgot = msg_json(&pila, &["forget-capture-permission", &id]);
         assert_eq!(forgot["ok"], true);
-        client.wait_logged("restored", "Stopped");
-
-        let _after = start_ext_session(&client, "HEADLESS-1", "after_forget");
+        again.wait_logged("again", "Stopped");
+        let _after = start_ext_session(&again, "HEADLESS-1", "after_forget");
         wait_armed(&mut pila);
-        pila.key("r");
-        pila.wait("remember toggled by R", |s| {
-            s["capture_permission"]["shown"]["remember"] == true
-        });
         pila.key("Return");
-        client.wait_logged("after_forget", "Done");
-
-        let forgot_all = msg_json(&pila, &["forget-capture-permission", "all"]);
-        assert_eq!(forgot_all["forgotten"], 1);
-        assert!(
-            msg_json(&pila, &["capture-permissions"])["capture_permissions"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        again.wait_logged("after_forget", "Done");
     }
+
+    // A Pila started again asks again: nothing was kept.
+    {
+        let mut pila = TestPila::start_with(options());
+        let client = pila.client();
+        pila.settle();
+        let _session = start_ext_session(&client, "HEADLESS-1", "restarted");
+        wait_armed(&mut pila);
+        assert!(!client.has_logged("restarted", "Done"));
+        pila.key("Escape");
+        client.wait_logged("restarted", "Stopped");
+    }
+    assert!(
+        !state_dir.join("pila/capture-permissions.json").exists(),
+        "a permission was written"
+    );
+
+    let _ = std::fs::remove_dir_all(&state_dir);
+}
+
+/// Only the config keeps a permission across restarts: the file 0.9.8's
+/// Remember saved grants nothing, and the program is asked.
+#[test]
+fn a_saved_permissions_file_grants_nothing() {
+    let exe = current_exe();
+    let state_dir = std::env::temp_dir().join(format!(
+        "pila-perm-old-file-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(state_dir.join("pila")).unwrap();
+    std::fs::write(
+        state_dir.join("pila/capture-permissions.json"),
+        serde_json::json!({
+            "version": 1,
+            "grants": [{ "id": "remembered", "executable": exe }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut pila = TestPila::start_with(Options {
+        config: "[permissions]\nenforce = true\n".into(),
+        env: vec![(
+            "XDG_STATE_HOME".to_string(),
+            state_dir.to_string_lossy().into_owned(),
+        )],
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+
+    let _session = start_ext_session(&client, "HEADLESS-1", "asked");
+    let state = pila.wait("permission prompt shown", |s| {
+        !s["capture_permission"]["shown"].is_null()
+    });
+    assert_eq!(state["capture_permission"]["shown"]["executable"], exe);
+    assert!(!client.has_logged("asked", "Done"));
+    assert!(
+        msg_json(&pila, &["capture-permissions"])["capture_permissions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let _ = std::fs::remove_dir_all(&state_dir);
 }
@@ -516,7 +539,6 @@ fn a_request_given_up_takes_its_prompt_away() {
 fn forgetting_all_counts_what_was_listed() {
     let mut pila = TestPila::with_config("[permissions]\nenforce = true\n");
     let client = pila.client();
-    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
     assert_eq!(
         msg_json(&pila, &["forget-capture-permission", "all"])["forgotten"],
         0
@@ -547,7 +569,7 @@ fn the_prompt_fits_a_narrow_output() {
     let _session = start_ext_session(&client, "NARROW", "s");
     let state = wait_armed(&mut pila);
     let shown = &state["capture_permission"]["shown"];
-    for part in ["panel", "allow", "deny", "remember_rect"] {
+    for part in ["panel", "allow", "deny"] {
         let (x, y, w, h) = common::rect(&shown[part]);
         assert!(
             x >= 0 && y >= 0 && x + w <= 480 && y + h <= 800,
@@ -702,70 +724,8 @@ fn enforce_turned_on_stops_a_denied_capture() {
     client.wait_logged("running", "Stopped");
 }
 
-/// A state directory whose `capture-permissions.json` is a FIFO: Pila's
-/// startup read of it waits until the test writes it (`write_held_store`).
-fn held_store() -> (std::path::PathBuf, Vec<(String, String)>) {
-    let state_dir = std::env::temp_dir().join(format!(
-        "pila-perm-held-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let dir = state_dir.join("pila");
-    std::fs::create_dir_all(&dir).unwrap();
-    let fifo = dir.join("capture-permissions.json");
-    let path = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
-    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
-    let env = vec![(
-        "XDG_STATE_HOME".to_string(),
-        state_dir.to_string_lossy().into_owned(),
-    )];
-    (fifo, env)
-}
-
-/// Let Pila's read of a `held_store` finish, with `grants` in it.
-fn write_held_store(fifo: &std::path::Path, grants: &str) {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
-    write!(file, "{{\"version\": 1, \"grants\": {grants}}}").unwrap();
-}
-
-/// Locking leaves alone a request of an allowed program still waiting for
-/// the saved permissions to be read: it's decided once they are, and a rule
-/// allows it.
-#[test]
-fn locking_keeps_an_allowed_request_waiting_for_the_saved_permissions() {
-    let exe = current_exe();
-    let (fifo, env) = held_store();
-    let mut pila = TestPila::start_with(Options {
-        config: format!(
-            "[permissions]\nenforce = true\n\
-             [[permission]]\nexecutable = {exe:?}\naccess = \"allow\"\n"
-        ),
-        env,
-        ..Default::default()
-    });
-    let client = pila.client();
-    pila.settle();
-    let _session = start_ext_session(&client, "HEADLESS-1", "held");
-    pila.settle();
-    client.roundtrip();
-    assert_eq!(pila.state()["capture_permission"]["loaded"], false);
-    let locker = pila.client();
-    let lock = locker.lock_session();
-    let surf = locker.lock_surface(&lock, "HEADLESS-1", [255, 10, 20, 30]);
-    locker.wait_surface_configured(surf);
-    locker.wait_logged("lock", "Locked");
-    write_held_store(&fifo, "[]");
-    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
-    client.wait_logged("held", "Done");
-    assert!(!client.has_logged("held", "Stopped"));
-}
-
-/// A program can't answer its own prompt with a virtual keyboard: Enter and
-/// R from one do nothing, and only the user's keys (or clicks) answer.
+/// A program can't answer its own prompt with a virtual keyboard: Enter from
+/// one does nothing, and only the user's keys (or clicks) answer.
 #[test]
 fn a_virtual_keyboard_cant_answer_the_prompt() {
     use common::protocols::{keymap_of, virtual_keyboard};
@@ -777,13 +737,13 @@ fn a_virtual_keyboard_cant_answer_the_prompt() {
     let _session = start_ext_session(&client, "HEADLESS-1", "typed");
     wait_armed(&mut pila);
     let keyboard = virtual_keyboard(&client, &keymap_of(&client));
-    // R (19), then Enter (28).
-    for (time, key, state) in [(1, 19, 1), (2, 19, 0), (3, 28, 1), (4, 28, 0)] {
+    // Enter (28).
+    for (time, key, state) in [(1, 28, 1), (2, 28, 0)] {
         keyboard.key(time, key, state);
     }
     client.flush();
     pila.stays("still asking", Duration::from_millis(300), |s| {
-        s["capture_permission"]["shown"]["remember"] == false
+        !s["capture_permission"]["shown"].is_null()
     });
     client.roundtrip();
     assert!(!client.has_logged("typed", "Done"));
@@ -791,10 +751,10 @@ fn a_virtual_keyboard_cant_answer_the_prompt() {
     client.wait_logged("typed", "Stopped");
 }
 
-/// The prompt shown on a monitor unplugged moves to another, and Remember
-/// toggled there is drawn checked.
+/// The prompt shown on a monitor unplugged moves to another, and answers
+/// there.
 #[test]
-fn remember_toggled_after_the_prompts_monitor_is_unplugged_shows() {
+fn the_prompt_on_a_monitor_unplugged_moves_to_another() {
     let mut pila = TestPila::start_with(Options {
         config: "[permissions]\nenforce = true\n".into(),
         outputs: Some("A:640x480,B:640x480".into()),
@@ -809,52 +769,14 @@ fn remember_toggled_after_the_prompts_monitor_is_unplugged_shows() {
             && s["capture_permission"]["shown"]["text"] == true
     });
     pila.request(json!({ "cmd": "output_remove", "name": "B" }));
-    pila.wait("asked on A", |s| {
+    let state = pila.wait("asked on A", |s| {
         s["capture_permission"]["shown"]["output"] == "A"
+            && s["capture_permission"]["shown"]["armed"] == true
     });
-    let state = pila.settle();
-    // The checkbox: the start of the Remember row.
-    let (x, y, _, h) = rect(&state["capture_permission"]["shown"]["remember_rect"]);
-    let (bx, by) = ((x + 9) as f64, (y + h / 2) as f64);
-    let unchecked = pila.pixel(bx, by);
-    pila.key("r");
-    pila.wait_pixel_is(bx, by, "the box checked", |p| p != unchecked);
-    pila.key("Escape");
+    let (x, y, w, h) = rect(&state["capture_permission"]["shown"]["deny"]);
+    assert!(x >= 0 && y >= 0 && x + w <= 640 && y + h <= 480, "off A");
+    click_at(&mut pila, (x + w / 2) as f64, (y + h / 2) as f64);
     client.wait_logged("moved", "Stopped");
-}
-
-/// Forgetting before the saved permissions are read fails, saying why: it
-/// would forget nothing, and those read after would be back.
-#[test]
-fn forgetting_before_the_saved_permissions_are_read_fails() {
-    let exe = current_exe();
-    let (fifo, env) = held_store();
-    let mut pila = TestPila::start_with(Options {
-        config: "[permissions]\nenforce = true\n".into(),
-        env,
-        ..Default::default()
-    });
-    pila.settle();
-    for args in [
-        ["forget-capture-permission", "all"],
-        ["forget-capture-permission", "0123"],
-    ] {
-        let out = pila.msg(&args);
-        assert!(!out.status.success(), "{args:?} succeeded");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("not read yet"), "{args:?}: {stderr}");
-    }
-    write_held_store(
-        &fifo,
-        &format!("[{{\"id\": \"0123\", \"executable\": {exe:?}}}]"),
-    );
-    pila.wait("loaded", |s| s["capture_permission"]["loaded"] == true);
-    msg_json(&pila, &["forget-capture-permission", "0123"]);
-    assert_eq!(
-        pila.state()["capture_permission"]["grants"],
-        json!([]),
-        "forgotten"
-    );
 }
 
 /// The hot corner does nothing while the prompt is shown: it's modal, and

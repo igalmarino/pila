@@ -450,9 +450,6 @@ fn handle(
              the desktop portal"
                 .to_string(),
         ),
-        Request::ForgetCapturePermission(_) if !state.capture_permissions_read() => {
-            Err("the saved capture permissions are not read yet: try again".to_string())
-        }
         // Forgetting takes access away: allowed while locked too.
         Request::ForgetScreenShare(Some(id)) => match state.forget_screen_grant(&id) {
             true => Ok(json!({})),
@@ -468,7 +465,7 @@ fn handle(
         // Forgetting takes access away: allowed while locked too.
         Request::ForgetCapturePermission(Some(id)) => match state.forget_capture_permission(&id) {
             true => Ok(json!({})),
-            false => Err(format!("no capture permission remembered as {id:?}")),
+            false => Err(format!("no capture permission allowed as {id:?}")),
         },
         Request::ForgetCapturePermission(None) => {
             Ok(json!({ "forgotten": state.forget_capture_permissions() }))

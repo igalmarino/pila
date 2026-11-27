@@ -9,18 +9,16 @@
 //! 1. `[[permission]]` rules in `config.toml`, matched against the client's
 //!    executable path (`/proc/<pid>/exe`, read off the event loop) with `*`
 //!    wildcards (`rules::wildcard_match`), last match winning (`allow`, `ask`,
-//!    `deny`).
-//! 2. Grants remembered for this session or persisted across restarts in
-//!    `$XDG_STATE_HOME/pila/capture-permissions.json` (`state_file.rs`),
-//!    manageable via `pila msg capture-permissions` and
+//!    `deny`). The config is the only place a permission outlives Pila.
+//! 2. Grants given in the prompt, in memory until Pila exits (the user logs
+//!    out), listed by `pila msg capture-permissions` and revoked by
 //!    `pila msg forget-capture-permission`.
 //! 3. Otherwise, a modal confirmation panel (`panel.rs`) showing the program
-//!    name and full executable path, with Allow (`Enter`), Deny (`Esc`), and
-//!    an opt-in Remember toggle (`R`).
+//!    name and full executable path, with Allow (`Enter`) and Deny (`Esc`).
 //!
 //! While the screen is locked, clients that would need a prompt are denied
-//! outright; explicitly allowed or remembered clients (such as a locker
-//! capturing a blurred background) continue to work.
+//! outright; clients a rule or a grant allows (such as a locker capturing a
+//! blurred background) continue to work.
 //!
 //! Portal screen sharing and portal screenshots always use Pila's own picker
 //! (`share_picker.rs`) and grants (`screen_grants.rs`) and are unaffected.
@@ -33,7 +31,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
@@ -57,19 +54,13 @@ use crate::{
     state_file, Pila,
 };
 
-const FILE_NAME: &str = "capture-permissions.json";
-const STORE_VERSION: u32 = 1;
-
 /// Panel geometry (logical pixels): wide enough for long executable paths,
 /// the Allow/Deny buttons at the bottom right.
 const WIDTH: i32 = 640;
 const PATH_AT: i32 = 58;
 const NOTE_AT: i32 = 82;
+const LASTS_AT: i32 = 106;
 const NOTE_HEIGHT: i32 = 20;
-const REMEMBER_GAP: i32 = 18;
-const REMEMBER_HEIGHT: i32 = 24;
-const REMEMBER_BOX: i32 = 18;
-const REMEMBER_LABEL_AT: i32 = 28;
 const BUTTON_HEIGHT: i32 = 34;
 const BUTTON_WIDTH: i32 = 88;
 const BUTTON_GAP: i32 = 10;
@@ -127,20 +118,11 @@ enum PromptKey {
     Client(ClientId),
 }
 
-/// A granted capture permission: either for this session only or persisted in
-/// `capture-permissions.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A capture permission given in the prompt, until Pila exits.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grant {
     pub id: String,
     pub executable: String,
-    #[serde(skip)]
-    pub persistent: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StoreFile {
-    version: u32,
-    grants: Vec<Grant>,
 }
 
 /// A queued prompt waiting for its turn behind another prompt or modal panel.
@@ -154,8 +136,6 @@ struct Queued {
 struct Shown {
     key: PromptKey,
     executable: Option<String>,
-    /// `None` when the executable couldn't be determined (cannot persist).
-    remember: Option<bool>,
     output: String,
     requests: Vec<PendingCapture>,
     /// Since when it can be seen (its text drawn): Allow waits `ALLOW_DELAY`
@@ -183,32 +163,20 @@ struct Buffers {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     pub panel: Rectangle<i32, Logical>,
-    pub remember: Option<Rectangle<i32, Logical>>,
     pub allow: Rectangle<i32, Logical>,
     pub deny: Rectangle<i32, Logical>,
 }
 
 /// Lay out the prompt centered in `area`, narrower than `WIDTH` on an output
 /// that is.
-pub fn layout(area: Rectangle<i32, Logical>, remember: bool) -> Layout {
+pub fn layout(area: Rectangle<i32, Logical>) -> Layout {
     let width = WIDTH.min(area.size.w - 2 * panel::PADDING);
-    let body_bottom = NOTE_AT + NOTE_HEIGHT;
-    let remember_row = if remember {
-        REMEMBER_GAP + REMEMBER_HEIGHT
-    } else {
-        0
-    };
-    let height = body_bottom + remember_row + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
+    let body_bottom = LASTS_AT + NOTE_HEIGHT;
+    let height = body_bottom + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
     let panel = Rectangle::new(
         area.loc + Point::from(((area.size.w - width) / 2, (area.size.h - height) / 2)),
         Size::from((width, height)),
     );
-    let remember = remember.then(|| {
-        Rectangle::new(
-            panel.loc + Point::from((panel::PADDING, body_bottom + REMEMBER_GAP)),
-            Size::from((width - 2 * panel::PADDING, REMEMBER_HEIGHT)),
-        )
-    });
     let buttons_y = height - panel::PADDING - BUTTON_HEIGHT;
     let allow = Rectangle::new(
         panel.loc + Point::from((width - panel::PADDING - BUTTON_WIDTH, buttons_y)),
@@ -218,19 +186,7 @@ pub fn layout(area: Rectangle<i32, Logical>, remember: bool) -> Layout {
         allow.loc - Point::from((BUTTON_GAP + BUTTON_WIDTH, 0)),
         Size::from((BUTTON_WIDTH, BUTTON_HEIGHT)),
     );
-    Layout {
-        panel,
-        remember,
-        allow,
-        deny,
-    }
-}
-
-fn remember_box(row: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
-    Rectangle::new(
-        row.loc + Point::from((0, (row.size.h - REMEMBER_BOX) / 2)),
-        Size::from((REMEMBER_BOX, REMEMBER_BOX)),
-    )
+    Layout { panel, allow, deny }
 }
 
 /// What `Pila::scene` passes to the renderer while the prompt is open.
@@ -238,7 +194,6 @@ fn remember_box(row: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
 pub struct ScenePrompt {
     pub output: String,
     pub layout: Layout,
-    pub remember: Option<bool>,
     pub rounding: panel::Shape,
     buffers: Rc<RefCell<Buffers>>,
 }
@@ -246,9 +201,7 @@ pub struct ScenePrompt {
 /// Capture permission state (`Pila::capture_permissions`).
 #[derive(Default)]
 pub struct CapturePermissions {
-    /// Whether the startup read of `capture-permissions.json` completed.
-    loaded: bool,
-    /// Persistent and session grants keyed by executable path.
+    /// Grants given in the prompt, by executable path.
     grants: Vec<Grant>,
     /// Session-only grants for clients whose executable couldn't be read.
     client_grants: HashSet<ClientId>,
@@ -256,8 +209,6 @@ pub struct CapturePermissions {
     /// ask fail without asking, until the program connects again (one
     /// retrying would bring the modal prompt back forever).
     client_denials: HashSet<ClientId>,
-    /// Requests that arrived before the startup store read finished.
-    waiting_store: Vec<(Client, PendingCapture)>,
     /// Requests waiting for `/proc/<pid>/exe` to be read on a thread.
     resolving: HashMap<ClientId, Vec<PendingCapture>>,
     /// Prompts queued behind the current prompt or another modal panel.
@@ -277,8 +228,8 @@ pub enum Decision {
     Ask,
 }
 
-/// Evaluate `[[permission]]` rules (last match wins), falling back to saved
-/// grants, then `Ask`.
+/// Evaluate `[[permission]]` rules (last match wins), falling back to the
+/// prompt's grants, then `Ask`.
 pub fn evaluate(rules: &[PermissionRule], grants: &[Grant], executable: Option<&str>) -> Decision {
     let Some(exe) = executable else {
         return Decision::Ask;
@@ -343,128 +294,7 @@ pub(crate) fn read_executable(pid: i32) -> ClientIdentity {
     ClientIdentity { executable }
 }
 
-/// Read persisted grants from `path`. Missing files return empty; unreadable
-/// or invalid files are logged and ignored.
-fn read_store(path: &Path) -> Vec<Grant> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(err) => {
-            warn!(path = %path.display(), ?err, "permissions: can't read saved capture permissions");
-            return Vec::new();
-        }
-    };
-    parse_store(&text, path)
-}
-
-fn parse_store(text: &str, path: &Path) -> Vec<Grant> {
-    let file: StoreFile = match serde_json::from_str(text) {
-        Ok(file) => file,
-        Err(err) => {
-            warn!(path = %path.display(), ?err, "permissions: ignoring invalid capture permissions file");
-            return Vec::new();
-        }
-    };
-    if file.version != STORE_VERSION {
-        warn!(
-            path = %path.display(),
-            version = file.version,
-            "permissions: ignoring capture permissions file of unknown version"
-        );
-        return Vec::new();
-    }
-    let mut seen = HashSet::new();
-    file.grants
-        .into_iter()
-        .filter(|g| {
-            !g.id.is_empty() && !g.executable.is_empty() && seen.insert(g.executable.clone())
-        })
-        .map(|mut g| {
-            g.persistent = true;
-            g
-        })
-        .collect()
-}
-
-fn format_store(grants: &[Grant]) -> Option<String> {
-    let persistent: Vec<Grant> = grants.iter().filter(|g| g.persistent).cloned().collect();
-    let file = StoreFile {
-        version: STORE_VERSION,
-        grants: persistent,
-    };
-    serde_json::to_string_pretty(&file).ok()
-}
-
-fn save_store(grants: Vec<Grant>) {
-    let Some(path) = state_file::path(FILE_NAME) else {
-        return;
-    };
-    state_file::save(
-        "pila-permissions-save",
-        path,
-        "the capture permissions",
-        move || format_store(&grants).ok_or_else(|| std::io::Error::other("not serializable")),
-    );
-}
-
 impl Pila {
-    /// Load persisted capture permissions from disk on a background thread.
-    /// Called once at startup (`main.rs`).
-    pub fn load_capture_permissions(&mut self) {
-        let Some(path) = state_file::path(FILE_NAME) else {
-            self.capture_permissions.loaded = true;
-            return;
-        };
-        let (sender, channel) = calloop::channel::channel();
-        let spawned = std::thread::Builder::new()
-            .name("pila-permissions-load".into())
-            .spawn(move || {
-                let grants = read_store(&path);
-                let _ = sender.send(grants);
-            });
-        if let Err(err) = spawned {
-            warn!(
-                ?err,
-                "permissions: can't spawn thread to load capture permissions"
-            );
-            self.capture_permissions.loaded = true;
-            return;
-        }
-        let inserted = self.loop_handle.insert_source(channel, |event, _, state| {
-            let calloop::channel::Event::Msg(loaded) = event else {
-                return;
-            };
-            state.capture_permissions_loaded(loaded);
-        });
-        if let Err(err) = inserted {
-            warn!(
-                ?err,
-                "permissions: can't wait for saved capture permissions"
-            );
-            self.capture_permissions.loaded = true;
-        }
-    }
-
-    fn capture_permissions_loaded(&mut self, loaded: Vec<Grant>) {
-        self.capture_permissions.loaded = true;
-        for grant in loaded {
-            if !self
-                .capture_permissions
-                .grants
-                .iter()
-                .any(|g| g.executable == grant.executable)
-            {
-                self.capture_permissions.grants.push(grant);
-            }
-        }
-        let waiting = std::mem::take(&mut self.capture_permissions.waiting_store);
-        for (client, request) in waiting {
-            if request.is_alive() {
-                self.authorize_capture(&client, request);
-            }
-        }
-    }
-
     /// Check whether `client` is allowed to carry out `request`.
     ///
     /// When `[permissions] enforce` is off, allows immediately with no I/O.
@@ -474,12 +304,6 @@ impl Pila {
     pub(crate) fn authorize_capture(&mut self, client: &Client, request: PendingCapture) {
         if !self.config.permissions.enforce {
             self.approve_capture(request);
-            return;
-        }
-        if !self.capture_permissions.loaded {
-            self.capture_permissions
-                .waiting_store
-                .push((client.clone(), request));
             return;
         }
         let client_id = client.id();
@@ -684,11 +508,9 @@ impl Pila {
                 executable = queued.executable.as_deref().unwrap_or("?"),
                 "asking for screen capture permission"
             );
-            let remember = queued.executable.is_some().then_some(false);
             self.capture_permissions.shown = Some(Shown {
                 key: queued.key,
                 executable: queued.executable,
-                remember,
                 output: output.name(),
                 requests: queued.requests,
                 visible_since: None,
@@ -728,21 +550,16 @@ impl Pila {
         }
     }
 
-    /// User clicked Allow or pressed Enter: record the grant (persistent if
-    /// Remember is checked, else for this session) and proceed with the
-    /// pending captures.
+    /// User clicked Allow or pressed Enter: record the grant, until Pila
+    /// exits, and proceed with the pending captures.
     fn allow_capture_permission(&mut self) {
         let Some(shown) = self.take_capture_permission() else {
             return;
         };
-        let persistent = shown.remember == Some(true);
         match &shown.executable {
             Some(exe) => {
-                info!(
-                    executable = exe.as_str(),
-                    persistent, "capture permission allowed"
-                );
-                self.record_capture_grant(exe.clone(), persistent);
+                info!(executable = exe.as_str(), "capture permission allowed");
+                self.record_capture_grant(exe.clone());
             }
             None => {
                 if let PromptKey::Client(id) = &shown.key {
@@ -782,9 +599,9 @@ impl Pila {
     }
 
     /// Cancel the open and queued capture prompts (when the session locks).
-    /// Requests still waiting for the saved permissions or an executable
-    /// aren't decided yet: they're decided once those are in, and those that
-    /// would ask are refused then, while locked (`decide_capture`).
+    /// Requests still waiting for an executable aren't decided yet: they're
+    /// decided once it's read, and those that would ask are refused then,
+    /// while locked (`decide_capture`).
     pub fn cancel_capture_permissions(&mut self) {
         let waiting = std::mem::take(&mut self.capture_permissions.waiting);
         for queued in waiting {
@@ -823,9 +640,6 @@ impl Pila {
     }
 
     fn remove_pending_capture(&mut self, matches: impl Fn(&PendingCapture) -> bool) {
-        self.capture_permissions
-            .waiting_store
-            .retain(|(_, r)| !matches(r));
         for requests in self.capture_permissions.resolving.values_mut() {
             requests.retain(|r| !matches(r));
         }
@@ -870,29 +684,13 @@ impl Pila {
         }
     }
 
-    fn record_capture_grant(&mut self, executable: String, persistent: bool) {
-        if let Some(existing) = self
-            .capture_permissions
-            .grants
-            .iter_mut()
-            .find(|g| g.executable == executable)
-        {
-            if persistent && !existing.persistent {
-                existing.persistent = true;
-                save_store(self.capture_permissions.grants.clone());
-            }
+    fn record_capture_grant(&mut self, executable: String) {
+        let grants = &mut self.capture_permissions.grants;
+        if grants.iter().any(|g| g.executable == executable) {
             return;
         }
-        let id = state_file::random_id()
-            .unwrap_or_else(|| format!("grant-{}", self.capture_permissions.grants.len() + 1));
-        self.capture_permissions.grants.push(Grant {
-            id,
-            executable,
-            persistent,
-        });
-        if persistent {
-            save_store(self.capture_permissions.grants.clone());
-        }
+        let id = state_file::random_id().unwrap_or_else(|| format!("grant-{}", grants.len() + 1));
+        grants.push(Grant { id, executable });
     }
 
     /// Re-evaluate open/queued prompts and active captures when `[permissions]`
@@ -1034,7 +832,8 @@ impl Pila {
 
     // --- IPC (`ipc.rs`) -----------------------------------------------------
 
-    /// Remembered and session capture permissions for `pila msg capture-permissions`.
+    /// The prompt's grants for `pila msg capture-permissions` (`persistent`,
+    /// always `false` since only the config keeps one, stays for scripts).
     pub(crate) fn ipc_capture_permissions(&self) -> Vec<Value> {
         let mut grants = self.capture_permissions.grants.clone();
         grants.sort_by(|a, b| a.executable.cmp(&b.executable).then(a.id.cmp(&b.id)));
@@ -1044,18 +843,13 @@ impl Pila {
                 json!({
                     "id": g.id,
                     "executable": g.executable,
-                    "persistent": g.persistent,
+                    "persistent": false,
                 })
             })
             .collect()
     }
 
-    /// Whether the saved permissions are read (forgetting waits for it).
-    pub(crate) fn capture_permissions_read(&self) -> bool {
-        self.capture_permissions.loaded
-    }
-
-    /// Forget one remembered or session capture permission by `id`. Returns
+    /// Forget one capture permission by `id`. Returns
     /// `true` if one was found and removed.
     pub(crate) fn forget_capture_permission(&mut self, id: &str) -> bool {
         let Some(pos) = self
@@ -1070,49 +864,25 @@ impl Pila {
         info!(
             id = removed.id,
             executable = removed.executable,
-            persistent = removed.persistent,
             "forgot capture permission"
         );
-        if removed.persistent {
-            save_store(self.capture_permissions.grants.clone());
-        }
         self.stop_denied_captures();
         true
     }
 
-    /// Forget all remembered and session capture permissions. Returns how many
-    /// were removed.
+    /// Forget all capture permissions. Returns how many were removed.
     pub(crate) fn forget_capture_permissions(&mut self) -> usize {
         // What `capture-permissions` lists (grants to clients of no known
         // executable go too, unlisted).
         let count = self.capture_permissions.grants.len();
-        let had_persistent = self.capture_permissions.grants.iter().any(|g| g.persistent);
         self.capture_permissions.grants.clear();
         self.capture_permissions.client_grants.clear();
-        if had_persistent {
-            save_store(Vec::new());
-        }
         info!(count, "forgot all capture permissions");
         self.stop_denied_captures();
         count
     }
 
     // --- Input (`input.rs`) -------------------------------------------------
-
-    fn toggle_capture_remember(&mut self) {
-        let Some(shown) = self.capture_permissions.shown.as_mut() else {
-            return;
-        };
-        let Some(remember) = shown.remember.as_mut() else {
-            return;
-        };
-        *remember = !*remember;
-        let output = shown.output.clone();
-        let output = self.space.outputs().find(|o| o.name() == output).cloned();
-        if let Some(output) = output {
-            self.queue_redraw_output(&output);
-        }
-    }
 
     /// Key press while the prompt is open (modal: takes every key).
     pub fn capture_permission_key(&mut self, sym: Keysym) {
@@ -1124,7 +894,6 @@ impl Pila {
                 self.allow_capture_permission()
             }
             Keysym::Escape => self.deny_capture_permission(),
-            Keysym::r | Keysym::R => self.toggle_capture_remember(),
             _ => {}
         }
     }
@@ -1142,11 +911,6 @@ impl Pila {
             }
         } else if layout.deny.to_f64().contains(location) {
             self.deny_capture_permission();
-        } else if layout
-            .remember
-            .is_some_and(|row| row.to_f64().contains(location))
-        {
-            self.toggle_capture_remember();
         }
     }
 
@@ -1163,8 +927,7 @@ impl Pila {
         let area = self.space.output_geometry(output)?;
         Some(ScenePrompt {
             output: output.name(),
-            layout: layout(area, shown.remember.is_some()),
-            remember: shown.remember,
+            layout: layout(area),
             rounding: panel::rounding(&self.config),
             buffers: self.capture_permissions.buffers.clone(),
         })
@@ -1250,19 +1013,16 @@ impl Pila {
                     "executable": shown.executable,
                     "title": title(shown.executable.as_deref()),
                     "output": view.output,
-                    "remember": shown.remember,
                     "requests": shown.requests.len(),
                     "panel": rect(view.layout.panel),
                     "allow": rect(view.layout.allow),
                     "deny": rect(view.layout.deny),
-                    "remember_rect": view.layout.remember.map(rect),
                     "text": view.buffers.borrow().text.is_some(),
                     "armed": shown.armed(),
                 })
             });
         json!({
             "enforce": self.config.permissions.enforce,
-            "loaded": self.capture_permissions.loaded,
             "shown": shown,
             "waiting": self.capture_permissions.waiting.len(),
             "grants": self.ipc_capture_permissions(),
@@ -1280,6 +1040,8 @@ fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
         .unwrap_or_else(|| "Executable path unavailable".to_string());
     // A program allowed may capture anything, whatever it asked for first.
     let detail = "It will be able to see everything on your screen, and any window.";
+    // Only the config keeps a permission past the session.
+    let lasts = "Allowed until you log out. To always allow it, add a [[permission]] rule.";
     let mut items = vec![
         panel::title(&title, width, colors),
         Item::Text {
@@ -1300,23 +1062,19 @@ fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
             align: Align::Left,
             color: dimmed,
         },
+        Item::Text {
+            text: lasts.into(),
+            at: (panel::PADDING, LASTS_AT),
+            w: width - 2 * panel::PADDING,
+            h: NOTE_HEIGHT,
+            font: panel::NOTE,
+            align: Align::Left,
+            color: dimmed,
+        },
     ];
 
     let local =
         |r: Rectangle<i32, Logical>| (r.loc.x - layout.panel.loc.x, r.loc.y - layout.panel.loc.y);
-
-    if let Some(row) = layout.remember {
-        let (x, y) = local(row);
-        items.push(Item::Text {
-            text: "Remember this choice".into(),
-            at: (x + REMEMBER_LABEL_AT, y + (REMEMBER_HEIGHT - 20) / 2),
-            w: row.size.w - REMEMBER_LABEL_AT,
-            h: 20,
-            font: panel::BODY,
-            align: Align::Left,
-            color: text,
-        });
-    }
 
     for (rect, label, color) in [
         (layout.allow, "Allow", panel::bits(colors.hover_icon)),
@@ -1365,50 +1123,10 @@ pub fn elements(
         .element(renderer, layout.panel, origin, scale)
         .into_iter()
         .collect();
-    let toggle = layout
-        .remember
-        .map(remember_box)
-        .into_iter()
-        .flat_map(|square| {
-            let key = Some((f64::from(panel::CAP_RADIUS), crate::rounded::Corners::All));
-            let inner = Rectangle::new(
-                square.loc + Point::from((1, 1)),
-                square.size - Size::from((2, 2)),
-            );
-            let mark = Rectangle::new(
-                square.loc + Point::from((5, 5)),
-                square.size - Size::from((10, 10)),
-            );
-            let on = view.remember == Some(true);
-            let fill = if on {
-                panel::accent(colors)
-            } else {
-                panel::opaque(colors.bar)
-            };
-            [
-                (
-                    "remember-mark",
-                    mark,
-                    fill,
-                    Some((2.0, crate::rounded::Corners::All)),
-                ),
-                (
-                    "remember-fill",
-                    inner,
-                    panel::opaque(colors.bar),
-                    Some((
-                        f64::from(panel::CAP_RADIUS - 1),
-                        crate::rounded::Corners::All,
-                    )),
-                ),
-                ("remember-edge", square, panel::rgb(colors.hover), key),
-            ]
-        });
-    let solids = toggle.chain(panel::buttons(layout.allow, layout.deny, colors));
     elements.extend(panel::solids(
         renderer,
         &mut buffers.solids,
-        solids,
+        panel::buttons(layout.allow, layout.deny, colors),
         origin,
         scale,
     ));
@@ -1436,11 +1154,10 @@ mod tests {
         }
     }
 
-    fn grant(id: &str, executable: &str, persistent: bool) -> Grant {
+    fn grant(id: &str, executable: &str) -> Grant {
         Grant {
             id: id.to_string(),
             executable: executable.to_string(),
-            persistent,
         }
     }
 
@@ -1452,15 +1169,15 @@ mod tests {
             rule("/usr/bin/wf-*", PermissionAccess::Ask),
         ];
         let grants = [
-            grant("1", "/usr/bin/wf-recorder", true),
-            grant("2", "/usr/bin/secret", true),
+            grant("1", "/usr/bin/wf-recorder"),
+            grant("2", "/usr/bin/secret"),
         ];
         // Explicitly allowed by rule.
         assert_eq!(
             evaluate(&rules, &grants, Some("/usr/bin/grim")),
             Decision::Allow
         );
-        // `ask` rule honors a remembered grant.
+        // `ask` rule honors a grant from the prompt.
         assert_eq!(
             evaluate(&rules, &grants, Some("/usr/bin/wf-recorder")),
             Decision::Allow
@@ -1470,7 +1187,8 @@ mod tests {
             evaluate(&rules, &grants, Some("/usr/bin/wf-other")),
             Decision::Ask
         );
-        // `deny` rule overrides even a previously remembered grant.
+        // `deny` rule overrides even a grant from the prompt (a rule
+        // reloaded after it was given).
         assert_eq!(
             evaluate(&rules, &grants, Some("/usr/bin/secret")),
             Decision::Deny
@@ -1480,51 +1198,19 @@ mod tests {
     }
 
     #[test]
-    fn store_round_trips_persistent_grants_and_ignores_corrupt_files() {
-        let grants = vec![
-            grant("aaa", "/usr/bin/grim", true),
-            grant("bbb", "/usr/bin/wf-recorder", false),
-        ];
-        let json = format_store(&grants).unwrap();
-        let parsed = parse_store(&json, Path::new("capture-permissions.json"));
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].id, "aaa");
-        assert_eq!(parsed[0].executable, "/usr/bin/grim");
-        assert!(parsed[0].persistent);
-
-        // Corrupt JSON, wrong version, and empty fields are ignored cleanly.
-        assert!(parse_store("{not json", Path::new("bad")).is_empty());
-        assert!(parse_store(r#"{"version": 99, "grants": []}"#, Path::new("v99")).is_empty());
-        let dup = r#"{"version":1,"grants":[
-            {"id":"","executable":"/usr/bin/a"},
-            {"id":"1","executable":""},
-            {"id":"2","executable":"/usr/bin/grim"},
-            {"id":"3","executable":"/usr/bin/grim"}
-        ]}"#;
-        let parsed = parse_store(dup, Path::new("dup"));
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].id, "2");
-    }
-
-    #[test]
     fn prompt_layout_fits_inside_panel_without_overlapping_buttons() {
         let narrow = Rectangle::new((0, 0).into(), (480, 800).into());
-        let l = layout(narrow, true);
+        let l = layout(narrow);
         assert!(narrow.contains_rect(l.panel));
         assert!(l.panel.contains_rect(l.deny) && !l.allow.overlaps(l.deny));
         let area = Rectangle::new((0, 0).into(), (1280, 800).into());
-        for with_remember in [true, false] {
-            let l = layout(area, with_remember);
-            assert!(area.contains_rect(l.panel));
-            assert!(l.panel.contains_rect(l.allow));
-            assert!(l.panel.contains_rect(l.deny));
-            assert!(!l.allow.overlaps(l.deny));
-            if let Some(rem) = l.remember {
-                assert!(l.panel.contains_rect(rem));
-                assert!(!rem.overlaps(l.allow));
-                assert!(!rem.overlaps(l.deny));
-            }
-        }
+        let l = layout(area);
+        assert!(area.contains_rect(l.panel));
+        assert!(l.panel.contains_rect(l.allow));
+        assert!(l.panel.contains_rect(l.deny));
+        assert!(!l.allow.overlaps(l.deny));
+        // The buttons sit below the notes.
+        assert!(l.allow.loc.y >= l.panel.loc.y + LASTS_AT + NOTE_HEIGHT);
     }
 
     #[test]

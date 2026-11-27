@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Changed (breaking):** Direct screen capture permissions are kept in one place, the
+  configuration. The capture prompt no longer has **Remember**: Allow lasts until you log out, as
+  it did without it, and `~/.local/state/pila/capture-permissions.json` is no longer read or
+  written. With two stores, a rule and a remembered answer could disagree; now the `[[permission]]`
+  rules are the only thing that lasts, and the prompt says so. **Migration:** for each program you
+  had remembered (`pila msg capture-permissions` on 0.9.8 listed them, or see that file), add a
+  rule, then delete the file:
+
+  ```toml
+  [[permission]]
+  executable = "/usr/bin/wf-recorder"
+  access = "allow"
+  ```
+
+  `pila msg capture-permissions` and `forget-capture-permission` work as before, for what was
+  allowed in the prompt; `persistent` is now always `false`. Portal screen sharing keeps its own
+  Remember (the portal's standard mechanism).
 - **New:** A capture indicator. While a program captures the screen, through the portal or
   directly (`grim`, `wf-recorder`), a small accent square lights the top-right corner of the
   monitor being captured, on the screen only, never in the capture (`[permissions] indicator =

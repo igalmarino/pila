@@ -352,8 +352,9 @@ tap = true                       # tap to click
 # Screen capture permissions (wlr-screencopy and ext-image-copy-capture).
 # Off by default: any unsandboxed program may capture the screen (sandboxed
 # apps, such as Flatpak, never see these protocols). Set `enforce = true` to
-# prompt before an unlisted program captures the screen, and add
-# `[[permission]]` rules below for tools you want to allow or deny outright.
+# prompt before an unlisted program captures the screen (Allow lasts until you
+# log out), and add `[[permission]]` rules below for tools you want to allow
+# or deny for good.
 # Portal screen sharing and screenshots always use Pila's own picker.
 [permissions]
 # enforce = true

@@ -1821,19 +1821,19 @@ Key flows and invariants:
   approves immediately with no I/O. When on, each client's `/proc/<pid>/exe` is read once off
   the event loop and cached in `ClientState::executable` (`OnceLock`), then evaluated by
   `permissions::evaluate` against `[[permission]]` rules (`rules::wildcard_match`, last match
-  winning: `allow`, `ask`, `deny`) and grants (in memory for the session, or persisted in
-  `$XDG_STATE_HOME/pila/capture-permissions.json` via `state_file.rs`, loaded and saved on
-  threads). Unlisted clients open a modal panel (`panel.rs`, `Scene::capture_permission`,
+  winning: `allow`, `ask`, `deny`) and the prompt's grants (in memory until Pila exits: the
+  config is the only place a permission outlives the session, so there's one source of truth
+  and no precedence between stores). Unlisted clients open a modal panel (`panel.rs`, `Scene::capture_permission`,
   blocking `Pila::under` and `Scene::tears`, coalescing concurrent requests from the same
   executable and queuing alongside `share_picker`, `color_pick` and `app_shortcuts`): Allow
-  (`Enter`) grants for this session (or persistently if Remember `R` is checked) and proceeds
+  (`Enter`) grants until Pila exits and proceeds
   after the panel closes so the captured frame excludes it; it takes no Allow until
   `permissions::ALLOW_DELAY` after its text is drawn (`Shown::visible_since`: an Enter typed into an
   app as it pops up). Deny (`Esc`) stops the session or fails the frame, and that connection's
   next requests that would ask are refused without asking (`CapturePermissions::client_denials`),
   or a program retrying would bring the modal prompt back forever; locking cancels the open and queued
-  prompts (`cancel_capture_permissions`) and denies new prompts; requests still waiting for the
-  saved permissions or an executable are decided once those are in, refused then if they'd ask. The executable read drops the
+  prompts (`cancel_capture_permissions`) and denies new prompts; requests still waiting for an
+  executable are decided once it's read, refused then if they'd ask. The executable read drops the
   kernel's ` (deleted)` (a program updated while running, `executable_path`). `pila msg capture-permissions` lists grants and `pila msg forget-capture-permission`
   revokes one or all (allowed while locked), stopping active sessions whose client is no longer
   allowed (`stop_denied_captures`); live reload re-evaluates open prompts and active sessions
