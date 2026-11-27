@@ -178,6 +178,11 @@ Forget a capture permission by the
 returned by
 .BR "pila msg capture\-permissions" ,
 or all of them; the program's captures stop.
+.TP
+.BR "pila msg " [ \-\-json ] " idle\-inhibitors"
+List the apps keeping the screen on now: those that asked over D-Bus
+.RB ( org.freedesktop.ScreenSaver )
+and the visible windows and layer surfaces with a Wayland idle inhibitor.
 .PP
 Scripts should pass
 .BR \-\-json ,

@@ -132,6 +132,33 @@ fn uninhibit(app: &zbus::Connection, path: &str, cookie: u32) {
     .unwrap();
 }
 
+/// `method` of the screensaver at its full path, with `body`.
+fn screensaver_call<B>(
+    app: &zbus::Connection,
+    method: &str,
+    body: &B,
+) -> zbus::Result<zbus::Message>
+where
+    B: serde::Serialize + zbus::zvariant::DynamicType,
+{
+    zbus::block_on(app.call_method(
+        Some("org.freedesktop.ScreenSaver"),
+        "/org/freedesktop/ScreenSaver",
+        Some("org.freedesktop.ScreenSaver"),
+        method,
+        body,
+    ))
+}
+
+/// `GetActive`'s answer.
+fn screensaver_active(app: &zbus::Connection) -> bool {
+    screensaver_call(app, "GetActive", &())
+        .unwrap()
+        .body()
+        .deserialize()
+        .unwrap()
+}
+
 /// An idle notification of 100 ms.
 fn idle_notification(
     client: &Client,
@@ -193,6 +220,128 @@ fn a_dbus_inhibit_cookie_is_given_back_only_by_its_app() {
     });
     uninhibit(&app, "/org/freedesktop/ScreenSaver", cookie);
     pila.wait("not inhibited", |s| s["idle_inhibited"] == false);
+}
+
+/// `SimulateUserActivity` counts as activity: an idle client resumes.
+#[test]
+fn a_dbus_simulate_user_activity_counts_as_activity() {
+    let (_pila, bus, client) = on_a_bus();
+    let app = app_on(&bus);
+    // Served once an inhibit gets through.
+    let cookie = inhibit(&app, "/org/freedesktop/ScreenSaver");
+    uninhibit(&app, "/org/freedesktop/ScreenSaver", cookie);
+    let _n = idle_notification(&client);
+    client.wait_logged("idle", "Idled");
+    screensaver_call(&app, "SimulateUserActivity", &()).unwrap();
+    client.wait_logged("idle", "Resumed");
+}
+
+/// `GetActive` answers whether the screen is locked.
+#[test]
+fn the_dbus_screensaver_is_active_while_the_session_is_locked() {
+    let (mut pila, bus, _client) = on_a_bus();
+    let app = app_on(&bus);
+    let cookie = inhibit(&app, "/org/freedesktop/ScreenSaver");
+    uninhibit(&app, "/org/freedesktop/ScreenSaver", cookie);
+    assert!(!screensaver_active(&app));
+    let locker = pila.client();
+    let lock = locker.lock_session();
+    locker.lock_surface(&lock, "HEADLESS-1", [0, 0, 0, 255]);
+    locker.wait_logged("lock", "Locked");
+    pila.wait("locked", |s| s["locked"] == true);
+    assert!(screensaver_active(&app));
+    lock.unlock_and_destroy();
+    locker.flush();
+    pila.wait("unlocked", |s| s["locked"] == false);
+    assert!(!screensaver_active(&app));
+}
+
+/// `pila msg idle-inhibitors` lists what keeps the screen on: an app's
+/// D-Bus cookie, a visible window's Wayland inhibitor, not a minimized one's.
+#[test]
+fn pila_msg_lists_what_keeps_the_screen_on() {
+    let (mut pila, bus, client) = on_a_bus();
+    let listed = |pila: &TestPila| -> serde_json::Value {
+        let out = pila.msg(&["--json", "idle-inhibitors"]);
+        assert!(out.status.success(), "{out:?}");
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["idle_inhibitors"].clone()
+    };
+    assert_eq!(listed(&pila), serde_json::json!([]));
+    let out = pila.msg(&["idle-inhibitors"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "nothing keeps the screen on"
+    );
+
+    let app = app_on(&bus);
+    let cookie = inhibit(&app, "/org/freedesktop/ScreenSaver");
+    let manager: ZwpIdleInhibitManagerV1 = client.bind("zwp_idle_inhibit_manager_v1", 1);
+    let video = client.window("video").create();
+    pila.wait_window("video");
+    let _shown = manager.create_inhibitor(&client.surface(video), &client.qh, "shown".into());
+    let hidden = client.window("hidden").create();
+    pila.wait_focus("hidden");
+    let _hidden = manager.create_inhibitor(&client.surface(hidden), &client.qh, "hidden".into());
+    client.flush();
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "hidden").unwrap()["minimized"] == true
+    });
+    let expected = serde_json::json!([
+        { "source": "dbus", "app": "Firefox", "reason": "video-playing" },
+        { "source": "wayland", "app": "video", "reason": null },
+    ]);
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while listed(&pila) != expected {
+        assert!(std::time::Instant::now() < deadline, "{}", listed(&pila));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = String::from_utf8_lossy(&pila.msg(&["idle-inhibitors"]).stdout).to_string();
+    assert_eq!(out.trim(), "dbus  Firefox  (video-playing)\nwayland  video");
+
+    uninhibit(&app, "/org/freedesktop/ScreenSaver", cookie);
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while listed(&pila)[0]["source"] != "wayland" {
+        assert!(std::time::Instant::now() < deadline, "{}", listed(&pila));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Another program has `org.freedesktop.ScreenSaver`: Pila leaves it to
+/// them, and serves nothing at its paths on its own connection either.
+#[test]
+fn a_screensaver_name_someone_else_has_leaves_no_objects_behind() {
+    let bus = notifications::Bus::start();
+    let other = app_on(&bus);
+    zbus::block_on(other.request_name("org.freedesktop.ScreenSaver")).unwrap();
+    let mut pila = TestPila::start_with(Options {
+        env: vec![bus.env()],
+        ..Default::default()
+    });
+    // Logged once the screensaver's serving is over.
+    pila.wait_log("portal: serving ScreenCast");
+    let app = app_on(&bus);
+    let reply = zbus::block_on(app.call_method(
+        Some("org.freedesktop.impl.portal.desktop.pila"),
+        "/org/freedesktop/ScreenSaver",
+        Some("org.freedesktop.ScreenSaver"),
+        "Inhibit",
+        &("Firefox", "video-playing"),
+    ));
+    assert!(
+        matches!(&reply, Err(zbus::Error::FDO(err))
+            if matches!(**err, zbus::fdo::Error::UnknownObject(_))),
+        "{reply:?}"
+    );
+    // The other program still has the name.
+    let owner = zbus::block_on(async {
+        zbus::fdo::DBusProxy::new(&app)
+            .await?
+            .get_name_owner("org.freedesktop.ScreenSaver".try_into().unwrap())
+            .await
+    })
+    .unwrap();
+    assert_eq!(owner.as_str(), other.unique_name().unwrap().as_str());
 }
 
 // --- Pointer constraints -----------------------------------------------------

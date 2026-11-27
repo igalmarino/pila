@@ -845,8 +845,10 @@ Idle timeouts are handled by `swayidle`, which the default `autostart` runs to l
 keep the screen on keep the session awake: through the Wayland idle-inhibit protocol while their
 window is visible (on the current workspace, not minimized), or through D-Bus
 (`org.freedesktop.ScreenSaver`, as Firefox, Chromium, mpv and call apps do, and Flatpaks through
-the portal) wherever their window is. Pila's log names each app that asks ("an app inhibits
-idling"). Whether an app asks is up to it: a web page that draws its video itself may not. To change timings or disable automatic
+the portal) wherever their window is. `pila msg idle-inhibitors` lists the apps keeping it on
+now (a forgotten browser tab playing a video, for one), and Pila's log names each app that asks
+("an app inhibits idling"). Apps that say the user is active over D-Bus (`SimulateUserActivity`)
+count as input does. Whether an app asks is up to it: a web page that draws its video itself may not. To change timings or disable automatic
 locking, customize the `swayidle` entry in `autostart` (takes effect on next login or manual
 restart):
 
@@ -996,6 +998,7 @@ pila msg screen-shares           # list the screen shares remembered for apps
 pila msg forget-screen-share <id> # revoke one (or all)
 pila msg capture-permissions     # list direct screen capture permissions
 pila msg forget-capture-permission <id> # revoke one (or all)
+pila msg idle-inhibitors         # list the apps keeping the screen on
 pila msg --json subscribe        # stream live window, workspace, and output changes
 ```
 

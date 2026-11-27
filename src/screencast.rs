@@ -324,6 +324,9 @@ impl Pila {
             }
             Request::ConfigureShortcuts { session } => self.configure_app_shortcuts(session),
             Request::DbusInhibitors(inhibitors) => self.set_dbus_inhibitors(inhibitors),
+            // Told the idle notifier with this iteration's input.
+            Request::UserActivity => self.input_activity = true,
+            Request::ScreenSaverActive { reply } => reply.send(self.is_locked()),
             Request::Screenshot {
                 ask,
                 app,

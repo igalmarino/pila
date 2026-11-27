@@ -1650,11 +1650,15 @@ Key flows and invariants:
   a client dispatch or input). Apps also inhibit over D-Bus (`screensaver.rs`:
   `org.freedesktop.ScreenSaver`'s `Inhibit`/`UnInhibit` at `/org/freedesktop/ScreenSaver` and
   `/ScreenSaver`, served on the portal's connection, so on udev and headless only; the name is
-  taken with `DO_NOT_QUEUE`, and a program that has it already keeps it). A cookie counts
+  taken with `DO_NOT_QUEUE`, and a program that has it already keeps it, the interface taken off
+  both paths again (`withdraw`)). `SimulateUserActivity` sets `input_activity`
+  (`portal::Request::UserActivity`), and `GetActive` asks the event loop whether the session is
+  locked (`portal::Request::ScreenSaverActive`); the rest of the interface isn't served. A cookie counts
   wherever its app is (no surface) but not while locked; only the app that got it can give
   it back, and an app's cookies go when it leaves the bus (`NameOwnerChanged`, on a thread of
   its own). The event loop gets the list of holders (`portal::Request::DbusInhibitors`) on
-  each change. A new input path
+  each change. `pila msg idle-inhibitors` (`Pila::ipc_idle_inhibitors`) lists the holders and
+  the visible surfaces whose inhibitor counts. A new input path
   must go through `process_input_event` (or set `input_activity`) to count as activity.
   Pila has no idle action of its own: locking and turning the monitors off are swayidle's
   (the example's `autostart`), through `power-off-monitors` (`power_off_monitors`: the next

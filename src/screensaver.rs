@@ -3,14 +3,17 @@
 //! apps) and, through xdg-desktop-portal-gtk's Inhibit, Flatpaks ask to keep
 //! the screen on. While a cookie is held, idle is inhibited (`idle.rs`) as it
 //! is by a visible Wayland idle inhibitor: swayidle neither locks nor turns
-//! the monitors off.
+//! the monitors off. `SimulateUserActivity` counts as input does, and
+//! `GetActive` answers whether the session is locked; the rest of the
+//! interface (`Lock`, `SetActive`, idle times) isn't served.
 //!
 //! Served on the portal's connection (`portal::serve`), from zbus's thread;
 //! the event loop gets the apps that hold one
 //! (`portal::Request::DbusInhibitors`) whenever that changes. A cookie lives
 //! until its app gives it back (`UnInhibit`) or leaves the bus
 //! (`NameOwnerChanged`, watched on a thread of its own), so an app that
-//! crashes doesn't keep the session awake.
+//! crashes doesn't keep the session awake. If another program has the
+//! name, it's theirs, and nothing is left at the paths either.
 
 use std::{
     collections::BTreeMap,
@@ -124,6 +127,30 @@ impl ScreenSaver {
             cookies.changed();
         }
     }
+
+    /// The user is active, as if they had touched a key (apps that drive
+    /// the screen another way, such as a remote desktop, say so).
+    async fn simulate_user_activity(&self) {
+        let send = self.cookies.locked().send.clone();
+        let _ = send.send(Request::UserActivity);
+    }
+
+    /// Whether the screen saver is on: the session is locked.
+    async fn get_active(&self) -> bool {
+        let send = self.cookies.locked().send.clone();
+        let (reply, answer) = crate::portal::reply_channel();
+        if send.send(Request::ScreenSaverActive { reply }).is_err() {
+            return false;
+        }
+        answer.await.unwrap_or(false)
+    }
+}
+
+/// Take the interface off `PATHS` again.
+async fn withdraw(server: &zbus::ObjectServer) {
+    for path in PATHS {
+        let _ = server.remove::<ScreenSaver, _>(path).await;
+    }
 }
 
 /// Serve the interface on `connection` (the portal's, on its thread) and
@@ -141,6 +168,7 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
         };
         if let Err(err) = server.at(path, iface).await {
             warn!(%err, path, "idle: can't serve org.freedesktop.ScreenSaver");
+            withdraw(server).await;
             return;
         }
     }
@@ -149,6 +177,7 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
         Ok(proxy) => proxy,
         Err(err) => {
             warn!(%err, "idle: can't watch the session bus");
+            withdraw(server).await;
             return;
         }
     };
@@ -156,6 +185,7 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
         Ok(stream) => stream,
         Err(err) => {
             warn!(%err, "idle: can't watch the session bus");
+            withdraw(server).await;
             return;
         }
     };
@@ -172,10 +202,12 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
                 name = BUS_NAME,
                 "idle: another program has the name"
             );
+            withdraw(server).await;
             return;
         }
         Err(err) => {
             warn!(%err, name = BUS_NAME, "idle: can't take the name");
+            withdraw(server).await;
             return;
         }
     }

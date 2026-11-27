@@ -332,6 +332,8 @@ pub enum Request {
     CapturePermissions,
     /// Forget one capture permission, by its id, or all of them (`None`).
     ForgetCapturePermission(Option<String>),
+    /// What keeps the screen on now (`idle.rs`).
+    IdleInhibitors,
 }
 
 /// A line of the protocol as a request, or why it isn't one. Reads it and
@@ -375,6 +377,7 @@ pub fn parse_request(line: &[u8]) -> Result<Request, String> {
             _ => Some(string_field(&request, "id")?.to_string()),
         }),
         "capture-permissions" => Request::CapturePermissions,
+        "idle-inhibitors" => Request::IdleInhibitors,
         "forget-capture-permission" => Request::ForgetCapturePermission(match request.get("all") {
             Some(Value::Bool(true)) => None,
             _ => Some(string_field(&request, "id")?.to_string()),
@@ -467,6 +470,10 @@ fn handle(
         Request::ForgetCapturePermission(None) => {
             Ok(json!({ "forgotten": state.forget_capture_permissions() }))
         }
+        Request::IdleInhibitors => Ok(json!({
+            "protocol": PROTOCOL,
+            "idle_inhibitors": state.ipc_idle_inhibitors(),
+        })),
     }
 }
 

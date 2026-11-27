@@ -164,6 +164,11 @@ pub enum Request {
     /// The apps holding an `org.freedesktop.ScreenSaver` inhibit cookie
     /// now (`screensaver.rs`): idle is inhibited while there's one.
     DbusInhibitors(Vec<crate::screensaver::Inhibitor>),
+    /// An app said the user is active (`SimulateUserActivity`): counted as
+    /// input is.
+    UserActivity,
+    /// Whether the screen saver is on (`GetActive`): the session is locked.
+    ScreenSaverActive { reply: Reply<bool> },
 }
 
 /// A stream started for a session, as `Start` answers it.
@@ -900,7 +905,7 @@ impl Session {
 pub struct Reply<T>(Arc<Mutex<Slot<T>>>);
 
 /// The bus's side: a future of the answer.
-struct Answer<T>(Arc<Mutex<Slot<T>>>);
+pub(crate) struct Answer<T>(Arc<Mutex<Slot<T>>>);
 
 struct Slot<T> {
     value: Option<T>,
@@ -908,7 +913,7 @@ struct Slot<T> {
     waker: Option<Waker>,
 }
 
-fn reply_channel<T>() -> (Reply<T>, Answer<T>) {
+pub(crate) fn reply_channel<T>() -> (Reply<T>, Answer<T>) {
     let slot = Arc::new(Mutex::new(Slot {
         value: None,
         closed: false,

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **New:** `pila msg idle-inhibitors` lists the apps keeping the screen on now: those that asked
+  over D-Bus (`org.freedesktop.ScreenSaver`), with the reason they gave, and the visible windows
+  with a Wayland idle inhibitor. Handy to find a forgotten browser tab keeping the session awake.
+- **New:** Apps calling `org.freedesktop.ScreenSaver`'s `SimulateUserActivity` (remote desktops,
+  some players) now count as user activity, as input does, and `GetActive` answers whether the
+  session is locked; both used to fail as unknown methods.
+- **Fixed:** When another program already owned `org.freedesktop.ScreenSaver`, Pila left its
+  interface registered on its own D-Bus connection anyway; it now removes it.
 - **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in
   the bottom-right corner (halfway to `hover`, `hover`, and the `snap-preview` accent on top), in
   place of the outlined window stack. Still drawn from `[colors]`.

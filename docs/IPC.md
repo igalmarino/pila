@@ -23,6 +23,7 @@ pila msg [--json] screen-shares      List the screen shares remembered for apps
 pila msg forget-screen-share <id>|all  Forget one remembered screen share, or all of them
 pila msg [--json] capture-permissions  List direct screen capture permissions
 pila msg forget-capture-permission <id>|all  Forget one capture permission, or all of them
+pila msg [--json] idle-inhibitors    List the apps keeping the screen on now
 ```
 
 Examples:
@@ -89,6 +90,7 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `forget-screen-share` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the remembered shares (it does once it serves the portal) |
 | `capture-permissions` | — | `protocol`, `capture_permissions` |
 | `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the saved permissions (at startup) |
+| `idle-inhibitors` | — | `protocol`, `idle_inhibitors` |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
 `quit`), while queries continue to work, and so do `forget-screen-share` and
@@ -176,6 +178,16 @@ A direct Wayland capture permission granted through the confirmation prompt (see
 - `executable`: the client's executable path (from `/proc/<pid>/exe`)
 - `persistent`: `true` if saved across restarts (`capture-permissions.json`), `false` for this
   session only
+
+**Idle inhibitor (`idle-inhibitors`):**
+Something keeping the screen on now (swayidle neither locks nor turns the monitors off): first
+the apps that asked over D-Bus, in the order they asked, then the visible windows and layer
+surfaces with a Wayland idle inhibitor, by `app`. Listed while the session is locked too, when
+none of them counts.
+- `source`: `"dbus"` (`org.freedesktop.ScreenSaver`'s `Inhibit`) or `"wayland"` (idle-inhibit)
+- `app`: for `dbus`, the name the app gave; for `wayland`, the window's app id or the layer
+  surface's namespace
+- `reason`: for `dbus`, the reason the app gave; `null` for `wayland`
 
 ## Events
 

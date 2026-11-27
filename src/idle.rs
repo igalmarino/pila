@@ -25,6 +25,8 @@ use smithay::{
     },
 };
 
+use serde_json::{json, Value};
+
 use crate::{screensaver::Inhibitor, Pila};
 
 /// What inhibits idle.
@@ -70,6 +72,33 @@ impl Pila {
                     .surfaces
                     .iter()
                     .any(|surface| self.surface_alive_and_visible(surface)))
+    }
+
+    /// What keeps the screen on now, for `pila msg idle-inhibitors`: the
+    /// apps holding a D-Bus cookie, then the windows and layer surfaces whose
+    /// Wayland inhibitor counts (visible ones), by their app id or
+    /// namespace. Listed while locked too, when none of them counts.
+    pub(crate) fn ipc_idle_inhibitors(&self) -> Vec<Value> {
+        let dbus = self.idle_inhibitors.dbus.iter().map(|inhibitor| {
+            json!({ "source": "dbus", "app": inhibitor.app, "reason": inhibitor.reason })
+        });
+        let wayland = self
+            .idle_inhibitors
+            .surfaces
+            .iter()
+            .filter(|surface| self.surface_alive_and_visible(surface))
+            .filter_map(|surface| {
+                let root = crate::redraw::root_surface(surface);
+                let app = match self.window_for_surface(&root) {
+                    Some(window) => crate::foreign_toplevel::app_id(&window),
+                    None => self.layer_for_surface(&root)?.1.namespace().to_string(),
+                };
+                Some(json!({ "source": "wayland", "app": app, "reason": Value::Null }))
+            });
+        let mut wayland: Vec<Value> = wayland.collect();
+        // A stable order (the surfaces are a set).
+        wayland.sort_by(|a, b| a["app"].as_str().cmp(&b["app"].as_str()));
+        dbus.chain(wayland).collect()
     }
 
     /// Whether `surface` is alive and belongs to a mapped window or a layer

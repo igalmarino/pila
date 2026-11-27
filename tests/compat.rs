@@ -302,6 +302,8 @@ fn ipc_answers_and_events_keep_their_fields() {
     // Its objects' fields need a prompt answered:
     // `permissions::prompt_allows_and_denies_capture_and_blocks_app_input`.
     assert!(ask(&mut ipc, "capture-permissions")["capture_permissions"].is_array());
+    // Its objects' fields: `input_protocols::pila_msg_lists_what_keeps_the_screen_on`.
+    assert!(ask(&mut ipc, "idle-inhibitors")["idle_inhibitors"].is_array());
     assert!(ask(&mut ipc, "switch")["switch"].is_null());
     pila.key_press("Alt");
     pila.key("Tab");

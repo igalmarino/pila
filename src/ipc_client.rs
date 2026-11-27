@@ -37,6 +37,9 @@ Requests:
                       programs (wlr-screencopy, ext-image-copy-capture)
   forget-capture-permission <id>|all
                       Forget one, by its id in `capture-permissions`, or all
+  idle-inhibitors     The apps keeping the screen on now: over D-Bus
+                      (org.freedesktop.ScreenSaver), or a visible window's
+                      or layer surface's Wayland idle inhibitor
 
 Options:
   --json              Print Pila's answer as it is (docs/IPC.md)";
@@ -86,6 +89,7 @@ fn request(args: &[String]) -> Result<Value, String> {
         | "version"
         | "screen-shares"
         | "capture-permissions"
+        | "idle-inhibitors"
             if rest.is_empty() =>
         {
             Ok(json!({ "request": name }))
@@ -99,7 +103,8 @@ fn request(args: &[String]) -> Result<Value, String> {
         | "focused"
         | "version"
         | "screen-shares"
-        | "capture-permissions" => Err(format!("{name} takes no arguments")),
+        | "capture-permissions"
+        | "idle-inhibitors" => Err(format!("{name} takes no arguments")),
         "forget-screen-share" | "forget-capture-permission" => match rest {
             [all] if all == "all" => Ok(json!({ "request": name, "all": true })),
             [id] => Ok(json!({ "request": name, "id": id })),
@@ -341,6 +346,23 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
         "forget-screen-share" | "forget-capture-permission" if answer["forgotten"].is_u64() => {
             vec![format!("forgot {}", answer["forgotten"])]
         }
+        "idle-inhibitors" => match list("idle_inhibitors") {
+            inhibitors if inhibitors.is_empty() => vec!["nothing keeps the screen on".to_string()],
+            inhibitors => inhibitors
+                .iter()
+                .map(|i| match i["reason"].as_str() {
+                    Some(reason) if !reason.is_empty() => {
+                        format!(
+                            "{}  {}  ({})",
+                            plain(&i["source"]),
+                            plain(&i["app"]),
+                            plain(&i["reason"])
+                        )
+                    }
+                    _ => format!("{}  {}", plain(&i["source"]), plain(&i["app"])),
+                })
+                .collect(),
+        },
         "capture-permissions" => match list("capture_permissions") {
             grants if grants.is_empty() => vec!["no capture permission remembered".to_string()],
             grants => grants
