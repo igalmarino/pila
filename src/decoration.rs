@@ -425,14 +425,7 @@ pub fn title_bar_elements(
                 buffer_scale,
             )?;
             Some(TitleTexture {
-                buffer: MemoryRenderBuffer::from_slice(
-                    &drawn.pixels,
-                    Fourcc::Argb8888,
-                    (drawn.width, TITLE_BAR_HEIGHT * buffer_scale),
-                    buffer_scale,
-                    Transform::Normal,
-                    None,
-                ),
+                buffer: drawn.buffer(TITLE_BAR_HEIGHT, buffer_scale),
                 width: drawn.width / buffer_scale,
                 max_width: title_width,
                 whole: drawn.whole,

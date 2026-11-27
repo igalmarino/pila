@@ -274,11 +274,10 @@ impl Pila {
         match self.scene_color_pick() {
             None => serde_json::json!({ "open": false }),
             Some(view) => {
-                let r = view.rect;
                 serde_json::json!({
                     "open": true,
                     "output": view.output,
-                    "rect": { "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h },
+                    "rect": crate::introspect::rect(view.rect),
                     "text": view.buffers.borrow().text.is_some(),
                 })
             }

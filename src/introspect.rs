@@ -21,7 +21,8 @@ use smithay::{
 
 use crate::{backend::Backend, decoration, foreign_toplevel, rules, snap, state::fill_state, Pila};
 
-fn rect(r: Rectangle<i32, Logical>) -> Value {
+/// A rectangle as the state dump has it.
+pub(crate) fn rect(r: Rectangle<i32, Logical>) -> Value {
     json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h })
 }
 

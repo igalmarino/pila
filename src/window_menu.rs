@@ -22,14 +22,9 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use smithay::{
     backend::{
-        allocator::Fourcc,
         input::ButtonState,
         renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::{SolidColorBuffer, SolidColorRenderElement},
-                Kind,
-            },
+            element::{memory::MemoryRenderBuffer, solid::SolidColorBuffer},
             gles::GlesRenderer,
         },
     },
@@ -43,7 +38,7 @@ use smithay::{
         RelativeMotionEvent,
     },
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Scale, Serial, Size, SERIAL_COUNTER},
 };
 use tracing::debug;
 
@@ -555,9 +550,6 @@ pub fn elements(
     let mut buffers = menu.buffers.borrow_mut();
     let buffers = &mut *buffers;
     let buffer_scale = crate::scale::buffer_scale(scale);
-    let physical = |loc: Point<i32, Logical>| -> Point<i32, Physical> {
-        (loc - origin).to_physical_precise_round(scale)
-    };
     let mut elements = Vec::new();
 
     for (index, (label, checked)) in menu.rows.iter().enumerate() {
@@ -567,41 +559,17 @@ pub fn elements(
         // The label and the mark where they'd be without the padding.
         let left = menu.rect.loc.x + TEXT_INSET;
         let right = menu.rect.loc.x + menu.rect.size.w - TEXT_INSET;
-        let key = (*label, buffer_scale, lit);
-        // None until the fonts have loaded; then the next frame draws it.
-        let label = match buffers.labels.entry(key) {
-            std::collections::hash_map::Entry::Occupied(entry) => Some(entry.into_mut()),
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                let width = WIDTH - TEXT_INSET * 2 - MARK_SIZE;
-                crate::text::render_title(label, color, width, ITEM_HEIGHT, buffer_scale).map(
-                    |title| {
-                        slot.insert(MemoryRenderBuffer::from_slice(
-                            &title.pixels,
-                            Fourcc::Argb8888,
-                            (title.width, ITEM_HEIGHT * buffer_scale),
-                            buffer_scale,
-                            Transform::Normal,
-                            None,
-                        ))
-                    },
-                )
-            }
-        };
-        if let Some(buffer) = label {
-            let loc = Point::<i32, Logical>::from((left, row.loc.y)).to_f64();
-            let loc = (loc - origin.to_f64()).to_physical(scale);
-            if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                loc,
-                buffer,
-                None,
-                None,
-                None,
-                Kind::Unspecified,
-            ) {
-                elements.push(PilaRenderElement::Memory(element));
-            }
-        }
+        elements.extend(crate::panel::label(
+            renderer,
+            &mut buffers.labels,
+            (*label, buffer_scale, lit),
+            label,
+            color,
+            (WIDTH - TEXT_INSET * 2 - MARK_SIZE, ITEM_HEIGHT),
+            Point::from((left, row.loc.y)),
+            origin,
+            scale,
+        ));
         if *checked {
             let size = Size::from((MARK_SIZE, MARK_SIZE));
             let buffer = crate::panel::solid_buffer(
@@ -610,14 +578,13 @@ pub fn elements(
                 crate::panel::rgb(color),
             );
             let at = Point::from((right - MARK_SIZE, row.loc.y + (ITEM_HEIGHT - MARK_SIZE) / 2));
-            elements.push(PilaRenderElement::Solid(
-                SolidColorRenderElement::from_buffer(
-                    buffer,
-                    physical(at),
-                    scale,
-                    1.0,
-                    Kind::Unspecified,
-                ),
+            elements.push(crate::render::solid_element(
+                renderer,
+                buffer,
+                at - origin,
+                None,
+                1.0,
+                scale,
             ));
         }
     }
@@ -625,14 +592,13 @@ pub fn elements(
         let row = row_rect(menu.rect, menu.padding, index);
         let buffer =
             crate::panel::solid_buffer(&mut buffers.hover, row.size, crate::panel::accent(colors));
-        elements.push(PilaRenderElement::Solid(
-            SolidColorRenderElement::from_buffer(
-                buffer,
-                physical(row.loc),
-                scale,
-                1.0,
-                Kind::Unspecified,
-            ),
+        elements.push(crate::render::solid_element(
+            renderer,
+            buffer,
+            row.loc - origin,
+            None,
+            1.0,
+            scale,
         ));
     }
     elements.extend(crate::panel::frame(

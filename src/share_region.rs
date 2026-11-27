@@ -81,17 +81,6 @@ pub struct SceneRegion {
     buffers: Rc<RefCell<Buffers>>,
 }
 
-/// The four sides of an outline `width` wide around `rect`, outside it.
-fn outline_sides(rect: Rectangle<i32, Logical>, width: i32) -> [Rectangle<i32, Logical>; 4] {
-    let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
-    [
-        Rectangle::new((x - width, y - width).into(), (w + 2 * width, width).into()),
-        Rectangle::new((x - width, y + h).into(), (w + 2 * width, width).into()),
-        Rectangle::new((x - width, y).into(), (width, h).into()),
-        Rectangle::new((x + w, y).into(), (width, h).into()),
-    ]
-}
-
 /// What of `geo` is outside `rect`: above, below, left and right of it.
 fn around(
     geo: Rectangle<i32, Logical>,
@@ -467,7 +456,7 @@ impl Pila {
 
     /// For the state dump: the selection, if it's on.
     pub fn region_json(&self) -> serde_json::Value {
-        let rect = |r: Rectangle<i32, Logical>| serde_json::json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
+        let rect = crate::introspect::rect;
         match self.scene_region() {
             None => serde_json::json!({ "selecting": false }),
             Some(view) => serde_json::json!({
@@ -520,7 +509,7 @@ pub fn elements(
         .map(|(_, rect)| *rect);
     match rect {
         Some(rect) => {
-            let sides = outline_sides(rect, OUTLINE);
+            let sides = panel::outline_sides(rect, OUTLINE);
             let names = ["top", "bottom", "left", "right"];
             let accent = panel::accent(colors);
             elements.extend(panel::solids(
@@ -577,19 +566,15 @@ pub fn outline_elements(
         .enumerate()
         .filter(|(_, (name, _))| name == output_name)
     {
-        for (side, piece) in outline_sides(*rect, OUTLINE).into_iter().enumerate() {
-            let buffer = buffers
-                .entry(format!("{i} {side}"))
-                .or_insert_with(|| SolidColorBuffer::new(piece.size, accent));
-            buffer.update(piece.size, accent);
-            elements.push(PilaRenderElement::Solid(
-                smithay::backend::renderer::element::solid::SolidColorRenderElement::from_buffer(
-                    buffer,
-                    (piece.loc - origin).to_physical_precise_round(scale),
-                    scale,
-                    1.0,
-                    smithay::backend::renderer::element::Kind::Unspecified,
-                ),
+        for (side, piece) in panel::outline_sides(*rect, OUTLINE).into_iter().enumerate() {
+            elements.push(panel::keyed_solid(
+                &mut buffers,
+                format!("{i} {side}"),
+                piece,
+                accent,
+                1.0,
+                origin,
+                scale,
             ));
         }
     }
@@ -627,7 +612,7 @@ mod tests {
     #[test]
     fn the_outline_is_outside_the_rectangle() {
         let inside = rect(10, 10, 50, 40);
-        for side in outline_sides(inside, OUTLINE) {
+        for side in panel::outline_sides(inside, OUTLINE) {
             assert!(side.intersection(inside).is_none_or(|i| i.is_empty()));
         }
     }

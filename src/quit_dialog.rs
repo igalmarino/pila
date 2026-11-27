@@ -195,7 +195,7 @@ impl Pila {
 
     /// State dump for the tests (`introspect.rs`).
     pub fn quit_dialog_json(&self) -> Value {
-        let rect = |r: Rectangle<i32, Logical>| json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
+        let rect = crate::introspect::rect;
         let shown = self.scene_quit_dialog().map(|view| {
             json!({
                 "output": view.output,

@@ -1852,19 +1852,14 @@ pub fn screen_elements(
         .find(|(name, _)| name == output_name)
     {
         let accent = crate::panel::accent(&scene.colors);
-        let mut buffers = scene.outline_buffers.borrow_mut();
-        let buffer = buffers
-            .entry("capture light".to_string())
-            .or_insert_with(|| SolidColorBuffer::new(light.size, accent));
-        buffer.update(light.size, accent);
-        elements.push(PilaRenderElement::Solid(
-            smithay::backend::renderer::element::solid::SolidColorRenderElement::from_buffer(
-                buffer,
-                (light.loc - origin).to_physical_precise_round(scale),
-                scale,
-                1.0,
-                smithay::backend::renderer::element::Kind::Unspecified,
-            ),
+        elements.push(crate::panel::keyed_solid(
+            &mut scene.outline_buffers.borrow_mut(),
+            "capture light".to_string(),
+            *light,
+            accent,
+            1.0,
+            origin,
+            scale,
         ));
     }
     if scene.locked || scene.shared_regions.is_empty() {

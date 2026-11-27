@@ -180,6 +180,40 @@ pub struct Title {
     pub whole: bool,
 }
 
+impl Title {
+    /// Its texture, `height` high (logical) at `scale`.
+    pub fn buffer(
+        &self,
+        height: i32,
+        scale: i32,
+    ) -> smithay::backend::renderer::element::memory::MemoryRenderBuffer {
+        smithay::backend::renderer::element::memory::MemoryRenderBuffer::from_slice(
+            &self.pixels,
+            smithay::backend::allocator::Fourcc::Argb8888,
+            (self.width, height * scale),
+            scale,
+            smithay::utils::Transform::Normal,
+            None,
+        )
+    }
+}
+
+/// Draw `bgr` (premultiplied, its alpha `alpha`) over the pixel at `i` of
+/// premultiplied BGRA `pixels`: source over destination.
+#[inline]
+pub(crate) fn blend(pixels: &mut [u8], i: usize, bgr: [f32; 3], alpha: f32) {
+    if alpha <= 0.0 {
+        return;
+    }
+    let keep = 1.0 - alpha;
+    for (c, value) in bgr.iter().enumerate() {
+        let dst = f32::from(pixels[i + c]) / 255.0;
+        pixels[i + c] = ((value * alpha + dst * keep) * 255.0).round() as u8;
+    }
+    let dst = f32::from(pixels[i + 3]) / 255.0;
+    pixels[i + 3] = ((alpha + dst * keep) * 255.0).round() as u8;
+}
+
 /// Whether the fonts have loaded: until then nothing draws text.
 pub fn loaded() -> bool {
     FONTS.get().is_some()
@@ -299,17 +333,11 @@ fn render_with(
             return;
         }
         let a = a as f32 / 255.0;
+        let bgr = [b, g, r].map(|c| c as f32 / 255.0);
         for py in y.max(0)..(y + h as i32).min(height) {
             for px in x.max(0)..(x + w as i32).min(width) {
                 let i = ((py * width + px) * 4) as usize;
-                // Source over destination, premultiplied.
-                let blend = |src: u8, dst: u8| {
-                    byte(src as f32 / 255.0 * a + dst as f32 / 255.0 * (1.0 - a))
-                };
-                pixels[i] = blend(b, pixels[i]);
-                pixels[i + 1] = blend(g, pixels[i + 1]);
-                pixels[i + 2] = blend(r, pixels[i + 2]);
-                pixels[i + 3] = byte(a + pixels[i + 3] as f32 / 255.0 * (1.0 - a));
+                blend(&mut pixels, i, bgr, a);
             }
         }
     });

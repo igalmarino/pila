@@ -728,13 +728,12 @@ impl Pila {
         match self.scene_shortcuts() {
             None => serde_json::json!({ "shown": false }),
             Some(view) => {
-                let r = view.rect;
                 serde_json::json!({
                     "shown": true,
                     "text": self.shortcuts_view.buffers.borrow().text.is_some(),
                     "heading": view.heading.text(),
                     "output": view.output,
-                    "rect": { "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h },
+                    "rect": crate::introspect::rect(view.rect),
                     "rows": view.rows().map(|row| serde_json::json!([row.keys.join("+"), row.what])).collect::<Vec<_>>(),
                     "sections": view.sections.iter().map(|s| s.title).collect::<Vec<_>>(),
                     "notes": view.notes,

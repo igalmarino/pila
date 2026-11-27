@@ -785,19 +785,24 @@ impl Pila {
                 "keys": b.keys.as_ref().map(crate::shortcuts_view::combo_label),
             })
         };
-        let panel = self.app_shortcuts.panel.as_ref().zip(self.scene_app_shortcuts()).map(|(panel, view)| {
-            let rect = |r: Rectangle<i32, Logical>| serde_json::json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
-            serde_json::json!({
-                "app": panel.app,
-                "rows": panel.rows.iter().map(shortcut).collect::<Vec<_>>(),
-                "selected": panel.selected,
-                "refused": panel.refused,
-                "panel": rect(view.layout.panel),
-                "save": rect(view.layout.save),
-                "cancel": rect(view.layout.cancel),
-                "text": view.buffers.borrow().text.is_some(),
-            })
-        });
+        let panel = self
+            .app_shortcuts
+            .panel
+            .as_ref()
+            .zip(self.scene_app_shortcuts())
+            .map(|(panel, view)| {
+                let rect = crate::introspect::rect;
+                serde_json::json!({
+                    "app": panel.app,
+                    "rows": panel.rows.iter().map(shortcut).collect::<Vec<_>>(),
+                    "selected": panel.selected,
+                    "refused": panel.refused,
+                    "panel": rect(view.layout.panel),
+                    "save": rect(view.layout.save),
+                    "cancel": rect(view.layout.cancel),
+                    "text": view.buffers.borrow().text.is_some(),
+                })
+            });
         serde_json::json!({
             "sessions": self.app_shortcuts.sessions.iter().map(|s| serde_json::json!({
                 "app": s.app,

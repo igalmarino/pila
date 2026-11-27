@@ -21,25 +21,19 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 use smithay::{
-    backend::{
-        allocator::Fourcc,
-        renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::{SolidColorBuffer, SolidColorRenderElement},
-                surface::WaylandSurfaceRenderElement,
-                utils::RescaleRenderElement,
-                AsRenderElements, Kind,
-            },
-            gles::GlesRenderer,
+    backend::renderer::{
+        element::{
+            memory::MemoryRenderBuffer, solid::SolidColorBuffer,
+            surface::WaylandSurfaceRenderElement, utils::RescaleRenderElement, AsRenderElements,
         },
+        gles::GlesRenderer,
     },
     desktop::Window,
     reexports::calloop::{
         timer::{TimeoutAction, Timer},
         RegistrationToken,
     },
-    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size},
 };
 
 use crate::{
@@ -288,7 +282,7 @@ impl Pila {
         match self.scene_switcher() {
             None => serde_json::json!({ "shown": false }),
             Some(view) => {
-                let rect = |r: Rectangle<i32, Logical>| serde_json::json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
+                let rect = crate::introspect::rect;
                 serde_json::json!({
                     "shown": true,
                     "output": view.output,
@@ -315,14 +309,6 @@ pub fn elements(
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
     let buffer_scale = crate::scale::buffer_scale(scale);
-    let physical = |loc: Point<i32, Logical>| -> Point<i32, Physical> {
-        (loc - origin).to_physical_precise_round(scale)
-    };
-    let solid = |slot: &mut Option<SolidColorBuffer>, size: Size<i32, Logical>, color: [f32; 4]| {
-        let buffer = slot.get_or_insert_with(|| SolidColorBuffer::new(size, color));
-        buffer.update(size, color);
-        buffer.clone()
-    };
     let mut elements = Vec::new();
     // Textures of windows no longer shown go.
     buffers
@@ -336,41 +322,19 @@ pub fn elements(
         } else {
             colors.icon
         };
-        let width = PREVIEW.0;
-        let key = (tile.title.clone(), buffer_scale, tile.selected);
-        let title = match buffers.titles.entry(key) {
-            std::collections::hash_map::Entry::Occupied(entry) => Some(entry.into_mut()),
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                crate::text::render_title(&tile.title, color, width, CAPTION, buffer_scale).map(
-                    |text| {
-                        slot.insert(MemoryRenderBuffer::from_slice(
-                            &text.pixels,
-                            Fourcc::Argb8888,
-                            (text.width, CAPTION * buffer_scale),
-                            buffer_scale,
-                            Transform::Normal,
-                            None,
-                        ))
-                    },
-                )
-            }
-        };
-        if let Some(buffer) = title {
-            let at =
-                tile.rect.loc + Point::from((TILE_PADDING, TILE_PADDING + PREVIEW.1 + CAPTION_GAP));
-            let loc = (at - origin).to_f64().to_physical(scale);
-            if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                loc,
-                buffer,
-                None,
-                None,
-                None,
-                Kind::Unspecified,
-            ) {
-                elements.push(PilaRenderElement::Memory(element));
-            }
-        }
+        let at =
+            tile.rect.loc + Point::from((TILE_PADDING, TILE_PADDING + PREVIEW.1 + CAPTION_GAP));
+        elements.extend(crate::panel::label(
+            renderer,
+            &mut buffers.titles,
+            (tile.title.clone(), buffer_scale, tile.selected),
+            &tile.title,
+            color,
+            (PREVIEW.0, CAPTION),
+            at,
+            origin,
+            scale,
+        ));
         // The preview.
         let area = Rectangle::new(
             tile.rect.loc + Point::from((TILE_PADDING, TILE_PADDING)),
@@ -387,19 +351,18 @@ pub fn elements(
             elements.push(element);
         }
         if tile.selected {
-            let buffer = solid(
+            let buffer = crate::panel::solid_buffer(
                 &mut buffers.selected,
                 tile.rect.size,
                 crate::panel::accent(colors),
             );
-            elements.push(PilaRenderElement::Solid(
-                SolidColorRenderElement::from_buffer(
-                    &buffer,
-                    physical(tile.rect.loc),
-                    scale,
-                    1.0,
-                    Kind::Unspecified,
-                ),
+            elements.push(crate::render::solid_element(
+                renderer,
+                buffer,
+                tile.rect.loc - origin,
+                None,
+                1.0,
+                scale,
             ));
         }
     }

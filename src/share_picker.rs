@@ -35,13 +35,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use smithay::{
-    backend::renderer::{
-        element::{
-            solid::{SolidColorBuffer, SolidColorRenderElement},
-            Kind,
-        },
-        gles::GlesRenderer,
-    },
+    backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::keyboard::Keysym,
     utils::{Logical, Physical, Point, Rectangle, Scale, Size},
 };
@@ -1058,19 +1052,14 @@ impl Pila {
                 &mut |_, _, _, _| None,
                 Some(geo),
             );
-            let back = buffers
-                .backgrounds
-                .entry(name.clone())
-                .or_insert_with(|| SolidColorBuffer::new((size.w, size.h), background));
-            back.update((size.w, size.h), background);
-            elements.push(PilaRenderElement::Solid(
-                SolidColorRenderElement::from_buffer(
-                    back,
-                    (0, 0),
-                    Scale::from(1.0),
-                    1.0,
-                    Kind::Unspecified,
-                ),
+            elements.push(crate::panel::keyed_solid(
+                &mut buffers.backgrounds,
+                name.clone(),
+                Rectangle::from_size((size.w, size.h).into()),
+                background,
+                1.0,
+                Point::default(),
+                Scale::from(1.0),
             ));
             let Some(preview) = buffers.previews.get_mut(&name) else {
                 continue;
@@ -1152,7 +1141,7 @@ impl Pila {
     /// For the state dump: whether it's shown, for whom, where, its sources
     /// and controls.
     pub fn share_picker_json(&self) -> serde_json::Value {
-        let rect = |r: Rectangle<i32, Logical>| serde_json::json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
+        let rect = crate::introspect::rect;
         let (Some(view), Some(shown)) =
             (self.scene_share_picker(), self.share_picker.shown.as_ref())
         else {
@@ -1352,31 +1341,16 @@ pub fn elements(
             screen.size / 2,
         );
         let accent = crate::panel::accent(colors);
+        // A selection's outline, inside it.
         let edge = 2;
-        let sides = [
-            (
-                "region-top",
-                Rectangle::new(selection.loc, (selection.size.w, edge).into()),
-            ),
-            (
-                "region-bottom",
-                Rectangle::new(
-                    selection.loc + Point::from((0, selection.size.h - edge)),
-                    (selection.size.w, edge).into(),
-                ),
-            ),
-            (
-                "region-left",
-                Rectangle::new(selection.loc, (edge, selection.size.h).into()),
-            ),
-            (
-                "region-right",
-                Rectangle::new(
-                    selection.loc + Point::from((selection.size.w - edge, 0)),
-                    (edge, selection.size.h).into(),
-                ),
-            ),
-        ];
+        let inside = Rectangle::new(
+            selection.loc + Point::from((edge, edge)),
+            selection.size - Size::from((2 * edge, 2 * edge)),
+        );
+        let names = ["region-top", "region-bottom", "region-left", "region-right"];
+        let sides = names
+            .into_iter()
+            .zip(crate::panel::outline_sides(inside, edge));
         let solids = sides
             .into_iter()
             .map(|(name, rect)| (name, rect, accent, None))
@@ -1435,14 +1409,6 @@ pub fn elements(
         .map(remember_box)
         .into_iter()
         .flat_map(|square| {
-            let key = Some((
-                f64::from(crate::panel::CAP_RADIUS),
-                crate::rounded::Corners::All,
-            ));
-            let inner = Rectangle::new(
-                square.loc + Point::from((1, 1)),
-                square.size - Size::from((2, 2)),
-            );
             let mark = Rectangle::new(
                 square.loc + Point::from((5, 5)),
                 square.size - Size::from((10, 10)),
@@ -1453,6 +1419,8 @@ pub fn elements(
             } else {
                 crate::panel::opaque(colors.bar)
             };
+            let [fill_box, edge] =
+                crate::panel::secondary_button(["remember-fill", "remember-edge"], square, colors);
             [
                 (
                     "remember-mark",
@@ -1460,21 +1428,8 @@ pub fn elements(
                     fill,
                     Some((2.0, crate::rounded::Corners::All)),
                 ),
-                (
-                    "remember-fill",
-                    inner,
-                    crate::panel::opaque(colors.bar),
-                    Some((
-                        f64::from(crate::panel::CAP_RADIUS - 1),
-                        crate::rounded::Corners::All,
-                    )),
-                ),
-                (
-                    "remember-edge",
-                    square,
-                    crate::panel::rgb(colors.hover),
-                    key,
-                ),
+                fill_box,
+                edge,
             ]
         });
     let solids = selected

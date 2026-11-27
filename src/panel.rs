@@ -189,15 +189,27 @@ pub fn buttons(
     colors: &Colors,
 ) -> [Solid; 3] {
     let key = Some((f64::from(CAP_RADIUS), Corners::All));
+    let [fill, edge] = secondary_button(["secondary", "secondary-edge"], secondary, colors);
+    [("primary", primary, accent(colors), key), fill, edge]
+}
+
+/// A secondary button at `rect` (Cancel, the Remember box): its fill inside
+/// an edge a pixel wide, rounded as the keycaps; its solids named `names`
+/// (fill, edge).
+pub fn secondary_button(
+    [fill, edge]: [&'static str; 2],
+    rect: Rectangle<i32, Logical>,
+    colors: &Colors,
+) -> [Solid; 2] {
+    let key = Some((f64::from(CAP_RADIUS), Corners::All));
     let inner = Some((f64::from(CAP_RADIUS - 1), Corners::All));
     let inset = Rectangle::new(
-        secondary.loc + Point::from((1, 1)),
-        secondary.size - Size::from((2, 2)),
+        rect.loc + Point::from((1, 1)),
+        rect.size - Size::from((2, 2)),
     );
     [
-        ("primary", primary, accent(colors), key),
-        ("secondary", inset, opaque(colors.bar), inner),
-        ("secondary-edge", secondary, rgb(colors.hover), key),
+        (fill, inset, opaque(colors.bar), inner),
+        (edge, rect, rgb(colors.hover), key),
     ]
 }
 
@@ -354,6 +366,44 @@ pub fn modal_elements(
     elements
 }
 
+/// A label, `text` in `color` within `width` and `height` high (logical),
+/// at `at` (global), drawn relative to `origin`: its texture kept in
+/// `cache` under `key` (which says what it shows, at what scale). None until
+/// the fonts have loaded; then the next frame draws it.
+#[allow(clippy::too_many_arguments)]
+pub fn label<K: Eq + std::hash::Hash>(
+    renderer: &mut GlesRenderer,
+    cache: &mut HashMap<K, MemoryRenderBuffer>,
+    key: K,
+    text: &str,
+    color: [f32; 3],
+    (width, height): (i32, i32),
+    at: Point<i32, Logical>,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> Option<PilaRenderElement> {
+    let buffer_scale = crate::scale::buffer_scale(scale);
+    let buffer = match cache.entry(key) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(slot) => slot.insert(
+            crate::text::render_title(text, color, width, height, buffer_scale)?
+                .buffer(height, buffer_scale),
+        ),
+    };
+    let loc = (at - origin).to_f64().to_physical(scale);
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        loc,
+        buffer,
+        None,
+        None,
+        None,
+        Kind::Unspecified,
+    )
+    .ok()
+    .map(PilaRenderElement::Memory)
+}
+
 /// `solids` drawn, front to back, relative to `origin`; their buffers kept
 /// in `buffers` by name.
 pub fn solids(
@@ -375,6 +425,18 @@ pub fn solids(
         .collect()
 }
 
+/// The four sides of an outline `width` wide around `rect`, outside it:
+/// top, bottom, left, right.
+pub fn outline_sides(rect: Rectangle<i32, Logical>, width: i32) -> [Rectangle<i32, Logical>; 4] {
+    let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+    [
+        Rectangle::new((x - width, y - width).into(), (w + 2 * width, width).into()),
+        Rectangle::new((x - width, y + h).into(), (w + 2 * width, width).into()),
+        Rectangle::new((x - width, y).into(), (width, h).into()),
+        Rectangle::new((x + w, y).into(), (width, h).into()),
+    ]
+}
+
 /// The panel at `rect` with its border: what it covers.
 pub fn with_border(rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
     Rectangle::new(
@@ -393,14 +455,28 @@ pub fn dim(
     origin: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> PilaRenderElement {
-    let buffer = dims
-        .entry(name.to_string())
-        .or_insert_with(|| SolidColorBuffer::new(geo.size, DIM));
-    buffer.update(geo.size, DIM);
+    keyed_solid(dims, name.to_string(), geo, DIM, alpha, origin, scale)
+}
+
+/// A square-cornered solid at `rect` (global) in `color` at `alpha`, drawn
+/// relative to `origin`; its buffer kept in `buffers` under `key`.
+pub fn keyed_solid<K: Eq + std::hash::Hash>(
+    buffers: &mut HashMap<K, SolidColorBuffer>,
+    key: K,
+    rect: Rectangle<i32, Logical>,
+    color: [f32; 4],
+    alpha: f32,
+    origin: Point<i32, Logical>,
+    scale: Scale<f64>,
+) -> PilaRenderElement {
+    let buffer = buffers
+        .entry(key)
+        .or_insert_with(|| SolidColorBuffer::new(rect.size, color));
+    buffer.update(rect.size, color);
     PilaRenderElement::Solid(
         smithay::backend::renderer::element::solid::SolidColorRenderElement::from_buffer(
             buffer,
-            (geo.loc - origin).to_physical_precise_round(scale),
+            (rect.loc - origin).to_physical_precise_round(scale),
             scale,
             alpha,
             Kind::Unspecified,
@@ -475,21 +551,6 @@ pub fn key_caps(colors: &Colors) -> [[u32; 3]; 4] {
     ]
 }
 
-/// Draw `src` (premultiplied, its alpha `alpha`) over the pixel at `i` of
-/// premultiplied BGRA `pixels`.
-fn blend(pixels: &mut [u8], i: usize, bgr: [f32; 3], alpha: f32) {
-    if alpha <= 0.0 {
-        return;
-    }
-    let keep = 1.0 - alpha;
-    for (c, value) in bgr.iter().enumerate() {
-        let dst = f32::from(pixels[i + c]) / 255.0;
-        pixels[i + c] = ((value * alpha + dst * keep) * 255.0).round() as u8;
-    }
-    let dst = f32::from(pixels[i + 3]) / 255.0;
-    pixels[i + 3] = ((alpha + dst * keep) * 255.0).round() as u8;
-}
-
 /// A rounded rect (physical pixels) filled with `color`, anti-aliased, over
 /// the image `width` wide.
 fn fill_rounded(
@@ -511,7 +572,7 @@ fn fill_rounded(
             let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
             let d = outside + qx.max(qy).min(0.0) - radius;
             let coverage = (0.5 - d).clamp(0.0, 1.0);
-            blend(pixels, ((py * width + px) * 4) as usize, bgr, coverage);
+            crate::text::blend(pixels, ((py * width + px) * 4) as usize, bgr, coverage);
         }
     }
 }
@@ -537,7 +598,7 @@ fn blit_text(pixels: &mut [u8], width: i32, text: &crate::text::Title, x: i32, y
             }
             // Premultiplied already: un-premultiply to blend.
             let bgr = [0, 1, 2].map(|c| f32::from(text.pixels[from + c]) / 255.0 / a);
-            blend(pixels, ((py * width + px) * 4) as usize, bgr, a);
+            crate::text::blend(pixels, ((py * width + px) * 4) as usize, bgr, a);
         }
     }
 }

@@ -24,13 +24,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use smithay::{
-    backend::renderer::{
-        element::{
-            solid::{SolidColorBuffer, SolidColorRenderElement},
-            Kind,
-        },
-        gles::GlesRenderer,
-    },
+    backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     desktop::Window,
     input::keyboard::Keysym,
     output::Output,
@@ -1078,7 +1072,7 @@ impl Pila {
         let Some(open) = self.overview.open.as_ref() else {
             return serde_json::json!({ "open": false, "shown": shown });
         };
-        let rect = |r: Rectangle<i32, Logical>| serde_json::json!({ "x": r.loc.x, "y": r.loc.y, "w": r.size.w, "h": r.size.h });
+        let rect = crate::introspect::rect;
         serde_json::json!({
             "open": true,
             "shown": shown,
@@ -1136,32 +1130,21 @@ pub fn overview_elements(
     let mut buffers = view.buffers.borrow_mut();
     let buffers = &mut *buffers;
     let shows = |rect: Rectangle<i32, Logical>| visible.is_none_or(|area| area.overlaps(rect));
-    let element = |buffer: &SolidColorBuffer, loc: Point<i32, Logical>| {
-        SolidColorRenderElement::from_buffer(
-            buffer,
-            (loc - origin).to_physical_precise_round(scale),
-            scale,
-            view.shown,
-            Kind::Unspecified,
-        )
-    };
     let mut elements = Vec::new();
     if let Some(rect) = view.selected.map(outline_rect).filter(|r| shows(*r)) {
-        let color = crate::panel::accent(colors);
-        let buffer = buffers
-            .outline
-            .get_or_insert_with(|| SolidColorBuffer::new(rect.size, color));
-        buffer.update(rect.size, color);
-        let solid = element(buffer, rect.loc);
-        let shaders = view
-            .rounding
-            .and_then(|_| crate::rounded::Shaders::get(renderer));
-        elements.push(match (view.rounding, shaders) {
-            (Some((radius, corners)), Some(shaders)) => PilaRenderElement::RoundedSolid(
-                crate::rounded::RoundedSolid::new(solid, &shaders, radius, corners, scale),
-            ),
-            _ => PilaRenderElement::Solid(solid),
-        });
+        let buffer = crate::panel::solid_buffer(
+            &mut buffers.outline,
+            rect.size,
+            crate::panel::accent(colors),
+        );
+        elements.push(crate::render::solid_element(
+            renderer,
+            buffer,
+            rect.loc - origin,
+            view.rounding,
+            view.shown,
+            scale,
+        ));
     }
     let mut thumbnails = view.thumbnails.borrow_mut();
     for thumb in view.thumbs.iter().filter(|thumb| shows(thumb.rect)) {
@@ -1184,14 +1167,17 @@ pub fn overview_elements(
         } else {
             (THUMB_BORDER, crate::panel::rgb(colors.hover))
         };
-        let border = thumb_border_rect(thumb.rect, width);
-        let buffer = buffers
-            .thumb_borders
-            .entry((thumb.output.clone(), thumb.workspace))
-            .or_insert_with(|| SolidColorBuffer::new(border.size, color));
-        buffer.update(border.size, color);
-        let loc = border.loc - Point::from((0, rise.round() as i32));
-        elements.push(PilaRenderElement::Solid(element(buffer, loc)));
+        let mut border = thumb_border_rect(thumb.rect, width);
+        border.loc.y -= rise.round() as i32;
+        elements.push(crate::panel::keyed_solid(
+            &mut buffers.thumb_borders,
+            (thumb.output.clone(), thumb.workspace),
+            border,
+            color,
+            view.shown,
+            origin,
+            scale,
+        ));
     }
     drop(thumbnails);
     for (name, geo) in view.outputs.iter().filter(|(_, geo)| shows(*geo)) {
@@ -1233,10 +1219,11 @@ fn thumbnail(
         );
     }
     let (_, target) = thumbnails.get_mut(&key)?;
-    let background = buffers
-        .thumb_background
-        .get_or_insert_with(|| SolidColorBuffer::new(thumb.output_geo.size, colors.background));
-    background.update(thumb.output_geo.size, colors.background);
+    let background = crate::panel::solid_buffer(
+        &mut buffers.thumb_background,
+        thumb.output_geo.size,
+        colors.background,
+    );
     if !crate::render::draw_thumbnail(
         renderer,
         target,
