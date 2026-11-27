@@ -158,8 +158,6 @@ pub struct CaptureIndicator {
     pub lights: Vec<(String, Rectangle<i32, Logical>)>,
     /// Recompute at the end of this iteration.
     pub dirty: bool,
-    /// Clients whose executable is being read for their name.
-    resolving: HashSet<ClientId>,
     /// Wakes the loop when the first of `held` runs out.
     timer: Option<(RegistrationToken, Instant)>,
 }
@@ -201,6 +199,7 @@ impl Pila {
         let now = Instant::now();
         let current = self.capturers();
         let indicator = &mut self.capture_indicator;
+        let reading = &self.capture_permissions.reading;
         let ended: Vec<Capturer> = indicator
             .current
             .iter()
@@ -225,9 +224,8 @@ impl Pila {
         let listed_changed = shown != indicator.shown;
         if listed_changed {
             // Logged once, by name: when it's read, if it's being read.
-            let resolving = &indicator.resolving;
             let new = shown.iter().filter(|c| {
-                !c.client.as_ref().is_some_and(|id| resolving.contains(id))
+                !c.client.as_ref().is_some_and(|id| reading.contains(id))
                     && !indicator.shown.contains(c)
             });
             for capturer in new {
@@ -457,49 +455,36 @@ impl Pila {
             return "a program".to_string();
         };
         if let Some(identity) = data.executable.get() {
-            return match &identity.executable {
-                Some(executable) => crate::permissions::program_name(executable).to_string(),
-                None => unknown(data.pid),
-            };
+            return display_name(identity, data.pid);
         }
         let pid = data.pid;
-        if self.capture_indicator.resolving.insert(client.id()) {
-            self.read_capturing_program(client.clone(), pid);
-        }
+        self.read_client_executable(client);
         unknown(pid)
     }
 
-    /// Read `client`'s executable on a thread; recompute once it's known.
-    fn read_capturing_program(&mut self, client: Client, pid: Option<i32>) {
-        let Some(pid) = pid else {
-            if let Some(data) = client.get_data::<ClientState>() {
-                let _ = data
-                    .executable
-                    .set(crate::permissions::ClientIdentity { executable: None });
-            }
-            return;
-        };
-        self.off_loop(
-            "pila-client-exe",
-            move || crate::permissions::read_executable(pid),
-            move |state, identity| {
-                let name = match &identity.executable {
-                    Some(executable) => crate::permissions::program_name(executable).to_string(),
-                    None => unknown(Some(pid)),
-                };
-                if let Some(data) = client.get_data::<ClientState>() {
-                    let _ = data.executable.set(identity);
-                }
-                let id = client.id();
-                state.capture_indicator.resolving.remove(&id);
-                // A capture that ended (or ends before the next update)
-                // before its name was read is named too.
-                state
-                    .capture_indicator
-                    .rename(|c| c.client.as_ref() == Some(&id), &name);
-                state.capture_indicator.dirty = true;
-            },
-        );
+    /// `client`'s executable was read (`Pila::read_client_executable`):
+    /// its captures are named by it, recomputed.
+    pub(crate) fn capturing_program_read(
+        &mut self,
+        client: &Client,
+        identity: &crate::permissions::ClientIdentity,
+    ) {
+        let pid = client.get_data::<ClientState>().and_then(|data| data.pid);
+        let name = display_name(identity, pid);
+        let id = client.id();
+        // A capture that ended (or ends before the next update) before its
+        // name was read is named too.
+        self.capture_indicator
+            .rename(|c| c.client.as_ref() == Some(&id), &name);
+        self.capture_indicator.dirty = true;
+    }
+}
+
+/// A program by its executable's name, or its process id without one.
+fn display_name(identity: &crate::permissions::ClientIdentity, pid: Option<i32>) -> String {
+    match &identity.executable {
+        Some(executable) => crate::permissions::program_name(executable).to_string(),
+        None => unknown(pid),
     }
 }
 

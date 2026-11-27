@@ -1853,14 +1853,15 @@ Key flows and invariants:
   revokes one or all (allowed while locked), stopping active sessions whose client is no longer
   allowed (`stop_denied_captures`); live reload re-evaluates open prompts and active sessions
   (`permissions_config_changed`). A capture started while `enforce` was off has no executable
-  read yet: turning it on reads it then (`resolve_executable`) and stops the capture only if it
+  read yet: turning it on reads it then (`Pila::read_client_executable`) and stops the capture only if it
   isn't allowed, never before it's known.
 - **Capture indicator** (`capture_indicator.rs`): who captures what, whichever way: the portal's
   casts (`ScreenCasts::shares`, named as the picker names the app), ext-image-copy-capture
   sessions allowed and not stopped (`Captures::capturing`) and wlr-screencopy frames waiting
   (`screencopy::frame_target`; a region the whole output is an output), named by the client's
-  executable, read on a thread once (`ClientState::executable`, shared with `permissions.rs`; its
-  process id until then). A capture is the same capture whatever it's named (`Capturer::same`: its
+  executable, read on a thread once (`ClientState::executable`, by `Pila::read_client_executable`
+  for the permissions and the indicator alike, which `capturing_program_read` tells; its process
+  id until then). A capture is the same capture whatever it's named (`Capturer::same`: its
   client, protocol and target), and stays listed `HOLD` (1 s) after it ends, so a one-shot
   screenshot shows; the one that ended last stays in `CaptureIndicator::last`, with the time, for
   the `captures` answer and event's `last` (renamed too when its name is read late); a calloop timer at the first hold's end wakes the loop (it changes what's

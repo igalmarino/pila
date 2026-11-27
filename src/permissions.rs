@@ -201,6 +201,8 @@ pub struct CapturePermissions {
     stopped: HashSet<ClientId>,
     /// Requests waiting for `/proc/<pid>/exe` to be read on a thread.
     resolving: HashMap<ClientId, Vec<PendingCapture>>,
+    /// Clients whose executable is being read (`Pila::read_client_executable`).
+    pub(crate) reading: HashSet<ClientId>,
     /// Prompts queued behind the current prompt or another modal panel.
     waiting: VecDeque<Queued>,
     /// The modal prompt currently shown.
@@ -216,6 +218,23 @@ pub enum Decision {
     Allow,
     Deny,
     Ask,
+}
+
+/// What `client`'s capture gets: allowed when the prompt allowed this
+/// connection, whose executable couldn't be read (`client_grants`), else what
+/// the rules and grants say for its executable (`evaluate`). The one rule a
+/// new capture and one going on (`stop_denied_captures`) are held to.
+fn decision(
+    rules: &[PermissionRule],
+    grants: &[Grant],
+    client_grants: &HashSet<ClientId>,
+    client: &ClientId,
+    executable: Option<&str>,
+) -> Decision {
+    if executable.is_none() && client_grants.contains(client) {
+        return Decision::Allow;
+    }
+    evaluate(rules, grants, executable)
 }
 
 /// Evaluate `[[permission]]` rules (last match wins), falling back to the
@@ -311,43 +330,45 @@ impl Pila {
             self.decide_capture(client_id, identity, request);
             return;
         }
-        let first = !self.capture_permissions.resolving.contains_key(&client_id);
         self.capture_permissions
             .resolving
             .entry(client_id)
             .or_default()
             .push(request);
-        if first {
-            self.resolve_executable(client);
-        }
+        self.read_client_executable(client);
     }
 
-    /// Read `client`'s executable on a thread, then decide the requests
-    /// waiting for it in `resolving` and stop its captures if it isn't
-    /// allowed (`stop_denied_captures`).
-    fn resolve_executable(&mut self, client: &Client) {
+    /// Read `client`'s executable on a thread (`ClientState::executable`),
+    /// unless it's on its way; then whoever waits for it is told: the
+    /// requests waiting in `resolving` are decided, its captures stopped if
+    /// it isn't allowed (`stop_denied_captures`), and the capture indicator
+    /// names it. Without a process id, or a thread, it's unknown.
+    pub(crate) fn read_client_executable(&mut self, client: &Client) {
+        if !self.capture_permissions.reading.insert(client.id()) {
+            return;
+        }
+        let unknown = ClientIdentity { executable: None };
         let pid = client.get_data::<ClientState>().and_then(|s| s.pid);
         let Some(pid) = pid else {
-            let identity = ClientIdentity { executable: None };
-            self.client_executable_resolved(client.clone(), identity);
-            return;
+            return self.client_executable_read(client.clone(), unknown);
         };
         let waiting = client.clone();
         let started = self.off_loop(
             "pila-client-exe",
             move || read_executable(pid),
-            move |state, identity| state.client_executable_resolved(waiting, identity),
+            move |state, identity| state.client_executable_read(waiting, identity),
         );
         if !started {
-            let identity = ClientIdentity { executable: None };
-            self.client_executable_resolved(client.clone(), identity);
+            self.client_executable_read(client.clone(), unknown);
         }
     }
 
-    fn client_executable_resolved(&mut self, client: Client, identity: ClientIdentity) {
+    fn client_executable_read(&mut self, client: Client, identity: ClientIdentity) {
+        self.capture_permissions.reading.remove(&client.id());
         if let Some(data) = client.get_data::<ClientState>() {
             let _ = data.executable.set(identity.clone());
         }
+        self.capturing_program_read(&client, &identity);
         let client_id = client.id();
         let requests = self
             .capture_permissions
@@ -375,13 +396,11 @@ impl Pila {
         request: PendingCapture,
     ) {
         let exe = identity.executable.as_deref();
-        if exe.is_none() && self.capture_permissions.client_grants.contains(&client_id) {
-            self.approve_capture(request);
-            return;
-        }
-        match evaluate(
+        match decision(
             &self.config.permission_rules,
             &self.capture_permissions.grants,
+            &self.capture_permissions.client_grants,
+            &client_id,
             exe,
         ) {
             Decision::Allow => {
@@ -757,7 +776,7 @@ impl Pila {
         let client_grants = &self.capture_permissions.client_grants;
         // Whether the client of `id` may capture: `None` while its
         // executable isn't known yet (it captured while `enforce` was off),
-        // to be read and checked then (`resolve_executable`).
+        // to be read and checked then (`read_client_executable`).
         let mut unresolved = Vec::new();
         let mut allowed = |dh: &smithay::reexports::wayland_server::DisplayHandle,
                            id: smithay::reexports::wayland_server::backend::ObjectId|
@@ -771,10 +790,7 @@ impl Pila {
                 return None;
             };
             let exe = identity.executable.as_deref();
-            Some(
-                (exe.is_none() && client_grants.contains(&client.id()))
-                    || evaluate(rules, grants, exe) == Decision::Allow,
-            )
+            Some(decision(rules, grants, client_grants, &client.id(), exe) == Decision::Allow)
         };
 
         let mut stopped = Vec::new();
@@ -797,11 +813,7 @@ impl Pila {
             self.deny_capture_session(&resource);
         }
         for client in unresolved {
-            let entry = self.capture_permissions.resolving.entry(client.id());
-            if let std::collections::hash_map::Entry::Vacant(entry) = entry {
-                entry.insert(Vec::new());
-                self.resolve_executable(&client);
-            }
+            self.read_client_executable(&client);
         }
     }
 
