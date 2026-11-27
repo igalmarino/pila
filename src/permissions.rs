@@ -314,7 +314,7 @@ fn title(executable: Option<&str>) -> String {
 }
 
 /// Short program name for the prompt title (e.g. `"/usr/bin/grim"` -> `"grim"`).
-fn program_name(executable: &str) -> &str {
+pub(crate) fn program_name(executable: &str) -> &str {
     Path::new(executable)
         .file_name()
         .and_then(|name| name.to_str())
@@ -331,7 +331,7 @@ fn executable_path(target: &Path) -> String {
 }
 
 /// Read `/proc/<pid>/exe` off the event loop.
-fn read_executable(pid: i32) -> ClientIdentity {
+pub(crate) fn read_executable(pid: i32) -> ClientIdentity {
     let path = format!("/proc/{pid}/exe");
     let executable = match std::fs::read_link(&path) {
         Ok(target) => Some(executable_path(&target)),

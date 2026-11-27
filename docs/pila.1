@@ -179,6 +179,12 @@ returned by
 .BR "pila msg capture\-permissions" ,
 or all of them; the program's captures stop.
 .TP
+.BR "pila msg " [ \-\-json ] " captures"
+List the programs capturing the screen now (through the portal, ext-image-copy-capture or
+wlr-screencopy) and what each captures; with
+.BR \-\-waybar ,
+follow them as a waybar custom module.
+.TP
 .BR "pila msg " [ \-\-json ] " idle\-inhibitors"
 List the apps keeping the screen on now: those that asked over D-Bus
 .RB ( org.freedesktop.ScreenSaver )

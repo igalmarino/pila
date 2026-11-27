@@ -185,6 +185,9 @@ pub struct Pila {
     /// `backend`: dropped first, it waits for the copy thread, whose jobs
     /// read the renderer's GL mappings (`copy_thread.rs`).
     pub capture: crate::capture::Captures,
+    /// What's capturing the screen, and the monitors' lights
+    /// (`capture_indicator.rs`).
+    pub capture_indicator: crate::capture_indicator::CaptureIndicator,
     /// Screen sharing through the portal Pila serves (`screencast.rs`).
     pub screencast: crate::screencast::ScreenCasts,
     /// The picker that asks which screen to share (`share_picker.rs`).
@@ -598,6 +601,7 @@ impl Pila {
             windows: Windows::default(),
             input: InputState::default(),
             capture: Default::default(),
+            capture_indicator: Default::default(),
             screencast: Default::default(),
             share_picker: Default::default(),
             color_pick: Default::default(),
@@ -905,6 +909,7 @@ impl Pila {
             capture_permission: self.scene_capture_permission(),
             quit_dialog: self.scene_quit_dialog(),
             shared_regions: self.share_picker.outlined.clone(),
+            capture_lights: self.capture_indicator.lights.clone(),
             outline_buffers: self.share_picker.outline_buffers.clone(),
             overview,
             ..Scene::blank(self.config.colors)
@@ -1945,6 +1950,8 @@ impl Pila {
         self.send_keyboard_events();
         // So can the window switch end (its window was already in front).
         self.send_switch_events();
+        // And a capture start or end (a screenshot: one frame, then gone).
+        self.update_capture_indicator();
         // The cheatsheet's content, once it can be drawn: an output or the
         // fonts can come after it's shown (a reload asks for it itself).
         if self.shortcuts_need_content() {

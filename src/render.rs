@@ -219,6 +219,9 @@ pub struct Scene {
     /// The regions shared, by output, global: outlined on the screen alone
     /// (`screen_elements`), never in a capture (`share_region.rs`).
     pub shared_regions: Vec<(String, Rectangle<i32, Logical>)>,
+    /// The lights of the outputs being captured, by output, global: on the
+    /// screen alone too, locked or not (`capture_indicator.rs`).
+    pub capture_lights: Vec<(String, Rectangle<i32, Logical>)>,
     pub outline_buffers:
         std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, SolidColorBuffer>>>,
     pub colors: Colors,
@@ -251,6 +254,7 @@ impl Scene {
             capture_permission: None,
             quit_dialog: None,
             shared_regions: Vec::new(),
+            capture_lights: Vec::new(),
             outline_buffers: Default::default(),
             colors,
         }
@@ -274,6 +278,7 @@ impl Scene {
             || self
                 .shared_regions
                 .iter()
+                .chain(&self.capture_lights)
                 .any(|(_, region)| region.overlaps(output))
         {
             return false;
@@ -1830,25 +1835,50 @@ impl FrameInput {
 }
 
 /// What the screen of `output_name` shows that no capture of it does, front
-/// to back, relative to `origin`: the outlines of the regions shared there
-/// (`share_region.rs`). The backends add them beside the pointer.
+/// to back, relative to `origin`: the capture light, if it's being captured
+/// (`capture_indicator.rs`), and the outlines of the regions shared there
+/// (`share_region.rs`), not while locked. The backends add them beside the
+/// pointer.
 pub fn screen_elements(
     scene: &Scene,
     output_name: &str,
     origin: Point<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<PilaRenderElement> {
-    if scene.locked || scene.shared_regions.is_empty() {
-        return Vec::new();
+    let mut elements = Vec::new();
+    if let Some((_, light)) = scene
+        .capture_lights
+        .iter()
+        .find(|(name, _)| name == output_name)
+    {
+        let accent = crate::panel::accent(&scene.colors);
+        let mut buffers = scene.outline_buffers.borrow_mut();
+        let buffer = buffers
+            .entry("capture light".to_string())
+            .or_insert_with(|| SolidColorBuffer::new(light.size, accent));
+        buffer.update(light.size, accent);
+        elements.push(PilaRenderElement::Solid(
+            smithay::backend::renderer::element::solid::SolidColorRenderElement::from_buffer(
+                buffer,
+                (light.loc - origin).to_physical_precise_round(scale),
+                scale,
+                1.0,
+                smithay::backend::renderer::element::Kind::Unspecified,
+            ),
+        ));
     }
-    crate::share_region::outline_elements(
+    if scene.locked || scene.shared_regions.is_empty() {
+        return elements;
+    }
+    elements.extend(crate::share_region::outline_elements(
         &scene.outline_buffers,
         &scene.shared_regions,
         &scene.colors,
         output_name,
         origin,
         scale,
-    )
+    ));
+    elements
 }
 
 /// The cursor's elements, relative to `origin`: the client's cursor surface,

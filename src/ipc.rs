@@ -334,6 +334,8 @@ pub enum Request {
     ForgetCapturePermission(Option<String>),
     /// What keeps the screen on now (`idle.rs`).
     IdleInhibitors,
+    /// What's capturing the screen now (`capture_indicator.rs`).
+    Captures,
 }
 
 /// A line of the protocol as a request, or why it isn't one. Reads it and
@@ -378,6 +380,7 @@ pub fn parse_request(line: &[u8]) -> Result<Request, String> {
         }),
         "capture-permissions" => Request::CapturePermissions,
         "idle-inhibitors" => Request::IdleInhibitors,
+        "captures" => Request::Captures,
         "forget-capture-permission" => Request::ForgetCapturePermission(match request.get("all") {
             Some(Value::Bool(true)) => None,
             _ => Some(string_field(&request, "id")?.to_string()),
@@ -474,6 +477,10 @@ fn handle(
             "protocol": PROTOCOL,
             "idle_inhibitors": state.ipc_idle_inhibitors(),
         })),
+        Request::Captures => Ok(json!({
+            "protocol": PROTOCOL,
+            "captures": state.ipc_captures(),
+        })),
     }
 }
 
@@ -499,16 +506,18 @@ pub enum Kind {
     Keyboard,
     Colors,
     Switch,
+    Captures,
 }
 
 impl Kind {
-    const ALL: [Kind; 6] = [
+    const ALL: [Kind; 7] = [
         Kind::Windows,
         Kind::Workspaces,
         Kind::Outputs,
         Kind::Keyboard,
         Kind::Colors,
         Kind::Switch,
+        Kind::Captures,
     ];
     /// Built after frames are drawn; the rest every loop iteration.
     const AFTER_FRAMES: [Kind; 3] = [Kind::Windows, Kind::Workspaces, Kind::Outputs];
@@ -521,6 +530,7 @@ impl Kind {
             Kind::Keyboard => "keyboard",
             Kind::Colors => "colors",
             Kind::Switch => "switch",
+            Kind::Captures => "captures",
         }
     }
 
@@ -644,6 +654,12 @@ impl Pila {
         self.send_events_of(&[Kind::Colors]);
     }
 
+    /// What's capturing changed (`capture_indicator.rs`): to its
+    /// subscribers at once, since an ending capture may draw nothing.
+    pub fn send_captures_event(&mut self) {
+        self.send_events_of(&[Kind::Captures]);
+    }
+
     /// The window switch started, stepped, lost a window or ended: its
     /// subscribers hear of it at the end of this loop iteration
     /// (`send_switch_events`), drawn or not, since a switch can end with
@@ -739,6 +755,7 @@ impl Pila {
             Kind::Keyboard => Value::Array(self.ipc_layouts()),
             Kind::Colors => self.ipc_colors(),
             Kind::Switch => self.ipc_switch(),
+            Kind::Captures => Value::Array(self.ipc_captures()),
         };
         let mut event = serde_json::Map::new();
         event.insert("event".into(), kind.name().into());

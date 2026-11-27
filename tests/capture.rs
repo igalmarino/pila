@@ -1218,3 +1218,197 @@ fn capture_frames_are_one_per_refresh() {
     );
     let _ = pila;
 }
+
+// --- Capture indicator -------------------------------------------------------
+
+const ACCENT: [u8; 4] = [0x44, 0x77, 0xcc, 255];
+
+/// What the state dump lists as capturing.
+fn captures(state: &Value) -> Vec<Value> {
+    state["capture_indicator"]["captures"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The test's own program name, as Pila reads it from `/proc/<pid>/exe`.
+fn own_name() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// An output captured: listed with the program's name, its corner lit on
+/// the screen and not in the capture; after the session ends, still for a
+/// moment, then neither.
+#[test]
+fn an_output_being_captured_is_listed_and_lit_on_the_screen_alone() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    let corner = (1279.0, 0.0);
+    let before = pila.settle();
+    assert_eq!(captures(&before), Vec::<Value>::new());
+    let unlit = pila.pixel(corner.0, corner.1);
+    assert_ne!(unlit, ACCENT);
+    let source = output_source(&client, "HEADLESS-1");
+    let (session, size) = session(&client, &source, "lit");
+    let name = own_name();
+    let state = pila.wait("listed by name", |s| {
+        captures(s)
+            .first()
+            .is_some_and(|c| c["app"] == name.as_str())
+    });
+    assert_eq!(
+        captures(&state),
+        vec![serde_json::json!({
+            "app": name,
+            "protocol": "ext-image-copy-capture",
+            "target": { "kind": "output", "output": "HEADLESS-1" },
+        })]
+    );
+    assert_eq!(
+        state["capture_indicator"]["lights"],
+        serde_json::json!(["HEADLESS-1"])
+    );
+    pila.wait_pixel(corner.0, corner.1, ACCENT);
+    // Not in what's captured.
+    let (_frame, file) = capture(&client, &session, size, "frame");
+    client.wait_logged("frame", "Ready");
+    let px = read_pixel(&file, size.0, size.0 - 1, 0);
+    assert_eq!(
+        px,
+        [unlit[0], unlit[1], unlit[2]],
+        "the light in the capture"
+    );
+
+    session.destroy();
+    client.flush();
+    let ended = std::time::Instant::now();
+    pila.wait("unlisted", |s| captures(s).is_empty());
+    assert!(
+        ended.elapsed() >= Duration::from_millis(800),
+        "gone after {:?}, not held",
+        ended.elapsed()
+    );
+    pila.wait_pixel(corner.0, corner.1, unlit);
+}
+
+/// A one-shot screenshot (grim's screencopy: one frame, then gone) is
+/// listed for a moment after it's done.
+#[test]
+fn a_screenshot_is_listed_for_a_moment() {
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pila.settle();
+    let manager: ZwlrScreencopyManagerV1 = client.bind("zwlr_screencopy_manager_v1", 3);
+    let frame = manager.capture_output(0, &client.output("HEADLESS-1"), &client.qh, "shot".into());
+    client.flush();
+    client.wait_logged("shot", "BufferDone");
+    let (buffer, _file) = client.capture_buffer((1280, 800), Format::Xrgb8888);
+    frame.copy(&buffer);
+    client.flush();
+    client.wait_logged("shot", "Ready");
+    frame.destroy();
+    client.flush();
+    let state = pila.state();
+    let listed = captures(&state);
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["protocol"], "wlr-screencopy");
+    assert_eq!(listed[0]["target"]["kind"], "output");
+    pila.wait("unlisted", |s| captures(s).is_empty());
+}
+
+/// A window captured: listed by its app id and id, the monitor it's on lit.
+#[test]
+fn a_window_being_captured_lights_the_monitor_it_is_on() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x800,B:1280x800".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    client.window("shared").size(300, 200).create();
+    pila.wait_focus("shared");
+    let id = pila.window("shared")["id"].as_str().unwrap().to_string();
+    let source = window_source(&client, "shared");
+    let (_session, _size) = session(&client, &source, "win");
+    let state = pila.wait("listed", |s| !captures(s).is_empty());
+    let target = &captures(&state)[0]["target"];
+    assert_eq!(target["kind"], "window");
+    assert_eq!(target["app_id"], "shared");
+    assert_eq!(target["id"], id.as_str());
+    let output = target["output"].as_str().unwrap().to_string();
+    assert_eq!(
+        state["capture_indicator"]["lights"],
+        serde_json::json!([output])
+    );
+}
+
+/// `[permissions] indicator = false`: listed, but no light.
+#[test]
+fn the_light_can_be_turned_off() {
+    let mut pila = TestPila::with_config("[permissions]\nindicator = false\n");
+    let client = pila.client();
+    let corner = (1279.0, 0.0);
+    pila.settle();
+    let unlit = pila.pixel(corner.0, corner.1);
+    let source = output_source(&client, "HEADLESS-1");
+    let (_session, _size) = session(&client, &source, "dark");
+    let state = pila.wait("listed", |s| !captures(s).is_empty());
+    assert_eq!(state["capture_indicator"]["lights"], serde_json::json!([]));
+    assert_eq!(pila.pixel(corner.0, corner.1), unlit);
+}
+
+/// `pila msg captures`, and `--waybar captures` following them as a waybar
+/// custom module: hidden (no text) while nothing captures.
+#[test]
+fn pila_msg_lists_the_captures_and_follows_them_for_waybar() {
+    use std::io::BufRead;
+    let mut pila = TestPila::start();
+    let client = pila.client();
+    pila.settle();
+    let out = pila.msg(&["captures"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "nothing is capturing the screen"
+    );
+    let mut waybar = std::process::Command::new(env!("CARGO_BIN_EXE_pila"))
+        .args(["msg", "--waybar", "captures"])
+        .env_remove("PILA_SOCKET")
+        .env("WAYLAND_DISPLAY", &pila.display)
+        .env("XDG_RUNTIME_DIR", &pila.dir)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = std::io::BufReader::new(waybar.stdout.take().unwrap()).lines();
+    let mut next = || -> Value { serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap() };
+    assert_eq!(
+        next(),
+        serde_json::json!({ "text": "", "tooltip": "", "class": "idle" })
+    );
+
+    let source = output_source(&client, "HEADLESS-1");
+    let (_session, _size) = session(&client, &source, "msg");
+    let name = own_name();
+    // Named once its executable is read: maybe a line with its pid first.
+    let line = loop {
+        let line = next();
+        if line["text"] == format!("● {name}").as_str() {
+            break line;
+        }
+    };
+    assert_eq!(line["class"], "capturing");
+    assert_eq!(
+        line["tooltip"],
+        format!("{name}  screen HEADLESS-1  (ext-image-copy-capture)").as_str()
+    );
+    let out = pila.msg(&["captures"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        format!("{name}  screen HEADLESS-1  (ext-image-copy-capture)")
+    );
+    let _ = waybar.kill();
+    let _ = waybar.wait();
+}

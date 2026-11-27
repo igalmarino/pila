@@ -252,6 +252,17 @@ pub(crate) struct Composited {
 const MAX_SHM_TEXTURES: usize = 4;
 
 impl Captures {
+    /// The sessions capturing: allowed, not stopped, their clients' and
+    /// targets (`capture_indicator.rs`).
+    pub(crate) fn capturing(
+        &self,
+    ) -> impl Iterator<Item = (Option<smithay::reexports::wayland_server::Client>, &Target)> {
+        self.sessions
+            .iter()
+            .filter(|s| s.authorized && !s.stopped && s.resource.is_alive())
+            .map(|s| (s.resource.client(), &s.target))
+    }
+
     /// Whether any capture session, pending screencopy or kept offscreen
     /// texture needs attention from `after_frames`.
     pub fn has_work(&self) -> bool {
@@ -564,6 +575,7 @@ impl Pila {
         let dmabuf = self.capture.dmabuf.as_ref();
         let session = &mut self.capture.sessions[index];
         session.authorized = true;
+        self.capture_indicator.dirty = true;
         match geometry {
             Some(geometry) => session.send_constraints(geometry, dmabuf),
             None => session.stop(),

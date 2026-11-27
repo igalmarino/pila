@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 const USAGE: &str = "\
 Usage: pila msg [--json] <request>
+       pila msg --waybar captures
 
 Requests:
   windows             The windows, on all workspaces
@@ -40,9 +41,13 @@ Requests:
   idle-inhibitors     The apps keeping the screen on now: over D-Bus
                       (org.freedesktop.ScreenSaver), or a visible window's
                       or layer surface's Wayland idle inhibitor
+  captures            The programs capturing the screen now, and what each
+                      captures: a monitor, a region or a window
 
 Options:
-  --json              Print Pila's answer as it is (docs/IPC.md)";
+  --json              Print Pila's answer as it is (docs/IPC.md)
+  --waybar            With captures: follow them as a waybar custom module
+                      (return-type json), a line each time they change";
 
 /// How long to wait for a pila that doesn't answer.
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -90,6 +95,7 @@ fn request(args: &[String]) -> Result<Value, String> {
         | "screen-shares"
         | "capture-permissions"
         | "idle-inhibitors"
+        | "captures"
             if rest.is_empty() =>
         {
             Ok(json!({ "request": name }))
@@ -104,7 +110,8 @@ fn request(args: &[String]) -> Result<Value, String> {
         | "version"
         | "screen-shares"
         | "capture-permissions"
-        | "idle-inhibitors" => Err(format!("{name} takes no arguments")),
+        | "idle-inhibitors"
+        | "captures" => Err(format!("{name} takes no arguments")),
         "forget-screen-share" | "forget-capture-permission" => match rest {
             [all] if all == "all" => Ok(json!({ "request": name, "all": true })),
             [id] => Ok(json!({ "request": name, "id": id })),
@@ -206,6 +213,50 @@ fn window_line(window: &Value) -> String {
             format!("  [{}]", marks.join(", "))
         },
     )
+}
+
+/// A program capturing: who, what, and how.
+fn capture_line(capture: &Value) -> String {
+    let target = &capture["target"];
+    let what = match target["kind"].as_str() {
+        Some("output") => format!("screen {}", plain(&target["output"])),
+        Some("region") => format!(
+            "region of {} {}x{}+{}+{}",
+            plain(&target["output"]),
+            target["width"],
+            target["height"],
+            target["x"],
+            target["y"]
+        ),
+        Some("window") => format!("window {}", plain(&target["app_id"])),
+        _ => "?".to_string(),
+    };
+    format!(
+        "{}  {what}  ({})",
+        plain(&capture["app"]),
+        plain(&capture["protocol"])
+    )
+}
+
+/// A line for a waybar custom module (`return-type: json`) about `captures`:
+/// no text when nothing captures (waybar hides the module), the app when one
+/// does, how many when several do; each capture in the tooltip.
+fn waybar_line(captures: &[Value]) -> String {
+    let mut apps: Vec<String> = captures.iter().map(|c| plain(&c["app"])).collect();
+    apps.sort();
+    apps.dedup();
+    let text = match apps.as_slice() {
+        [] => String::new(),
+        [app] => format!("● {app}"),
+        apps => format!("● {}", apps.len()),
+    };
+    let tooltip: Vec<String> = captures.iter().map(capture_line).collect();
+    json!({
+        "text": text,
+        "tooltip": tooltip.join("\n"),
+        "class": if captures.is_empty() { "idle" } else { "capturing" },
+    })
+    .to_string()
 }
 
 /// A screen share remembered: its id, the app, what it shares, and how long
@@ -346,6 +397,10 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
         "forget-screen-share" | "forget-capture-permission" if answer["forgotten"].is_u64() => {
             vec![format!("forgot {}", answer["forgotten"])]
         }
+        "captures" => match list("captures") {
+            captures if captures.is_empty() => vec!["nothing is capturing the screen".to_string()],
+            captures => captures.iter().map(capture_line).collect(),
+        },
         "idle-inhibitors" => match list("idle_inhibitors") {
             inhibitors if inhibitors.is_empty() => vec!["nothing keeps the screen on".to_string()],
             inhibitors => inhibitors
@@ -387,6 +442,11 @@ fn text_of(name: &str, answer: &Value) -> Vec<String> {
 
 /// `pila msg`, with the arguments after `msg`. Returns the exit status.
 pub fn run(args: &[String]) -> i32 {
+    if let Some((first, rest)) = args.split_first() {
+        if first == "--waybar" {
+            return waybar(rest);
+        }
+    }
     let (json_output, args): (bool, &[String]) = match args.split_first() {
         Some((first, rest)) if first == "--json" => (true, rest),
         _ => (false, args),
@@ -437,6 +497,53 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// `pila msg --waybar captures`: the captures as a waybar custom module
+/// follows them, a line now and one each time they change, until pila quits.
+fn waybar(args: &[String]) -> i32 {
+    if args != ["captures"] {
+        eprintln!("pila msg: --waybar goes with captures\n\n{USAGE}");
+        return EXIT_USAGE;
+    }
+    let request = json!({ "request": "subscribe", "events": ["captures"] });
+    let (line, mut reader) = match socket_path().and_then(|path| ask(&path, &request)) {
+        Ok(answer) => answer,
+        Err(err) => {
+            eprintln!("pila msg: {err}");
+            return EXIT_NO_PILA;
+        }
+    };
+    let answer: Value = serde_json::from_str(&line).unwrap_or_default();
+    if answer["ok"] != true {
+        eprintln!("pila msg: {}", plain(&answer["error"]));
+        return EXIT_REFUSED;
+    }
+    if let Err(err) = reader.get_ref().set_read_timeout(None) {
+        eprintln!("pila msg: can't talk to pila: {err}");
+        return EXIT_NO_PILA;
+    }
+    let mut out = std::io::stdout().lock();
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return 0,
+            Ok(_) => {}
+        }
+        let event: Value = serde_json::from_str(&line).unwrap_or_default();
+        if event["event"] != "captures" {
+            continue;
+        }
+        let captures = event["captures"].as_array().cloned().unwrap_or_default();
+        let text = format!("{}\n", waybar_line(&captures));
+        if out
+            .write_all(text.as_bytes())
+            .and_then(|()| out.flush())
+            .is_err()
+        {
+            return 0;
+        }
+    }
 }
 
 /// `pila msg subscribe`, once pila said yes: each event as it comes, until
@@ -502,6 +609,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Hidden with nothing captured; the app, or how many apps, with each
+    /// capture in the tooltip; names can't bring controls in.
+    #[test]
+    fn the_waybar_module_names_who_captures() {
+        let line = |captures: Value| -> Value {
+            serde_json::from_str(&waybar_line(captures.as_array().unwrap())).unwrap()
+        };
+        assert_eq!(
+            line(json!([])),
+            json!({ "text": "", "tooltip": "", "class": "idle" })
+        );
+        let screen = json!({ "app": "grim", "protocol": "wlr-screencopy", "target": { "kind": "output", "output": "DP-1" } });
+        let window = json!({ "app": "Web\u{1b}Browser", "protocol": "portal", "target": { "kind": "window", "id": "1", "app_id": "kitty", "output": "DP-1" } });
+        assert_eq!(
+            line(json!([screen])),
+            json!({ "text": "● grim", "tooltip": "grim  screen DP-1  (wlr-screencopy)", "class": "capturing" })
+        );
+        let both = line(json!([screen, window, screen]));
+        assert_eq!(both["text"], "● 2");
+        assert_eq!(
+            both["tooltip"],
+            "grim  screen DP-1  (wlr-screencopy)\nWeb?Browser  window kitty  (portal)\ngrim  screen DP-1  (wlr-screencopy)"
+        );
     }
 
     #[test]

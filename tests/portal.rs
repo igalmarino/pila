@@ -459,6 +459,36 @@ fn closing_the_session_stops_its_stream() {
     pila.wait("the stream gone", |s| s["screencast"]["casts"] == 0);
 }
 
+/// A share through the portal is listed as the app's (`pila msg captures`)
+/// and lights its monitor while it lasts.
+#[test]
+fn a_share_is_listed_as_the_apps_capture_while_it_lasts() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    share(&mut pila, &mut portal, "listed");
+    let state = pila.wait("listed", |s| {
+        !s["capture_indicator"]["captures"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    });
+    assert_eq!(
+        state["capture_indicator"]["captures"],
+        json!([{
+            // As the picker names it: its desktop entry's name.
+            "app": "Web Browser",
+            "protocol": "portal",
+            "target": { "kind": "output", "output": "HEADLESS-1" },
+        }])
+    );
+    assert_eq!(state["capture_indicator"]["lights"], json!(["HEADLESS-1"]));
+    portal.close("listed");
+    pila.wait("unlisted", |s| {
+        s["capture_indicator"]["captures"] == json!([])
+            && s["capture_indicator"]["lights"] == json!([])
+    });
+}
+
 #[test]
 fn the_picker_names_the_app_and_offers_every_output() {
     let (mut pila, bus, _pipewire) = start_with("A:640x480,B:800x600");

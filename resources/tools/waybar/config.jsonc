@@ -4,7 +4,7 @@
     "height": 28,
     "spacing": 0,
     "modules-left": ["ext/workspaces", "wlr/taskbar"],
-    "modules-right": ["tray", "wireplumber", "battery", "clock"],
+    "modules-right": ["custom/pila-captures", "tray", "wireplumber", "battery", "clock"],
     "ext/workspaces": {
         "format": "{name}",
         "on-click": "activate",
@@ -17,6 +17,12 @@
         "max-length": 32,
         "on-click": "activate",
         "on-click-middle": "close"
+    },
+    "custom/pila-captures": {
+        "exec": "pila msg --waybar captures",
+        "return-type": "json",
+        "escape": true,
+        "restart-interval": 5
     },
     "tray": {
         "icon-size": 16,

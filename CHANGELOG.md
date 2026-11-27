@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New:** A capture indicator. While a program captures the screen, through the portal or
+  directly (`grim`, `wf-recorder`), a small accent square lights the top-right corner of the
+  monitor being captured, on the screen only, never in the capture (`[permissions] indicator =
+  false` turns it off). `pila msg captures` lists who captures what, and Pila's waybar
+  configuration shows it in the bar through `pila msg --waybar captures`, which a waybar
+  configuration of your own can use too.
 - **New:** `pila msg idle-inhibitors` lists the apps keeping the screen on now: those that asked
   over D-Bus (`org.freedesktop.ScreenSaver`), with the reason they gave, and the visible windows
   with a Wayland idle inhibitor. Handy to find a forgotten browser tab keeping the session awake.

@@ -17,6 +17,7 @@ pub mod backend;
 pub mod bell;
 pub mod blur;
 pub mod capture;
+pub mod capture_indicator;
 pub mod color_pick;
 pub mod commit_pacing;
 pub mod config;

@@ -304,6 +304,9 @@ fn ipc_answers_and_events_keep_their_fields() {
     assert!(ask(&mut ipc, "capture-permissions")["capture_permissions"].is_array());
     // Its objects' fields: `input_protocols::pila_msg_lists_what_keeps_the_screen_on`.
     assert!(ask(&mut ipc, "idle-inhibitors")["idle_inhibitors"].is_array());
+    // Its objects' fields need a capture:
+    // `capture::an_output_being_captured_is_listed_and_lit_on_the_screen_alone`.
+    assert!(ask(&mut ipc, "captures")["captures"].is_array());
     assert!(ask(&mut ipc, "switch")["switch"].is_null());
     pila.key_press("Alt");
     pila.key("Tab");
@@ -319,6 +322,7 @@ fn ipc_answers_and_events_keep_their_fields() {
         "keyboard",
         "colors",
         "switch",
+        "captures",
     ];
     ipc.ask(serde_json::json!({ "request": "subscribe", "events": kinds }));
     let mut seen = BTreeSet::new();
@@ -333,6 +337,7 @@ fn ipc_answers_and_events_keep_their_fields() {
             "outputs" => all_have("an outputs event", &event["outputs"], OUTPUT),
             "keyboard" => all_have("a keyboard event", &event["layouts"], LAYOUT),
             "colors" => has_fields("a colors event", &event["colors"], COLORS),
+            "captures" => assert!(event["captures"].is_array(), "{event}"),
             "switch" => {
                 let switch = &event["switch"];
                 if !switch.is_null() {

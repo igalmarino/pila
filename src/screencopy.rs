@@ -66,6 +66,14 @@ pub struct FrameState {
 /// A frame's user data; `None` for one that failed at creation.
 pub type FrameData = Mutex<Option<FrameState>>;
 
+/// What a frame copies, as a capture target: its region of its output
+/// (the whole output is one too: `capture_indicator.rs` tells).
+pub(crate) fn frame_target(frame: &ZwlrScreencopyFrameV1) -> Option<capture::Target> {
+    let data = frame.data::<FrameData>()?.locked();
+    let state = data.as_ref()?;
+    Some(capture::Target::Region(state.output.clone(), state.region))
+}
+
 /// What distinguishes the damage trackers of `copy_with_damage`: the
 /// manager (each client sees changes since *its* last copy), the output and
 /// the region (as x, y, w, h: `Rectangle` isn't hashable).
@@ -381,6 +389,7 @@ impl Pila {
             return;
         };
         self.capture.screencopies.push(resource.clone());
+        self.capture_indicator_changed();
         // Copied after the next frame (`after_frames`): at most once per
         // refresh however fast a client asks, as with damage. Its output's
         // frame, which may well have nothing new (`redraw::Content::Maybe`).

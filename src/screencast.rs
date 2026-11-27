@@ -94,6 +94,13 @@ impl ScreenCasts {
             .filter(|target| matches!(target, Target::Region(..)))
     }
 
+    /// Who shares what: each cast's app and target (`capture_indicator.rs`).
+    pub(crate) fn shares(&self) -> impl Iterator<Item = (&str, &Target)> {
+        self.casts
+            .iter()
+            .map(|cast| (cast.app.as_str(), &cast.target))
+    }
+
     /// How many casts there are, for tests (`Pila::state_json`).
     pub fn cast_count(&self) -> usize {
         self.casts.len()
@@ -180,6 +187,8 @@ enum CastEvent {
 /// A started session's stream.
 struct Cast {
     id: u64,
+    /// Who shares: the app as the portal names it (`capture_indicator.rs`).
+    app: String,
     /// The portal session, by its object path.
     session: String,
     /// What's shared: an output or a window.
@@ -362,8 +371,14 @@ impl Pila {
             session,
             cursor,
             reply,
+            app_id,
+            app,
             ..
         } = share;
+        let app = app
+            .filter(|app| !app.is_empty())
+            .or_else(|| (!app_id.is_empty()).then_some(app_id))
+            .unwrap_or_else(|| "an app".to_string());
         // Only the user's pick (now, or remembered) starts a share, and
         // never while locked.
         if self.is_locked() {
@@ -442,6 +457,7 @@ impl Pila {
         );
         self.screencast.casts.push(Cast {
             id,
+            app,
             session,
             target,
             source_type,
@@ -464,6 +480,7 @@ impl Pila {
         });
         // A region shared is outlined on the screen.
         self.update_region_outlines();
+        self.capture_indicator_changed();
         // Callbacks may have run while connecting.
         self.handle_cast_events();
     }

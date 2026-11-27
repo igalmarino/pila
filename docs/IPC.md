@@ -24,6 +24,8 @@ pila msg forget-screen-share <id>|all  Forget one remembered screen share, or al
 pila msg [--json] capture-permissions  List direct screen capture permissions
 pila msg forget-capture-permission <id>|all  Forget one capture permission, or all of them
 pila msg [--json] idle-inhibitors    List the apps keeping the screen on now
+pila msg [--json] captures           List what's capturing the screen now
+pila msg --waybar captures           Follow the captures as a waybar custom module
 ```
 
 Examples:
@@ -81,7 +83,7 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `colors` | — | `protocol`, `colors` |
 | `switch` | — | `protocol`, `switch` (active window-switch state, or `null`) |
 | `focused` | — | `protocol`, `window` (focused window object, or `null`) |
-| `subscribe` | `events`: array of `windows`, `workspaces`, `outputs`, `keyboard`, `colors`, `switch` (defaults to all) | `protocol`, followed by event lines (see below) |
+| `subscribe` | `events`: array of `windows`, `workspaces`, `outputs`, `keyboard`, `colors`, `switch`, `captures` (defaults to all) | `protocol`, followed by event lines (see below) |
 | `action` | `action`: string, as in `[bindings]` | — |
 | `focus` | `id` | — |
 | `close` | `id` | — |
@@ -91,6 +93,7 @@ increment `protocol`. Available actions match those documented in `config.exampl
 | `capture-permissions` | — | `protocol`, `capture_permissions` |
 | `forget-capture-permission` | `id`, or `all`: `true` | with `all`, `forgotten` (how many); fails for an unknown `id`, and before Pila has read the saved permissions (at startup) |
 | `idle-inhibitors` | — | `protocol`, `idle_inhibitors` |
+| `captures` | — | `protocol`, `captures` |
 
 While the session is locked, `action`, `focus`, `close`, and `minimize` are refused (including
 `quit`), while queries continue to work, and so do `forget-screen-share` and
@@ -189,6 +192,22 @@ none of them counts.
   surface's namespace
 - `reason`: for `dbus`, the reason the app gave; `null` for `wayland`
 
+**Capture (`captures`):**
+A program capturing the screen now, or that stopped less than a second ago (so a one-shot
+screenshot shows): portal shares first, then direct captures. The same program capturing two
+things is listed twice.
+- `app`: for `portal`, the app as the share picker names it; otherwise the program's executable
+  name (its process id, as `process 1234`, until Pila has read it)
+- `protocol`: `"portal"`, `"ext-image-copy-capture"` or `"wlr-screencopy"`
+- `target`: an object with `kind`: `"output"` (with `output`, a monitor name), `"region"` (with
+  `output` and `x`, `y`, `width`, `height` in logical pixels, from the monitor's top-left), or
+  `"window"` (with `id`, as in `windows`, `app_id`, and `output`: the monitor it's on, or `null`)
+
+`pila msg --waybar captures` subscribes to `captures` and prints a line of JSON for a waybar
+custom module (`"return-type": "json"`) now and at each change: `text` (empty while nothing
+captures, which hides the module; the app's name, or how many apps, after a `●`), `tooltip` (a
+line per capture) and `class` (`"capturing"` or `"idle"`).
+
 ## Events
 
 After a `subscribe` request succeeds, Pila immediately sends one snapshot event for each subscribed
@@ -202,12 +221,15 @@ category, followed by a new event whenever that category changes:
 ```
 
 Each event carries the full current state in the same shape as the matching query (`keyboard`
-events carry `layouts`, `colors` events carry `colors`, and `switch` events carry `switch` or
-`null`), so subscribers can simply replace their cached state.
+events carry `layouts`, `colors` events carry `colors`, `switch` events carry `switch` or
+`null`, and `captures` events carry `captures`), so subscribers can simply replace their cached
+state.
 
 Timing details:
 - `switch` events fire immediately on each step.
 - `colors` events fire when a reloaded configuration changes colors.
+- `captures` events fire as soon as a capture starts or a program's name is read, and a second
+  after a capture ends.
 - While a window is being dragged or resized with the pointer, events keep its pre-drag `x`, `y`,
   `width`, and `height` and emit a single update when the drag ends (avoiding per-frame chatter).
   Querying `windows` directly still returns the live coordinates.

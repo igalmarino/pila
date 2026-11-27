@@ -773,6 +773,29 @@ their scripts (allowing `python3` allows every Python script), and on Nix the st
 with each update (match it with `*`, such as `/nix/store/*-grim-*/bin/grim`). A program updated
 while running keeps its path.
 
+**Capture indicator:** While anything captures the screen, through the portal (browsers, OBS,
+Kooha) or directly (`grim`, `wf-recorder`), with or without permissions enforced, Pila shows it:
+
+- A small square in the accent color lights the top-right corner of each monitor being captured
+  (for a window, the monitor it's on). It's drawn on the screen only, never in what's captured. A
+  screenshot lights it for about a second. Turn it off with `indicator = false` in
+  `[permissions]`; it also keeps a fullscreen game from tearing while it's being recorded.
+- `pila msg captures` lists who captures what, and how. Pila's own waybar configuration shows it
+  in the bar: the app's name in the accent (or how many apps), each capture in the tooltip,
+  nothing while nothing captures. With a waybar configuration of your own, add the module:
+
+```jsonc
+"modules-right": ["custom/pila-captures", ...],
+"custom/pila-captures": {
+    "exec": "pila msg --waybar captures",
+    "return-type": "json",
+    "escape": true,
+    "restart-interval": 5
+}
+```
+
+Pila's own screenshots through the portal (after its picker) aren't listed.
+
 ## Portals, polkit, and the keyring
 
 Desktop apps expect three session services that full desktop environments start automatically:
@@ -997,6 +1020,7 @@ pila msg switch                  # inspect active Mod+Tab switcher state
 pila msg screen-shares           # list the screen shares remembered for apps
 pila msg forget-screen-share <id> # revoke one (or all)
 pila msg capture-permissions     # list direct screen capture permissions
+pila msg captures                # list what's capturing the screen now
 pila msg forget-capture-permission <id> # revoke one (or all)
 pila msg idle-inhibitors         # list the apps keeping the screen on
 pila msg --json subscribe        # stream live window, workspace, and output changes

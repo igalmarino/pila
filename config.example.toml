@@ -358,6 +358,11 @@ tap = true                       # tap to click
 [permissions]
 # enforce = true
 enforce = false
+# While a program captures a monitor (or a window or region on it), a small
+# square in the accent lights its top-right corner, on the screen only, never
+# in what's captured; `pila msg captures` lists who captures what either way.
+# indicator = false
+indicator = true
 
 [gestures]
 # Touchpad swipes (bare metal): "swipe-<fingers>-<direction>", where fingers is

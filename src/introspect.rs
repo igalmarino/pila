@@ -292,6 +292,15 @@ impl Pila {
             _ => None,
         };
 
+        let capture_indicator = json!({
+            "captures": self.ipc_captures(),
+            "lights": self
+                .capture_indicator
+                .lights
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>(),
+        });
         let idle_inhibitors: Vec<Value> = self
             .idle_inhibitors
             .dbus
@@ -435,6 +444,7 @@ impl Pila {
         // limit.
         state["idle_inhibited"] = self.idle_inhibited().into();
         state["idle_inhibitors"] = idle_inhibitors.into();
+        state["capture_indicator"] = capture_indicator;
         state
     }
 }

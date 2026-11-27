@@ -1840,6 +1840,25 @@ Key flows and invariants:
   (`permissions_config_changed`). A capture started while `enforce` was off has no executable
   read yet: turning it on reads it then (`resolve_executable`) and stops the capture only if it
   isn't allowed, never before it's known.
+- **Capture indicator** (`capture_indicator.rs`): who captures what, whichever way: the portal's
+  casts (`ScreenCasts::shares`, named as the picker names the app), ext-image-copy-capture
+  sessions allowed and not stopped (`Captures::capturing`) and wlr-screencopy frames waiting
+  (`screencopy::frame_target`; a region the whole output is an output), named by the client's
+  executable, read on a thread once (`ClientState::executable`, shared with `permissions.rs`; its
+  process id until then). A capture is the same capture whatever it's named (`Capturer::same`: its
+  client, protocol and target), and stays listed `HOLD` (1 s) after it ends, so a one-shot
+  screenshot shows; a calloop timer at the first hold's end wakes the loop (it changes what's
+  shown, it paces no frame). `Pila::update_capture_indicator` runs at the end of each iteration
+  (`after_frames`, beside the switch events) when `dirty` (a session allowed, a screencopy queued,
+  a cast started, a name read, the timer) or while anything is listed (an ending capture, a window
+  moving to another monitor), and does nothing otherwise. A change of the list sends the `captures`
+  event at once; a change of the lights (`[permissions] indicator`: one per output captured, a
+  window's on its `window_output` or, off every output, `output_for_new_window`) redraws those
+  outputs. The light is `LIGHT` (8) logical pixels in the accent in the output's top-right corner,
+  in `Scene::capture_lights`, drawn by `render::screen_elements` beside the pointer (locked too),
+  never into a capture, and it keeps the output from tearing (`Scene::tears`). `pila msg --waybar
+  captures` (`ipc_client.rs`) turns the event into a waybar custom module's JSON lines; Pila's
+  waybar configuration (`resources/tools/waybar/`) has the module.
 - **IPC** (`ipc.rs`, `ipc_client.rs`; public format in `docs/IPC.md`): a Unix socket on the event
   loop, for `pila msg`, opened on every backend and removed on the way out. Nothing a client does may
   hold the loop: reads and writes don't block, a client gets `READS_PER_WAKE` reads per wake, what

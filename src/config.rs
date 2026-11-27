@@ -1733,6 +1733,8 @@ impl OverviewFile {
 pub struct PermissionsConfig {
     /// Enforce screen capture permissions for direct Wayland capture protocols.
     pub enforce: bool,
+    /// Light a monitor's corner while it's captured (`capture_indicator.rs`).
+    pub indicator: bool,
 }
 
 /// `[permissions]` as written.
@@ -1740,16 +1742,18 @@ pub struct PermissionsConfig {
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 struct PermissionsFile {
     enforce: Option<bool>,
+    indicator: Option<bool>,
 }
 
 impl PermissionsFile {
     fn or_example(self, example: Self) -> Self {
-        or_example!(self, example, PermissionsFile { enforce })
+        or_example!(self, example, PermissionsFile { enforce, indicator })
     }
 
     fn validate(self) -> Result<PermissionsConfig, String> {
         Ok(PermissionsConfig {
             enforce: need(self.enforce, "permissions.enforce")?,
+            indicator: need(self.indicator, "permissions.indicator")?,
         })
     }
 }
