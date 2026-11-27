@@ -701,26 +701,11 @@ impl Pila {
             return;
         }
         let id = wm.id();
-        let (sender, channel) = smithay::reexports::calloop::channel::channel();
-        let spawned = std::thread::Builder::new()
-            .name("pila-x11-idle".into())
-            .spawn(move || {
-                let _ = sender.send(only_pilas_x11_clients(display, &cookie, pid));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't check whether Xwayland is idle");
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                if let smithay::reexports::calloop::channel::Event::Msg(result) = event {
-                    state.xwayland_idle_checked(id, result);
-                }
-            });
-        if let Err(err) = inserted {
-            warn!(error = ?err.error, "can't check whether Xwayland is idle");
-        }
+        self.off_loop(
+            "pila-x11-idle",
+            move || only_pilas_x11_clients(display, &cookie, pid),
+            move |state, result| state.xwayland_idle_checked(id, result),
+        );
     }
 
     /// What X said about its clients (`check_xwayland_idle`): with only

@@ -36,18 +36,17 @@ use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::keyboard::Keysym,
     reexports::{
-        calloop,
         wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
         wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
         wayland_server::{backend::ClientId, Client, Resource},
     },
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     config::{Colors, PermissionAccess, PermissionRule},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     render::PilaRenderElement,
     rules::wildcard_match,
     state::ClientState,
@@ -347,29 +346,13 @@ impl Pila {
             self.client_executable_resolved(client.clone(), identity);
             return;
         };
-        let (sender, channel) = calloop::channel::channel();
-        let spawned = std::thread::Builder::new()
-            .name("pila-client-exe".into())
-            .spawn(move || {
-                let _ = sender.send(read_executable(pid));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, pid, "permissions: can't resolve client executable");
-            let identity = ClientIdentity { executable: None };
-            self.client_executable_resolved(client.clone(), identity);
-            return;
-        }
-        let client_for_cb = client.clone();
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(identity) = event else {
-                    return;
-                };
-                state.client_executable_resolved(client_for_cb.clone(), identity);
-            });
-        if let Err(err) = inserted {
-            warn!(?err, pid, "permissions: can't wait for client executable");
+        let waiting = client.clone();
+        let started = self.off_loop(
+            "pila-client-exe",
+            move || read_executable(pid),
+            move |state, identity| state.client_executable_resolved(waiting, identity),
+        );
+        if !started {
             let identity = ClientIdentity { executable: None };
             self.client_executable_resolved(client.clone(), identity);
         }
@@ -981,12 +964,7 @@ impl Pila {
         ) else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         let key = TextKey {
             items: items(shown, &view.layout, &self.config.colors),
             caps: panel::key_caps(&self.config.colors),
@@ -994,50 +972,21 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.capture_permissions.pending_text.as_ref() == Some(&key) {
-            return;
-        }
-        self.capture_permissions.pending_text = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-permission-text".into())
-            .spawn(move || {
-                let _ = sender.send(panel::draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the capture permission prompt's text");
-            self.capture_permissions.pending_text = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.capture_permissions.pending_text.as_ref() != Some(&key) {
-                    return;
-                }
-                state.capture_permissions.pending_text = None;
-                if NoText::ask_again(&pixels) {
-                    state.draw_capture_permission_text();
-                }
-                let Ok(pixels) = pixels else {
-                    return;
-                };
-                state.capture_permissions.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-permission-text",
+            |state| &mut state.capture_permissions.pending_text,
+            Self::draw_capture_permission_text,
+            |state, text| {
+                state.capture_permissions.buffers.borrow_mut().text = Some(text);
                 // Seen from its next frame: Allow counts from now.
                 if let Some(shown) = state.capture_permissions.shown.as_mut() {
                     shown.visible_since.get_or_insert_with(Instant::now);
                 }
                 state.queue_redraw();
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the capture permission prompt's text");
-            self.capture_permissions.pending_text = None;
-        }
+            },
+        );
     }
 
     /// State dump for automated tests (`introspect.rs`).

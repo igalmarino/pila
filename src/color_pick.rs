@@ -16,7 +16,6 @@ use std::{cell::RefCell, rc::Rc};
 use smithay::{
     backend::{allocator::Fourcc, renderer::gles::GlesRenderer},
     input::{keyboard::Keysym, pointer::CursorIcon, pointer::CursorImageStatus},
-    reexports::calloop,
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
 use tracing::{info, warn};
@@ -24,7 +23,7 @@ use tracing::{info, warn};
 use crate::{
     capture::{Source, Write},
     config::Colors,
-    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     portal::{Refused, Reply},
     render::{self, PilaRenderElement},
     scale::output_scale,
@@ -278,12 +277,7 @@ impl Pila {
         let Some(view) = self.scene_color_pick() else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         let key = TextKey {
             items: items(&self.config.colors),
             caps: panel::key_caps(&self.config.colors),
@@ -291,46 +285,17 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.color_pick.pending.as_ref() == Some(&key) {
-            return;
-        }
-        self.color_pick.pending = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-color-pick".into())
-            .spawn(move || {
-                let _ = sender.send(panel::draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the color picker's text");
-            self.color_pick.pending = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.color_pick.pending.as_ref() != Some(&key) {
-                    return;
-                }
-                state.color_pick.pending = None;
-                if NoText::ask_again(&pixels) {
-                    state.draw_color_pick_text();
-                }
-                let Ok(pixels) = pixels else {
-                    return;
-                };
-                state.color_pick.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-color-pick",
+            |state| &mut state.color_pick.pending,
+            Self::draw_color_pick_text,
+            |state, text| {
+                state.color_pick.buffers.borrow_mut().text = Some(text);
                 state.redraw_color_pick();
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the color picker's text");
-            self.color_pick.pending = None;
-        }
+            },
+        );
     }
 
     /// For the state dump: whether it's on, and its panel.

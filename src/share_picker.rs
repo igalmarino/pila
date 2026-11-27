@@ -43,16 +43,15 @@ use smithay::{
         gles::GlesRenderer,
     },
     input::keyboard::Keysym,
-    reexports::calloop,
     utils::{Logical, Physical, Point, Rectangle, Scale, Size},
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use smithay::{desktop::Window, utils::IsAlive};
 
 use crate::{
     config::Colors,
-    panel::{bits, draw_text, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{bits, Align, ContentImage, FrameBuffers, Item, TextKey},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
@@ -711,22 +710,12 @@ impl Pila {
     /// (files aren't read on the event loop): the panel says it once it's
     /// there, if it still asks for that app.
     fn name_share_picker_app(&mut self, app_id: String) {
-        let (sender, channel) = calloop::channel::channel();
         let looked_up = app_id.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-app-name".into())
-            .spawn(move || {
-                let name = crate::portal::app_name(&looked_up, &crate::portal::data_dirs());
-                let _ = sender.send(name);
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "portal: can't look up the app's name");
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(Some(name)) = event else {
+        self.off_loop(
+            "pila-app-name",
+            move || crate::portal::app_name(&looked_up, &crate::portal::data_dirs()),
+            move |state, name| {
+                let Some(name) = name else {
                     return;
                 };
                 let Some(shown) = state.share_picker.shown.as_mut() else {
@@ -736,10 +725,8 @@ impl Pila {
                     shown.app = Some(name);
                     state.draw_share_picker_text();
                 }
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "portal: can't wait for the app's name");
-        }
+            },
+        );
     }
 
     pub fn share_picker_open(&self) -> bool {
@@ -1142,12 +1129,7 @@ impl Pila {
         let Some(shown) = self.share_picker.shown.as_ref() else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         // The labels of the tiles shown: an output's name and size, a
         // window's title (its app id without one).
         let labels: Vec<String> = view
@@ -1187,50 +1169,19 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.share_picker.pending.as_ref() == Some(&key) {
-            return;
-        }
-        self.share_picker.pending = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-share-picker".into())
-            .spawn(move || {
-                let _ = sender.send(draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the share picker's text");
-            self.share_picker.pending = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.share_picker.pending.as_ref() != Some(&key) {
-                    return;
-                }
-                state.share_picker.pending = None;
-                // No fonts yet: the panel goes on without its text until
-                // they come (`Pila::draw_panels_text`).
-                if NoText::ask_again(&pixels) {
-                    state.draw_share_picker_text();
-                }
-                let Ok(pixels) = pixels else {
-                    return;
-                };
-                state.share_picker.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-share-picker",
+            |state| &mut state.share_picker.pending,
+            Self::draw_share_picker_text,
+            |state, text| {
+                state.share_picker.buffers.borrow_mut().text = Some(text);
                 if let Some(view) = state.scene_share_picker() {
                     state.queue_redraw_named_output(&view.output);
                 }
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the share picker's text");
-            self.share_picker.pending = None;
-        }
+            },
+        );
     }
 
     /// For the state dump: whether it's shown, for whom, where, its sources

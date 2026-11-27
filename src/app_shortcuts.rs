@@ -26,14 +26,13 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::keyboard::{xkb, Keysym, ModifiersState},
-    reexports::calloop,
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
 use tracing::{debug, info, warn};
 
 use crate::{
     config::{Colors, KeyCombo, Mods, Trigger},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     portal::{Refused, Reply},
     render::PilaRenderElement,
     Pila,
@@ -797,12 +796,7 @@ impl Pila {
         ) else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         let key = TextKey {
             items: items(panel, &view.layout, &self.config.colors),
             caps: panel::key_caps(&self.config.colors),
@@ -810,46 +804,17 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.app_shortcuts.pending.as_ref() == Some(&key) {
-            return;
-        }
-        self.app_shortcuts.pending = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-app-shortcuts-text".into())
-            .spawn(move || {
-                let _ = sender.send(panel::draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the shortcuts panel's text");
-            self.app_shortcuts.pending = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.app_shortcuts.pending.as_ref() != Some(&key) {
-                    return;
-                }
-                state.app_shortcuts.pending = None;
-                if NoText::ask_again(&pixels) {
-                    state.draw_app_shortcuts_text();
-                }
-                let Ok(pixels) = pixels else {
-                    return;
-                };
-                state.app_shortcuts.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-app-shortcuts-text",
+            |state| &mut state.app_shortcuts.pending,
+            Self::draw_app_shortcuts_text,
+            |state, text| {
+                state.app_shortcuts.buffers.borrow_mut().text = Some(text);
                 state.queue_redraw();
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the shortcuts panel's text");
-            self.app_shortcuts.pending = None;
-        }
+            },
+        );
     }
 
     /// For the state dump: the sessions and their shortcuts, and the panel.

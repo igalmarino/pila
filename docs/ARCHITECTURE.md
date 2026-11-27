@@ -831,11 +831,14 @@ Key flows and invariants:
   key hints: their keys are in the manual. The switcher and
   the window menu have no title, and tighter room of their own. Texts and keycaps are `Item`s
   drawn by `draw_text` on a thread into one image the size of the panel (`TextKey` says what it
-  shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`. A draw that finds
-  no fonts yet (`NoText::NoFonts`) is asked again when they come (`Pila::draw_panels_text`,
-  from the fonts' ping in `main.rs`), or at once if they came while it was on its way
-  (`NoText::ask_again`); one that fails with them (`NoText::Failed`) isn't asked again until
-  what it says changes.
+  shows, the keycaps in `key_caps`), shown as one texture by `ContentImage`. Every panel asks
+  for it through `Pila::draw_panel_text` (skipped when drawn or on its way; the panel keeps
+  what's pending and takes the image), except the region guide, which draws one at a time. A
+  draw that finds no fonts yet (`NoText::NoFonts`) is asked again when they come
+  (`Pila::draw_panels_text`, from the fonts' ping in `main.rs`, and on a config reload), or at
+  once if they came while it was on its way; one that fails with them (`NoText::Failed`) stays
+  pending, not asked again until what it says changes. Work off the event loop in general (a
+  thread, its result back through a channel) is `Pila::off_loop` (`off_loop.rs`).
 - **Switcher** (`switcher_view.rs`): Pila's own window switcher, drawn by Pila, that only shows
   the switch `switcher.rs` does (see "Window switching"). `Pila::switch_changed` (and
   `cycle_focus` once the switch is in place) call `switcher_view_changed`: a new switch arms a

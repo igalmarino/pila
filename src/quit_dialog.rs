@@ -9,14 +9,13 @@ use serde_json::{json, Value};
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::keyboard::{Keysym, ModifiersState},
-    reexports::calloop,
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     config::{Action, Colors},
-    panel::{self, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -197,12 +196,7 @@ impl Pila {
         let Some(view) = self.scene_quit_dialog() else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         let key = TextKey {
             items: items(&view.layout, &self.config.colors),
             caps: panel::key_caps(&self.config.colors),
@@ -210,46 +204,17 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.quit_dialog.pending_text.as_ref() == Some(&key) {
-            return;
-        }
-        self.quit_dialog.pending_text = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-quit-text".into())
-            .spawn(move || {
-                let _ = sender.send(panel::draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the quit dialog's text");
-            self.quit_dialog.pending_text = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.quit_dialog.pending_text.as_ref() != Some(&key) {
-                    return;
-                }
-                state.quit_dialog.pending_text = None;
-                if NoText::ask_again(&pixels) {
-                    state.draw_quit_dialog_text();
-                }
-                let Ok(pixels) = pixels else {
-                    return;
-                };
-                state.quit_dialog.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-quit-text",
+            |state| &mut state.quit_dialog.pending_text,
+            Self::draw_quit_dialog_text,
+            |state, text| {
+                state.quit_dialog.buffers.borrow_mut().text = Some(text);
                 state.queue_redraw();
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the quit dialog's text");
-            self.quit_dialog.pending_text = None;
-        }
+            },
+        );
     }
 
     /// State dump for the tests (`introspect.rs`).

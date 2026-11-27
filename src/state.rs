@@ -2212,37 +2212,18 @@ impl Pila {
         let systemd = is_user_bus(&bus, &runtime.to_string_lossy());
         let vars = self.exported_env();
 
-        let (sender, channel) = calloop::channel::channel();
-        let exporter = std::thread::Builder::new()
-            .name("pila-dbus-env".into())
-            .spawn(move || {
-                let _ = sender.send(crate::session_bus::export(
-                    &bus,
-                    systemd,
-                    &vars,
-                    EXPORT_TIMEOUT,
-                ));
-            });
-        if let Err(err) = exporter {
-            warn!(
-                ?err,
-                "can't start exporting the environment to the session bus"
-            );
-            return false;
-        }
-        let done = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                if let calloop::channel::Event::Msg(result) = event {
-                    match result {
-                        Ok(()) => info!(systemd, "exported the environment to the session bus"),
-                        Err(err) => warn!(err, "can't export the environment"),
-                    }
-                    state.startup_step_done();
+        let started = self.off_loop(
+            "pila-dbus-env",
+            move || crate::session_bus::export(&bus, systemd, &vars, EXPORT_TIMEOUT),
+            move |state, result| {
+                match result {
+                    Ok(()) => info!(systemd, "exported the environment to the session bus"),
+                    Err(err) => warn!(err, "can't export the environment"),
                 }
-            });
-        if let Err(err) = done {
-            warn!(?err, "can't wait for the environment's export");
+                state.startup_step_done();
+            },
+        );
+        if !started {
             return false;
         }
         let timeout = Timer::from_duration(EXPORT_TIMEOUT);

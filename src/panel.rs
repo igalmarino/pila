@@ -35,6 +35,7 @@ use smithay::{
     },
     utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
+use tracing::warn;
 
 use crate::{
     config::{Colors, Config},
@@ -481,6 +482,65 @@ impl crate::Pila {
         self.draw_app_shortcuts_text();
         self.draw_capture_permission_text();
         self.draw_quit_dialog_text();
+    }
+
+    /// The buffer scale a panel's text is drawn at on the output named
+    /// `output` (1 without it).
+    pub(crate) fn panel_text_scale(&self, output: &str) -> i32 {
+        self.space
+            .outputs()
+            .find(|o| o.name() == output)
+            .map(|o| crate::scale::buffer_scale(crate::scale::output_scale(o)))
+            .unwrap_or(1)
+    }
+
+    /// Draw a panel's text, `key`, on a thread named `thread`, unless it's
+    /// `drawn` already or on its way: the panel keeps what's on its way in
+    /// `pending`, and `shown` takes the image once it's back (and redraws).
+    /// With no fonts yet their coming asks again (`draw_panels_text`), or
+    /// `again`, if they came while it was drawn; a draw that failed with
+    /// them stays pending, not asked again until what it says changes.
+    pub(crate) fn draw_panel_text(
+        &mut self,
+        key: TextKey,
+        drawn: bool,
+        thread: &str,
+        pending: fn(&mut Self) -> &mut Option<TextKey>,
+        again: fn(&mut Self),
+        shown: fn(&mut Self, ContentImage),
+    ) {
+        if drawn || pending(self).as_ref() == Some(&key) {
+            return;
+        }
+        *pending(self) = Some(key.clone());
+        let job = key.clone();
+        let what = thread.to_string();
+        let started = self.off_loop(
+            thread,
+            move || draw_text(&job),
+            move |state, pixels| {
+                // Something else was asked for since: that's on its way.
+                if pending(state).as_ref() != Some(&key) {
+                    return;
+                }
+                match pixels {
+                    Ok(pixels) => {
+                        *pending(state) = None;
+                        shown(state, ContentImage::new(key, pixels));
+                    }
+                    Err(NoText::NoFonts) => {
+                        *pending(state) = None;
+                        if crate::text::loaded() {
+                            again(state);
+                        }
+                    }
+                    Err(NoText::Failed) => warn!(thread = what, "can't draw a panel's text"),
+                }
+            },
+        );
+        if !started {
+            *pending(self) = None;
+        }
     }
 }
 

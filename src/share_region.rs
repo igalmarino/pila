@@ -386,12 +386,7 @@ impl Pila {
             return;
         };
         let screenshot = self.share_picker_screenshot();
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.guide_output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.guide_output);
         let key = TextKey {
             items: items(&self.config.colors, screenshot, self.region_size()),
             caps: panel::key_caps(&self.config.colors),

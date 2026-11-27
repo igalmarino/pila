@@ -479,22 +479,10 @@ impl Pila {
             }
             return;
         };
-        let (sender, channel) = calloop::channel::channel();
-        let spawned = std::thread::Builder::new()
-            .name("pila-client-exe".into())
-            .spawn(move || {
-                let _ = sender.send(crate::permissions::read_executable(pid));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, pid, "capture indicator: can't read a program's name");
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(identity) = event else {
-                    return;
-                };
+        self.off_loop(
+            "pila-client-exe",
+            move || crate::permissions::read_executable(pid),
+            move |state, identity| {
                 let name = match &identity.executable {
                     Some(executable) => crate::permissions::program_name(executable).to_string(),
                     None => unknown(Some(pid)),
@@ -510,13 +498,8 @@ impl Pila {
                     .capture_indicator
                     .rename(|c| c.client.as_ref() == Some(&id), &name);
                 state.capture_indicator.dirty = true;
-            });
-        if let Err(err) = inserted {
-            warn!(
-                ?err,
-                pid, "capture indicator: can't wait for a program's name"
-            );
-        }
+            },
+        );
     }
 }
 

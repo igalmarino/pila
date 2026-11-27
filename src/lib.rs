@@ -48,6 +48,7 @@ pub mod layers;
 pub mod minimize;
 pub mod missing_program;
 pub mod notifications;
+pub mod off_loop;
 pub mod output_management;
 pub mod output_power;
 pub mod overview;

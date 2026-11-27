@@ -16,13 +16,12 @@ use std::{cell::RefCell, rc::Rc};
 use smithay::{
     backend::renderer::gles::GlesRenderer,
     input::keyboard::{xkb, Keysym},
-    reexports::calloop,
     utils::{Logical, Point, Rectangle, Scale, Size},
 };
 
 use crate::{
     config::{Action, Colors, Config, KeyCombo, ModKey, Trigger, WorkspaceTarget},
-    panel::{self, draw_text, Align, ContentImage, FrameBuffers, Item, NoText, TextKey},
+    panel::{self, Align, ContentImage, FrameBuffers, Item, TextKey},
     render::PilaRenderElement,
     Pila,
 };
@@ -575,12 +574,7 @@ impl Pila {
         let Some(view) = self.scene_shortcuts() else {
             return;
         };
-        let scale = self
-            .space
-            .outputs()
-            .find(|o| o.name() == view.output)
-            .map(|o| crate::scale::buffer_scale(Scale::from(o.current_scale().fractional_scale())))
-            .unwrap_or(1);
+        let scale = self.panel_text_scale(&view.output);
         let colors = &self.config.colors;
         let items = match view.heading {
             Heading::Welcome => {
@@ -596,61 +590,17 @@ impl Pila {
             scale,
         };
         let drawn = view.buffers.borrow().text.as_ref().map(|t| &t.key) == Some(&key);
-        if drawn || self.shortcuts_view.pending.as_ref() == Some(&key) {
-            return;
-        }
-        self.shortcuts_view.pending = Some(key.clone());
-        let (sender, channel) = calloop::channel::channel();
-        let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-shortcuts".into())
-            .spawn(move || {
-                let _ = sender.send(draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            tracing::warn!(?err, "can't draw the shortcuts' text");
-            self.shortcuts_view.pending = None;
-            return;
-        }
-        // One message, then the channel closes and its source goes.
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
-                if state.shortcuts_view.pending.as_ref() != Some(&key) {
-                    return;
-                }
-                let pixels = match pixels {
-                    Ok(pixels) => pixels,
-                    // No fonts yet: their coming asks again
-                    // (`Pila::draw_panels_text`), or this, if they came
-                    // while it was drawn.
-                    Err(NoText::NoFonts) => {
-                        state.shortcuts_view.pending = None;
-                        if NoText::ask_again(&pixels) {
-                            state.draw_shortcuts_text();
-                        }
-                        return;
-                    }
-                    // With them, it failed: it stays pending, not asked
-                    // again on every turn of the loop, until what it says
-                    // changes.
-                    Err(NoText::Failed) => {
-                        tracing::warn!("can't draw the shortcuts' text");
-                        return;
-                    }
-                };
-                state.shortcuts_view.pending = None;
-                state.shortcuts_view.buffers.borrow_mut().text =
-                    Some(ContentImage::new(key.clone(), pixels));
+        self.draw_panel_text(
+            key,
+            drawn,
+            "pila-shortcuts",
+            |state| &mut state.shortcuts_view.pending,
+            Self::draw_shortcuts_text,
+            |state, text| {
+                state.shortcuts_view.buffers.borrow_mut().text = Some(text);
                 state.redraw_shortcuts_view();
-            });
-        if let Err(err) = inserted {
-            tracing::warn!(?err, "can't wait for the shortcuts' text");
-            self.shortcuts_view.pending = None;
-        }
+            },
+        );
     }
 
     /// Whether the cheatsheet is shown with no content and none on the way,
