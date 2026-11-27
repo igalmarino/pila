@@ -2199,6 +2199,52 @@ fn the_picker_opened_before_the_fonts_gets_its_text_when_they_come() {
     assert_eq!(answered_with(started), 1);
 }
 
+/// Whether any pixel of the panel at `rect` is close to `color`.
+fn panel_has_color(pila: &mut TestPila, rect: (i64, i64, i64, i64), color: [u8; 3]) -> bool {
+    let (x, y, w, h) = rect;
+    let r = pila.request(json!({ "cmd": "pixels", "x": x, "y": y, "w": w, "h": h }));
+    let rgba: Vec<u8> = r["rgba"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as u8)
+        .collect();
+    rgba.chunks(4).any(|px| {
+        px[..3]
+            .iter()
+            .zip(color)
+            .all(|(&got, want)| got.abs_diff(want) < 24)
+    })
+}
+
+/// A config reload that changes the colors redraws the text of a panel
+/// shown (here the color picker's) in the new ones.
+#[test]
+fn a_panel_shown_takes_the_new_text_color_on_reload() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    let asked = portal.pick_color("org.example.Paint");
+    let state = pila.wait("the color picker", |s| {
+        color_pick_open(s) && s["color_pick"]["text"] == true
+    });
+    let panel = rect(&state["color_pick"]["rect"]);
+    const RED: [u8; 3] = [255, 0, 0];
+    assert!(!panel_has_color(&mut pila, panel, RED));
+
+    pila.write_config("[colors]\nicon = \"#ff0000\"\n");
+    pila.wait_log("config reloaded");
+    let started = std::time::Instant::now();
+    while !panel_has_color(&mut pila, panel, RED) {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the picker's text kept its old color"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    pila.key("Escape");
+    assert_eq!(asked.join().unwrap(), (1, None));
+}
+
 #[test]
 fn the_color_picker_opened_before_the_fonts_gets_its_text_when_they_come() {
     let (mut pila, bus, _pipewire) = start_holding_fonts();

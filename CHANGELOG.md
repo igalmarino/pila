@@ -42,6 +42,8 @@
   `wf-recorder`. It now reads "Allow wf-recorder to capture your screen?" (the line below still
   says it can see any window), and the prompt is a little wider, so it fits whole for names as
   long as `gpu-screen-recorder`.
+- **Fixed:** Editing `[colors]` while the share picker, the color picker, the apps' shortcuts panel or
+  the region guide was open left their text in the old colors until they were opened again.
 - **Fixed:** When another program already owned `org.freedesktop.ScreenSaver`, Pila left its
   interface registered on its own D-Bus connection anyway; it now removes it.
 - **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in
