@@ -13,6 +13,7 @@ pub mod notifications;
 pub mod pipewire;
 pub mod protocols;
 pub mod session_protocol;
+pub mod tray;
 
 use std::{
     io::{BufRead, BufReader, Write},

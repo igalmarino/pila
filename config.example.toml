@@ -364,6 +364,11 @@ enforce = false
 # never in what's captured; `pila msg captures` lists who captures what either way.
 # indicator = false
 indicator = true
+# While anything captures, an icon in the system tray (waybar's `tray`, or
+# any bar's that hosts StatusNotifierItems) names who captures what; its menu
+# stops a capture (a program stopped can't capture again until it restarts).
+# tray = false
+tray = true
 
 [gestures]
 # Touchpad swipes (bare metal): "swipe-<fingers>-<direction>", where fingers is

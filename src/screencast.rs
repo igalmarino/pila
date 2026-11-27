@@ -659,6 +659,24 @@ impl Pila {
         }
     }
 
+    /// End the casts of `app` sharing `target` (the tray's Stop,
+    /// `Pila::stop_capture`), telling the app, as when its monitor goes.
+    pub(crate) fn stop_casts(&mut self, app: &str, target: &crate::capture_indicator::Captured) {
+        let stopped: Vec<u64> = self
+            .screencast
+            .casts
+            .iter()
+            .filter(|cast| cast.app == app && self.captured(&cast.target).as_ref() == Some(target))
+            .map(|cast| cast.id)
+            .collect();
+        for cast in &mut self.screencast.casts {
+            if stopped.contains(&cast.id) {
+                cast.ended = true;
+            }
+        }
+        self.end_casts();
+    }
+
     /// Drop the casts Pila ended, telling their apps.
     fn end_casts(&mut self) {
         if !self.screencast.casts.iter().any(|cast| cast.ended) {

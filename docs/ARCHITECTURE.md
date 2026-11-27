@@ -1857,9 +1857,26 @@ Key flows and invariants:
   window's on its `window_output` or, off every output, `output_for_new_window`) redraws those
   outputs. The light is `LIGHT` (8) logical pixels in the accent in the middle of the output's top
   edge, in `Scene::capture_lights`, drawn by `render::screen_elements` beside the pointer (locked too),
-  never into a capture, and it keeps the output from tearing (`Scene::tears`). `pila msg --waybar
-  captures` (`ipc_client.rs`) turns the event into a waybar custom module's JSON lines; Pila's
-  waybar configuration (`resources/tools/waybar/`) has the module.
+  never into a capture, and it keeps the output from tearing (`Scene::tears`). A change of the list
+  also updates the tray icon (`Pila::update_tray`, below). `pila msg --waybar captures`
+  (`ipc_client.rs`) turns the event into a waybar custom module's JSON lines, for a waybar
+  configuration of the user's own.
+- **Capture tray icon** (`tray.rs`): a StatusNotifierItem (`org.kde.StatusNotifierItem`, the
+  tray protocol bars host) while anything is listed, its menu over `com.canonical.dbusmenu`, both
+  D-Bus specs of the desktop at large with no standard successor (as `org.freedesktop.ScreenSaver`
+  is served). `Pila::update_tray` builds the item from `CaptureIndicator::shown` (a line per
+  capture, a Stop per capture with an id kept while it's listed, the icon a square in the accent
+  at a few sizes) and hands it to the `pila-tray` thread, started with the first capture, which
+  connects to `Pila::session_bus_address` (as notifications do) and serves the item and the menu
+  from zbus's thread; nothing waits on the event loop. The item is on the bus only while there's
+  something to show: its name (`org.kde.StatusNotifierItem-<pid>-1`) is taken and registered with
+  `org.kde.StatusNotifierWatcher`, then given back, which takes it out of the tray; a watcher that
+  starts later (a bar restarted, `NameOwnerChanged` on a thread of its own) gets it registered
+  again. A Stop clicked comes back through a calloop channel to `Pila::stop_capture`: a portal
+  cast ends (`Pila::stop_casts`, the app told), a direct capture's client has its sessions
+  stopped and screencopies failed, and its connection goes into `CapturePermissions::stopped`,
+  refused before anything else (rules, `enforce`) until it connects again, or a recorder would
+  start over at once. `[permissions] tray` turns it off.
 - **IPC** (`ipc.rs`, `ipc_client.rs`; public format in `docs/IPC.md`): a Unix socket on the event
   loop, for `pila msg`, opened on every backend and removed on the way out. Nothing a client does may
   hold the loop: reads and writes don't block, a client gets `READS_PER_WAKE` reads per wake, what

@@ -49,14 +49,6 @@ window#waybar {
     padding: 0 10px;
 }
 
-/* Who is capturing the screen (`pila msg --waybar captures`): hidden while
-   nothing is. */
-#custom-pila-captures {
-    padding: 0 10px;
-    background: #@snap-preview@;
-    color: #@icon@;
-}
-
 #wireplumber.muted {
     color: #@icon-inactive@;
 }

@@ -778,13 +778,19 @@ while running keeps its path.
 Kooha) or directly (`grim`, `wf-recorder`), with or without permissions enforced, Pila shows it:
 
 - A small square in the accent color lights the middle of the top edge of each monitor being
-  captured (for a window, the monitor it's on). It's drawn on the screen only, never in what's captured. A
-  screenshot lights it for about a second. Turn it off with `indicator = false` in
+  captured (for a window, the monitor it's on). It's drawn on the screen only, never in what's
+  captured. A screenshot lights it for about a second. Turn it off with `indicator = false` in
   `[permissions]`; it also keeps a fullscreen game from tearing while it's being recorded.
+- An icon in the system tray (waybar's `tray` module, or any bar that hosts StatusNotifierItems),
+  a square in the accent, there only while something captures: its tooltip says who captures
+  what, and its menu has a **Stop** for each capture. A share through the portal ends (the app is
+  told, as when a monitor is unplugged); a program capturing directly is stopped and can't
+  capture again until it restarts, or a recorder would just start over. Turn the icon off with
+  `tray = false` in `[permissions]`. It needs the session D-Bus bus.
 - `pila msg captures` lists who captures what, and how, and the capture that ended last, with how
-  long ago (a screenshot over before you could look is still named). Pila's own waybar
-  configuration shows it in the bar: the app's name in the accent (or how many apps), each capture
-  in the tooltip, nothing while nothing captures. With a waybar configuration of your own, add the module:
+  long ago (a screenshot over before you could look is still named). For a waybar module of its
+  own instead of the tray icon (the app's name in the accent, each capture in the tooltip,
+  nothing while nothing captures), add:
 
 ```jsonc
 "modules-right": ["custom/pila-captures", ...],

@@ -91,6 +91,7 @@ pub mod text;
 pub mod tool_configs;
 pub mod toplevel_management;
 pub mod transients;
+pub mod tray;
 pub mod udev;
 pub mod upload;
 pub mod urgency;

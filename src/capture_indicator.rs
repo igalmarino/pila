@@ -101,11 +101,24 @@ pub struct Capturer {
 impl Capturer {
     /// The same capture, whatever it's named: a client's name comes once
     /// its executable is read, and a capture renamed hasn't ended.
-    fn same(&self, other: &Capturer) -> bool {
+    pub(crate) fn same(&self, other: &Capturer) -> bool {
         self.protocol == other.protocol
             && self.target == other.target
             && self.client == other.client
             && (self.client.is_some() || self.app == other.app)
+    }
+
+    /// For people, as `pila msg captures` writes it: the app, what, how.
+    pub fn describe(&self) -> String {
+        let what = match &self.target {
+            Captured::Output(output) => format!("screen {output}"),
+            Captured::Region(output, rect) => format!(
+                "region of {output} {}x{}+{}+{}",
+                rect.size.w, rect.size.h, rect.loc.x, rect.loc.y
+            ),
+            Captured::Window { app_id, .. } => format!("window {app_id}"),
+        };
+        format!("{} ({what}, {})", self.app, self.protocol.name())
     }
 
     pub fn json(&self) -> Value {
@@ -236,7 +249,20 @@ impl Pila {
         }
         if listed_changed {
             self.send_captures_event();
+            self.update_tray();
         }
+    }
+
+    /// End `capturer`'s capture, as the user asked (the tray's Stop): a
+    /// portal share ends, its app told; a program capturing directly has its
+    /// captures stopped and can't capture again until it connects again
+    /// (`Pila::stop_client_captures`), or it would at once.
+    pub(crate) fn stop_capture(&mut self, capturer: &Capturer) {
+        match &capturer.client {
+            Some(client) => self.stop_client_captures(client),
+            None => self.stop_casts(&capturer.app, &capturer.target),
+        }
+        self.capture_indicator_changed();
     }
 
     /// What `pila msg captures` lists.
@@ -376,7 +402,7 @@ impl Pila {
     }
 
     /// What `target` names now; `None` if it's gone.
-    fn captured(&self, target: &Target) -> Option<Captured> {
+    pub(crate) fn captured(&self, target: &Target) -> Option<Captured> {
         match target {
             Target::Output(output) => {
                 let output = output.upgrade()?;

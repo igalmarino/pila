@@ -1382,6 +1382,118 @@ fn the_last_capture_is_named_after_it_ends() {
     );
 }
 
+/// Wait for `f` to give something, polling as `TestPila::wait` does.
+fn eventually<T>(what: &str, f: impl Fn() -> Option<T>) -> T {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(value) = f() {
+            return value;
+        }
+        assert!(started.elapsed() < TIMEOUT, "never: {what}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A capture puts an icon in the tray, named in its tooltip, with a Stop in
+/// its menu that ends it; the program can't capture again on that
+/// connection (it would start over at once), but can once it connects
+/// again; with nothing captured, the icon leaves the tray.
+#[test]
+fn a_capture_is_in_the_tray_and_its_menu_stops_it() {
+    let bus = notifications::Bus::start();
+    let watcher = bus.tray_watcher();
+    let host = bus.host();
+    let mut pila = TestPila::start_with(Options {
+        env: vec![bus.env()],
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+    let source = output_source(&client, "HEADLESS-1");
+    let (_session, _size) = session(&client, &source, "tray");
+    let item = watcher.wait_for(1);
+    assert!(item.starts_with("org.kde.StatusNotifierItem-"), "{item}");
+    assert_eq!(
+        String::try_from(host.property(&item, "Status")).unwrap(),
+        "Active"
+    );
+    let icons: Vec<common::tray::Pixmap> = host.property(&item, "IconPixmap").try_into().unwrap();
+    assert!(!icons.is_empty(), "no icon");
+    // Named once its executable is read.
+    let what = format!("{} (screen HEADLESS-1, ext-image-copy-capture)", own_name());
+    eventually("the tooltip names it", || {
+        (host.tooltip(&item).1 == what).then_some(())
+    });
+    assert_eq!(host.tooltip(&item).0, "Capturing the screen");
+    let stop = format!("Stop {what}");
+    let menu = eventually("a Stop in the menu", || {
+        let menu = host.menu(&item);
+        (menu.len() == 1 && menu[0].label == stop).then_some(menu)
+    });
+
+    host.click(&item, menu[0].id);
+    client.wait_logged("tray", "Stopped");
+    // Not again on that connection.
+    let manager: ExtImageCopyCaptureManagerV1 = client.bind("ext_image_copy_capture_manager_v1", 1);
+    let again = output_source(&client, "HEADLESS-1");
+    let _again =
+        manager.create_session(&again, CaptureOptions::empty(), &client.qh, "again".into());
+    client.flush();
+    client.wait_logged("again", "Stopped");
+    pila.wait("unlisted", |s| captures(s).is_empty());
+    eventually("out of the tray", || (!host.on_bus(&item)).then_some(()));
+
+    // Connected again, it may.
+    let restarted = pila.client();
+    let source = output_source(&restarted, "HEADLESS-1");
+    let (_session, _size) = session(&restarted, &source, "restarted");
+    assert!(!restarted.has_logged("restarted", "Stopped"));
+    assert_eq!(watcher.wait_for(2), item, "back in the tray");
+}
+
+/// `[permissions] tray = false`: no icon in the tray.
+#[test]
+fn the_tray_icon_can_be_turned_off() {
+    let bus = notifications::Bus::start();
+    let watcher = bus.tray_watcher();
+    let mut pila = TestPila::start_with(Options {
+        config: "[permissions]\ntray = false\n".into(),
+        env: vec![bus.env()],
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+    let source = output_source(&client, "HEADLESS-1");
+    let (_session, _size) = session(&client, &source, "off");
+    pila.wait("listed", |s| !captures(s).is_empty());
+    pila.stays("not in the tray", Duration::from_millis(300), |_| {
+        watcher.registered().is_empty()
+    });
+}
+
+/// A tray started while something captures (a bar restarted) gets the icon.
+#[test]
+fn a_tray_started_later_gets_the_icon() {
+    let bus = notifications::Bus::start();
+    let mut pila = TestPila::start_with(Options {
+        env: vec![bus.env()],
+        ..Default::default()
+    });
+    let client = pila.client();
+    pila.settle();
+    let source = output_source(&client, "HEADLESS-1");
+    let (_session, _size) = session(&client, &source, "later");
+    pila.wait("listed", |s| !captures(s).is_empty());
+    let host = bus.host();
+    eventually("the item on the bus", || {
+        host.on_bus(&format!("org.kde.StatusNotifierItem-{}-1", pila.pid()))
+            .then_some(())
+    });
+    let watcher = bus.tray_watcher();
+    let item = watcher.wait_for(1);
+    assert!(host.on_bus(&item));
+}
+
 /// A window captured: listed by its app id and id, the monitor it's on lit.
 #[test]
 fn a_window_being_captured_lights_the_monitor_it_is_on() {

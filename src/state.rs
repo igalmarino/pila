@@ -133,6 +133,8 @@ pub struct Pila {
     pub tool_configs_dir: std::cell::OnceCell<Option<std::path::PathBuf>>,
     /// Desktop notifications, sent from a thread (`notifications.rs`).
     pub notifier: crate::notifications::Notifier,
+    /// The capture icon in the system tray, served from a thread (`tray.rs`).
+    pub tray: crate::tray::Tray,
 
     /// Where a dragged window would snap to, shown above the windows
     /// (`snap.rs`), and the buffer it's drawn with.
@@ -616,6 +618,7 @@ impl Pila {
             missing_programs: Default::default(),
             tool_configs_dir: Default::default(),
             notifier: Default::default(),
+            tray: Default::default(),
             snap_preview: None,
             snap_preview_buffer: SolidColorBuffer::default(),
             config_path: None,

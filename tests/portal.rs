@@ -489,6 +489,30 @@ fn a_share_is_listed_as_the_apps_capture_while_it_lasts() {
     });
 }
 
+/// A share stopped from the tray's menu ends, as if its monitor went: the
+/// app is told and the stream goes (`tray.rs`).
+#[test]
+fn a_share_stopped_from_the_tray_ends() {
+    let (mut pila, bus, _pipewire) = start();
+    let watcher = bus.tray_watcher();
+    let host = bus.host();
+    let mut portal = Portal::connect(&bus.address);
+    share(&mut pila, &mut portal, "stopped");
+    let item = watcher.wait_for(1);
+    let stop = "Stop Web Browser (screen HEADLESS-1, portal)";
+    let started = std::time::Instant::now();
+    let menu = loop {
+        let menu = host.menu(&item);
+        if menu.len() == 1 && menu[0].label == stop {
+            break menu;
+        }
+        assert!(started.elapsed() < TIMEOUT, "{menu:?}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    host.click(&item, menu[0].id);
+    pila.wait("the share over", |s| s["screencast"]["casts"] == 0);
+}
+
 #[test]
 fn the_picker_names_the_app_and_offers_every_output() {
     let (mut pila, bus, _pipewire) = start_with("A:640x480,B:800x600");

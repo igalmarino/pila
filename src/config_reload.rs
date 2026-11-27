@@ -172,6 +172,13 @@ impl Pila {
         {
             self.permissions_config_changed();
         }
+        // Turned on or off, or a new accent for its icon, or another bus.
+        if old.permissions.tray != self.config.permissions.tray
+            || old.colors.snap_preview != self.config.colors.snap_preview
+            || old.environment != self.config.environment
+        {
+            self.update_tray();
+        }
         let outputs_changed = old.outputs != self.config.outputs;
         if outputs_changed {
             // An edited [[output]] section takes over from what a display
@@ -299,8 +306,16 @@ impl Pila {
     /// `[environment]` one first.
     fn send_notification(&mut self, summary: &str, body: &str, milliseconds: u32) {
         info!(summary, body, "notification");
+        let bus = self.session_bus_address();
+        self.notifier.send(bus, summary, body, milliseconds);
+    }
+
+    /// The session bus Pila's programs get, where their notification daemon
+    /// and tray are: an `[environment]` one first, else Pila's own; `None`
+    /// without one.
+    pub(crate) fn session_bus_address(&self) -> Option<String> {
         const BUS: &str = "DBUS_SESSION_BUS_ADDRESS";
-        let bus = match self
+        match self
             .config
             .environment
             .iter()
@@ -308,8 +323,7 @@ impl Pila {
         {
             Some((_, value)) => value.clone(),
             None => std::env::var(BUS).ok(),
-        };
-        self.notifier.send(bus, summary, body, milliseconds);
+        }
     }
 }
 

@@ -74,6 +74,7 @@ hot-corner-delay = 250
 [permissions]
 enforce = false
 indicator = true
+tray = true
 
 [idle]
 monitors-off = 900

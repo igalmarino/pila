@@ -22,9 +22,11 @@
 - **New:** A capture indicator. While a program captures the screen, through the portal or
   directly (`grim`, `wf-recorder`), a small accent square lights the middle of the top edge of the
   monitor being captured, on the screen only, never in the capture (`[permissions] indicator =
-  false` turns it off). `pila msg captures` lists who captures what, and Pila's waybar
-  configuration shows it in the bar through `pila msg --waybar captures`, which a waybar
-  configuration of your own can use too.
+  false` turns it off). An icon in the system tray (waybar's, or any bar's that hosts
+  StatusNotifierItems) shows it too, while something captures: its tooltip says who captures what,
+  and its menu stops a capture; a program stopped can't capture again until it restarts
+  (`[permissions] tray = false` turns it off). `pila msg captures` lists who captures what, and
+  `pila msg --waybar captures` follows it as a waybar custom module.
 - **New:** `pila msg captures` also names the capture that ended last, and how long ago (`last`,
   with `ended` in Unix seconds, in the JSON answer and the `captures` event), so a screenshot over
   before you could look at the indicator can still be told apart.

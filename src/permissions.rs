@@ -210,6 +210,10 @@ pub struct CapturePermissions {
     /// ask fail without asking, until the program connects again (one
     /// retrying would bring the modal prompt back forever).
     client_denials: HashSet<ClientId>,
+    /// Connections whose captures the user stopped (the tray's Stop): their
+    /// next requests fail, enforced or not and whatever the rules say, until
+    /// the program connects again, or one recording would start over at once.
+    stopped: HashSet<ClientId>,
     /// Requests waiting for `/proc/<pid>/exe` to be read on a thread.
     resolving: HashMap<ClientId, Vec<PendingCapture>>,
     /// Prompts queued behind the current prompt or another modal panel.
@@ -301,6 +305,15 @@ impl Pila {
     /// `ClientState`), evaluates `[[permission]]` rules and grants, and either
     /// executes `request`, denies it, or opens the modal prompt.
     pub(crate) fn authorize_capture(&mut self, client: &Client, request: PendingCapture) {
+        // Stopped by the user (the tray's Stop, `stop_client_captures`),
+        // enforced or not.
+        if self.capture_permissions.stopped.contains(&client.id()) {
+            // Logged once, when stopped (`tray.rs`): a recorder retries a
+            // few times before it gives up.
+            debug!("capture refused: stopped on this connection");
+            self.deny_capture(request);
+            return;
+        }
         if !self.config.permissions.enforce {
             self.approve_capture(request);
             return;
@@ -827,6 +840,34 @@ impl Pila {
                 self.resolve_executable(&client);
             }
         }
+    }
+
+    /// The user stopped `client`'s captures (the tray's Stop,
+    /// `Pila::stop_capture`): its sessions stop, its screencopies fail, and
+    /// so do its next requests until it connects again (`stopped`).
+    pub(crate) fn stop_client_captures(&mut self, client: &ClientId) {
+        let dh = self.display_handle.backend_handle();
+        let stopped = &mut self.capture_permissions.stopped;
+        stopped.retain(|id| dh.get_client_data(id.clone()).is_ok());
+        stopped.insert(client.clone());
+        let mine = |owner: Option<Client>| owner.is_some_and(|c| c.id() == *client);
+        let sessions: Vec<_> = self
+            .capture
+            .sessions
+            .iter()
+            .map(|session| session.resource())
+            .filter(|resource| mine(resource.client()))
+            .collect();
+        for resource in sessions {
+            self.deny_capture_session(&resource);
+        }
+        self.capture.screencopies.retain(|frame| {
+            let stop = mine(frame.client());
+            if stop && frame.is_alive() {
+                frame.failed();
+            }
+            !stop
+        });
     }
 
     // --- IPC (`ipc.rs`) -----------------------------------------------------

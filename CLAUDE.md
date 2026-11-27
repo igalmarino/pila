@@ -219,7 +219,9 @@ shells such as waybar): `wlr-layer-shell`, `wlr-screencopy`, `wlr-foreign-toplev
 `wlr-gamma-control`, `wlr-output-management`, `wlr-output-power-management` and
 `virtual-keyboard-unstable-v1`; and `input-method-unstable-v2`, which input methods (fcitx5)
 need, until its successor (`xx-input-method`, experimental) lands. Other vendor protocols (KDE,
-GNOME, Hyprland, …) are not added, even if Smithay implements them. Features with no protocol
+GNOME, Hyprland, …) are not added, even if Smithay implements them. That's for Wayland: on D-Bus,
+Pila serves the desktop's de facto interfaces where no standard exists (`org.freedesktop.ScreenSaver`;
+StatusNotifierItem and dbusmenu for the capture tray icon, `tray.rs`). Features with no protocol
 at all go through Pila's own config/IPC.
 
 Privileged protocols are hidden from sandboxed apps: a client that connected through
