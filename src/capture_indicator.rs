@@ -1,8 +1,8 @@
 //! The capture indicator: what is capturing the screen now, whichever way
 //! (the portal's casts, ext-image-copy-capture sessions, wlr-screencopy
 //! frames), for `pila msg captures` and its event, and a light on each
-//! monitor being captured: a small square in the accent in its top-right
-//! corner, drawn on the screen alone (`render::screen_elements`), never in a
+//! monitor being captured: a small square in the accent in the middle of
+//! its top edge, where the eye passes often, drawn on the screen alone (`render::screen_elements`), never in a
 //! capture. `[permissions] indicator` turns the light off; the list stays.
 //!
 //! A capture is listed while it runs and for `HOLD` after it ends, so a
@@ -286,8 +286,8 @@ impl Pila {
         }
     }
 
-    /// The lights: one per output something listed captures, in its
-    /// top-right corner. None when `[permissions] indicator` is off.
+    /// The lights: one per output something listed captures, in the middle
+    /// of its top edge. None when `[permissions] indicator` is off.
     fn capture_lights(&self) -> Vec<(String, Rectangle<i32, Logical>)> {
         if !self.config.permissions.indicator {
             return Vec::new();
@@ -306,7 +306,7 @@ impl Pila {
                 let output = self.space.outputs().find(|o| o.name() == name)?;
                 let geo = self.space.output_geometry(output)?;
                 let light = Rectangle::new(
-                    (geo.loc.x + geo.size.w - LIGHT, geo.loc.y).into(),
+                    (geo.loc.x + (geo.size.w - LIGHT) / 2, geo.loc.y).into(),
                     (LIGHT, LIGHT).into(),
                 );
                 Some((name.to_string(), light))

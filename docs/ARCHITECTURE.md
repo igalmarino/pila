@@ -1855,8 +1855,8 @@ Key flows and invariants:
   moving to another monitor), and does nothing otherwise. A change of the list sends the `captures`
   event at once; a change of the lights (`[permissions] indicator`: one per output captured, a
   window's on its `window_output` or, off every output, `output_for_new_window`) redraws those
-  outputs. The light is `LIGHT` (8) logical pixels in the accent in the output's top-right corner,
-  in `Scene::capture_lights`, drawn by `render::screen_elements` beside the pointer (locked too),
+  outputs. The light is `LIGHT` (8) logical pixels in the accent in the middle of the output's top
+  edge, in `Scene::capture_lights`, drawn by `render::screen_elements` beside the pointer (locked too),
   never into a capture, and it keeps the output from tearing (`Scene::tears`). `pila msg --waybar
   captures` (`ipc_client.rs`) turns the event into a waybar custom module's JSON lines; Pila's
   waybar configuration (`resources/tools/waybar/`) has the module.

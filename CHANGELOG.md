@@ -20,7 +20,7 @@
   allowed in the prompt; `persistent` is now always `false`. Portal screen sharing keeps its own
   Remember (the portal's standard mechanism).
 - **New:** A capture indicator. While a program captures the screen, through the portal or
-  directly (`grim`, `wf-recorder`), a small accent square lights the top-right corner of the
+  directly (`grim`, `wf-recorder`), a small accent square lights the middle of the top edge of the
   monitor being captured, on the screen only, never in the capture (`[permissions] indicator =
   false` turns it off). `pila msg captures` lists who captures what, and Pila's waybar
   configuration shows it in the bar through `pila msg --waybar captures`, which a waybar

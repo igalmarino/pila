@@ -360,8 +360,8 @@ tap = true                       # tap to click
 # enforce = true
 enforce = false
 # While a program captures a monitor (or a window or region on it), a small
-# square in the accent lights its top-right corner, on the screen only, never
-# in what's captured; `pila msg captures` lists who captures what either way.
+# square in the accent lights the middle of its top edge, on the screen only,
+# never in what's captured; `pila msg captures` lists who captures what either way.
 # indicator = false
 indicator = true
 

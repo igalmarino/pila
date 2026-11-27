@@ -777,8 +777,8 @@ while running keeps its path.
 **Capture indicator:** While anything captures the screen, through the portal (browsers, OBS,
 Kooha) or directly (`grim`, `wf-recorder`), with or without permissions enforced, Pila shows it:
 
-- A small square in the accent color lights the top-right corner of each monitor being captured
-  (for a window, the monitor it's on). It's drawn on the screen only, never in what's captured. A
+- A small square in the accent color lights the middle of the top edge of each monitor being
+  captured (for a window, the monitor it's on). It's drawn on the screen only, never in what's captured. A
   screenshot lights it for about a second. Turn it off with `indicator = false` in
   `[permissions]`; it also keeps a fullscreen game from tearing while it's being recorded.
 - `pila msg captures` lists who captures what, and how, and the capture that ended last, with how

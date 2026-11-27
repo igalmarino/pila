@@ -1241,18 +1241,19 @@ fn own_name() -> String {
         .into_owned()
 }
 
-/// An output captured: listed with the program's name, its corner lit on
-/// the screen and not in the capture; after the session ends, still for a
-/// moment, then neither.
+/// An output captured: listed with the program's name, the middle of its
+/// top edge lit on the screen and not in the capture; after the session
+/// ends, still for a moment, then neither.
 #[test]
 fn an_output_being_captured_is_listed_and_lit_on_the_screen_alone() {
     let mut pila = TestPila::start();
     let client = pila.client();
-    let corner = (1279.0, 0.0);
+    let corner = (640.0, 0.0);
     let before = pila.settle();
     assert_eq!(captures(&before), Vec::<Value>::new());
     let unlit = pila.pixel(corner.0, corner.1);
     assert_ne!(unlit, ACCENT);
+    let top_right = pila.pixel(1279.0, 0.0);
     let source = output_source(&client, "HEADLESS-1");
     let (session, size) = session(&client, &source, "lit");
     let name = own_name();
@@ -1274,10 +1275,11 @@ fn an_output_being_captured_is_listed_and_lit_on_the_screen_alone() {
         serde_json::json!(["HEADLESS-1"])
     );
     pila.wait_pixel(corner.0, corner.1, ACCENT);
+    assert_eq!(pila.pixel(1279.0, 0.0), top_right, "the corner lit");
     // Not in what's captured.
     let (_frame, file) = capture(&client, &session, size, "frame");
     client.wait_logged("frame", "Ready");
-    let px = read_pixel(&file, size.0, size.0 - 1, 0);
+    let px = read_pixel(&file, size.0, size.0 / 2, 0);
     assert_eq!(
         px,
         [unlit[0], unlit[1], unlit[2]],
@@ -1410,7 +1412,7 @@ fn a_window_being_captured_lights_the_monitor_it_is_on() {
 fn the_light_can_be_turned_off() {
     let mut pila = TestPila::with_config("[permissions]\nindicator = false\n");
     let client = pila.client();
-    let corner = (1279.0, 0.0);
+    let corner = (640.0, 0.0);
     pila.settle();
     let unlit = pila.pixel(corner.0, corner.1);
     let source = output_source(&client, "HEADLESS-1");
