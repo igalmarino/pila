@@ -51,6 +51,16 @@
   the region guide was open left their text in the old colors until they were opened again.
 - **Fixed:** When another program already owned `org.freedesktop.ScreenSaver`, Pila left its
   interface registered on its own D-Bus connection anyway; it now removes it.
+- **Fixed:** A commit an app timed (wp-commit-timing) for just before a refresh, on a still
+  screen, could be shown a refresh late: Pila woke too early to draw the frame for it and then
+  drew nothing. It now draws that frame in time for the first refresh at or after the moment asked.
+- **Fixed:** The outline of a shared screen region stayed where it was when its monitor moved (a
+  config reload, a display tool), while the stream followed the monitor; it follows too now.
+- **Fixed:** The portal kept every screen-sharing session an app ever created, and starting one
+  the app had already closed showed the share picker for it. A closed session is now forgotten,
+  and starting it fails.
+- **Changed:** A wrong `rounded-corners` value is reported with the line it's on, as other
+  settings' are.
 - **Changed:** A new default wallpaper: the plain `background` with a small pile of three bars in
   the bottom-right corner (halfway to `hover`, `hover`, and the `snap-preview` accent on top), in
   place of the outlined window stack. Still drawn from `[colors]`.
