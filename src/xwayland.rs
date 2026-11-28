@@ -205,15 +205,21 @@ fn with_signals_unblocked<T>(f: impl FnOnce() -> T) -> T {
     }
 }
 
+/// The X display reserved (`XwaylandState::reservation`).
+pub struct Reservation {
+    /// Its number, lock file and listening sockets.
+    pub display: XWaylandDisplay,
+    /// Its cookie (`xauth.rs`): Xwayland's `-auth` file, and `XAUTHORITY`
+    /// for what Pila starts.
+    pub authority: crate::xauth::Xauthority,
+}
+
 /// Xwayland and the display it serves (`Pila::xwayland`).
 pub struct XwaylandState {
-    /// The X display pila holds from startup, whether Xwayland runs or not:
-    /// its number, lock file and listening sockets. `None` when X11 apps
-    /// can't run (no Xwayland installed, or it keeps failing).
-    pub reservation: Option<XWaylandDisplay>,
-    /// The reservation's cookie (`xauth.rs`): Xwayland's `-auth` file, and
-    /// `XAUTHORITY` for what Pila starts. Goes with the reservation.
-    pub authority: Option<crate::xauth::Xauthority>,
+    /// The X display pila holds from startup, whether Xwayland runs or not.
+    /// `None` when X11 apps can't run (no Xwayland installed, it keeps
+    /// failing, or it's turned off).
+    pub reservation: Option<Reservation>,
     /// Watching the reservation's sockets while Xwayland doesn't run
     /// (`listen_for_x11`).
     pub listening: Vec<RegistrationToken>,
@@ -241,7 +247,6 @@ impl XwaylandState {
     pub fn new(shell_state: XWaylandShellState) -> Self {
         Self {
             reservation: None,
-            authority: None,
             listening: Vec::new(),
             wm: None,
             shell_state,
@@ -260,7 +265,7 @@ impl XwaylandState {
     pub fn display(&self) -> Option<u32> {
         self.reservation
             .as_ref()
-            .map(XWaylandDisplay::display_number)
+            .map(|reservation| reservation.display.display_number())
     }
 
     /// Whether Xwayland is up, with its window manager.
@@ -391,8 +396,10 @@ impl Pila {
             display = number,
             "X11 display reserved; Xwayland starts when an X11 app connects"
         );
-        self.xwayland.reservation = Some(reservation);
-        self.xwayland.authority = Some(authority);
+        self.xwayland.reservation = Some(Reservation {
+            display: reservation,
+            authority,
+        });
         self.listen_for_x11();
     }
 
@@ -406,9 +413,10 @@ impl Pila {
             self.stop_xwayland();
             return;
         }
-        let Some(reservation) = self.xwayland.reservation.clone() else {
+        let Some(reservation) = self.xwayland.reservation.as_ref() else {
             return;
         };
+        let reservation = reservation.display.clone();
         if !self.xwayland.listening.is_empty() {
             return;
         }
@@ -449,12 +457,10 @@ impl Pila {
     /// Start Xwayland on the reserved display. Once it's ready its window
     /// manager starts, with the selections Wayland clients set meanwhile.
     fn spawn_xwayland(&mut self) {
-        let (Some(reservation), Some(authority)) = (
-            self.xwayland.reservation.clone(),
-            self.xwayland.authority.as_ref(),
-        ) else {
+        let Some(Reservation { display, authority }) = &self.xwayland.reservation else {
             return;
         };
+        let reservation = display.clone();
         let number = reservation.display_number();
         // Only clients with the cookie get in; the window manager's
         // connection (`-wm`) needs none.
@@ -569,7 +575,6 @@ impl Pila {
         self.kill_xwayland();
         self.stop_listening();
         self.xwayland.reservation = None;
-        self.xwayland.authority = None;
     }
 
     /// The window manager's connection to X closed: Xwayland stopped for
@@ -659,7 +664,8 @@ impl Pila {
             && self.xwayland.token.is_none()
         {
             if self.xwayland.reservation.is_some() {
-                self.listen_for_x11();
+                info!("Xwayland is turned off; X11 display released");
+                self.stop_xwayland();
             }
         } else if self.config.xwayland.enabled && self.xwayland.reservation.is_none() {
             self.reserve_xwayland();
@@ -682,21 +688,24 @@ impl Pila {
     /// `x11_display`.
     pub fn x11_authority(&self) -> Option<&std::path::Path> {
         self.x11_display()?;
-        self.xwayland.authority.as_ref().map(|a| a.path())
+        self.xwayland
+            .reservation
+            .as_ref()
+            .map(|reservation| reservation.authority.path())
     }
 
     /// The idle timeout is over with no X11 window: ask X, on a thread (it
     /// blocks), whether only pila's own clients are left.
     fn check_xwayland_idle(&mut self) {
-        let (Some(wm), Some(display), Some(pid), Some(authority)) = (
+        let (Some(wm), Some(reservation), Some(pid)) = (
             &self.xwayland.wm,
-            self.xwayland.display(),
+            &self.xwayland.reservation,
             self.xwayland.pid,
-            &self.xwayland.authority,
         ) else {
             return;
         };
-        let cookie = authority.cookie();
+        let display = reservation.display.display_number();
+        let cookie = reservation.authority.cookie();
         if self.config.xwayland.idle_timeout.is_none() || self.has_x11_windows() {
             return;
         }

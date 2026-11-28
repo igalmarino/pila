@@ -434,7 +434,7 @@ impl Pila {
                 "housekeeping": self.loop_stats.total.1,
             },
             "xwayland": self.xwayland.display(),
-            "xauthority": self.xwayland.authority.as_ref().map(|a| a.path()),
+            "xauthority": self.xwayland.reservation.as_ref().map(|r| r.authority.path()),
             "xwayland_running": self.xwayland.running(),
             "children": self.children.len(),
         });
