@@ -766,9 +766,12 @@ captures from that program. Turning `enforce` on while programs capture stops th
 or grant allows, without asking. Portal screen sharing and screenshots are unaffected and always use
 Pila's picker.
 
-The executable path is what's checked, so this guards against programs you didn't expect, not
-against a program set on getting around it: any unsandboxed process running as you can also edit
-the configuration, run its code inside an allowed program, or connect and then start an allowed
+The executable path is what's checked (`/proc/<pid>/exe`), so this guards against programs you
+didn't expect, not against a program set on getting around it. **Rules by executable don't protect
+against malicious code already running as your user:** such a process can pass for an allowed
+program, by running it in a mount namespace of its own where another binary sits at the allowed path,
+or by loading its code into the real one with `LD_PRELOAD`. It can also edit
+the configuration, or connect and then start an allowed
 program in its own process (the path is read when the program first captures). Interpreters are one program for all
 their scripts (allowing `python3` allows every Python script), and on Nix the store path changes
 with each update (match it with `*`, such as `/nix/store/*-grim-*/bin/grim`). A program updated
