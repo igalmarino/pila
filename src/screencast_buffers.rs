@@ -288,9 +288,17 @@ impl Buffers {
     }
 }
 
-/// The modifiers a negotiated format offers, if it has any: whether it's
-/// fixed (a value) or left to pick from (a choice, even of one), and which.
-pub fn format_modifiers(format: &spa::pod::Pod) -> Option<(bool, Vec<u64>)> {
+/// The modifiers of a negotiated format (`format_modifiers`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Negotiated {
+    /// Fixed: one value.
+    Fixed(u64),
+    /// Left to Pila to pick from: a choice, even of one.
+    Choice(Vec<u64>),
+}
+
+/// The modifiers a negotiated format offers, if it has any.
+pub fn format_modifiers(format: &spa::pod::Pod) -> Option<Negotiated> {
     use spa::pod::{deserialize::PodDeserializer, ChoiceValue, Value};
     use spa::utils::ChoiceEnum;
     let (_, value) = PodDeserializer::deserialize_any_from(format.as_bytes()).ok()?;
@@ -302,9 +310,9 @@ pub fn format_modifiers(format: &spa::pod::Pod) -> Option<(bool, Vec<u64>)> {
         .iter()
         .find(|p| p.key == spa::sys::SPA_FORMAT_VIDEO_modifier)?;
     match &property.value {
-        Value::Long(modifier) => Some((true, vec![*modifier as u64])),
+        Value::Long(modifier) => Some(Negotiated::Fixed(*modifier as u64)),
         Value::Choice(ChoiceValue::Long(choice)) => match &choice.1 {
-            ChoiceEnum::None(modifier) => Some((true, vec![*modifier as u64])),
+            ChoiceEnum::None(modifier) => Some(Negotiated::Fixed(*modifier as u64)),
             // A choice is left for Pila to fix even with one value in it
             // (`DONT_FIXATE`): the stream's format isn't set until then.
             ChoiceEnum::Enum {
@@ -317,7 +325,7 @@ pub fn format_modifiers(format: &spa::pod::Pod) -> Option<(bool, Vec<u64>)> {
                         all.push(modifier as u64);
                     }
                 }
-                Some((false, all))
+                Some(Negotiated::Choice(all))
             }
             _ => None,
         },

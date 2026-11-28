@@ -1343,11 +1343,12 @@ fn new_stream(
                 return;
             }
             let (width, height) = (info.size().width, info.size().height);
-            let kind = match crate::screencast_buffers::format_modifiers(param) {
+            use crate::screencast_buffers::{format_modifiers, Negotiated};
+            let kind = match format_modifiers(param) {
                 None => Kind::Shm,
                 // Several the app takes: one fixed, offered alone (with
                 // shared memory still), and negotiated again.
-                Some((false, candidates)) => {
+                Some(Negotiated::Choice(candidates)) => {
                     let picked = format_allocator
                         .borrow_mut()
                         .as_mut()
@@ -1365,13 +1366,11 @@ fn new_stream(
                     }
                     return;
                 }
-                Some((true, picked)) => {
-                    let planes = picked.first().and_then(|&m| {
-                        format_allocator
-                            .borrow_mut()
-                            .as_mut()
-                            .and_then(|a| a.pick_modifier((width, height), &[m]))
-                    });
+                Some(Negotiated::Fixed(fixed)) => {
+                    let planes = format_allocator
+                        .borrow_mut()
+                        .as_mut()
+                        .and_then(|a| a.pick_modifier((width, height), &[fixed]));
                     match planes {
                         Some((modifier, planes)) => Kind::Dmabuf { modifier, planes },
                         None => {
@@ -1625,6 +1624,7 @@ fn buffers_param(width: u32, height: u32, kind: Kind) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screencast_buffers::{format_modifiers, Negotiated};
 
     #[test]
     fn the_params_serialize() {
@@ -1637,10 +1637,10 @@ mod tests {
             let pod = Pod::from_bytes(&format).unwrap();
             let expected = match modifiers {
                 Modifiers::None => None,
-                Modifiers::Offer(all) => Some((false, all.to_vec())),
-                Modifiers::Fixed(one) => Some((true, vec![one])),
+                Modifiers::Offer(all) => Some(Negotiated::Choice(all.to_vec())),
+                Modifiers::Fixed(one) => Some(Negotiated::Fixed(one)),
             };
-            assert_eq!(crate::screencast_buffers::format_modifiers(pod), expected);
+            assert_eq!(format_modifiers(pod), expected);
         }
         let buffers = buffers_param(1920, 1080, Kind::Shm).unwrap();
         assert!(Pod::from_bytes(&buffers).is_some());
