@@ -9,17 +9,13 @@ use std::time::Duration;
 
 const BAR: i64 = 28;
 
-fn geometry(pila: &mut TestPila, app_id: &str) -> (i64, i64, i64, i64) {
-    rect(&pila.window(app_id)["geometry"])
-}
-
 #[test]
 fn a_client_can_maximize_and_unmaximize_itself() {
     let mut pila = TestPila::start();
     let client = pila.client();
     let a = client.window("a").size(400, 300).create();
     pila.wait_focus("a");
-    let before = geometry(&mut pila, "a");
+    let before = pila.geometry("a");
     client.request(a, |t| t.set_maximized());
     client.wait_configure(a, "maximized", |c| {
         c.has(states::MAXIMIZED) && c.size == (1280, 772)
@@ -42,7 +38,7 @@ fn a_client_can_go_fullscreen_and_back() {
     let client = pila.client();
     let a = client.window("a").size(400, 300).create();
     pila.wait_focus("a");
-    let before = geometry(&mut pila, "a");
+    let before = pila.geometry("a");
     client.request(a, |t| t.set_fullscreen(None));
     client.wait_configure(a, "fullscreen", |c| {
         c.has(states::FULLSCREEN) && c.size == (1280, 800)
@@ -62,7 +58,7 @@ fn fullscreen_over_maximized_comes_back_maximized() {
     let client = pila.client();
     let a = client.window("a").size(400, 300).create();
     pila.wait_focus("a");
-    let before = geometry(&mut pila, "a");
+    let before = pila.geometry("a");
     pila.combo("Super+m");
     pila.wait("maximized", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 1280
@@ -160,7 +156,7 @@ fn a_maximized_window_keeps_its_restore_geometry_across_workspaces() {
     let client = pila.client();
     client.window("a").size(400, 300).create();
     pila.wait_focus("a");
-    let before = geometry(&mut pila, "a");
+    let before = pila.geometry("a");
     pila.combo("Super+m");
     pila.wait("maximized", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 1280
@@ -181,7 +177,7 @@ fn maximizing_a_snapped_window_restores_to_before_the_snap() {
     let client = pila.client();
     client.window("a").size(400, 300).create();
     pila.wait_focus("a");
-    let before = geometry(&mut pila, "a");
+    let before = pila.geometry("a");
     pila.combo("Super+Left");
     pila.wait("snapped", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 640

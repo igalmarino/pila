@@ -385,6 +385,28 @@ impl TestPila {
             .clone()
     }
 
+    /// The geometry (x, y, w, h) of the window with `app_id`.
+    #[track_caller]
+    pub fn geometry(&mut self, app_id: &str) -> (i64, i64, i64, i64) {
+        rect(&self.window(app_id)["geometry"])
+    }
+
+    /// Pila's IPC socket, `pila msg`'s.
+    pub fn ipc_socket(&self) -> PathBuf {
+        self.dir.join(format!("pila-{}.sock", self.display))
+    }
+
+    /// A connection to the IPC socket by hand, its reads timing out after
+    /// 10 s: (writer, reader).
+    pub fn ipc_connect(&self) -> (UnixStream, BufReader<UnixStream>) {
+        let writer = UnixStream::connect(self.ipc_socket()).unwrap();
+        writer
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let reader = BufReader::new(writer.try_clone().unwrap());
+        (writer, reader)
+    }
+
     /// Wait for a mapped window with `app_id`; returns it.
     #[track_caller]
     pub fn wait_window(&mut self, app_id: &str) -> Value {

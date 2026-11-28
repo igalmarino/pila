@@ -235,12 +235,7 @@ struct Ipc {
 
 impl Ipc {
     fn connect(pila: &TestPila) -> Self {
-        let path = pila.dir.join(format!("pila-{}.sock", pila.display));
-        let writer = UnixStream::connect(path).unwrap();
-        writer
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        let reader = BufReader::new(writer.try_clone().unwrap());
+        let (writer, reader) = pila.ipc_connect();
         Ipc { writer, reader }
     }
 

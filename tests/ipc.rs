@@ -11,10 +11,6 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-fn socket(pila: &TestPila) -> std::path::PathBuf {
-    pila.dir.join(format!("pila-{}.sock", pila.display))
-}
-
 /// `pila msg <args>` as a program in this session would run it.
 fn msg(pila: &TestPila, args: &[&str]) -> Output {
     pila.msg(args)
@@ -66,11 +62,7 @@ struct Raw {
 
 impl Raw {
     fn connect(pila: &TestPila) -> Self {
-        let writer = UnixStream::connect(socket(pila)).unwrap();
-        writer
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        let reader = BufReader::new(writer.try_clone().unwrap());
+        let (writer, reader) = pila.ipc_connect();
         Self { writer, reader }
     }
 
@@ -525,7 +517,7 @@ fn the_socket_is_private_given_to_programs_and_gone_at_the_end() {
         command: Some("printf %s \"$PILA_SOCKET\" > \"$XDG_RUNTIME_DIR/its-socket\"".into()),
         ..Options::default()
     });
-    let path = socket(&pila);
+    let path = pila.ipc_socket();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
     assert_eq!(pila.wait_file("its-socket"), path.to_str().unwrap());
@@ -704,7 +696,7 @@ struct Subscription {
 
 impl Subscription {
     fn new(pila: &TestPila, events: Option<&[&str]>) -> (Subscription, Value) {
-        let mut stream = UnixStream::connect(socket(pila)).unwrap();
+        let mut stream = UnixStream::connect(pila.ipc_socket()).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();

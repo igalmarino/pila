@@ -34,10 +34,6 @@ fn one_window(
     (pila, client, window, geometry)
 }
 
-fn geometry_of(pila: &mut TestPila, app_id: &str) -> (i64, i64, i64, i64) {
-    rect(&pila.window(app_id)["geometry"])
-}
-
 #[test]
 fn mod_shift_q_closes_and_the_client_never_sees_q() {
     let (mut pila, client, window, _) = one_window("");
@@ -153,13 +149,13 @@ fn mod_m_and_mod_up_maximize_and_toggle_back() {
         let w = window_in(s, "a").unwrap();
         w["maximized"] == true && w["geometry"]["w"] == 1280
     });
-    assert_eq!(geometry_of(&mut pila, "a"), (0, BAR, 1280, 800 - BAR));
+    assert_eq!(pila.geometry("a"), (0, BAR, 1280, 800 - BAR));
     client.wait_configure(window, "maximized", |c| c.has(states::MAXIMIZED));
     pila.combo("Super+m");
     pila.wait("restored", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 400
     });
-    assert_eq!(geometry_of(&mut pila, "a"), before);
+    assert_eq!(pila.geometry("a"), before);
     pila.combo("Super+Up");
     pila.wait("maximized again", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 1280
@@ -168,7 +164,7 @@ fn mod_m_and_mod_up_maximize_and_toggle_back() {
     pila.wait("restored again", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 400
     });
-    assert_eq!(geometry_of(&mut pila, "a"), before);
+    assert_eq!(pila.geometry("a"), before);
 }
 
 #[test]
@@ -180,14 +176,14 @@ fn mod_f_toggles_fullscreen_over_the_whole_output() {
         w["fullscreen"] == true && w["geometry"]["w"] == 1280
     });
     // No title bar: the whole output.
-    assert_eq!(geometry_of(&mut pila, "a"), (0, 0, 1280, 800));
+    assert_eq!(pila.geometry("a"), (0, 0, 1280, 800));
     assert_eq!(pila.window("a")["title_bar"], false);
     client.wait_configure(window, "fullscreen", |c| c.has(states::FULLSCREEN));
     pila.combo("Super+f");
     pila.wait("back", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 400
     });
-    assert_eq!(geometry_of(&mut pila, "a"), before);
+    assert_eq!(pila.geometry("a"), before);
     assert_eq!(pila.window("a")["title_bar"], true);
 }
 
@@ -210,7 +206,7 @@ fn mod_left_and_right_snap_to_halves_and_again_restores() {
         let w = window_in(s, "a").unwrap();
         w["snapped"] == "left" && w["geometry"]["w"] == 640
     });
-    assert_eq!(geometry_of(&mut pila, "a"), (0, BAR, 640, 800 - BAR));
+    assert_eq!(pila.geometry("a"), (0, BAR, 640, 800 - BAR));
     let c = client.wait_configure(window, "tiled", |c| c.has(states::TILED_LEFT));
     assert!(c.has(states::TILED_TOP) && c.has(states::TILED_BOTTOM));
     pila.combo("Super+Right");
@@ -218,7 +214,7 @@ fn mod_left_and_right_snap_to_halves_and_again_restores() {
         let w = window_in(s, "a").unwrap();
         w["snapped"] == "right" && w["geometry"]["x"] == 640
     });
-    assert_eq!(geometry_of(&mut pila, "a"), (640, BAR, 640, 800 - BAR));
+    assert_eq!(pila.geometry("a"), (640, BAR, 640, 800 - BAR));
     // The same side again restores the size from before the first snap.
     pila.combo("Super+Right");
     pila.wait("unsnapped", |s| {
@@ -227,7 +223,7 @@ fn mod_left_and_right_snap_to_halves_and_again_restores() {
     pila.wait("its old size", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 400
     });
-    assert_eq!(geometry_of(&mut pila, "a"), before);
+    assert_eq!(pila.geometry("a"), before);
     client.wait_configure(window, "untiled", |c| !c.has(states::TILED_RIGHT));
 }
 
@@ -252,11 +248,7 @@ fn a_maximized_or_fullscreen_window_snaps_out_of_it() {
             let w = window_in(s, "a").unwrap();
             w["snapped"] == "left" && w[field] == false && w["geometry"]["w"] == 640
         });
-        assert_eq!(
-            geometry_of(&mut pila, "a"),
-            (0, BAR, 640, 800 - BAR),
-            "{field}"
-        );
+        assert_eq!(pila.geometry("a"), (0, BAR, 640, 800 - BAR), "{field}");
         let c = client.wait_configure(window, "tiled", |c| c.has(states::TILED_LEFT));
         assert!(!c.has(state), "{field}: still {field} in {c:?}");
         pila.combo("Super+Left");
@@ -266,7 +258,7 @@ fn a_maximized_or_fullscreen_window_snaps_out_of_it() {
         pila.wait("its size from before", |s| {
             window_in(s, "a").unwrap()["geometry"]["w"] == 400
         });
-        assert_eq!(geometry_of(&mut pila, "a"), before, "{field}");
+        assert_eq!(pila.geometry("a"), before, "{field}");
         assert_eq!(pila.window("a")[field], false, "{field}");
     }
 }
@@ -282,7 +274,7 @@ fn the_restore_action_undoes_a_snap() {
     pila.wait("restored", |s| {
         window_in(s, "a").unwrap()["geometry"]["w"] == 400
     });
-    assert_eq!(geometry_of(&mut pila, "a"), before);
+    assert_eq!(pila.geometry("a"), before);
 }
 
 /// Waits for window "a" to be snapped to `side` (`None`: not snapped) with
@@ -398,7 +390,7 @@ fn mod_shift_arrows_unsnap_a_snapped_window_where_it_is() {
         let a = window_in(s, "a").unwrap();
         a["snapped"] == "left" && a["geometry"]["w"] == 640
     });
-    assert_eq!(geometry_of(&mut pila, "a"), (0, BAR, 640, 800 - BAR));
+    assert_eq!(pila.geometry("a"), (0, BAR, 640, 800 - BAR));
     pila.combo("Super+Shift+Right");
     pila.wait("unsnapped, moved by 40", |s| {
         let a = window_in(s, "a").unwrap();
