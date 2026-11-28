@@ -183,8 +183,6 @@ pub fn init_winit(
     state.space.map_output(&output, (0, 0));
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
-    // Frames left to render in full: buffer ages are unreliable after a resize.
-    let mut full_redraw = 0u8;
     // The refreshes missed between frames, by when they start
     // (`frame_stats::NestedPacing`).
     let mut pacing = crate::frame_stats::NestedPacing::default();
@@ -202,9 +200,9 @@ pub fn init_winit(
                     return;
                 }
             };
-            // Redraws happen on demand: after a window event here, as input
-            // and client requests ask (`redraw.rs`), and for a few frames
-            // after a resize.
+            // Redraws happen on demand: after a window event here, and as
+            // input and client requests ask (`redraw.rs`). A resize is
+            // redrawn in full: the damage tracker sees the new size.
             let mut queue_redraw = true;
             match event {
                 WinitEvent::Resized { size, .. } => {
@@ -221,7 +219,6 @@ pub fn init_winit(
                     state.refit_to_usable_area();
                     state.configure_lock_surfaces();
                     state.refresh_output_heads();
-                    full_redraw = 4;
                 }
                 WinitEvent::Input(event) => {
                     state.process_input_event(event);
@@ -230,20 +227,18 @@ pub fn init_winit(
                 // Keys held when the host takes focus away never get a release.
                 WinitEvent::Focus(false) => state.release_all_keys(),
                 WinitEvent::Redraw => {
-                    full_redraw = full_redraw.saturating_sub(1);
                     let started = std::time::Instant::now();
                     let at = state.clock.now().into();
-                    if redraw(state, &output, &mut damage_tracker, full_redraw > 0) {
+                    if redraw(state, &output, &mut damage_tracker) {
                         let period = crate::frame_stats::refresh_period(&output);
-                        // Only animations: the full redraws after a resize
-                        // go at the host's pace, which may well pause.
+                        // Only animations: other redraws go at the host's
+                        // pace, which may well pause.
                         let missed = pacing.frame(at, state.animating(), period);
                         state.record_missed(&output, missed);
                         state.record_frame(&output, started.elapsed());
                     }
-                    // Keep going while buffers need repainting in full, or a
-                    // lock still waits for its first locked frame.
-                    queue_redraw = full_redraw > 0 || state.lock_pending();
+                    // Again while a lock still waits for its first locked frame.
+                    queue_redraw = state.lock_pending();
                 }
                 WinitEvent::CloseRequested => state.loop_signal.stop(),
                 _ => (),
@@ -257,12 +252,7 @@ pub fn init_winit(
 }
 
 /// Draw the frame; whether one was submitted.
-fn redraw(
-    state: &mut Pila,
-    output: &Output,
-    damage_tracker: &mut OutputDamageTracker,
-    full_redraw: bool,
-) -> bool {
+fn redraw(state: &mut Pila, output: &Output, damage_tracker: &mut OutputDamageTracker) -> bool {
     // A destroyed cursor surface falls back to the default arrow.
     if matches!(&state.cursor_status, CursorImageStatus::Surface(s) if !s.is_alive()) {
         state.set_cursor(CursorImageStatus::default_named());
@@ -292,7 +282,7 @@ fn redraw(
     let mut gpu = None;
     // Age 0 makes the damage tracker redraw everything. The frame that
     // confirms a session lock must not keep anything of the unlocked screen.
-    let age = if full_redraw || lock_pending || !make_surface_current(backend) {
+    let age = if lock_pending || !make_surface_current(backend) {
         0
     } else {
         backend.buffer_age().unwrap_or(0)
