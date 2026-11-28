@@ -1376,10 +1376,10 @@ Key flows and invariants:
   and the rectangle's size in the stream's pixels (even, `capture::region_pixels`): its text drawn on a thread, one at a time, the
   latest asked for drawn when the one drawing is done. Only the outputs it was and is on redraw
   (`redraw_region`). The picker answered, cancelled or locked ends it (`take_share_picker`). While
-  a region is shared, its outline stays on the screen: `Scene::shared_regions`, set from the casts
-  when one starts or ends (`update_region_outlines`, which redraws the outputs whose outlines come
-  or go), drawn by the backends beside the pointer (`render::screen_elements`), never by a capture;
-  an outline over a fullscreen window keeps it from tearing (`Scene::tears`).
+  a region is shared, its outline stays on the screen: `Scene::shared_regions`, taken from the
+  casts with each scene (`Pila::shared_regions`), so it follows its output as that moves; a region
+  cast starting or ending redraws its output (`redraw_region_outline`); drawn by the backends
+  beside the pointer (`render::screen_elements`), never by a capture; an outline over a fullscreen window keeps it from tearing (`Scene::tears`).
 - **Remembered shares** (`screen_grants.rs`, the ScreenCast portal's `persist_mode` and
   `restore_data`): `SelectSources` keeps the `persist_mode` asked and the grant id in
   `restore_data` (`(suv)`: vendor `pila`, version 1, the id; `portal::restore_id`), which

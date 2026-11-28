@@ -972,7 +972,7 @@ impl Pila {
             app_shortcuts: self.scene_app_shortcuts(),
             capture_permission: self.scene_capture_permission(),
             quit_dialog: self.scene_quit_dialog(),
-            shared_regions: self.share_picker.outlined.clone(),
+            shared_regions: self.shared_regions(),
             capture_lights: self.capture_indicator.lights.clone(),
             outline_buffers: self.share_picker.outline_buffers.clone(),
             overview,

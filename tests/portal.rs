@@ -1826,6 +1826,31 @@ fn a_region_shared_is_outlined_on_the_screen_alone() {
     pila.wait_pixel(outside.0, outside.1, before);
 }
 
+/// A region shared goes with its output: moved, the outline is drawn where
+/// the region now is.
+#[test]
+fn a_region_shared_is_outlined_where_its_output_moves() {
+    let (mut pila, bus, _pipewire) = start_with("A:640x480,B:640x480");
+    pila.move_to(10.0, 10.0);
+    pila.settle();
+    // Left of the region, on B: at (739, 250) now, at (99, 730) once B moves
+    // under A.
+    let before = pila.pixel(739.0, 250.0);
+    let mut portal = Portal::connect(&bus.address);
+    let started = portal.request("moved", "org.example.Browser", 1);
+    pick_region(&mut pila);
+    drag(&mut pila, (740.0, 200.0), (940.0, 350.0));
+    assert_eq!(started.answer().0, 0, "Start");
+    pila.move_to(10.0, 10.0);
+    pila.wait_pixel_is(739.0, 250.0, "the outline", |p| p != before);
+
+    pila.write_config("[[output]]\nname = \"B\"\nposition = [0, 480]\n");
+    pila.wait("B under A", |s| {
+        common::rect(&s["outputs"][1]["geometry"]) == (0, 480, 640, 480)
+    });
+    pila.wait_pixel_is(99.0, 730.0, "the outline, moved with B", |p| p != before);
+}
+
 #[test]
 fn a_screenshot_of_a_region() {
     let (mut pila, bus, _pipewire) = start();

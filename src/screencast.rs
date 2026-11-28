@@ -348,6 +348,16 @@ impl Pila {
                     .retain(|ask| ask.session() != Some(session.as_str()));
                 self.close_share_picker_of(&session);
                 self.app_shortcuts_closed(&session);
+                let closed: Vec<Target> = self
+                    .screencast
+                    .casts
+                    .iter()
+                    .filter(|cast| cast.session == session)
+                    .map(|cast| cast.target.clone())
+                    .collect();
+                for target in &closed {
+                    self.redraw_region_outline(target);
+                }
                 self.screencast.casts.retain(|cast| cast.session != session);
                 self.trim_after_casts();
             }
@@ -452,6 +462,8 @@ impl Pila {
             fps,
             "portal: sharing"
         );
+        // A region shared is outlined on the screen.
+        self.redraw_region_outline(&target);
         self.screencast.casts.push(Cast {
             id,
             app,
@@ -475,8 +487,6 @@ impl Pila {
             ended: false,
             seq: 0,
         });
-        // A region shared is outlined on the screen.
-        self.update_region_outlines();
         self.capture_indicator_changed();
         // Callbacks may have run while connecting.
         self.handle_cast_events();
@@ -678,6 +688,7 @@ impl Pila {
         self.screencast.casts = kept;
         for cast in ended {
             info!(session = cast.session, "portal: sharing ended");
+            self.redraw_region_outline(&cast.target);
             if let Some(connection) = &self.screencast.portal {
                 portal::end_session(connection, cast.session.clone());
             }
@@ -689,7 +700,6 @@ impl Pila {
     /// them: now, not at the next frame drawn (a still screen has none).
     /// PipeWire's connection stays for the next.
     fn trim_after_casts(&mut self) {
-        self.update_region_outlines();
         if self.screencast.casts.is_empty() {
             self.capture.trim_textures(false);
         }

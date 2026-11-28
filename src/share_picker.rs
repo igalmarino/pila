@@ -117,9 +117,7 @@ pub struct SharePicker {
     shown: Option<Shown>,
     /// Selecting a region (Region picked), the panel hidden meanwhile.
     pub(crate) region: Option<crate::share_region::Selecting>,
-    /// The regions shared whose outlines are drawn (`Pila::shared_regions`),
-    /// and their buffers.
-    pub(crate) outlined: Vec<(String, Rectangle<i32, Logical>)>,
+    /// The buffers of the shared regions' outlines (`Pila::shared_regions`).
     pub(crate) outline_buffers: Rc<RefCell<HashMap<String, SolidColorBuffer>>>,
     /// The content being drawn on a thread (`Pila::draw_share_picker_text`).
     pending: Option<TextKey>,

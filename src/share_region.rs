@@ -434,23 +434,13 @@ impl Pila {
             .collect()
     }
 
-    /// The regions shared changed (a share started or ended): the outputs
-    /// whose outlines come or go are redrawn.
-    pub(crate) fn update_region_outlines(&mut self) {
-        let now = self.shared_regions();
-        if now == self.share_picker.outlined {
-            return;
-        }
-        let before = std::mem::replace(&mut self.share_picker.outlined, now.clone());
-        let names: Vec<&String> = before.iter().chain(&now).map(|(name, _)| name).collect();
-        let outputs: Vec<_> = self
-            .space
-            .outputs()
-            .filter(|o| names.contains(&&o.name()))
-            .cloned()
-            .collect();
-        for output in outputs {
-            self.queue_redraw_output(&output);
+    /// A share of `target` started or ended: if it's a region, its output
+    /// redraws, with its outline or without.
+    pub(crate) fn redraw_region_outline(&mut self, target: &crate::capture::Target) {
+        if let crate::capture::Target::Region(output, _) = target {
+            if let Some(output) = output.upgrade() {
+                self.queue_redraw_output(&output);
+            }
         }
     }
 
