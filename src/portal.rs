@@ -207,10 +207,7 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
         .name("pila-portal".into())
         .spawn(move || {
             let send = thread_send;
-            let screencast = ScreenCast {
-                send: send.clone(),
-                selections: Mutex::default(),
-            };
+            let screencast = ScreenCast { send: send.clone() };
             let screenshot = Screenshot { send: send.clone() };
             let shortcuts = GlobalShortcuts { send: send.clone() };
             // What was confirmed before, read here: off the event loop.
@@ -301,7 +298,6 @@ fn restore_data(id: &str) -> Variant<'static> {
 /// `org.freedesktop.impl.portal.ScreenCast`.
 struct ScreenCast {
     send: calloop::channel::Sender<Request>,
-    selections: Mutex<HashMap<String, Selection>>,
 }
 
 type Results = HashMap<String, OwnedVariant>;
@@ -337,16 +333,31 @@ async fn serve_session(
     send: &calloop::channel::Sender<Request>,
     server: &ObjectServer,
     handle: &OwnedObjectPath,
+    selection: Option<Selection>,
 ) -> bool {
     let session = Session {
         send: send.clone(),
         path: handle.to_string(),
+        selection: Mutex::new(selection),
     };
     if let Err(err) = server.at(handle.as_ref(), session).await {
         warn!(%err, "portal: can't serve a session");
         return false;
     }
     true
+}
+
+/// Run `change` on the selection of the screencast session at `path`, while
+/// it's served: a closed session's is gone with it.
+async fn with_selection<T>(
+    server: &ObjectServer,
+    path: &OwnedObjectPath,
+    change: impl FnOnce(&mut Selection) -> T,
+) -> Option<T> {
+    let session = server.interface::<_, Session>(path.as_str()).await.ok()?;
+    let session = session.get().await;
+    let mut selection = session.selection.locked();
+    selection.as_mut().map(change)
 }
 
 /// Run `work` (a bus call) on a thread named `thread`: the bus may be slow.
@@ -388,23 +399,19 @@ impl ScreenCast {
         _options: HashMap<String, OwnedVariant>,
         #[zbus(object_server)] server: &ObjectServer,
     ) -> (u32, Results) {
-        let path = session_handle.to_string();
-        debug!(app_id, session = path, "portal: new screencast session");
-        if !serve_session(&self.send, server, &session_handle).await {
+        debug!(app_id, session = %session_handle, "portal: new screencast session");
+        let selection = Selection {
+            cursor: CursorMode::Hidden,
+            sources: Sources {
+                monitors: true,
+                windows: false,
+            },
+            persist: crate::screen_grants::PERSIST_NONE,
+            restore: None,
+        };
+        if !serve_session(&self.send, server, &session_handle, Some(selection)).await {
             return (RESPONSE_OTHER, Results::new());
         }
-        self.selections.locked().insert(
-            path,
-            Selection {
-                cursor: CursorMode::Hidden,
-                sources: Sources {
-                    monitors: true,
-                    windows: false,
-                },
-                persist: crate::screen_grants::PERSIST_NONE,
-                restore: None,
-            },
-        );
         (RESPONSE_SUCCESS, Results::new())
     }
 
@@ -414,6 +421,7 @@ impl ScreenCast {
         session_handle: OwnedObjectPath,
         _app_id: String,
         options: HashMap<String, OwnedVariant>,
+        #[zbus(object_server)] server: &ObjectServer,
     ) -> (u32, Results) {
         let wanted = |key: &str| options.get(key).and_then(|v| u32::try_from(v).ok());
         let types = wanted("types");
@@ -433,15 +441,18 @@ impl ScreenCast {
             restore = restore.is_some(),
             "portal: sources selected"
         );
-        let mut selections = self.selections.locked();
-        let Some(selection) = selections.get_mut(session_handle.as_str()) else {
-            return (RESPONSE_OTHER, Results::new());
-        };
-        selection.cursor = cursor;
-        selection.sources = sources;
-        selection.persist = persist;
-        selection.restore = restore;
-        (RESPONSE_SUCCESS, Results::new())
+        let selected = with_selection(server, &session_handle, |selection| {
+            *selection = Selection {
+                cursor,
+                sources,
+                persist,
+                restore,
+            };
+        });
+        match selected.await {
+            Some(()) => (RESPONSE_SUCCESS, Results::new()),
+            None => (RESPONSE_OTHER, Results::new()),
+        }
     }
 
     async fn start(
@@ -451,11 +462,12 @@ impl ScreenCast {
         app_id: String,
         parent_window: String,
         _options: HashMap<String, OwnedVariant>,
+        #[zbus(object_server)] server: &ObjectServer,
     ) -> (u32, Results) {
-        let session = session_handle.to_string();
-        let Some(selection) = self.selections.locked().get(&session).cloned() else {
+        let Some(selection) = with_selection(server, &session_handle, |s| s.clone()).await else {
             return (RESPONSE_OTHER, Results::new());
         };
+        let session = session_handle.to_string();
         let asked = ask(&self.send, |reply| Request::Start {
             session,
             cursor: selection.cursor,
@@ -535,7 +547,7 @@ impl GlobalShortcuts {
         #[zbus(object_server)] server: &ObjectServer,
     ) -> (u32, Results) {
         let path = session_handle.to_string();
-        if !serve_session(&self.send, server, &session_handle).await {
+        if !serve_session(&self.send, server, &session_handle, None).await {
             return (RESPONSE_OTHER, Results::new());
         }
         let request = Request::ShortcutsSession {
@@ -880,6 +892,8 @@ fn streams_result(streams: &[Stream]) -> zbus::Result<Results> {
 struct Session {
     send: calloop::channel::Sender<Request>,
     path: String,
+    /// What `SelectSources` chose, for `Start`: a screencast session's.
+    selection: Mutex<Option<Selection>>,
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Session")]

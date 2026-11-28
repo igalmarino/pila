@@ -1851,6 +1851,21 @@ fn a_region_shared_is_outlined_where_its_output_moves() {
     pila.wait_pixel_is(99.0, 730.0, "the outline, moved with B", |p| p != before);
 }
 
+/// A session closed is forgotten: starting it afterwards fails and asks
+/// nothing.
+#[test]
+fn a_closed_session_cannot_be_started() {
+    let (mut pila, bus, _pipewire) = start();
+    let mut portal = Portal::connect(&bus.address);
+    portal.select_sources("closed", "org.example.Browser", 1, 1);
+    portal.close("closed");
+    let started = portal.start("closed", "org.example.Browser");
+    pila.stays("no picker", std::time::Duration::from_millis(500), |s| {
+        s["share_picker"]["shown"] != true
+    });
+    assert_eq!(started.answer().0, 2, "no session to start");
+}
+
 #[test]
 fn a_screenshot_of_a_region() {
     let (mut pila, bus, _pipewire) = start();

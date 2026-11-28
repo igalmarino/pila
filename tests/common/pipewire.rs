@@ -654,6 +654,11 @@ pub fn restore_id(data: &OwnedVariant) -> String {
     id.to_string()
 }
 
+/// The object path of the session `name`.
+fn session_path(name: &str) -> OwnedObjectPath {
+    OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap()
+}
+
 /// The portal Pila serves, called as xdg-desktop-portal calls it.
 pub struct Portal {
     bus: Connection,
@@ -774,7 +779,26 @@ impl Portal {
         persist_mode: u32,
         restore_data: Option<&OwnedVariant>,
     ) -> Started {
-        let session = OwnedObjectPath::try_from(format!("{PATH}/session/1_1/{name}")).unwrap();
+        self.select_with(name, app_id, cursor_mode, types, persist_mode, restore_data);
+        self.start(name, app_id)
+    }
+
+    /// Create the session `name` and select its sources, as `request` does,
+    /// without starting it.
+    pub fn select_sources(&mut self, name: &str, app_id: &str, cursor_mode: u32, types: u32) {
+        self.select_with(name, app_id, cursor_mode, types, 0, None);
+    }
+
+    fn select_with(
+        &mut self,
+        name: &str,
+        app_id: &str,
+        cursor_mode: u32,
+        types: u32,
+        persist_mode: u32,
+        restore_data: Option<&OwnedVariant>,
+    ) {
+        let session = session_path(name);
         let handle = self.handle();
         let (response, _) = self.call("CreateSession", &(handle, &session, app_id, Vardict::new()));
         assert_eq!(response, 0, "CreateSession");
@@ -791,6 +815,12 @@ impl Portal {
         let handle = self.handle();
         let (response, _) = self.call("SelectSources", &(handle, &session, app_id, options));
         assert_eq!(response, 0, "SelectSources");
+    }
+
+    /// Start the session `name` as app `app_id`: its answer comes on a
+    /// thread (`Started::answer`).
+    pub fn start(&mut self, name: &str, app_id: &str) -> Started {
+        let session = session_path(name);
         let handle = self.handle();
         let bus = self.bus.clone();
         let app_id = app_id.to_string();

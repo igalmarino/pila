@@ -1218,7 +1218,8 @@ Key flows and invariants:
   xdg-desktop-portal's ScreenCast backend itself, as `org.freedesktop.impl.portal.desktop.pila`
   on the session bus (`Pila::start_portal`, at startup, when `Backend::serves_portal`: bare metal,
   or headless with a bus a test gives it; nested, the host's portal shares the host's screen).
-  The bus is served from zbus's thread: `CreateSession` and `SelectSources` answer there, and
+  The bus is served from zbus's thread: `CreateSession` and `SelectSources` answer there (what a
+  session selected is kept on its `Session` object, gone when it's closed or ended), and
   `Start` sends a `portal::Request` to the event loop and waits off it for its `portal::Reply`
   (dropped unsent, `Start` fails). Monitors and windows are offered (`AvailableSourceTypes`);
   what an app selects (`portal::Sources`) is what its picker offers, and `Start` describes each
