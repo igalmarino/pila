@@ -153,46 +153,30 @@ fn remembered_keys(text: &str) -> Option<KeyCombo> {
 /// trigger text, empty for one left unset.
 pub type Store = HashMap<String, HashMap<String, String>>;
 
-/// `$XDG_STATE_HOME/pila/app-shortcuts.json`.
-pub fn store_path() -> Option<std::path::PathBuf> {
-    crate::state_file::path("app-shortcuts.json")
-}
+/// Its file in `$XDG_STATE_HOME/pila`, and the key it's kept under there.
+const STORE_FILE: &str = "app-shortcuts.json";
+const STORE_KEY: &str = "apps";
 
 /// The store, read from its file (none or unreadable: empty). Reads a file:
 /// never on the event loop (the portal's thread reads it).
 pub fn read_store() -> Store {
-    let Some(path) = store_path() else {
-        return Store::new();
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Store::new();
-    };
-    parse_store(&text).unwrap_or_else(|err| {
-        warn!(%err, path = %path.display(), "can't read the apps' shortcuts");
-        Store::new()
-    })
+    crate::state_file::read_keyed(STORE_FILE, STORE_KEY, "the apps' shortcuts")
 }
 
 /// The store in `app-shortcuts.json`'s text, which anything may have
 /// written (the `app_shortcuts` fuzz target reads it as this does).
 pub fn parse_store(text: &str) -> serde_json::Result<Store> {
-    let mut file: HashMap<String, Store> = serde_json::from_str(text)?;
-    Ok(file.remove("apps").unwrap_or_default())
+    crate::state_file::parse_keyed(text, STORE_KEY)
 }
 
 /// Write `store` to its file, on a thread, whole or not at all.
 fn save_store(store: Store) {
-    let Some(path) = store_path() else {
-        return;
-    };
-    crate::state_file::save(
+    crate::state_file::save_keyed(
         "pila-app-shortcuts",
-        path,
+        STORE_FILE,
+        STORE_KEY,
         "the apps' shortcuts",
-        move || {
-            let file = HashMap::from([("apps".to_string(), store)]);
-            serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
-        },
+        store,
     );
 }
 

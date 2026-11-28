@@ -24,7 +24,7 @@ use smithay::{
     desktop::Window,
     utils::{IsAlive, Rectangle},
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{capture::Target, foreign_toplevel, Pila};
 
@@ -72,52 +72,36 @@ fn kept() -> bool {
 /// The grants, by id.
 pub type Store = HashMap<String, Grant>;
 
-/// `$XDG_STATE_HOME/pila/screen-shares.json`.
-pub fn store_path() -> Option<std::path::PathBuf> {
-    crate::state_file::path("screen-shares.json")
-}
+/// Its file in `$XDG_STATE_HOME/pila`, and the key it's kept under there.
+const STORE_FILE: &str = "screen-shares.json";
+const STORE_KEY: &str = "grants";
 
 /// The grants kept, read from their file (none or unreadable: none). Reads
 /// a file: never on the event loop (the portal's thread reads it).
 pub fn read_store() -> Store {
-    let Some(path) = store_path() else {
-        return Store::new();
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Store::new();
-    };
-    parse_store(&text).unwrap_or_else(|err| {
-        warn!(%err, path = %path.display(), "can't read the screen shares remembered");
-        Store::new()
-    })
+    crate::state_file::read_keyed(STORE_FILE, STORE_KEY, "the screen shares remembered")
 }
 
 /// The grants in `screen-shares.json`'s text, which anything may have
 /// written.
 pub fn parse_store(text: &str) -> serde_json::Result<Store> {
-    let mut file: HashMap<String, Store> = serde_json::from_str(text)?;
-    Ok(file.remove("grants").unwrap_or_default())
+    crate::state_file::parse_keyed(text, STORE_KEY)
 }
 
 /// Write the grants kept until revoked to their file, on a thread, whole or
 /// not at all.
 fn save_store(store: &Store) {
-    let Some(path) = store_path() else {
-        return;
-    };
     let kept: Store = store
         .iter()
         .filter(|(_, grant)| grant.persistent)
         .map(|(id, grant)| (id.clone(), grant.clone()))
         .collect();
-    crate::state_file::save(
+    crate::state_file::save_keyed(
         "pila-screen-shares",
-        path,
+        STORE_FILE,
+        STORE_KEY,
         "the screen shares remembered",
-        move || {
-            let file = HashMap::from([("grants".to_string(), kept)]);
-            serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
-        },
+        kept,
     );
 }
 

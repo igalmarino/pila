@@ -71,10 +71,7 @@ fn socket_path() -> Result<PathBuf, String> {
     let display = display
         .file_name()
         .ok_or("WAYLAND_DISPLAY has no name in it")?;
-    let mut name = std::ffi::OsString::from("pila-");
-    name.push(display);
-    name.push(".sock");
-    Ok(PathBuf::from(runtime).join(name))
+    Ok(PathBuf::from(runtime).join(crate::ipc::socket_file_name(display)))
 }
 
 /// The request for the arguments after `msg`.
@@ -523,7 +520,7 @@ fn waybar(args: &[String]) -> i32 {
         return EXIT_USAGE;
     }
     let request = json!({ "request": "subscribe", "events": ["captures"] });
-    let (line, mut reader) = match socket_path().and_then(|path| ask(&path, &request)) {
+    let (line, reader) = match socket_path().and_then(|path| ask(&path, &request)) {
         Ok(answer) => answer,
         Err(err) => {
             eprintln!("pila msg: {err}");
@@ -535,36 +532,22 @@ fn waybar(args: &[String]) -> i32 {
         eprintln!("pila msg: {}", plain(&answer["error"]));
         return EXIT_REFUSED;
     }
-    if let Err(err) = reader.get_ref().set_read_timeout(None) {
-        eprintln!("pila msg: can't talk to pila: {err}");
-        return EXIT_NO_PILA;
-    }
-    let mut out = std::io::stdout().lock();
-    loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => return 0,
-            Ok(_) => {}
-        }
-        let event: Value = serde_json::from_str(&line).unwrap_or_default();
+    each_event(reader, |line| {
+        let event: Value = serde_json::from_str(line).unwrap_or_default();
         if event["event"] != "captures" {
-            continue;
+            return None;
         }
         let captures = event["captures"].as_array().cloned().unwrap_or_default();
-        let text = format!("{}\n", waybar_line(&captures));
-        if out
-            .write_all(text.as_bytes())
-            .and_then(|()| out.flush())
-            .is_err()
-        {
-            return 0;
-        }
-    }
+        Some(format!("{}\n", waybar_line(&captures)))
+    })
 }
 
-/// `pila msg subscribe`, once pila said yes: each event as it comes, until
-/// pila closes the connection.
-fn follow(mut reader: BufReader<UnixStream>, json_output: bool) -> i32 {
+/// Each event pila sends, as `text` writes it (`None`: nothing), until pila
+/// closes the connection or the output does (`| head`).
+fn each_event(
+    mut reader: BufReader<UnixStream>,
+    mut text: impl FnMut(&str) -> Option<String>,
+) -> i32 {
     // Events come when something changes: no timeout from here on.
     if let Err(err) = reader.get_ref().set_read_timeout(None) {
         eprintln!("pila msg: can't talk to pila: {err}");
@@ -577,24 +560,35 @@ fn follow(mut reader: BufReader<UnixStream>, json_output: bool) -> i32 {
             Ok(0) | Err(_) => return 0,
             Ok(_) => {}
         }
-        let written = if json_output {
-            out.write_all(json_safe(&line).as_bytes())
-                .and_then(|()| out.flush())
-        } else {
-            let event: Value = serde_json::from_str(&line).unwrap_or_default();
-            let kind = plain(&event["event"]);
-            let mut text = format!("== {kind}\n");
-            for item in text_of(&kind, &event) {
-                text.push_str(&item);
-                text.push('\n');
-            }
-            out.write_all(text.as_bytes()).and_then(|()| out.flush())
+        let Some(text) = text(&line) else {
+            continue;
         };
-        // A closed pipe (`| head`): done.
-        if written.is_err() {
+        if out
+            .write_all(text.as_bytes())
+            .and_then(|()| out.flush())
+            .is_err()
+        {
             return 0;
         }
     }
+}
+
+/// `pila msg subscribe`, once pila said yes: each event as it comes, until
+/// pila closes the connection.
+fn follow(reader: BufReader<UnixStream>, json_output: bool) -> i32 {
+    each_event(reader, |line| {
+        if json_output {
+            return Some(json_safe(line));
+        }
+        let event: Value = serde_json::from_str(line).unwrap_or_default();
+        let kind = plain(&event["event"]);
+        let mut text = format!("== {kind}\n");
+        for item in text_of(&kind, &event) {
+            text.push_str(&item);
+            text.push('\n');
+        }
+        Some(text)
+    })
 }
 
 #[cfg(test)]

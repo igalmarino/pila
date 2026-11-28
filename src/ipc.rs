@@ -109,14 +109,20 @@ pub fn init(state: &mut Pila) {
     }
 }
 
+/// The IPC socket's name in `$XDG_RUNTIME_DIR` for the Wayland socket
+/// `display`: `pila-<display>.sock`, where `pila msg` looks for it.
+pub(crate) fn socket_file_name(display: impl AsRef<std::ffi::OsStr>) -> std::ffi::OsString {
+    let mut name = std::ffi::OsString::from("pila-");
+    name.push(display);
+    name.push(".sock");
+    name
+}
+
 fn open(state: &mut Pila) -> std::io::Result<()> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| std::io::Error::other("XDG_RUNTIME_DIR is not set"))?;
-    let mut name = std::ffi::OsString::from("pila-");
-    name.push(&state.socket_name);
-    name.push(".sock");
-    let path = dir.join(name);
+    let path = dir.join(socket_file_name(&state.socket_name));
     // Left by a pila that crashed: the Wayland socket's name is ours now.
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
@@ -893,25 +899,13 @@ impl Pila {
     /// `[colors]` as the config writes them (`#rrggbb`, or `#rrggbbaa` when
     /// translucent), named with `_` for `-`.
     fn ipc_colors(&self) -> Value {
-        let c = &self.config.colors;
-        let opaque = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
-        let colors = [
-            ("bar", c.bar),
-            ("bar_inactive", c.bar_inactive),
-            ("bar_urgent", c.bar_urgent),
-            ("icon", opaque(c.icon)),
-            ("icon_inactive", opaque(c.icon_inactive)),
-            ("hover", opaque(c.hover)),
-            ("hover_icon", opaque(c.hover_icon)),
-            ("close_hover", opaque(c.close_hover)),
-            ("close_hover_icon", opaque(c.close_hover_icon)),
-            ("background", c.background),
-            ("snap_preview", c.snap_preview),
-        ];
+        // The config's keys, in snake case as the rest of the IPC.
         Value::Object(
-            colors
+            self.config
+                .colors
+                .named()
                 .into_iter()
-                .map(|(name, color)| (name.to_string(), hex(color).into()))
+                .map(|(name, color)| (name.replace('-', "_"), hex(color).into()))
                 .collect(),
         )
     }

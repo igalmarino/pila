@@ -1356,6 +1356,29 @@ fn need<T>(value: Option<T>, key: &str) -> Result<T, String> {
     })
 }
 
+/// `value` of `key` if it's within `range`; else an error that says the
+/// range, in `unit` ("pixels"; empty: none).
+fn in_range<T: PartialOrd + std::fmt::Display>(
+    value: T,
+    key: &str,
+    range: std::ops::RangeInclusive<T>,
+    unit: &str,
+) -> Result<T, String> {
+    if range.contains(&value) {
+        return Ok(value);
+    }
+    let unit = if unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {unit}")
+    };
+    Err(format!(
+        "{key} = {value}: must be {} to {}{unit}",
+        range.start(),
+        range.end()
+    ))
+}
+
 /// The file's layout, before validation: everything optional, as the user's
 /// file may leave anything out (`EXAMPLE` fills it in).
 #[derive(Debug, Default, Deserialize)]
@@ -1442,6 +1465,27 @@ pub struct Colors {
     pub background: [f32; 4],
     /// Where a dragged window would snap to (`snap.rs`).
     pub snap_preview: [f32; 4],
+}
+
+impl Colors {
+    /// Every color by its key in `[colors]`, premultiplied RGBA (those
+    /// with no alpha of their own opaque).
+    pub fn named(&self) -> [(&'static str, [f32; 4]); 11] {
+        let opaque = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
+        [
+            ("bar", self.bar),
+            ("bar-inactive", self.bar_inactive),
+            ("bar-urgent", self.bar_urgent),
+            ("icon", opaque(self.icon)),
+            ("icon-inactive", opaque(self.icon_inactive)),
+            ("hover", opaque(self.hover)),
+            ("hover-icon", opaque(self.hover_icon)),
+            ("close-hover", opaque(self.close_hover)),
+            ("close-hover-icon", opaque(self.close_hover_icon)),
+            ("background", self.background),
+            ("snap-preview", self.snap_preview),
+        ]
+    }
 }
 
 /// `[colors]` as written: unset ones are `EXAMPLE`'s.
@@ -1554,14 +1598,13 @@ impl CursorFile {
     }
 
     fn validate(self) -> Result<CursorConfig, String> {
-        let magnification = need(self.shake_magnification, "cursor.shake-magnification")?;
-        if !SHAKE_MAGNIFICATIONS.contains(&magnification) {
-            return Err(format!(
-                "cursor.shake-magnification = {magnification}: must be {} to {}",
-                SHAKE_MAGNIFICATIONS.start(),
-                SHAKE_MAGNIFICATIONS.end()
-            ));
-        }
+        let key = "cursor.shake-magnification";
+        let magnification = in_range(
+            need(self.shake_magnification, key)?,
+            key,
+            SHAKE_MAGNIFICATIONS,
+            "",
+        )?;
         if self
             .theme
             .as_deref()
@@ -1569,12 +1612,8 @@ impl CursorFile {
         {
             return Err("cursor.theme is empty: name a theme, or leave it out".to_string());
         }
-        if let Some(size) = self.size.filter(|size| !CURSOR_SIZES.contains(size)) {
-            return Err(format!(
-                "cursor.size = {size}: must be {} to {}",
-                CURSOR_SIZES.start(),
-                CURSOR_SIZES.end()
-            ));
+        if let Some(size) = self.size {
+            in_range(size, "cursor.size", CURSOR_SIZES, "")?;
         }
         Ok(CursorConfig {
             shake_to_find: need(self.shake_to_find, "cursor.shake-to-find")?,
@@ -1622,17 +1661,18 @@ impl XwaylandFile {
     }
 
     fn validate(self) -> Result<XwaylandConfig, String> {
-        match self.idle_timeout {
-            Some(seconds) if !XWAYLAND_IDLE_TIMEOUTS.contains(&seconds) => Err(format!(
-                "xwayland.idle-timeout = {seconds}: must be {} to {} seconds",
-                XWAYLAND_IDLE_TIMEOUTS.start(),
-                XWAYLAND_IDLE_TIMEOUTS.end()
-            )),
-            idle_timeout => Ok(XwaylandConfig {
-                enabled: need(self.enabled, "xwayland.enabled")?,
-                idle_timeout,
-            }),
+        if let Some(seconds) = self.idle_timeout {
+            in_range(
+                seconds,
+                "xwayland.idle-timeout",
+                XWAYLAND_IDLE_TIMEOUTS,
+                "seconds",
+            )?;
         }
+        Ok(XwaylandConfig {
+            enabled: need(self.enabled, "xwayland.enabled")?,
+            idle_timeout: self.idle_timeout,
+        })
     }
 }
 
@@ -1703,22 +1743,20 @@ impl OverviewFile {
     }
 
     fn validate(self) -> Result<OverviewConfig, String> {
-        let pressure = need(self.hot_corner_pressure, "overview.hot-corner-pressure")?;
-        if !HOT_CORNER_PRESSURES.contains(&pressure) {
-            return Err(format!(
-                "overview.hot-corner-pressure = {pressure}: must be {} to {} pixels",
-                HOT_CORNER_PRESSURES.start(),
-                HOT_CORNER_PRESSURES.end()
-            ));
-        }
-        let delay = need(self.hot_corner_delay, "overview.hot-corner-delay")?;
-        if !HOT_CORNER_DELAYS.contains(&delay) {
-            return Err(format!(
-                "overview.hot-corner-delay = {delay}: must be {} to {} milliseconds",
-                HOT_CORNER_DELAYS.start(),
-                HOT_CORNER_DELAYS.end()
-            ));
-        }
+        let key = "overview.hot-corner-pressure";
+        let pressure = in_range(
+            need(self.hot_corner_pressure, key)?,
+            key,
+            HOT_CORNER_PRESSURES,
+            "pixels",
+        )?;
+        let key = "overview.hot-corner-delay";
+        let delay = in_range(
+            need(self.hot_corner_delay, key)?,
+            key,
+            HOT_CORNER_DELAYS,
+            "milliseconds",
+        )?;
         Ok(OverviewConfig {
             hot_corner: need(self.hot_corner, "overview.hot-corner")?,
             hot_corner_position: need(self.hot_corner_position, "overview.hot-corner-position")?,
@@ -1917,10 +1955,12 @@ impl ShadowFile {
     }
 
     fn validate(self) -> Result<ShadowConfig, String> {
-        let size = need(self.size, "shadow.size")?;
-        if !(0..=MAX_SHADOW).contains(&size) {
-            return Err(format!("shadow.size = {size}: must be 0 to {MAX_SHADOW}"));
-        }
+        let size = in_range(
+            need(self.size, "shadow.size")?,
+            "shadow.size",
+            0..=MAX_SHADOW,
+            "",
+        )?;
         let [x, y] = need(self.offset, "shadow.offset")?;
         let offset = (x, y);
         if [offset.0, offset.1].iter().any(|v| v.abs() > MAX_SHADOW) {
@@ -2226,25 +2266,27 @@ impl Config {
         // Unset in both: nothing to start.
         let autostart = file.autostart.or(example.autostart).unwrap_or_default();
 
-        let workspaces = match need(file.workspaces.or(example.workspaces), "workspaces")? {
-            n @ 1..=MAX_WORKSPACES => n,
-            n => return Err(format!("workspaces = {n}: must be 1 to {MAX_WORKSPACES}")),
-        };
-        let corner_radius = match need(
-            file.corner_radius.or(example.corner_radius),
+        let workspaces = in_range(
+            need(file.workspaces.or(example.workspaces), "workspaces")?,
+            "workspaces",
+            1..=MAX_WORKSPACES,
+            "",
+        )?;
+        let corner_radius = in_range(
+            need(
+                file.corner_radius.or(example.corner_radius),
+                "corner-radius",
+            )?,
             "corner-radius",
-        )? {
-            r @ 0..=MAX_CORNER_RADIUS => r,
-            r => {
-                return Err(format!(
-                    "corner-radius = {r}: must be 0 to {MAX_CORNER_RADIUS}"
-                ))
-            }
-        };
-        let gaps = match need(file.gaps.or(example.gaps), "gaps")? {
-            g @ 0..=MAX_GAPS => g,
-            g => return Err(format!("gaps = {g}: must be 0 to {MAX_GAPS}")),
-        };
+            0..=MAX_CORNER_RADIUS,
+            "",
+        )?;
+        let gaps = in_range(
+            need(file.gaps.or(example.gaps), "gaps")?,
+            "gaps",
+            0..=MAX_GAPS,
+            "",
+        )?;
         let rounded_corners = match need(
             file.rounded_corners.or(example.rounded_corners),
             "rounded-corners",
@@ -2403,19 +2445,17 @@ impl Config {
         let input = InputConfig {
             touchpad: pointer(file.input.touchpad, example.input.touchpad, "touchpad")?,
             mouse: pointer(file.input.mouse, example.input.mouse, "mouse")?,
-            wheel_binding_cooldown: match need(
-                file.input
-                    .wheel_binding_cooldown
-                    .or(example.input.wheel_binding_cooldown),
+            wheel_binding_cooldown: in_range(
+                need(
+                    file.input
+                        .wheel_binding_cooldown
+                        .or(example.input.wheel_binding_cooldown),
+                    "input.wheel-binding-cooldown",
+                )?,
                 "input.wheel-binding-cooldown",
-            )? {
-                ms if ms > MAX_WHEEL_BINDING_COOLDOWN => {
-                    return Err(format!(
-                        "[input] wheel-binding-cooldown = {ms}: it's 0 to {MAX_WHEEL_BINDING_COOLDOWN} ms"
-                    ))
-                }
-                ms => ms,
-            },
+                0..=MAX_WHEEL_BINDING_COOLDOWN,
+                "ms",
+            )?,
         };
 
         Ok(Self {

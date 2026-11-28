@@ -122,24 +122,6 @@ pub fn dir_in(runtime: &Path) -> PathBuf {
     runtime.join("pila-tools")
 }
 
-/// Each `[colors]` key, as the templates name it (`@key@`), and its color.
-fn palette(colors: &Colors) -> [(&'static str, [f32; 4]); 11] {
-    let rgb = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
-    [
-        ("bar", colors.bar),
-        ("bar-inactive", colors.bar_inactive),
-        ("bar-urgent", colors.bar_urgent),
-        ("icon", rgb(colors.icon)),
-        ("icon-inactive", rgb(colors.icon_inactive)),
-        ("hover", rgb(colors.hover)),
-        ("hover-icon", rgb(colors.hover_icon)),
-        ("close-hover", rgb(colors.close_hover)),
-        ("close-hover-icon", rgb(colors.close_hover_icon)),
-        ("background", colors.background),
-        ("snap-preview", colors.snap_preview),
-    ]
-}
-
 /// A premultiplied color's `rrggbb`, its alpha left out (the tools draw
 /// these opaque: `snap-preview` is the accent).
 fn rgb_hex(color: [f32; 4]) -> String {
@@ -175,7 +157,7 @@ fn partial_path(path: &Path) -> PathBuf {
 /// `template` with each `@key@` of `[colors]` replaced by its `rrggbb`.
 pub fn fill(template: &str, colors: &Colors) -> String {
     let mut text = template.to_string();
-    for (key, color) in palette(colors) {
+    for (key, color) in colors.named() {
         text = text.replace(&format!("@{key}@"), &rgb_hex(color));
     }
     text
@@ -407,7 +389,7 @@ mod tests {
     #[test]
     fn every_color_is_a_colors_key() {
         let keys: Vec<String> = example_hex().into_iter().map(|(k, _)| k).collect();
-        assert_eq!(keys.len(), palette(&colors("")).len());
+        assert_eq!(keys.len(), colors("").named().len());
         for (path, text) in templates() {
             let used = keys_in(text);
             assert!(

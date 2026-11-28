@@ -63,6 +63,54 @@ fn write_in_order(path: &Path, text: &str, number: u64) -> std::io::Result<bool>
     Ok(true)
 }
 
+/// What `key` holds in a state file's `text` (`{"<key>": ...}`), which
+/// anything may have written; nothing there: the default.
+pub fn parse_keyed<T: serde::de::DeserializeOwned + Default>(
+    text: &str,
+    key: &str,
+) -> serde_json::Result<T> {
+    let mut file: HashMap<String, T> = serde_json::from_str(text)?;
+    Ok(file.remove(key).unwrap_or_default())
+}
+
+/// What `key` holds in the state file `name` (`parse_keyed`); none or
+/// unreadable: the default, logged as `what`. Reads a file: never on the
+/// event loop.
+pub fn read_keyed<T: serde::de::DeserializeOwned + Default>(
+    name: &str,
+    key: &str,
+    what: &str,
+) -> T {
+    let Some(path) = path(name) else {
+        return T::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return T::default();
+    };
+    parse_keyed(&text, key).unwrap_or_else(|err| {
+        warn!(%err, path = %path.display(), "can't read {what}");
+        T::default()
+    })
+}
+
+/// `value` written under `key` to the state file `name` (`save`, on a
+/// thread named `thread`).
+pub fn save_keyed<T: serde::Serialize + Send + 'static>(
+    thread: &str,
+    name: &str,
+    key: &'static str,
+    what: &'static str,
+    value: T,
+) {
+    let Some(path) = path(name) else {
+        return;
+    };
+    save(thread, path, what, move || {
+        let file = HashMap::from([(key, value)]);
+        serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
+    });
+}
+
 /// `$XDG_STATE_HOME/pila/<name>`; `None` with neither it (absolute) nor
 /// `HOME` set.
 pub fn path(name: &str) -> Option<PathBuf> {
