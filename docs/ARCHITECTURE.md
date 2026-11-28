@@ -1665,8 +1665,10 @@ Key flows and invariants:
   a client dispatch or input). Apps also inhibit over D-Bus (`screensaver.rs`:
   `org.freedesktop.ScreenSaver`'s `Inhibit`/`UnInhibit` at `/org/freedesktop/ScreenSaver` and
   `/ScreenSaver`, served on the portal's connection, so on udev and headless only; the name is
-  taken with `DO_NOT_QUEUE`, and a program that has it already keeps it, the interface taken off
-  both paths again (`withdraw`)). `SimulateUserActivity` sets `input_activity`
+  taken with `DO_NOT_QUEUE` (`session_bus::take_name`, as the tray takes its item's), and a
+  program that has it already keeps it, the interface taken off both paths again (`withdraw`)).
+  Pila's connections to the bus share `session_bus::TIMEOUT` (`session_bus::builder`), and
+  follow names' owners with `session_bus::name_owner_changes`. `SimulateUserActivity` sets `input_activity`
   (`portal::Request::UserActivity`), and `GetActive` asks the event loop whether the session is
   locked (`portal::Request::ScreenSaverActive`); the rest of the interface isn't served. A cookie counts
   wherever its app is (no surface) but not while locked; only the app that got it can give

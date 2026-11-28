@@ -217,8 +217,7 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
             let _ = send.send(Request::ShortcutsStore(crate::app_shortcuts::read_store()));
             let _ = send.send(Request::ScreenGrants(crate::screen_grants::read_store()));
             let built = zbus::block_on(
-                zbus::connection::Builder::address(address.as_str())
-                    .method_timeout(std::time::Duration::from_secs(5))
+                crate::session_bus::builder(&address)
                     .name(BUS_NAME)
                     .serve_at(PATH, screencast)
                     .serve_at(PATH, screenshot)
@@ -251,23 +250,15 @@ pub fn serve(address: String, send: calloop::channel::Sender<Request>) {
 /// serving it, on a thread: the bus may be slow.
 pub fn end_session(connection: &zbus::Connection, session: String) {
     let connection = connection.clone();
-    let spawned = std::thread::Builder::new()
-        .name("pila-portal-end".into())
-        .spawn(move || {
-            let ended = zbus::block_on(async {
-                let server = connection.object_server();
-                let iface = server.interface::<_, Session>(session.as_str()).await?;
-                Session::closed(iface.signal_emitter()).await?;
-                server.remove::<Session, _>(session.as_str()).await?;
-                zbus::Result::Ok(())
-            });
-            if let Err(err) = ended {
-                debug!(%err, session, "portal: can't end the session on the bus");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(?err, "portal: can't end a session");
-    }
+    on_bus_thread("pila-portal-end", "end a session on the bus", move || {
+        zbus::block_on(async {
+            let server = connection.object_server();
+            let iface = server.interface::<_, Session>(session.as_str()).await?;
+            Session::closed(iface.signal_emitter()).await?;
+            server.remove::<Session, _>(session.as_str()).await?;
+            Ok(())
+        })
+    });
 }
 
 /// What `SelectSources` chose for a session, used by `Start`.
@@ -315,6 +306,78 @@ struct ScreenCast {
 
 type Results = HashMap<String, OwnedVariant>;
 
+/// Hand the event loop the request `make` builds with its reply, and wait
+/// for the answer: refused, the response the portal gives (cancelled, or
+/// another failure).
+async fn ask<T>(
+    send: &calloop::channel::Sender<Request>,
+    make: impl FnOnce(Reply<Result<T, Refused>>) -> Request,
+) -> Result<T, u32> {
+    let (reply, answer) = reply_channel();
+    if send.send(make(reply)).is_err() {
+        return Err(RESPONSE_OTHER);
+    }
+    match answer.await {
+        Some(Ok(value)) => Ok(value),
+        Some(Err(Refused::Cancelled)) => Err(RESPONSE_CANCELLED),
+        Some(Err(Refused::Failed)) | None => Err(RESPONSE_OTHER),
+    }
+}
+
+/// A success with one result, `key`.
+fn one_result(key: &str, value: Variant<'_>) -> (u32, Results) {
+    match OwnedVariant::try_from(value) {
+        Ok(value) => (RESPONSE_SUCCESS, Results::from([(key.to_string(), value)])),
+        Err(_) => (RESPONSE_OTHER, Results::new()),
+    }
+}
+
+/// Serve a `Session` at `handle`; whether it's served.
+async fn serve_session(
+    send: &calloop::channel::Sender<Request>,
+    server: &ObjectServer,
+    handle: &OwnedObjectPath,
+) -> bool {
+    let session = Session {
+        send: send.clone(),
+        path: handle.to_string(),
+    };
+    if let Err(err) = server.at(handle.as_ref(), session).await {
+        warn!(%err, "portal: can't serve a session");
+        return false;
+    }
+    true
+}
+
+/// Run `work` (a bus call) on a thread named `thread`: the bus may be slow.
+/// `what` names it in the log when it fails.
+fn on_bus_thread(
+    thread: &str,
+    what: &'static str,
+    work: impl FnOnce() -> zbus::Result<()> + Send + 'static,
+) {
+    let spawned = std::thread::Builder::new()
+        .name(thread.into())
+        .spawn(move || {
+            if let Err(err) = work() {
+                debug!(%err, "portal: can't {what}");
+            }
+        });
+    if let Err(err) = spawned {
+        warn!(?err, "portal: can't {what}");
+    }
+}
+
+/// The `GlobalShortcuts` interface served on `connection`, for its signals.
+async fn shortcuts_interface(
+    connection: &zbus::Connection,
+) -> zbus::Result<zbus::object_server::InterfaceRef<GlobalShortcuts>> {
+    connection
+        .object_server()
+        .interface::<_, GlobalShortcuts>(PATH)
+        .await
+}
+
 #[zbus::interface(name = "org.freedesktop.impl.portal.ScreenCast")]
 impl ScreenCast {
     async fn create_session(
@@ -327,12 +390,7 @@ impl ScreenCast {
     ) -> (u32, Results) {
         let path = session_handle.to_string();
         debug!(app_id, session = path, "portal: new screencast session");
-        let session = Session {
-            send: self.send.clone(),
-            path: path.clone(),
-        };
-        if let Err(err) = server.at(session_handle.as_ref(), session).await {
-            warn!(%err, "portal: can't serve a session");
+        if !serve_session(&self.send, server, &session_handle).await {
             return (RESPONSE_OTHER, Results::new());
         }
         self.selections.locked().insert(
@@ -398,8 +456,7 @@ impl ScreenCast {
         let Some(selection) = self.selections.locked().get(&session).cloned() else {
             return (RESPONSE_OTHER, Results::new());
         };
-        let (reply, answer) = reply_channel();
-        let request = Request::Start {
+        let asked = ask(&self.send, |reply| Request::Start {
             session,
             cursor: selection.cursor,
             sources: selection.sources,
@@ -409,14 +466,10 @@ impl ScreenCast {
             persist: selection.persist,
             restore: selection.restore,
             reply,
-        };
-        if self.send.send(request).is_err() {
-            return (RESPONSE_OTHER, Results::new());
-        }
-        let started = match answer.await {
-            Some(Ok(started)) => started,
-            Some(Err(Refused::Cancelled)) => return (RESPONSE_CANCELLED, Results::new()),
-            Some(Err(Refused::Failed)) | None => return (RESPONSE_OTHER, Results::new()),
+        });
+        let started = match asked.await {
+            Ok(started) => started,
+            Err(response) => return (response, Results::new()),
         };
         match start_results(&started) {
             Ok(results) => (RESPONSE_SUCCESS, results),
@@ -482,12 +535,7 @@ impl GlobalShortcuts {
         #[zbus(object_server)] server: &ObjectServer,
     ) -> (u32, Results) {
         let path = session_handle.to_string();
-        let session = Session {
-            send: self.send.clone(),
-            path: path.clone(),
-        };
-        if let Err(err) = server.at(session_handle.as_ref(), session).await {
-            warn!(%err, "portal: can't serve a session");
+        if !serve_session(&self.send, server, &session_handle).await {
             return (RESPONSE_OTHER, Results::new());
         }
         let request = Request::ShortcutsSession {
@@ -521,29 +569,16 @@ impl GlobalShortcuts {
                 preferred: text(properties, "preferred_trigger"),
             })
             .collect();
-        let (reply, answer) = reply_channel();
-        let request = Request::BindShortcuts {
+        let bound = ask(&self.send, |reply| Request::BindShortcuts {
             session: session_handle.to_string(),
             app: None,
             parent: parent_handle(&parent_window),
             shortcuts: asked,
             reply,
-        };
-        if self.send.send(request).is_err() {
-            return (RESPONSE_OTHER, Results::new());
-        }
-        match answer.await {
-            Some(Ok(bound)) => {
-                match OwnedVariant::try_from(Variant::from(shortcut_entries(&bound))) {
-                    Ok(entries) => (
-                        RESPONSE_SUCCESS,
-                        Results::from([("shortcuts".to_string(), entries)]),
-                    ),
-                    Err(_) => (RESPONSE_OTHER, Results::new()),
-                }
-            }
-            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
-            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        });
+        match bound.await {
+            Ok(bound) => one_result("shortcuts", Variant::from(shortcut_entries(&bound))),
+            Err(response) => (response, Results::new()),
         }
     }
 
@@ -563,13 +598,7 @@ impl GlobalShortcuts {
         let Some(bound) = answer.await else {
             return (RESPONSE_OTHER, Results::new());
         };
-        match OwnedVariant::try_from(Variant::from(shortcut_entries(&bound))) {
-            Ok(entries) => (
-                RESPONSE_SUCCESS,
-                Results::from([("shortcuts".to_string(), entries)]),
-            ),
-            Err(_) => (RESPONSE_OTHER, Results::new()),
-        }
+        one_result("shortcuts", Variant::from(shortcut_entries(&bound)))
     }
 
     async fn configure_shortcuts(
@@ -624,10 +653,7 @@ pub fn emit_shortcut(
     millis: u64,
 ) {
     let emitted = zbus::block_on(async {
-        let iface = connection
-            .object_server()
-            .interface::<_, GlobalShortcuts>(PATH)
-            .await?;
+        let iface = shortcuts_interface(connection).await?;
         let emitter = iface.signal_emitter();
         let session = ObjectPath::try_from(session)?;
         match signal {
@@ -652,14 +678,12 @@ pub fn shortcuts_changed(
     shortcuts: Vec<crate::app_shortcuts::Bound>,
 ) {
     let connection = connection.clone();
-    let spawned = std::thread::Builder::new()
-        .name("pila-portal-shortcuts".into())
-        .spawn(move || {
-            let sent = zbus::block_on(async {
-                let iface = connection
-                    .object_server()
-                    .interface::<_, GlobalShortcuts>(PATH)
-                    .await?;
+    on_bus_thread(
+        "pila-portal-shortcuts",
+        "send ShortcutsChanged",
+        move || {
+            zbus::block_on(async {
+                let iface = shortcuts_interface(&connection).await?;
                 let session = ObjectPath::try_from(session.as_str())?;
                 GlobalShortcuts::shortcuts_changed(
                     iface.signal_emitter(),
@@ -667,14 +691,9 @@ pub fn shortcuts_changed(
                     shortcut_entries(&shortcuts),
                 )
                 .await
-            });
-            if let Err(err) = sent {
-                debug!(%err, "portal: can't send ShortcutsChanged");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(?err, "portal: can't send ShortcutsChanged");
-    }
+            })
+        },
+    );
 }
 
 /// `org.freedesktop.impl.portal.Screenshot`.
@@ -701,23 +720,15 @@ impl Screenshot {
         // xdg-desktop-portal says it may (its permission store).
         let ask = flag("interactive") || !flag("permission_store_checked");
         debug!(app_id, ask, "portal: screenshot");
-        let (reply, answer) = reply_channel();
-        let request = Request::Screenshot {
+        let taken = self::ask(&self.send, |reply| Request::Screenshot {
             ask,
             app: app_name(&app_id, &data_dirs()),
             parent: parent_handle(&parent_window),
             reply,
-        };
-        if self.send.send(request).is_err() {
-            return (RESPONSE_OTHER, Results::new());
-        }
-        match answer.await {
-            Some(Ok(uri)) => match OwnedVariant::try_from(Variant::from(uri)) {
-                Ok(uri) => (RESPONSE_SUCCESS, Results::from([("uri".to_string(), uri)])),
-                Err(_) => (RESPONSE_OTHER, Results::new()),
-            },
-            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
-            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        });
+        match taken.await {
+            Ok(uri) => one_result("uri", Variant::from(uri)),
+            Err(response) => (response, Results::new()),
         }
     }
 
@@ -729,20 +740,9 @@ impl Screenshot {
         _options: HashMap<String, OwnedVariant>,
     ) -> (u32, Results) {
         debug!(app_id, "portal: pick a color");
-        let (reply, answer) = reply_channel();
-        if self.send.send(Request::PickColor { reply }).is_err() {
-            return (RESPONSE_OTHER, Results::new());
-        }
-        match answer.await {
-            Some(Ok([r, g, b])) => match OwnedVariant::try_from(Variant::from((r, g, b))) {
-                Ok(color) => (
-                    RESPONSE_SUCCESS,
-                    Results::from([("color".to_string(), color)]),
-                ),
-                Err(_) => (RESPONSE_OTHER, Results::new()),
-            },
-            Some(Err(Refused::Cancelled)) => (RESPONSE_CANCELLED, Results::new()),
-            Some(Err(Refused::Failed)) | None => (RESPONSE_OTHER, Results::new()),
+        match ask(&self.send, |reply| Request::PickColor { reply }).await {
+            Ok([r, g, b]) => one_result("color", Variant::from((r, g, b))),
+            Err(response) => (response, Results::new()),
         }
     }
 
@@ -875,7 +875,8 @@ fn streams_result(streams: &[Stream]) -> zbus::Result<Results> {
     Ok(Results::from([("streams".to_string(), streams)]))
 }
 
-/// `org.freedesktop.impl.portal.Session`, one per screencast session.
+/// `org.freedesktop.impl.portal.Session`, one per screencast or shortcuts
+/// session.
 struct Session {
     send: calloop::channel::Sender<Request>,
     path: String,

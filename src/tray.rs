@@ -19,14 +19,10 @@
 use std::{
     collections::HashMap,
     sync::{mpsc, Arc, Mutex},
-    time::Duration,
 };
 
 use tracing::{debug, info, warn};
-use zbus::{
-    fdo, fdo::RequestNameFlags, fdo::RequestNameReply, object_server::SignalEmitter, Connection,
-    OwnedObjectPath, OwnedVariant, Variant,
-};
+use zbus::{fdo, object_server::SignalEmitter, Connection, OwnedObjectPath, OwnedVariant, Variant};
 
 use crate::{capture_indicator::Capturer, sync::Locked, Pila};
 
@@ -34,8 +30,6 @@ const ITEM_PATH: &str = "/StatusNotifierItem";
 const MENU_PATH: &str = "/MenuBar";
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
-/// How long the bus has to answer: a hung one only holds up the thread.
-const TIMEOUT: Duration = Duration::from_secs(5);
 /// The icon's sizes, for the tray to pick from (logical pixels).
 const ICON_SIZES: [i32; 4] = [16, 22, 32, 48];
 
@@ -282,8 +276,7 @@ fn connect(
     watcher: &mpsc::Sender<Message>,
 ) -> Result<Connection, String> {
     let connection = zbus::block_on(
-        zbus::connection::Builder::address(address)
-            .method_timeout(TIMEOUT)
+        crate::session_bus::builder(address)
             .serve_at(
                 ITEM_PATH,
                 StatusNotifierItem {
@@ -300,12 +293,7 @@ fn connect(
             .build(),
     )
     .map_err(|err| err.to_string())?;
-    let starts = zbus::block_on(async {
-        fdo::DBusProxy::new(&connection)
-            .await?
-            .receive_name_owner_changed()
-            .await
-    });
+    let starts = zbus::block_on(crate::session_bus::name_owner_changes(&connection));
     match starts {
         Ok(starts) => {
             let watcher = watcher.clone();
@@ -323,10 +311,7 @@ fn connect(
 
 /// Tell the tray's thread each time a tray's watcher starts.
 async fn watch_watchers(mut starts: fdo::NameOwnerChangedStream, watcher: mpsc::Sender<Message>) {
-    use zbus::export::futures_core::Stream;
-    while let Some(signal) =
-        std::future::poll_fn(|cx| std::pin::Pin::new(&mut starts).poll_next(cx)).await
-    {
+    while let Some(signal) = crate::session_bus::next_change(&mut starts).await {
         let Ok(args) = signal.args() else {
             continue;
         };
@@ -341,14 +326,10 @@ async fn watch_watchers(mut starts: fdo::NameOwnerChangedStream, watcher: mpsc::
 
 /// Take the item's name; whether it's Pila's.
 fn take_name(connection: &Connection, name: &str) -> bool {
-    match zbus::block_on(connection.request_name_with_flags(name, RequestNameFlags::DO_NOT_QUEUE)) {
-        Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => true,
-        Ok(reply) => {
-            warn!(?reply, name, "tray: can't take the item's name");
-            false
-        }
+    match zbus::block_on(crate::session_bus::take_name(connection, name)) {
+        Ok(()) => true,
         Err(err) => {
-            warn!(%err, name, "tray: can't take the item's name");
+            warn!(err, name, "tray: can't take the item's name");
             false
         }
     }

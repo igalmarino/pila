@@ -21,7 +21,7 @@ use std::{
 };
 
 use tracing::{info, warn};
-use zbus::{fdo, fdo::RequestNameFlags, fdo::RequestNameReply, message::Header};
+use zbus::{fdo, message::Header};
 
 use crate::{portal::Request, sync::Locked};
 
@@ -161,56 +161,15 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
         last: 0,
         send,
     }));
-    let server = connection.object_server();
-    for path in PATHS {
-        let iface = ScreenSaver {
-            cookies: cookies.clone(),
-        };
-        if let Err(err) = server.at(path, iface).await {
-            warn!(%err, path, "idle: can't serve org.freedesktop.ScreenSaver");
-            withdraw(server).await;
-            return;
-        }
-    }
-    // Watched before the name is taken, so no app's leaving is missed.
-    let proxy = match fdo::DBusProxy::new(connection).await {
-        Ok(proxy) => proxy,
+    let departures = match set_up(connection, &cookies).await {
+        Ok(departures) => departures,
         Err(err) => {
-            warn!(%err, "idle: can't watch the session bus");
-            withdraw(server).await;
+            warn!(err, "idle: not serving org.freedesktop.ScreenSaver");
+            withdraw(connection.object_server()).await;
             return;
         }
     };
-    let departures = match proxy.receive_name_owner_changed().await {
-        Ok(stream) => stream,
-        Err(err) => {
-            warn!(%err, "idle: can't watch the session bus");
-            withdraw(server).await;
-            return;
-        }
-    };
-    match connection
-        .request_name_with_flags(BUS_NAME, RequestNameFlags::DO_NOT_QUEUE)
-        .await
-    {
-        Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => {
-            info!(name = BUS_NAME, "idle: serving apps' inhibitors");
-        }
-        Ok(reply) => {
-            warn!(
-                ?reply,
-                name = BUS_NAME,
-                "idle: another program has the name"
-            );
-            withdraw(server).await;
-            return;
-        }
-        Err(err) => {
-            warn!(%err, name = BUS_NAME, "idle: can't take the name");
-            withdraw(server).await;
-            return;
-        }
-    }
+    info!(name = BUS_NAME, "idle: serving apps' inhibitors");
     let spawned = std::thread::Builder::new()
         .name("pila-screensaver".into())
         .spawn(move || zbus::block_on(watch_departures(departures, cookies)));
@@ -219,15 +178,37 @@ pub async fn serve(connection: &zbus::Connection, send: calloop::channel::Sender
     }
 }
 
+/// Serve the interface at `PATHS` and take its name, watching apps leave
+/// the bus from before (so no app's leaving is missed); why not.
+async fn set_up(
+    connection: &zbus::Connection,
+    cookies: &Arc<Mutex<Cookies>>,
+) -> Result<fdo::NameOwnerChangedStream, String> {
+    let server = connection.object_server();
+    for path in PATHS {
+        let iface = ScreenSaver {
+            cookies: cookies.clone(),
+        };
+        server
+            .at(path, iface)
+            .await
+            .map_err(|err| format!("can't serve it at {path}: {err}"))?;
+    }
+    let departures = crate::session_bus::name_owner_changes(connection)
+        .await
+        .map_err(|err| format!("can't watch the session bus: {err}"))?;
+    crate::session_bus::take_name(connection, BUS_NAME)
+        .await
+        .map_err(|err| format!("can't take the name {BUS_NAME}: {err}"))?;
+    Ok(departures)
+}
+
 /// Drop the cookies of each app that leaves the bus.
 async fn watch_departures(
     mut departures: fdo::NameOwnerChangedStream,
     cookies: Arc<Mutex<Cookies>>,
 ) {
-    use zbus::export::futures_core::Stream;
-    while let Some(signal) =
-        std::future::poll_fn(|cx| std::pin::Pin::new(&mut departures).poll_next(cx)).await
-    {
+    while let Some(signal) = crate::session_bus::next_change(&mut departures).await {
         let Ok(args) = signal.args() else {
             continue;
         };

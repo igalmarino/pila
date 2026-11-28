@@ -6,10 +6,58 @@
 //! systemd user bus `SetEnvironment` on systemd's manager too.
 //!
 //! Blocking: `export` runs on a thread of its own, never the event loop.
+//!
+//! Also what Pila's other connections to the bus share (the portal, the
+//! tray, notifications): their timeout, taking a name, following names'
+//! owners.
 
 use std::{collections::HashMap, time::Duration};
 
-use zbus::Connection;
+use zbus::{
+    fdo::{self, RequestNameFlags, RequestNameReply},
+    Connection,
+};
+
+/// How long Pila's connections to the session bus wait for an answer: a
+/// hung peer only holds up their thread.
+pub const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A connection to the bus at `address`, its calls answered within
+/// `TIMEOUT`.
+pub fn builder(address: &str) -> zbus::connection::Builder<'_> {
+    zbus::connection::Builder::address(address).method_timeout(TIMEOUT)
+}
+
+/// Take `name` on `connection`, not queued for it: why not, when it isn't
+/// Pila's (another program has it).
+pub async fn take_name(connection: &Connection, name: &str) -> Result<(), String> {
+    match connection
+        .request_name_with_flags(name, RequestNameFlags::DO_NOT_QUEUE)
+        .await
+    {
+        Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => Ok(()),
+        Ok(reply) => Err(format!("another program has it ({reply:?})")),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The bus's `NameOwnerChanged` signals, from now on.
+pub async fn name_owner_changes(
+    connection: &Connection,
+) -> zbus::Result<fdo::NameOwnerChangedStream> {
+    fdo::DBusProxy::new(connection)
+        .await?
+        .receive_name_owner_changed()
+        .await
+}
+
+/// The next of `changes` (`None`: the connection closed).
+pub async fn next_change(
+    changes: &mut fdo::NameOwnerChangedStream,
+) -> Option<fdo::NameOwnerChanged> {
+    use zbus::export::futures_core::Stream;
+    std::future::poll_fn(|cx| std::pin::Pin::new(&mut *changes).poll_next(cx)).await
+}
 
 /// Give the bus at `address` the variables `vars` (name, value) for the
 /// services it starts and, with `systemd`, `systemd --user` too, each

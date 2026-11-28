@@ -10,13 +10,10 @@
 //! next notification tries again (a daemon started later, by `autostart`, or
 //! by the bus when the first one asks for it).
 
-use std::{collections::HashMap, sync::mpsc, time::Duration};
+use std::{collections::HashMap, sync::mpsc};
 
 use tracing::warn;
 use zbus::{Connection, Variant};
-
-/// How long the daemon has to answer: a hung one only holds up the thread.
-const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A notification to send, with the bus to send it on.
 struct Notification {
@@ -100,11 +97,7 @@ fn run(receiver: mpsc::Receiver<Notification>) {
 }
 
 fn connect(address: &str) -> zbus::Result<Connection> {
-    zbus::block_on(
-        zbus::connection::Builder::address(address)
-            .method_timeout(TIMEOUT)
-            .build(),
-    )
+    zbus::block_on(crate::session_bus::builder(address).build())
 }
 
 /// `Notify`, as notify-send calls it: app name `pila`, no icon or actions.
