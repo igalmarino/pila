@@ -64,13 +64,28 @@ pub const PADDING: i32 = 12;
 /// The switcher while a switch goes on.
 #[derive(Default)]
 pub struct SwitcherView {
-    /// Shown: the switch went on past `DELAY`.
-    shown: bool,
-    /// The delay of the switch in progress.
-    timer: Option<RegistrationToken>,
+    phase: Phase,
     /// Where the panel was last drawn, redrawn when it changes or goes.
     drawn: Option<Rectangle<i32, Logical>>,
     buffers: Rc<RefCell<Buffers>>,
+}
+
+/// Where the switcher is in a switch.
+#[derive(Default)]
+enum Phase {
+    /// No switch, or it's ending.
+    #[default]
+    Hidden,
+    /// A switch began: shown once `DELAY` is over, by this timer.
+    Waiting(RegistrationToken),
+    /// Shown: the switch went on past `DELAY`.
+    Shown,
+}
+
+impl SwitcherView {
+    fn shown(&self) -> bool {
+        matches!(self.phase, Phase::Shown)
+    }
 }
 
 /// Kept between frames while it's shown: an unchanged switcher adds no
@@ -149,33 +164,30 @@ impl Pila {
     /// changes, gone with it.
     pub(crate) fn switcher_view_changed(&mut self) {
         if self.windows.switch.is_none() {
-            if let Some(timer) = self.switcher_view.timer.take() {
+            if let Phase::Waiting(timer) = std::mem::take(&mut self.switcher_view.phase) {
                 self.loop_handle.remove(timer);
             }
-            self.switcher_view.shown = false;
             *self.switcher_view.buffers.borrow_mut() = Buffers::default();
             self.redraw_switcher_view();
             return;
         }
-        if self.switcher_view.shown {
-            self.redraw_switcher_view();
-            return;
-        }
-        if self.switcher_view.timer.is_some() {
-            return;
+        match self.switcher_view.phase {
+            Phase::Shown => return self.redraw_switcher_view(),
+            Phase::Waiting(_) => return,
+            Phase::Hidden => {}
         }
         let timer = Timer::from_duration(DELAY);
-        self.switcher_view.timer = self
-            .loop_handle
-            .insert_source(timer, |_, _, state| {
-                state.switcher_view.timer = None;
-                if state.windows.switch.is_some() && !state.is_locked() {
-                    state.switcher_view.shown = true;
-                    state.redraw_switcher_view();
-                }
-                TimeoutAction::Drop
-            })
-            .ok();
+        let inserted = self.loop_handle.insert_source(timer, |_, _, state| {
+            state.switcher_view.phase = Phase::Hidden;
+            if state.windows.switch.is_some() && !state.is_locked() {
+                state.switcher_view.phase = Phase::Shown;
+                state.redraw_switcher_view();
+            }
+            TimeoutAction::Drop
+        });
+        if let Ok(timer) = inserted {
+            self.switcher_view.phase = Phase::Waiting(timer);
+        }
     }
 
     /// Redraw where the panel was and where it is now.
@@ -183,7 +195,7 @@ impl Pila {
         if let Some(rect) = self.switcher_view.drawn.take() {
             self.queue_redraw_rect(rect);
         }
-        if !self.switcher_view.shown {
+        if !self.switcher_view.shown() {
             return;
         }
         if let Some((rect, ..)) = self.switcher_layout() {
@@ -194,7 +206,7 @@ impl Pila {
 
     /// A window committed: its tile is redrawn if it's shown.
     pub(crate) fn switcher_view_committed(&mut self, window: &Window) {
-        if !self.switcher_view.shown {
+        if !self.switcher_view.shown() {
             return;
         }
         let tile = self
@@ -242,7 +254,7 @@ impl Pila {
 
     /// The switcher for `Pila::scene`, while it's shown.
     pub(crate) fn scene_switcher(&self) -> Option<SceneSwitcher> {
-        if !self.switcher_view.shown {
+        if !self.switcher_view.shown() {
             return None;
         }
         let (rect, tiles, output) = self.switcher_layout()?;
@@ -258,7 +270,7 @@ impl Pila {
     /// Whether the switcher is shown at `location` (global): nothing under
     /// it gets the pointer.
     pub fn switcher_view_covers(&self, location: Point<f64, Logical>) -> bool {
-        self.switcher_view.shown
+        self.switcher_view.shown()
             && self
                 .switcher_layout()
                 .is_some_and(|(rect, ..)| rect.to_f64().contains(location))
@@ -267,7 +279,7 @@ impl Pila {
     /// The window of the tile at `location` (global), if the switcher is
     /// shown there.
     pub fn switcher_view_window_at(&self, location: Point<f64, Logical>) -> Option<Window> {
-        if !self.switcher_view.shown || self.is_locked() {
+        if !self.switcher_view.shown() || self.is_locked() {
             return None;
         }
         let (_, tiles, _) = self.switcher_layout()?;
