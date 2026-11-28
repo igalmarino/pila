@@ -526,7 +526,8 @@ pub struct RoundedSolid {
 
 /// Which corners of a shape are rounded: a window's (`rounded-corners`),
 /// or a solid's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Corners {
     All,
     Top,

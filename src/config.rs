@@ -1381,7 +1381,7 @@ struct ConfigFile {
     input: InputFile,
     workspaces: Option<usize>,
     corner_radius: Option<u32>,
-    rounded_corners: Option<String>,
+    rounded_corners: Option<crate::rounded::Corners>,
     gaps: Option<u32>,
     other_gpus: Option<bool>,
     direct_scanout: Option<bool>,
@@ -2271,20 +2271,10 @@ impl Config {
             0..=MAX_GAPS,
             "",
         )?;
-        let rounded_corners = match need(
+        let rounded_corners = need(
             file.rounded_corners.or(example.rounded_corners),
             "rounded-corners",
-        )?
-        .as_str()
-        {
-            "top" => crate::rounded::Corners::Top,
-            "all" => crate::rounded::Corners::All,
-            other => {
-                return Err(format!(
-                    "rounded-corners = {other:?}: must be \"top\" or \"all\""
-                ))
-            }
-        };
+        )?;
         let flag = |user: Option<bool>, example: Option<bool>, key| need(user.or(example), key);
         let other_gpus = flag(file.other_gpus, example.other_gpus, "other-gpus")?;
         let direct_scanout = flag(
@@ -3515,7 +3505,7 @@ mod tests {
         let config = Config::from_toml("rounded-corners = \"all\"", &no_env).unwrap();
         assert_eq!(config.rounded_corners, crate::rounded::Corners::All);
         let err = Config::from_toml("rounded-corners = \"bottom\"", &no_env).unwrap_err();
-        assert!(err.contains("\"top\" or \"all\""), "{err}");
+        assert!(err.contains("unknown variant `bottom`"), "{err}");
         assert!(
             Config::from_toml("corner-radius = 0", &no_env)
                 .unwrap()
