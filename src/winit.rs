@@ -305,23 +305,16 @@ fn redraw(
     let (damage, render_states) = match backend.bind() {
         Ok((renderer, mut framebuffer)) => {
             // Nested, the host draws named cursors unless they're magnified.
-            let mut elements =
-                render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
-            elements.extend(render::screen_elements(
-                scene,
-                &output.name(),
-                output_geo.loc,
-                scale,
-            ));
-            elements.extend(render::output_elements(
+            let elements = render::frame_elements(
                 renderer,
                 blur,
-                scene,
+                cursor_theme,
+                &input,
                 &output.name(),
                 output_geo,
-                output_geo.loc,
                 scale,
-            ));
+                true,
+            );
             match damage_tracker.render_output(
                 renderer,
                 &mut framebuffer,

@@ -1879,6 +1879,40 @@ pub fn screen_elements(
 /// The cursor's elements, relative to `origin`: the client's cursor surface,
 /// or the named cursor from `theme` (if the backend draws it: see
 /// `FrameInput::named_cursor`), magnified as `FrameInput::magnification` says.
+/// What `output_name` at `output_geo` shows in a frame, front to back: the
+/// pointer (`with_pointer`: it's on this output; nested, named cursors are
+/// the host's unless magnified), Pila's marks on the screen alone
+/// (`screen_elements`), then the scene (`output_elements`). What every
+/// backend draws, and what the headless redraw check compares.
+#[allow(clippy::too_many_arguments)]
+pub fn frame_elements(
+    renderer: &mut GlesRenderer,
+    blur: &mut BlurCache,
+    theme: &mut CursorTheme,
+    input: &FrameInput,
+    output_name: &str,
+    output_geo: Rectangle<i32, Logical>,
+    scale: Scale<f64>,
+    with_pointer: bool,
+) -> Vec<PilaRenderElement> {
+    let origin = output_geo.loc;
+    let mut elements = Vec::new();
+    if with_pointer {
+        elements = pointer_elements(renderer, input, theme, origin, scale);
+    }
+    elements.extend(screen_elements(&input.scene, output_name, origin, scale));
+    elements.extend(output_elements(
+        renderer,
+        blur,
+        &input.scene,
+        output_name,
+        output_geo,
+        origin,
+        scale,
+    ));
+    elements
+}
+
 pub fn pointer_elements(
     renderer: &mut GlesRenderer,
     input: &FrameInput,

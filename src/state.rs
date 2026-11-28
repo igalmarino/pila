@@ -1235,6 +1235,19 @@ impl Pila {
         Some(Rectangle::new(output_geo.loc + zone.loc, zone.size))
     }
 
+    /// An output goes (unplugged, disabled), in the order it must: its
+    /// global retired, then off the `Space`, then what was on it moved
+    /// (`output_removed`).
+    pub fn retire_output(
+        &mut self,
+        output: &Output,
+        global: smithay::reexports::wayland_server::backend::GlobalId,
+    ) {
+        retire_global(&self.display_handle, &self.loop_handle, global);
+        self.space.unmap_output(output);
+        self.output_removed(output);
+    }
+
     /// An output went away (already unmapped from the space): close its
     /// panels so their clients can recreate them elsewhere, drop its lock
     /// surface, and bring windows and the pointer back onto the remaining

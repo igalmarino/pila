@@ -652,9 +652,7 @@ pub fn remove_output(state: &mut Pila, name: &str) -> bool {
     state.outputs.monitors.remove(name);
     info!(name, "output disconnected");
     if let Some(global) = removed.global {
-        crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
-        state.space.unmap_output(&removed.output);
-        state.output_removed(&removed.output);
+        state.retire_output(&removed.output, global);
     }
     state.refresh_output_heads();
     state.refresh_workspaces();
@@ -1006,26 +1004,16 @@ fn check_redraws(state: &mut Pila) {
             continue;
         };
         let scale = crate::scale::output_scale(&output);
-        let mut elements = Vec::new();
-        if output_geo.to_f64().contains(input.pointer) {
-            elements =
-                render::pointer_elements(renderer, &input, cursor_theme, output_geo.loc, scale);
-        }
-        elements.extend(render::screen_elements(
-            &input.scene,
-            &output.name(),
-            output_geo.loc,
-            scale,
-        ));
-        elements.extend(render::output_elements(
+        let elements = render::frame_elements(
             renderer,
             blur,
-            &input.scene,
+            cursor_theme,
+            &input,
             &output.name(),
             output_geo,
-            output_geo.loc,
             scale,
-        ));
+            output_geo.to_f64().contains(input.pointer),
+        );
         if let Ok((Some(damage), _)) = tracker.damage_output(1, &elements) {
             if !damage.is_empty() {
                 warn!(
@@ -1133,25 +1121,16 @@ fn render_output(
 
     // Named cursors are left out unless magnified, as nested (the host
     // would draw them).
-    let mut elements = Vec::new();
-    if pointer_here {
-        elements = render::pointer_elements(renderer, input, cursor_theme, output_geo.loc, scale);
-    }
-    elements.extend(render::screen_elements(
-        scene,
-        &output.name(),
-        output_geo.loc,
-        scale,
-    ));
-    elements.extend(render::output_elements(
+    let elements = render::frame_elements(
         renderer,
         blur,
-        scene,
+        cursor_theme,
+        input,
         &output.name(),
         output_geo,
-        output_geo.loc,
         scale,
-    ));
+        pointer_here,
+    );
     // The check's tracker follows what's drawn (`check_redraws`).
     if let Some((tracker, suspect)) = &mut o.check {
         let _ = tracker.damage_output(1, &elements);
