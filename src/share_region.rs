@@ -18,10 +18,9 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use smithay::{
     backend::renderer::{element::solid::SolidColorBuffer, gles::GlesRenderer},
     input::{keyboard::Keysym, pointer::CursorIcon, pointer::CursorImageStatus},
-    reexports::calloop,
     utils::{Logical, Point, Rectangle, Scale},
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     capture::Target,
@@ -375,24 +374,11 @@ impl Pila {
         }
         selecting.pending = Some(key.clone());
         let buffers = selecting.buffers.clone();
-        let (sender, channel) = calloop::channel::channel();
         let job = key.clone();
-        let spawned = std::thread::Builder::new()
-            .name("pila-region".into())
-            .spawn(move || {
-                let _ = sender.send(panel::draw_text(&job));
-            });
-        if let Err(err) = spawned {
-            warn!(?err, "can't draw the region guide's text");
-            selecting.pending = None;
-            return;
-        }
-        let inserted = self
-            .loop_handle
-            .insert_source(channel, move |event, _, state| {
-                let calloop::channel::Event::Msg(pixels) = event else {
-                    return;
-                };
+        let started = self.off_loop(
+            "pila-region",
+            move || panel::draw_text(&job),
+            move |state, pixels| {
                 // Still this selection's: it shows, and the latest is drawn.
                 let Some(selecting) = state.share_picker.region.as_mut() else {
                     return;
@@ -407,15 +393,15 @@ impl Pila {
                 // was drawn; failed, not until what it says changes.
                 let again = pixels.is_ok() || NoText::ask_again(&pixels);
                 if let Ok(pixels) = pixels {
-                    buffers.borrow_mut().text = Some(ContentImage::new(key.clone(), pixels));
+                    buffers.borrow_mut().text = Some(ContentImage::new(key, pixels));
                 }
                 state.redraw_region();
                 if again {
                     state.draw_region_text();
                 }
-            });
-        if let Err(err) = inserted {
-            warn!(?err, "can't wait for the region guide's text");
+            },
+        );
+        if !started {
             if let Some(selecting) = self.share_picker.region.as_mut() {
                 selecting.pending = None;
             }
