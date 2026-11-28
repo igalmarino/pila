@@ -3,15 +3,27 @@
 //! pila watches the config file's directory with inotify (editors often
 //! replace the file instead of writing it, which a watch on the file itself
 //! would lose) and reloads shortly after a change to the file, so a burst of
-//! writes is one reload. An invalid file is reported (log and a desktop
-//! notification) and the running config stays.
+//! writes is one reload. A symlinked config's target is watched in its own
+//! directory, followed when the link is pointed elsewhere; a queue that
+//! overflowed reloads too, as the config's change may be among the events
+//! lost. An invalid file is reported (log and a desktop notification) and
+//! the running config stays.
 //!
 //! What applies live: bindings, Mod, terminal and launcher (read when used),
 //! the keyboard (keymap and repeat), `[input]` on connected devices, and
 //! `[[output]]` (mode, scale and position on a TTY; the nested output's
 //! scale). `autostart` only runs at startup.
 
-use std::{ffi::OsString, mem::MaybeUninit, os::unix::ffi::OsStrExt, time::Duration};
+use std::{
+    ffi::OsString,
+    mem::MaybeUninit,
+    os::{
+        fd::{AsFd, BorrowedFd},
+        unix::ffi::OsStrExt,
+    },
+    path::PathBuf,
+    time::Duration,
+};
 
 use smithay::{
     desktop::layer_map_for_output,
@@ -52,7 +64,6 @@ impl Pila {
             .parent()
             .filter(|dir| !dir.as_os_str().is_empty())
             .unwrap_or(std::path::Path::new("."));
-        let mut names = vec![file.to_owned()];
         let fd = match inotify::init(inotify::CreateFlags::CLOEXEC | inotify::CreateFlags::NONBLOCK)
         {
             Ok(fd) => fd,
@@ -61,39 +72,28 @@ impl Pila {
                 return;
             }
         };
-        let flags = inotify::WatchFlags::CLOSE_WRITE
-            | inotify::WatchFlags::MOVED_TO
-            | inotify::WatchFlags::CREATE
-            | inotify::WatchFlags::DELETE;
-        if let Err(err) = inotify::add_watch(&fd, dir, flags) {
-            info!(dir = %dir.display(), ?err, "not watching the config (no such directory?)");
-            return;
-        }
-        // A symlinked config (dotfiles managers) is edited where it points
-        // to: watch that file's directory too.
-        if path.is_symlink() {
-            let target = std::fs::canonicalize(&path).ok();
-            let parts = target
-                .as_deref()
-                .and_then(|t| Some((t.parent()?, t.file_name()?)));
-            match parts {
-                Some((target_dir, target_file)) => {
-                    match inotify::add_watch(&fd, target_dir, flags) {
-                        Ok(_) => names.push(target_file.to_owned()),
-                        Err(err) => {
-                            info!(dir = %target_dir.display(), ?err, "not watching the config's target")
-                        }
-                    }
-                }
-                None => info!(path = %path.display(), "the config is a broken symlink"),
+        let dir_wd = match inotify::add_watch(&fd, dir, watch_flags()) {
+            Ok(wd) => wd,
+            Err(err) => {
+                info!(dir = %dir.display(), ?err, "not watching the config (no such directory?)");
+                return;
             }
-        }
+        };
+        let mut watch = ConfigWatch {
+            path: path.clone(),
+            file: file.to_owned(),
+            dir_wd,
+            target: None,
+        };
+        watch.follow_target(fd.as_fd());
         let source = Generic::new(fd, Interest::READ, Mode::Level);
         let inserted = self.loop_handle.insert_source(source, move |_, fd, state| {
-            if changed(fd, &names) {
-                state.schedule_config_reload();
-            }
-            Ok(PostAction::Continue)
+            Ok(on_ready(
+                fd.as_fd(),
+                &mut watch,
+                state,
+                Pila::schedule_config_reload,
+            ))
         });
         match inserted {
             Ok(_) => info!(path = %path.display(), "watching the config for changes"),
@@ -328,25 +328,195 @@ impl Pila {
     }
 }
 
-/// Whether the inotify events waiting on `fd` touch one of the files `names`.
-fn changed(fd: &impl std::os::fd::AsFd, names: &[OsString]) -> bool {
+/// What the watch on the config follows: the file in its directory and, for
+/// a symlink, the file it points to, in that one's directory.
+struct ConfigWatch {
+    path: PathBuf,
+    /// The config's file name, in the directory watched as `dir_wd`.
+    file: OsString,
+    dir_wd: i32,
+    /// A symlinked config's target: its directory, that one's watch and the
+    /// target's file name.
+    target: Option<(PathBuf, i32, OsString)>,
+}
+
+/// The changes that can touch the config: written, moved or linked in
+/// (editors and dotfiles managers replace it), deleted.
+fn watch_flags() -> inotify::WatchFlags {
+    inotify::WatchFlags::CLOSE_WRITE
+        | inotify::WatchFlags::MOVED_TO
+        | inotify::WatchFlags::CREATE
+        | inotify::WatchFlags::DELETE
+}
+
+impl ConfigWatch {
+    /// Watch the directory of the file a symlinked config points to now
+    /// (dotfiles managers keep it elsewhere, and point the link elsewhere
+    /// again on each change: stow, home-manager), and stop watching the one
+    /// it pointed to before.
+    fn follow_target(&mut self, fd: BorrowedFd<'_>) {
+        let is_link = self.path.is_symlink();
+        let target = is_link
+            .then(|| std::fs::canonicalize(&self.path).ok())
+            .flatten();
+        let parts = target
+            .as_deref()
+            .and_then(|t| Some((t.parent()?.to_owned(), t.file_name()?.to_owned())));
+        if is_link && parts.is_none() {
+            info!(path = %self.path.display(), "the config is a broken symlink");
+        }
+        let old = self.target.take();
+        let new = parts.and_then(|(dir, name)| {
+            if let Some((_, wd, _)) = old.as_ref().filter(|(old_dir, ..)| *old_dir == dir) {
+                return Some((dir, *wd, name));
+            }
+            match inotify::add_watch(fd, &dir, watch_flags()) {
+                Ok(wd) => {
+                    info!(dir = %dir.display(), "watching the config's target");
+                    Some((dir, wd, name))
+                }
+                Err(err) => {
+                    info!(dir = %dir.display(), ?err, "not watching the config's target");
+                    None
+                }
+            }
+        });
+        if let Some((_, old_wd, _)) = old {
+            let still_used =
+                old_wd == self.dir_wd || new.as_ref().is_some_and(|(_, wd, _)| *wd == old_wd);
+            if !still_used {
+                let _ = inotify::remove_watch(fd, old_wd);
+            }
+        }
+        self.target = new;
+    }
+}
+
+/// Read the inotify events waiting on `fd` and schedule a reload with
+/// `reload` if one touches the config. A read that fails for good (not a
+/// wait or an interruption) would wake the loop again and again, the fd
+/// staying readable: the watch stops then, said once.
+fn on_ready<D>(
+    fd: BorrowedFd<'_>,
+    watch: &mut ConfigWatch,
+    data: &mut D,
+    reload: impl FnOnce(&mut D),
+) -> PostAction {
+    let events = read_events(fd, watch);
+    if events.changed {
+        reload(data);
+    }
+    match events.failed {
+        Some(err) => {
+            warn!(
+                ?err,
+                "reading config file events failed; no longer watching the config"
+            );
+            PostAction::Remove
+        }
+        None => PostAction::Continue,
+    }
+}
+
+/// What the events read at once said.
+struct Events {
+    /// One touched the config (or some were lost: it may have).
+    changed: bool,
+    /// The read failed for good.
+    failed: Option<Errno>,
+}
+
+/// Read the inotify events waiting on `fd`: whether one touches the config,
+/// following a symlinked config to its new target when the link changes.
+fn read_events(fd: BorrowedFd<'_>, watch: &mut ConfigWatch) -> Events {
     let mut buf = [MaybeUninit::<u8>::uninit(); 4096];
     let mut reader = inotify::Reader::new(fd, &mut buf);
     let mut changed = false;
+    let mut link_changed = false;
+    let mut failed = None;
     loop {
         match reader.next() {
             Ok(event) => {
-                let ours = event
-                    .file_name()
-                    .is_some_and(|n| names.iter().any(|name| n.to_bytes() == name.as_bytes()));
-                changed |= ours;
+                if event.events().contains(inotify::ReadFlags::QUEUE_OVERFLOW) {
+                    // Events were lost, the config's among them maybe.
+                    info!("config file events overflowed; reloading");
+                    changed = true;
+                    link_changed = true;
+                    continue;
+                }
+                let Some(name) = event.file_name() else {
+                    continue;
+                };
+                let name = name.to_bytes();
+                if event.wd() == watch.dir_wd && name == watch.file.as_bytes() {
+                    changed = true;
+                    link_changed = true;
+                } else if watch
+                    .target
+                    .as_ref()
+                    .is_some_and(|(_, wd, target)| event.wd() == *wd && name == target.as_bytes())
+                {
+                    changed = true;
+                }
             }
             Err(Errno::WOULDBLOCK | Errno::INTR) => break,
             Err(err) => {
-                warn!(?err, "reading config file events failed");
+                failed = Some(err);
                 break;
             }
         }
     }
-    changed
+    if link_changed && failed.is_none() {
+        watch.follow_target(fd);
+    }
+    Events { changed, failed }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        os::{fd::AsFd, unix::net::UnixStream},
+        time::Duration,
+    };
+
+    use smithay::reexports::calloop::{generic::Generic, EventLoop, Interest, Mode};
+
+    use super::{on_ready, ConfigWatch};
+
+    /// A read that fails for good stops the watch at once: in `Mode::Level`
+    /// the fd stays readable, and the loop would spin on it, logging each
+    /// time. A socket whose other end is closed reads as end of file, which
+    /// an inotify fd never does (`EINVAL`).
+    #[test]
+    fn a_read_that_fails_for_good_stops_the_watch() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        ours.set_nonblocking(true).unwrap();
+        drop(theirs);
+        let mut event_loop: EventLoop<(usize, usize)> = EventLoop::try_new().unwrap();
+        let mut watch = ConfigWatch {
+            path: "/nonexistent/config.toml".into(),
+            file: "config.toml".into(),
+            dir_wd: 1,
+            target: None,
+        };
+        let source = Generic::new(
+            std::os::fd::OwnedFd::from(ours),
+            Interest::READ,
+            Mode::Level,
+        );
+        event_loop
+            .handle()
+            .insert_source(source, move |_, fd, (calls, reloads)| {
+                *calls += 1;
+                Ok(on_ready(fd.as_fd(), &mut watch, reloads, |r| *r += 1))
+            })
+            .unwrap();
+        let mut counts = (0, 0);
+        for _ in 0..5 {
+            event_loop
+                .dispatch(Some(Duration::ZERO), &mut counts)
+                .unwrap();
+        }
+        assert_eq!(counts, (1, 0), "(reads, reloads)");
+    }
 }

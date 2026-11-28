@@ -53,7 +53,12 @@ Key flows and invariants:
   falls back to defaults on errors (`main` notifies of them once the session has had time to
   start a notification daemon, `state::notify_after_startup`), and reloaded when the file changes
   (`config_reload.rs`: inotify on its directory, a 250 ms settle timer, then
-  `Config::read`; an invalid file keeps the running config and notifies). Notifications
+  `Config::read`; an invalid file keeps the running config and notifies). A symlinked config's
+  target directory is watched too (`ConfigWatch::follow_target`), worked out again when the
+  link changes, so a link pointed elsewhere (stow, home-manager) is followed; an overflowed
+  queue (`IN_Q_OVERFLOW`, the config's change maybe lost) reloads too; a read that fails for
+  good stops the watch, said once (`on_ready`), since the level-triggered fd would wake the
+  loop again and again. Notifications
   (`send_notification`, in the log too) go to the notification daemon over D-Bus
   (`notifications.rs`: `Notifier::send` hands them to a thread of their own, started with the
   first, which calls `org.freedesktop.Notifications.Notify` on the session bus Pila's programs

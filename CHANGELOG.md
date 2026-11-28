@@ -12,6 +12,11 @@
   `Inhibit`) and leaves the bus right away no longer keeps it on for good: its leaving could be
   seen before its call, leaving a cookie no one would give back. An app now holds at most 32
   such inhibitors at once; the next is refused.
+- **Fixed:** The config's watch follows a symlinked config pointed to a file elsewhere (stow,
+  home-manager): edits to the new file reload it, where only the first target was watched.
+  Changes lost because too many came at once (an inotify queue overflow) now reload as well, and
+  a watch that can no longer read its events stops with one warning instead of spinning and
+  filling the log.
 
 ## 0.9.9 (2026-11-27)
 

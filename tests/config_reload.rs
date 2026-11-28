@@ -34,6 +34,82 @@ fn a_symlinked_config_reloads_when_its_file_changes() {
     pila.wait_file("ran");
 }
 
+/// How many times "config reloaded" is in `pila`'s log.
+fn reloads(pila: &TestPila) -> usize {
+    pila.log().matches("config reloaded").count()
+}
+
+/// Wait for a reload past the `before`th.
+fn wait_reload(pila: &TestPila, before: usize) {
+    let started = std::time::Instant::now();
+    while reloads(pila) <= before {
+        assert!(
+            started.elapsed() < TIMEOUT,
+            "no reload:\n{}",
+            pila.log_tail()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A symlinked config pointed to another file, in another directory (stow,
+/// home-manager): reloaded then, and when that file is edited afterwards.
+#[test]
+fn a_symlinked_config_follows_its_new_target() {
+    let mut pila = TestPila::start_with(Options {
+        config_symlink: true,
+        ..Options::default()
+    });
+    pila.wait_log("watching the config for changes");
+    let text = std::fs::read_to_string(&pila.config_path).unwrap();
+    let elsewhere = pila.dir.join("generation-2");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let target = elsewhere.join("pila.toml");
+    std::fs::write(&target, &text).unwrap();
+    // As stow and home-manager do: a new link put in place of the old one.
+    let link = pila.dir.join("config/config.toml");
+    let tmp = pila.dir.join("config/config.toml.new");
+    std::os::unix::fs::symlink(&target, &tmp).unwrap();
+    std::fs::rename(&tmp, &link).unwrap();
+    wait_reload(&pila, 0);
+    let before = reloads(&pila);
+    let tmp = elsewhere.join("pila.toml.tmp");
+    std::fs::write(
+        &tmp,
+        format!("{text}\n[bindings]\n\"Mod+n\" = \"spawn echo ran > $XDG_RUNTIME_DIR/ran\"\n"),
+    )
+    .unwrap();
+    std::fs::rename(&tmp, &target).unwrap();
+    wait_reload(&pila, before);
+    pila.combo("Super+n");
+    pila.wait_file("ran");
+}
+
+/// More changes in the config's directory than inotify keeps while Pila
+/// isn't reading: the queue overflows, the config's own change is lost
+/// with the rest, and Pila reloads anyway.
+#[test]
+fn a_config_change_lost_to_an_overflow_still_reloads() {
+    let mut pila = TestPila::start();
+    pila.wait_log("watching the config for changes");
+    let max: usize = std::fs::read_to_string("/proc/sys/fs/inotify/max_queued_events")
+        .ok()
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(16384);
+    let pid = pila.pid() as i32;
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+    let junk = pila.dir.join("config/junk");
+    for _ in 0..max / 2 + 1 {
+        std::fs::write(&junk, "").unwrap();
+        std::fs::remove_file(&junk).unwrap();
+    }
+    pila.write_config("[bindings]\n\"Mod+n\" = \"spawn echo ran > $XDG_RUNTIME_DIR/ran\"\n");
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGCONT) }, 0);
+    wait_reload(&pila, 0);
+    pila.combo("Super+n");
+    pila.wait_file("ran");
+}
+
 #[test]
 fn an_invalid_file_keeps_the_running_config() {
     let mut pila = TestPila::with_config("[bindings]\n\"Mod+x\" = \"close\"\n");
