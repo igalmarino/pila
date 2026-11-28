@@ -711,16 +711,13 @@ pub(super) fn frame_finish(
         DrmEventTime::Monotonic(time) if !time.is_zero() => Some(time),
         _ => None,
     });
-    let seq = metadata.as_ref().map_or(0, |m| m.sequence as u64);
+    // The vblank's number, when the kernel gives one.
+    let seq = metadata.as_ref().map(|m| m.sequence as u64);
     // While an animation runs every vblank should show a new frame: the
     // vblanks since the last frame shown, beyond one, were missed (if it's
     // still running: the pause after one ends doesn't count).
-    let missed = match metadata
-        .is_some()
-        .then_some(surface.crtc_state.last_vblank)
-        .flatten()
-    {
-        Some(last) if !torn => {
+    let missed = match (surface.crtc_state.last_vblank, seq) {
+        (Some(last), Some(seq)) if !torn => {
             missed_refreshes(last, seq, surface.crtc_state.back_to_back && animating)
         }
         _ => 0,
@@ -764,13 +761,13 @@ pub(super) fn frame_finish(
     // From the first redraw asked for with something new to the vblank that
     // showed it (`frame_stats.rs`, latency).
     let latency = request.map(|r| shown.saturating_sub(r.at));
-    surface.crtc_state.last_vblank = metadata.is_some().then_some(seq);
+    surface.crtc_state.last_vblank = seq;
     // The time of a torn flip isn't a vblank's: the grid the next vblank is
     // reckoned from (`idle_until`, `commit_pacing`) stays the last one's.
     if !torn || surface.last_vblank_time.is_none() {
         surface.last_vblank_time = Some(hw_time.unwrap_or_else(|| now.into()));
     }
-    tracing::trace!(target: "pila::frames", output = surface.output.name(), seq, missed, torn, "shown");
+    tracing::trace!(target: "pila::frames", output = surface.output.name(), ?seq, missed, torn, "shown");
     let output = surface.output.clone();
     let vsync = if torn {
         wp_presentation_feedback::Kind::empty()
@@ -810,7 +807,7 @@ pub(super) fn frame_finish(
     }
     match drm_output.frame_submitted() {
         Ok(Some(mut feedback)) => {
-            feedback.presented(time, refresh, seq, flags);
+            feedback.presented(time, refresh, seq.unwrap_or(0), flags);
         }
         Ok(None) | Err(FrameError::EmptyFrame) => {}
         Err(err) => warn!(?err, "frame submission failed"),
