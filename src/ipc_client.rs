@@ -93,23 +93,10 @@ fn request(args: &[String]) -> Result<Value, String> {
         | "screen-shares"
         | "capture-permissions"
         | "idle-inhibitors"
-        | "captures"
-            if rest.is_empty() =>
-        {
-            Ok(json!({ "request": name }))
-        }
-        "windows"
-        | "outputs"
-        | "workspaces"
-        | "keyboard"
-        | "colors"
-        | "switch"
-        | "focused"
-        | "version"
-        | "screen-shares"
-        | "capture-permissions"
-        | "idle-inhibitors"
-        | "captures" => Err(format!("{name} takes no arguments")),
+        | "captures" => match rest {
+            [] => Ok(json!({ "request": name })),
+            _ => Err(format!("{name} takes no arguments")),
+        },
         "forget-screen-share" | "forget-capture-permission" => match rest {
             [all] if all == "all" => Ok(json!({ "request": name, "all": true })),
             [id] => Ok(json!({ "request": name, "id": id })),

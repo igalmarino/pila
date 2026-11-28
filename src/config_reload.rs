@@ -29,7 +29,8 @@ use tracing::{info, warn};
 
 use crate::{config::Config, Pila};
 
-/// How long after the last change to reload.
+/// How long after the first change to reload: the changes that come
+/// meanwhile go with it.
 const SETTLE: Duration = Duration::from_millis(250);
 /// How long a notification that all went well stays.
 const NOTICE_MS: u32 = 3000;

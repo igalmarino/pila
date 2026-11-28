@@ -539,7 +539,6 @@ impl Pila {
         // A keymap xkbcommon can't build (e.g. a typo in the layout) falls
         // back to the default one rather than leaving pila without keyboard.
         let kb = &config.keyboard;
-        let mut keymap_failed = false;
         if let Err(err) = seat.add_keyboard(xkb_config(kb), kb.repeat_delay, kb.repeat_rate) {
             warn!(
                 ?err,
@@ -548,9 +547,6 @@ impl Pila {
             );
             seat.add_keyboard(XkbConfig::default(), kb.repeat_delay, kb.repeat_rate)
                 .expect("failed to initialize keyboard");
-            keymap_failed = true;
-        }
-        if keymap_failed {
             // Only in the log otherwise: say so on screen too.
             let what = crate::config::keymap_description(kb);
             notify_after_startup(
@@ -1048,7 +1044,7 @@ impl Pila {
         now: Option<std::time::Duration>,
     ) -> Option<SceneWindow> {
         let loc = self.space.element_location(window)?;
-        self.scene_window_at(window, loc, focused, hovered, now)
+        Some(self.scene_window_at(window, loc, focused, hovered, now))
     }
 
     /// `scene_window` for a window whose geometry is at `loc`, on the
@@ -1060,7 +1056,7 @@ impl Pila {
         focused: Option<&Window>,
         hovered: Option<&(Window, TitleBarPart)>,
         now: Option<std::time::Duration>,
-    ) -> Option<SceneWindow> {
+    ) -> SceneWindow {
         let bar_rect = decoration::title_bar_rect(window, loc);
         let (_, fullscreen) = fill_state(window);
         let fills_output = self.fills_output(window);
@@ -1134,7 +1130,7 @@ impl Pila {
                 config.inactive_color
             },
         });
-        Some(SceneWindow {
+        SceneWindow {
             window: window.clone(),
             render_location,
             blur: if opaque {
@@ -1158,7 +1154,7 @@ impl Pila {
                 && window
                     .wl_surface()
                     .is_some_and(|surface| crate::tearing::wants_async(&surface)),
-        })
+        }
     }
 
     /// Find a window (mapped or not) by its toplevel surface.

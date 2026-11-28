@@ -84,8 +84,6 @@ use crate::{
 const BLUR_PASSES: usize = 3;
 /// Sample spread per pass, in texels.
 const BLUR_OFFSET: f32 = 2.5;
-/// Redo every blur every frame (to debug the change detection).
-const BLUR_ALWAYS: bool = false;
 /// How far from what changed the passes can show it, in physical pixels: an
 /// upper bound (each pass samples `BLUR_OFFSET` times two texels of its level
 /// away at most, the levels doubling).
@@ -1021,7 +1019,7 @@ impl BlurCache {
             Ok((None, _)) => false,
             Err(err) => return Err(render_error(&err)),
         };
-        if entry.drawn && !changed && !reshaped && !BLUR_ALWAYS {
+        if entry.drawn && !changed && !reshaped {
             return Ok(());
         }
 

@@ -646,14 +646,7 @@ impl Pila {
         let Some(open) = self.overview.open.as_mut() else {
             return false;
         };
-        if open
-            .press
-            .as_ref()
-            .is_none_or(|press| press.button != button)
-        {
-            return false;
-        }
-        let Some(press) = open.press.take() else {
+        let Some(press) = open.press.take_if(|press| press.button == button) else {
             return false;
         };
         if !press.dragging {
@@ -946,10 +939,9 @@ impl Pila {
             .collect();
         for slot in slots.iter().filter(|s| self.is_minimized(&s.window)) {
             let loc = crate::workspaces::space_location(&slot.window);
-            if let Some(mut entry) = self.scene_window_at(&slot.window, loc, focused, None, None) {
-                entry.effect = Some(effect(slot, slot.frame, shown as f32));
-                drawn.push(entry);
-            }
+            let mut entry = self.scene_window_at(&slot.window, loc, focused, None, None);
+            entry.effect = Some(effect(slot, slot.frame, shown as f32));
+            drawn.push(entry);
         }
         // A window dragged is under the pointer, in front of the others.
         let dragged = self
@@ -997,10 +989,10 @@ impl Pila {
                 ))
             })
             .collect();
-        windows.extend(self.workspaces.parked.iter().rev().filter_map(|w| {
+        windows.extend(self.workspaces.parked.iter().rev().map(|w| {
             let loc = crate::workspaces::space_location(w);
-            let entry = self.scene_window_at(w, loc, focused.as_ref(), None, None)?;
-            Some((Some(self.workspace_of(w)), entry))
+            let entry = self.scene_window_at(w, loc, focused.as_ref(), None, None);
+            (Some(self.workspace_of(w)), entry)
         }));
         self.overview_strips()
             .into_iter()

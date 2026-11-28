@@ -229,9 +229,6 @@ pub fn gapped(area: Rectangle<i32, Logical>, gap: u32) -> Rectangle<i32, Logical
     )
 }
 
-/// The rectangle (window geometry, below a `bar`-high title bar) for the
-/// half or quarter of `area` that `side` names, `gap` from the area's edges
-/// and from the other halves (`gaps`).
 /// No side of `state` tiled (xdg-shell's `tiled_*`): not snapped.
 fn unset_tiled(state: &mut smithay::wayland::shell::xdg::ToplevelState) {
     use xdg_toplevel::State::*;
@@ -258,6 +255,9 @@ impl Pila {
     }
 }
 
+/// The rectangle (window geometry, below a `bar`-high title bar) for the
+/// half or quarter of `area` that `side` names, `gap` from the area's edges
+/// and from the other halves (`gaps`).
 pub fn side_rect(
     area: Rectangle<i32, Logical>,
     side: Side,

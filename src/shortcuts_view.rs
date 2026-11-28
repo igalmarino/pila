@@ -623,7 +623,6 @@ impl Pila {
         }
         self.shortcuts_view.buffers.borrow_mut().frame = FrameBuffers::default();
         self.redraw_shortcuts_view();
-        self.draw_shortcuts_text();
     }
 
     /// Hide the cheatsheet, if it's shown.

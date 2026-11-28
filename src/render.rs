@@ -1871,9 +1871,6 @@ pub fn screen_elements(
     elements
 }
 
-/// The cursor's elements, relative to `origin`: the client's cursor surface,
-/// or the named cursor from `theme` (if the backend draws it: see
-/// `FrameInput::named_cursor`), magnified as `FrameInput::magnification` says.
 /// What `output_name` at `output_geo` shows in a frame, front to back: the
 /// pointer (`with_pointer`: it's on this output; nested, named cursors are
 /// the host's unless magnified), Pila's marks on the screen alone
@@ -1908,6 +1905,9 @@ pub fn frame_elements(
     elements
 }
 
+/// The cursor's elements, relative to `origin`: the client's cursor surface,
+/// or the named cursor from `theme` (if the backend draws it: see
+/// `FrameInput::named_cursor`), magnified as `FrameInput::magnification` says.
 pub fn pointer_elements(
     renderer: &mut GlesRenderer,
     input: &FrameInput,
