@@ -2743,9 +2743,9 @@ pub struct ClientState {
     pub security_context: Option<SecurityContext>,
     /// The client's process (its socket's peer credentials), for the log.
     pub pid: Option<i32>,
-    /// Resolved executable path from `/proc/<pid>/exe`, cached on first
-    /// permission check (`permissions.rs`).
-    pub executable: std::sync::OnceLock<crate::permissions::ClientIdentity>,
+    /// Its executable's path from `/proc/<pid>/exe` (`None`: unreadable),
+    /// read once, off the event loop (`Pila::read_client_executable`).
+    pub executable: std::sync::OnceLock<Option<String>>,
 }
 
 impl ClientState {

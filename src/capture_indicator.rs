@@ -454,8 +454,8 @@ impl Pila {
         let Some(data) = client.get_data::<ClientState>() else {
             return "a program".to_string();
         };
-        if let Some(identity) = data.executable.get() {
-            return display_name(identity, data.pid);
+        if let Some(executable) = data.executable.get() {
+            return display_name(executable.as_deref(), data.pid);
         }
         let pid = data.pid;
         self.read_client_executable(client);
@@ -464,13 +464,9 @@ impl Pila {
 
     /// `client`'s executable was read (`Pila::read_client_executable`):
     /// its captures are named by it, recomputed.
-    pub(crate) fn capturing_program_read(
-        &mut self,
-        client: &Client,
-        identity: &crate::permissions::ClientIdentity,
-    ) {
+    pub(crate) fn capturing_program_read(&mut self, client: &Client, executable: Option<&str>) {
         let pid = client.get_data::<ClientState>().and_then(|data| data.pid);
-        let name = display_name(identity, pid);
+        let name = display_name(executable, pid);
         let id = client.id();
         // A capture that ended (or ends before the next update) before its
         // name was read is named too.
@@ -481,8 +477,8 @@ impl Pila {
 }
 
 /// A program by its executable's name, or its process id without one.
-fn display_name(identity: &crate::permissions::ClientIdentity, pid: Option<i32>) -> String {
-    match &identity.executable {
+fn display_name(executable: Option<&str>, pid: Option<i32>) -> String {
+    match executable {
         Some(executable) => crate::permissions::program_name(executable).to_string(),
         None => unknown(pid),
     }

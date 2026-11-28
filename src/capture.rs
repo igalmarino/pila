@@ -264,7 +264,7 @@ impl Captures {
     ) -> impl Iterator<Item = (Option<smithay::reexports::wayland_server::Client>, &Target)> {
         self.sessions
             .iter()
-            .filter(|s| s.authorized && !s.stopped && s.resource.is_alive())
+            .filter(|s| s.status == Status::Allowed && s.resource.is_alive())
             .map(|s| (s.resource.client(), &s.target))
     }
 
@@ -312,9 +312,8 @@ impl Captures {
         for session in &mut self.sessions {
             let ours = matches!(&session.target, Target::Output(o) if o.upgrade().as_ref() == Some(output));
             if !ours
-                || !session.authorized
+                || session.status != Status::Allowed
                 || !session.pending
-                || session.stopped
                 || session.geometry != Some(geometry)
                 || (pointer_here && !session.paint_cursors)
             {
@@ -423,9 +422,7 @@ pub struct Session {
     frame: Option<ExtImageCopyCaptureFrameV1>,
     /// `frame` asked to be captured and hasn't been yet.
     pending: bool,
-    /// Allowed to send buffer constraints and capture frames (`permissions.rs`).
-    authorized: bool,
-    stopped: bool,
+    status: Status,
     /// The frame its output just composited filled or checked its pending
     /// frame in this event-loop iteration (`Captures::take_composited`):
     /// `process_captures` leaves it.
@@ -433,6 +430,16 @@ pub struct Session {
     /// The presentation time of the last frame sent: the next waits for a
     /// later refresh (`process_capture`).
     last_presented: Option<Duration>,
+}
+
+/// Where a capture session is: waiting for its permission
+/// (`permissions.rs`), allowed to send buffer constraints and capture
+/// frames, or stopped for good.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Waiting,
+    Allowed,
+    Stopped,
 }
 
 /// A frame's buffer and whether `capture` was sent.
@@ -465,15 +472,14 @@ impl Session {
             tracker: None,
             frame: None,
             pending: false,
-            authorized: false,
-            stopped: false,
+            status: Status::Waiting,
             composited: false,
             last_presented: None,
         }
     }
 
     pub(crate) fn is_authorized(&self) -> bool {
-        self.authorized && !self.stopped
+        self.status == Status::Allowed
     }
 
     pub(crate) fn resource(&self) -> ExtImageCopyCaptureSessionV1 {
@@ -485,10 +491,10 @@ impl Session {
     }
 
     fn stop(&mut self) {
-        if self.stopped {
+        if self.status == Status::Stopped {
             return;
         }
-        self.stopped = true;
+        self.status = Status::Stopped;
         self.resource.stopped();
         if self.pending {
             self.fail(FailureReason::Stopped);
@@ -646,14 +652,14 @@ impl Pila {
         else {
             return;
         };
-        if self.capture.sessions[index].stopped || self.capture.sessions[index].authorized {
+        if self.capture.sessions[index].status != Status::Waiting {
             return;
         }
         let target = self.capture.sessions[index].target.clone();
         let geometry = self.capture_geometry(&target, None);
         let dmabuf = self.capture.dmabuf.as_ref();
         let session = &mut self.capture.sessions[index];
-        session.authorized = true;
+        session.status = Status::Allowed;
         self.capture_indicator.dirty = true;
         match geometry {
             Some(geometry) => session.send_constraints(geometry, dmabuf),
@@ -696,7 +702,7 @@ impl Pila {
         session: &mut Session,
         input: &mut Option<crate::render::FrameInput>,
     ) {
-        if !session.authorized {
+        if session.status != Status::Allowed {
             return;
         }
         let Some(geometry) = self.capture_geometry(&session.target, session.geometry) else {
@@ -1822,7 +1828,7 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, FrameData> for Pila {
                     resource.failed(FailureReason::Stopped);
                     return;
                 };
-                if session.stopped {
+                if session.status == Status::Stopped {
                     resource.failed(FailureReason::Stopped);
                     return;
                 }

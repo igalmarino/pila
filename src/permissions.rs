@@ -67,13 +67,6 @@ const NOTE_HEIGHT: i32 = 20;
 /// Deny works at once.
 pub const ALLOW_DELAY: Duration = Duration::from_millis(500);
 
-/// Resolved executable identity for a Wayland client, cached on `ClientState`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientIdentity {
-    /// Canonical path from `/proc/<pid>/exe`, if readable.
-    pub executable: Option<String>,
-}
-
 /// A capture request waiting on permission resolution or user confirmation.
 #[derive(Clone)]
 pub enum PendingCapture {
@@ -115,6 +108,16 @@ enum PromptKey {
     Client(ClientId),
 }
 
+impl PromptKey {
+    /// The program asking, if its executable is known.
+    fn executable(&self) -> Option<&str> {
+        match self {
+            PromptKey::Executable(exe) => Some(exe),
+            PromptKey::Client(_) => None,
+        }
+    }
+}
+
 /// A capture permission given in the prompt, until Pila exits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grant {
@@ -125,14 +128,12 @@ pub struct Grant {
 /// A queued prompt waiting for its turn behind another prompt or modal panel.
 struct Queued {
     key: PromptKey,
-    executable: Option<String>,
     requests: Vec<PendingCapture>,
 }
 
 /// The prompt currently shown on screen.
 struct Shown {
     key: PromptKey,
-    executable: Option<String>,
     output: String,
     requests: Vec<PendingCapture>,
     /// Since when it can be seen (its text drawn): Allow waits `ALLOW_DELAY`
@@ -280,17 +281,17 @@ fn executable_path(target: &Path) -> String {
     path.strip_suffix(" (deleted)").unwrap_or(&path).to_string()
 }
 
-/// Read `/proc/<pid>/exe` off the event loop.
-pub(crate) fn read_executable(pid: i32) -> ClientIdentity {
+/// Read `/proc/<pid>/exe` off the event loop: the executable's canonical
+/// path, if it can be read.
+pub(crate) fn read_executable(pid: i32) -> Option<String> {
     let path = format!("/proc/{pid}/exe");
-    let executable = match std::fs::read_link(&path) {
+    match std::fs::read_link(&path) {
         Ok(target) => Some(executable_path(&target)),
         Err(err) => {
             debug!(pid, ?err, "permissions: couldn't read client executable");
             None
         }
-    };
-    ClientIdentity { executable }
+    }
 }
 
 impl Pila {
@@ -339,28 +340,27 @@ impl Pila {
         if !self.capture_permissions.reading.insert(client.id()) {
             return;
         }
-        let unknown = ClientIdentity { executable: None };
         let pid = client.get_data::<ClientState>().and_then(|s| s.pid);
         let Some(pid) = pid else {
-            return self.client_executable_read(client.clone(), unknown);
+            return self.client_executable_read(client.clone(), None);
         };
         let waiting = client.clone();
         let started = self.off_loop(
             "pila-client-exe",
             move || read_executable(pid),
-            move |state, identity| state.client_executable_read(waiting, identity),
+            move |state, executable| state.client_executable_read(waiting, executable),
         );
         if !started {
-            self.client_executable_read(client.clone(), unknown);
+            self.client_executable_read(client.clone(), None);
         }
     }
 
-    fn client_executable_read(&mut self, client: Client, identity: ClientIdentity) {
+    fn client_executable_read(&mut self, client: Client, executable: Option<String>) {
         self.capture_permissions.reading.remove(&client.id());
         if let Some(data) = client.get_data::<ClientState>() {
-            let _ = data.executable.set(identity.clone());
+            let _ = data.executable.set(executable.clone());
         }
-        self.capturing_program_read(&client, &identity);
+        self.capturing_program_read(&client, executable.as_deref());
         let client_id = client.id();
         let requests = self
             .capture_permissions
@@ -374,7 +374,7 @@ impl Pila {
             if !self.config.permissions.enforce {
                 self.approve_capture(request);
             } else {
-                self.decide_capture(client_id.clone(), identity.clone(), request);
+                self.decide_capture(client_id.clone(), executable.clone(), request);
             }
         }
         // Its captures started while `enforce` was off, unchecked.
@@ -384,10 +384,10 @@ impl Pila {
     fn decide_capture(
         &mut self,
         client_id: ClientId,
-        identity: ClientIdentity,
+        executable: Option<String>,
         request: PendingCapture,
     ) {
-        let exe = identity.executable.as_deref();
+        let exe = executable.as_deref();
         match decision(
             &self.config.permission_rules,
             &self.capture_permissions.grants,
@@ -420,7 +420,7 @@ impl Pila {
                     self.deny_capture(request);
                     return;
                 }
-                self.queue_capture_prompt(client_id, identity.executable, request);
+                self.queue_capture_prompt(client_id, executable, request);
             }
         }
     }
@@ -431,8 +431,8 @@ impl Pila {
         executable: Option<String>,
         request: PendingCapture,
     ) {
-        let key = match &executable {
-            Some(exe) => PromptKey::Executable(exe.clone()),
+        let key = match executable {
+            Some(exe) => PromptKey::Executable(exe),
             None => PromptKey::Client(client_id),
         };
         // Coalesce into an open prompt for the same program/client.
@@ -454,7 +454,6 @@ impl Pila {
         }
         self.capture_permissions.waiting.push_back(Queued {
             key,
-            executable,
             requests: vec![request],
         });
         self.show_capture_permission();
@@ -491,12 +490,11 @@ impl Pila {
             };
             self.close_transient_panels();
             info!(
-                executable = queued.executable.as_deref().unwrap_or("?"),
+                executable = queued.key.executable().unwrap_or("?"),
                 "asking for screen capture permission"
             );
             self.capture_permissions.shown = Some(Shown {
                 key: queued.key,
-                executable: queued.executable,
                 output: output.name(),
                 requests: queued.requests,
                 visible_since: None,
@@ -542,15 +540,13 @@ impl Pila {
         let Some(shown) = self.take_capture_permission() else {
             return;
         };
-        match &shown.executable {
-            Some(exe) => {
+        match &shown.key {
+            PromptKey::Executable(exe) => {
                 info!(executable = exe.as_str(), "capture permission allowed");
                 self.record_capture_grant(exe.clone());
             }
-            None => {
-                if let PromptKey::Client(id) = &shown.key {
-                    self.capture_permissions.client_grants.insert(id.clone());
-                }
+            PromptKey::Client(id) => {
+                self.capture_permissions.client_grants.insert(id.clone());
                 info!("capture permission allowed for unknown client (this session)");
             }
         }
@@ -568,7 +564,7 @@ impl Pila {
             return;
         };
         info!(
-            executable = shown.executable.as_deref().unwrap_or("?"),
+            executable = shown.key.executable().unwrap_or("?"),
             "capture permission denied"
         );
         // Not asked again on these connections; those gone are forgotten.
@@ -599,7 +595,7 @@ impl Pila {
         }
         if let Some(shown) = self.take_capture_permission() {
             info!(
-                executable = shown.executable.as_deref().unwrap_or("?"),
+                executable = shown.key.executable().unwrap_or("?"),
                 "capture permission cancelled"
             );
             for request in shown.requests {
@@ -707,7 +703,7 @@ impl Pila {
             evaluate(
                 &self.config.permission_rules,
                 &self.capture_permissions.grants,
-                shown.executable.as_deref(),
+                shown.key.executable(),
             )
         }) {
             match decision {
@@ -732,7 +728,7 @@ impl Pila {
             match evaluate(
                 &self.config.permission_rules,
                 &self.capture_permissions.grants,
-                queued.executable.as_deref(),
+                queued.key.executable(),
             ) {
                 Decision::Allow => {
                     for request in queued.requests {
@@ -774,14 +770,14 @@ impl Pila {
                            id: smithay::reexports::wayland_server::backend::ObjectId|
          -> Option<bool> {
             let client = dh.get_client(id).ok()?;
-            let Some(identity) = client
+            let Some(executable) = client
                 .get_data::<ClientState>()
                 .and_then(|s| s.executable.get())
             else {
                 unresolved.push(client);
                 return None;
             };
-            let exe = identity.executable.as_deref();
+            let exe = executable.as_deref();
             Some(decision(rules, grants, client_grants, &client.id(), exe) == Decision::Allow)
         };
 
@@ -978,8 +974,8 @@ impl Pila {
             .zip(self.scene_capture_permission())
             .map(|(shown, view)| {
                 json!({
-                    "executable": shown.executable,
-                    "title": title(shown.executable.as_deref()),
+                    "executable": shown.key.executable(),
+                    "title": title(shown.key.executable()),
                     "output": view.output,
                     "requests": shown.requests.len(),
                     "panel": rect(view.layout.panel),
@@ -1000,11 +996,12 @@ impl Pila {
 
 fn items(shown: &Shown, layout: &Layout, colors: &Colors) -> Vec<Item> {
     let width = layout.panel.size.w;
-    let title = title(shown.executable.as_deref());
+    let title = title(shown.key.executable());
     let path_line = shown
-        .executable
-        .clone()
-        .unwrap_or_else(|| "Executable path unavailable".to_string());
+        .key
+        .executable()
+        .unwrap_or("Executable path unavailable")
+        .to_string();
     // A program allowed may capture anything, whatever it asked for first.
     let detail = "It will be able to see everything on your screen, and any window.";
     // Only the config keeps a permission past the session.
