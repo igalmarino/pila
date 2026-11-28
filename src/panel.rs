@@ -279,7 +279,7 @@ pub fn button_label(
     panel: Rectangle<i32, Logical>,
     button: Rectangle<i32, Logical>,
     label: &str,
-    color: [u32; 3],
+    color: [f32; 3],
 ) -> Item {
     let at = button.loc - panel.loc;
     Item::Text {
@@ -302,7 +302,7 @@ pub fn button_labels(
     colors: &Colors,
 ) -> [Item; 2] {
     [
-        button_label(panel, primary, primary_label, bits(colors.hover_icon)),
+        button_label(panel, primary, primary_label, colors.hover_icon),
         button_label(panel, secondary, secondary_label, text_colors(colors).0),
     ]
 }
@@ -514,7 +514,7 @@ pub enum Item {
         h: i32,
         font: Font,
         align: Align,
-        color: [u32; 3],
+        color: [f32; 3],
     },
     /// Keycaps from left to right, a "+" between them, within `w`, their
     /// labels at `size` px.
@@ -533,25 +533,15 @@ pub struct TextKey {
     pub items: Vec<Item>,
     /// A keycap's label, its fill, its edge and the "+" between them
     /// (`key_caps`).
-    pub caps: [[u32; 3]; 4],
+    pub caps: [[f32; 3]; 4],
     pub size: (i32, i32),
     pub scale: i32,
 }
 
-/// An opaque color as the content image's key keeps it.
-pub fn bits(color: [f32; 3]) -> [u32; 3] {
-    color.map(f32::to_bits)
-}
-
 /// The keycaps' palette: their label, fill, edge and the "+" between them.
-pub fn key_caps(colors: &Colors) -> [[u32; 3]; 4] {
+pub fn key_caps(colors: &Colors) -> [[f32; 3]; 4] {
     let [r, g, b, _] = opaque(colors.bar);
-    [
-        bits(colors.icon),
-        bits([r, g, b]),
-        bits(colors.hover),
-        bits(colors.icon_inactive),
-    ]
+    [colors.icon, [r, g, b], colors.hover, colors.icon_inactive]
 }
 
 /// A rounded rect (physical pixels) filled with `color`, anti-aliased, over
@@ -607,13 +597,9 @@ fn blit_text(pixels: &mut [u8], width: i32, text: &crate::text::Title, x: i32, y
 }
 
 /// The texts' colors: text, dimmed text and the accent.
-pub fn text_colors(colors: &Colors) -> ([u32; 3], [u32; 3], [u32; 3]) {
+pub fn text_colors(colors: &Colors) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let [r, g, b, _] = accent(colors);
-    (
-        bits(colors.icon),
-        bits(colors.icon_inactive),
-        bits([r, g, b]),
-    )
+    (colors.icon, colors.icon_inactive, [r, g, b])
 }
 
 /// A titled panel's title, at its place, within `width` (the panel's).
@@ -790,7 +776,7 @@ fn draw_items(key: &TextKey) -> Option<Vec<u8>> {
     let scale = key.scale;
     let (width, height) = (key.size.0 * scale, key.size.1 * scale);
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    let [label, fill, edge, plus] = key.caps.map(|c| c.map(f32::from_bits));
+    let [label, fill, edge, plus] = key.caps;
     for item in &key.items {
         match item {
             Item::Text {
@@ -806,7 +792,7 @@ fn draw_items(key: &TextKey) -> Option<Vec<u8>> {
                     size: f32::from(font.size),
                     bold: font.bold,
                 };
-                let line = render_text(text, color.map(f32::from_bits), *w, *h, scale, style)?;
+                let line = render_text(text, *color, *w, *h, scale, style)?;
                 let room = w * scale - line.width;
                 let x = at.0 * scale
                     + match align {

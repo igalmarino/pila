@@ -45,7 +45,7 @@ use smithay::{desktop::Window, utils::IsAlive};
 
 use crate::{
     config::Colors,
-    panel::{bits, Align, ContentImage, FrameBuffers, Item, TextKey, BUTTON_GAP, BUTTON_HEIGHT},
+    panel::{Align, ContentImage, FrameBuffers, Item, TextKey, BUTTON_GAP, BUTTON_HEIGHT},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
@@ -1227,7 +1227,7 @@ fn items(
     }
     // Share's label on the accent, as the switcher's selected title, and
     // the tab shown's.
-    let on_accent = bits(colors.hover_icon);
+    let on_accent = colors.hover_icon;
     let act = if screenshot { "Take" } else { "Share" };
     let tabs = layout.tabs.iter().map(|(tab, rect)| {
         let color = if Some(*tab) == layout.tab {
