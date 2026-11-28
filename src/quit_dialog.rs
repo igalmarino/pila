@@ -20,13 +20,10 @@ use crate::{
     Pila,
 };
 
-/// Panel geometry (logical pixels): the two buttons at the bottom right.
+/// Panel geometry (logical pixels); the buttons are `panel::footer_buttons`.
 const WIDTH: i32 = 520;
 const NOTE_AT: i32 = 62;
 const NOTE_HEIGHT: i32 = 20;
-const BUTTON_HEIGHT: i32 = 34;
-const BUTTON_WIDTH: i32 = 88;
-const BUTTON_GAP: i32 = 10;
 
 const TITLE: &str = "Quit Pila?";
 const NOTE: &str = "Every window will close.";
@@ -51,14 +48,9 @@ pub struct Layout {
 /// The panel centered in `area`, narrower than `WIDTH` on an output that is.
 pub fn layout(area: Rectangle<i32, Logical>) -> Layout {
     let width = WIDTH.min(area.size.w - 2 * panel::PADDING);
-    let height = NOTE_AT + NOTE_HEIGHT + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
+    let height = NOTE_AT + NOTE_HEIGHT + panel::FOOTER_GAP + panel::BUTTON_HEIGHT + panel::PADDING;
     let panel = panel::centered(area, Size::from((width, height)));
-    let (quit, cancel) = panel::footer_buttons(
-        panel,
-        (BUTTON_WIDTH, BUTTON_WIDTH),
-        BUTTON_HEIGHT,
-        BUTTON_GAP,
-    );
+    let (quit, cancel) = panel::footer_buttons(panel);
     Layout {
         panel,
         cancel,

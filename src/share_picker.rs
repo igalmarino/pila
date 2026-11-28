@@ -45,7 +45,7 @@ use smithay::{desktop::Window, utils::IsAlive};
 
 use crate::{
     config::Colors,
-    panel::{bits, Align, ContentImage, FrameBuffers, Item, TextKey},
+    panel::{bits, Align, ContentImage, FrameBuffers, Item, TextKey, BUTTON_GAP, BUTTON_HEIGHT},
     portal::Refused,
     render::{OffscreenWindow, PilaRenderElement},
     screencast::Share,
@@ -83,11 +83,6 @@ const REMEMBER_GAP: i32 = 20;
 const REMEMBER_HEIGHT: i32 = 28;
 const REMEMBER_BOX: i32 = 20;
 const REMEMBER_LABEL_AT: i32 = 32;
-/// The footer: the buttons, as tall as they are, at its right.
-const BUTTON_HEIGHT: i32 = 36;
-const SHARE_WIDTH: i32 = 120;
-const CANCEL_WIDTH: i32 = 110;
-const BUTTON_GAP: i32 = 12;
 /// The narrowest panel (one source): room for its title, its note and the
 /// buttons.
 const MIN_WIDTH: i32 = 694;
@@ -419,12 +414,7 @@ pub fn layout(
     } else {
         Vec::new()
     };
-    let (share, cancel) = crate::panel::footer_buttons(
-        panel,
-        (SHARE_WIDTH, CANCEL_WIDTH),
-        BUTTON_HEIGHT,
-        BUTTON_GAP,
-    );
+    let (share, cancel) = crate::panel::footer_buttons(panel);
     let remember = remember.then(|| {
         Rectangle::new(
             panel.loc + Point::from((PADDING, top + content.1 + REMEMBER_GAP)),

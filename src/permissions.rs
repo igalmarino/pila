@@ -55,15 +55,12 @@ use crate::{
 
 /// Panel geometry (logical pixels): wide enough for the question whole with a
 /// long program name (`the_question_fits_for_a_long_program_name`), the
-/// Allow/Deny buttons at the bottom right.
+/// Allow/Deny buttons where `panel::footer_buttons` puts them.
 const WIDTH: i32 = 720;
 const PATH_AT: i32 = 58;
 const NOTE_AT: i32 = 82;
 const LASTS_AT: i32 = 106;
 const NOTE_HEIGHT: i32 = 20;
-const BUTTON_HEIGHT: i32 = 34;
-const BUTTON_WIDTH: i32 = 88;
-const BUTTON_GAP: i32 = 10;
 
 /// How long Allow does nothing once the prompt shows: it may pop up while
 /// the user is typing, and an Enter meant for the app mustn't allow a capture.
@@ -164,14 +161,9 @@ pub struct Layout {
 pub fn layout(area: Rectangle<i32, Logical>) -> Layout {
     let width = WIDTH.min(area.size.w - 2 * panel::PADDING);
     let body_bottom = LASTS_AT + NOTE_HEIGHT;
-    let height = body_bottom + panel::FOOTER_GAP + BUTTON_HEIGHT + panel::PADDING;
+    let height = body_bottom + panel::FOOTER_GAP + panel::BUTTON_HEIGHT + panel::PADDING;
     let panel = panel::centered(area, Size::from((width, height)));
-    let (allow, deny) = panel::footer_buttons(
-        panel,
-        (BUTTON_WIDTH, BUTTON_WIDTH),
-        BUTTON_HEIGHT,
-        BUTTON_GAP,
-    );
+    let (allow, deny) = panel::footer_buttons(panel);
     Layout { panel, allow, deny }
 }
 

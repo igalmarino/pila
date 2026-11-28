@@ -46,11 +46,6 @@ const ROWS_AT: i32 = 100;
 const ROW: i32 = 36;
 const ROWS_SHOWN: usize = 8;
 const KEYS_AT: i32 = 420;
-/// The footer: its buttons, as the share picker's.
-const BUTTON_HEIGHT: i32 = 36;
-const SAVE_WIDTH: i32 = 120;
-const CANCEL_WIDTH: i32 = 110;
-const BUTTON_GAP: i32 = 12;
 
 /// A shortcut an app asks for: its id, what it does, the keys it would like
 /// (the shortcuts XDG specification's text).
@@ -246,7 +241,7 @@ pub fn layout(area: Rectangle<i32, Logical>, rows: usize, selected: usize) -> La
     let shown = rows.clamp(1, ROWS_SHOWN);
     let first = crate::switcher_view::first_shown(rows, ROWS_SHOWN, Some(selected));
     let height = ROWS_AT + shown as i32 * ROW + panel::FOOTER_GAP - (ROW - panel::CAP_HEIGHT)
-        + BUTTON_HEIGHT
+        + panel::BUTTON_HEIGHT
         + panel::PADDING;
     let panel = panel::centered(area, Size::from((WIDTH, height)));
     let rows = (0..rows.saturating_sub(first).min(ROWS_SHOWN))
@@ -257,8 +252,7 @@ pub fn layout(area: Rectangle<i32, Logical>, rows: usize, selected: usize) -> La
             )
         })
         .collect();
-    let (save, cancel) =
-        panel::footer_buttons(panel, (SAVE_WIDTH, CANCEL_WIDTH), BUTTON_HEIGHT, BUTTON_GAP);
+    let (save, cancel) = panel::footer_buttons(panel);
     Layout {
         panel,
         first,

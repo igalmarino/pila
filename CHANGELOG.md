@@ -36,6 +36,8 @@
 - **New:** Apps calling `org.freedesktop.ScreenSaver`'s `SimulateUserActivity` (remote desktops,
   some players) now count as user activity, as input does, and `GetActive` answers whether the
   session is locked; both used to fail as unknown methods.
+- **Changed:** The quit dialog's and the capture prompt's buttons are the size of the other
+  dialogs' (the share picker's and the app shortcuts panel's): one size for every dialog.
 - **Fixed:** A window title cut short ("…") on a narrow window stayed cut once the window was
   widened or maximized, until the title changed.
 - **Fixed:** The capture prompt's question was cut short ("…") for programs with names as long as

@@ -64,6 +64,12 @@ pub const FOOTER_HEIGHT: i32 = CAP_HEIGHT;
 pub const FOOTER_GAP: i32 = 32;
 /// What a titled panel keeps under its content: the footer and its room.
 pub const FOOTER: i32 = FOOTER_GAP + FOOTER_HEIGHT + PADDING;
+/// A dialog's buttons: their height, the primary's and the secondary's
+/// widths, and the gap between them.
+pub const BUTTON_HEIGHT: i32 = 36;
+pub const PRIMARY_WIDTH: i32 = 120;
+pub const SECONDARY_WIDTH: i32 = 110;
+pub const BUTTON_GAP: i32 = 12;
 
 /// The type scale. A panel's title; the welcome's, larger; what it says;
 /// a note, dimmed; a section's heading, in the accent and capitals.
@@ -249,23 +255,20 @@ pub fn centered(
     Rectangle::new(area.loc + at, size)
 }
 
-/// A dialog's two buttons in its bottom right corner, `PADDING` in, both
-/// `height` high: the primary (`primary` wide) at the right, the secondary
-/// (`secondary` wide) `gap` left of it. (primary, secondary).
+/// A dialog's two buttons in its bottom right corner, `PADDING` in: the
+/// primary at the right, the secondary `BUTTON_GAP` left of it.
+/// (primary, secondary).
 pub fn footer_buttons(
     panel: Rectangle<i32, Logical>,
-    (primary, secondary): (i32, i32),
-    height: i32,
-    gap: i32,
 ) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
-    let y = panel.size.h - PADDING - height;
+    let y = panel.size.h - PADDING - BUTTON_HEIGHT;
     let primary = Rectangle::new(
-        panel.loc + Point::from((panel.size.w - PADDING - primary, y)),
-        Size::from((primary, height)),
+        panel.loc + Point::from((panel.size.w - PADDING - PRIMARY_WIDTH, y)),
+        Size::from((PRIMARY_WIDTH, BUTTON_HEIGHT)),
     );
     let secondary = Rectangle::new(
-        primary.loc - Point::from((gap + secondary, 0)),
-        Size::from((secondary, height)),
+        primary.loc - Point::from((BUTTON_GAP + SECONDARY_WIDTH, 0)),
+        Size::from((SECONDARY_WIDTH, BUTTON_HEIGHT)),
     );
     (primary, secondary)
 }
