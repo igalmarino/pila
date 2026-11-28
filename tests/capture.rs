@@ -421,27 +421,6 @@ fn presentation_time(client: &Client, tag: &str) -> Duration {
     event_time(client, tag, "PresentationTime")
 }
 
-/// The time an event of `tag` named `name` carries (ext's
-/// `PresentationTime`, wlr-screencopy's `Ready`).
-fn event_time(client: &Client, tag: &str, name: &str) -> Duration {
-    let event = client
-        .logged(tag)
-        .into_iter()
-        .find(|e| e.starts_with(name))
-        .unwrap_or_else(|| panic!("no {name} for {tag}"));
-    let field = |name: &str| -> u64 {
-        let at = event.find(&format!("{name}: ")).unwrap() + name.len() + 2;
-        event[at..]
-            .split(|c: char| !c.is_ascii_digit())
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap()
-    };
-    let secs = (field("tv_sec_hi") << 32) | field("tv_sec_lo");
-    Duration::new(secs, field("tv_nsec") as u32)
-}
-
 #[test]
 fn a_frame_is_presented_at_the_next_refresh() {
     // At 1 Hz, the next refresh is long after the frame is copied and sent.

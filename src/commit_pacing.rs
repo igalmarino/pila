@@ -17,9 +17,11 @@
 //! wp-commit-timing holds a commit back until the refresh at or after its
 //! timestamp. Smithay's unmanaged mode leaves the blocking to pila, which needs
 //! to know the deadline: on an idle screen no frame would come to apply it. A
-//! timer wakes pila a period before the earliest deadline to draw the frame
-//! that may show it (`signal_commit_timers`, before each frame is built), and
-//! at the deadline itself applies it anyway, in case no frame was drawn. This
+//! timer wakes pila half a period before the earliest deadline and asks the
+//! surface's outputs for the frame that may show it, in time for the first
+//! refresh at or after it (`signal_commit_timers`, before each frame is built,
+//! applies what's due when the frame shows), and at the deadline itself
+//! applies it anyway, in case that frame was for an earlier refresh. This
 //! isn't frame pacing: the client asked for that moment. A surface is held
 //! for as long as its client asks, whatever it's showing.
 
@@ -85,11 +87,12 @@ pub fn next_vblank(last: Duration, now: Duration, period: Duration) -> Duration 
     last + period * u32::try_from(periods).unwrap_or(u32::MAX)
 }
 
-/// How long to sleep before acting on a deadline `until` from now: until a
-/// period before it, to draw the frame that shows it; once within that, until
-/// the deadline itself.
+/// How long to sleep before acting on a deadline `until` from now: until
+/// half a period before it, to draw in time the frame for the first refresh
+/// at or after it (a frame drawn a whole period ahead would be for an earlier
+/// one); once within that, until the deadline itself.
 fn deadline_wait(until: Duration, period: Duration) -> Duration {
-    match until.saturating_sub(period) {
+    match until.saturating_sub(period / 2) {
         Duration::ZERO => until,
         before => before,
     }
@@ -311,17 +314,42 @@ impl Pila {
             .max()
             .unwrap_or(Duration::from_micros(16_667));
         let timer = Timer::from_duration(deadline_wait(until, period));
-        let inserted = self.loop_handle.insert_source(timer, |_, _, state| {
+        let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
             state.commit_pacing.deadline_timer = None;
             // Past deadlines apply even if no frame comes.
             let now = state.clock.now();
             // The commits that apply ask for their redraws.
             state.signal_timers_until(now, None);
+            // The frames that may show the ones due soon, drawn ahead of them
+            // (`signal_commit_timers` applies what's due when a frame shows).
+            state.redraw_for_deadlines_until((Duration::from(now) + period / 2).into());
             state.housekeeping = true;
             state.schedule_deadline_timer();
             TimeoutAction::Drop
         });
         self.commit_pacing.deadline_timer = inserted.ok();
+    }
+
+    /// Ask for a redraw of the outputs of the surfaces with commits held
+    /// back until `until` or earlier: the frame that may show them.
+    fn redraw_for_deadlines_until(&mut self, until: Time<Monotonic>) {
+        let due: Vec<WlSurface> = self
+            .commit_pacing
+            .timed
+            .iter()
+            .filter_map(|surface| surface.upgrade().ok())
+            .filter(|surface| next_deadline(surface).is_some_and(|deadline| deadline <= until))
+            .collect();
+        for surface in due {
+            match self.surface_outputs(&surface) {
+                Some(outputs) => {
+                    for output in outputs {
+                        self.request_redraw_as(&output, crate::redraw::Content::Maybe);
+                    }
+                }
+                None => self.queue_redraw(),
+            }
+        }
     }
 
     /// Run the timer that frees barriers no frame signals, while there are any.
@@ -383,10 +411,11 @@ mod tests {
     }
 
     #[test]
-    fn a_deadline_wakes_a_period_before_it_then_at_it() {
+    fn a_deadline_wakes_half_a_period_before_it_then_at_it() {
         let wait = |ms| deadline_wait(Duration::from_millis(ms), PERIOD);
-        assert_eq!(wait(100), Duration::from_millis(90));
-        assert_eq!(wait(10), Duration::from_millis(10));
+        assert_eq!(wait(100), Duration::from_millis(95));
+        assert_eq!(wait(10), Duration::from_millis(5));
+        assert_eq!(wait(5), Duration::from_millis(5));
         assert_eq!(wait(4), Duration::from_millis(4));
         assert_eq!(wait(0), Duration::ZERO);
         assert_eq!(

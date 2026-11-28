@@ -668,7 +668,27 @@ fn tail(text: &str, lines: usize) -> String {
     all[all.len().saturating_sub(lines)..].join("\n")
 }
 
-/// The window with `app_id` in a state; panics if several match.
+/// The time an event of `tag` named `name` carries (ext's
+/// `PresentationTime`, wlr-screencopy's `Ready`).
+pub fn event_time(client: &client::Client, tag: &str, name: &str) -> Duration {
+    let event = client
+        .logged(tag)
+        .into_iter()
+        .find(|e| e.starts_with(name))
+        .unwrap_or_else(|| panic!("no {name} for {tag}"));
+    let field = |name: &str| -> u64 {
+        let at = event.find(&format!("{name}: ")).unwrap() + name.len() + 2;
+        event[at..]
+            .split(|c: char| !c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let secs = (field("tv_sec_hi") << 32) | field("tv_sec_lo");
+    Duration::new(secs, field("tv_nsec") as u32)
+}
+
 /// CLOCK_MONOTONIC, the clock wp_presentation announces, as pila reads it.
 pub fn monotonic_now() -> Duration {
     let mut time = libc::timespec {
@@ -683,6 +703,7 @@ pub fn monotonic_now() -> Duration {
     Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
+/// The window with `app_id` in a state; panics if several match.
 pub fn window_in<'a>(state: &'a Value, app_id: &str) -> Option<&'a Value> {
     let mut found = state["windows"]
         .as_array()?

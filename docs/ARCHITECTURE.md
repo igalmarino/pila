@@ -731,10 +731,12 @@ Key flows and invariants:
   redraw the next waits (bare metal: until half a period before the vblank, `draw::idle_wait`),
   so a looping client still gets about one update per refresh.
   wp-commit-timing: `hold_commit_until_timestamp` (pre-commit hook; Smithay's unmanaged mode)
-  blocks a commit with a timestamp and arms one timer for the earliest deadline, a period
-  before it. The redraw that wakes builds a frame, and before building it
+  blocks a commit with a timestamp and arms one timer for the earliest deadline, half a period
+  before it (a whole period ahead, the frame would be for an earlier refresh), which asks the
+  surface's outputs for a redraw (`Content::Maybe`). Before building that frame
   `signal_commit_timers` applies what will be due when it shows (`Backend::next_frame_time`:
-  the next vblank from the kernel's timestamps, nested and headless a period from now).
+  the next vblank from the kernel's timestamps, headless from its last redraw the same way,
+  nested a period from now).
   At the deadline itself anything left applies whether a frame came or not.
 - **Stacking order** is the `Space` element order (back to front); raising =
   `Pila::raise_window` (`redraw.rs`: `raise_element` plus its redraw), ending in `keep_on_top`.

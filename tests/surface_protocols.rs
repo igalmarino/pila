@@ -1061,6 +1061,43 @@ fn a_commit_with_a_timestamp_waits_for_it_on_an_idle_screen() {
 }
 
 #[test]
+fn a_commit_due_just_before_a_refresh_is_drawn_ahead_for_it() {
+    // 2 Hz: a refresh every 500 ms, wide enough to tell when a frame is drawn.
+    let period = Duration::from_millis(500);
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("SLOW:1280x800@2".into()),
+        ..Default::default()
+    });
+    let client = pila.client();
+    let window = fifo_window(&mut pila, &client);
+    let presentation: WpPresentation = client.bind("wp_presentation", 2);
+    let surface = client.surface(window);
+    // A redraw to count the refreshes from: headless redraws are its vblanks.
+    let _first = presentation.feedback(&surface, &client.qh, "first".into());
+    client.draw(window, Some((140, 100)));
+    client.flush();
+    client.wait_logged("first", "Presented");
+    let vblank = event_time(&client, "first", "Presented");
+    // Due a little before the second refresh from it: the frame for that
+    // refresh is drawn ahead (headless: drawn is presented), not once the
+    // timestamp has passed.
+    let target = vblank + 2 * period - Duration::from_millis(100);
+    let timer = commit_timer_of(&client, window);
+    set_timestamp(&timer, target);
+    let _timed = presentation.feedback(&surface, &client.qh, "timed".into());
+    client.draw(window, Some((150, 100)));
+    client.flush();
+    client.wait_logged("timed", "Presented");
+    let shown = event_time(&client, "timed", "Presented");
+    assert!(
+        shown < target,
+        "drawn {:?} after its timestamp",
+        shown - target
+    );
+    assert!(shown + period >= target, "drawn more than a refresh early");
+}
+
+#[test]
 fn a_commit_with_a_past_timestamp_applies_at_once() {
     let mut pila = TestPila::start();
     let client = pila.client();
