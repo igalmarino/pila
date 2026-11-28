@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.9 (2026-11-27)
 
 - **Changed (breaking):** Direct screen capture permissions are kept in one place, the
   configuration. The capture prompt no longer has **Remember**: Allow lasts until you log out, as
