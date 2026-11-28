@@ -96,13 +96,7 @@ fn save_store(store: &Store) {
         .filter(|(_, grant)| grant.persistent)
         .map(|(id, grant)| (id.clone(), grant.clone()))
         .collect();
-    crate::state_file::save_keyed(
-        "pila-screen-shares",
-        STORE_FILE,
-        STORE_KEY,
-        "the screen shares remembered",
-        kept,
-    );
+    crate::state_file::save_keyed(STORE_FILE, STORE_KEY, "the screen shares remembered", kept);
 }
 
 /// A share's grant, as `Start` answers it: its id, the `persist_mode`

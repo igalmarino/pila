@@ -166,13 +166,7 @@ pub fn parse_store(text: &str) -> serde_json::Result<Store> {
 
 /// Write `store` to its file, on a thread, whole or not at all.
 fn save_store(store: Store) {
-    crate::state_file::save_keyed(
-        "pila-app-shortcuts",
-        STORE_FILE,
-        STORE_KEY,
-        "the apps' shortcuts",
-        store,
-    );
+    crate::state_file::save_keyed(STORE_FILE, STORE_KEY, "the apps' shortcuts", store);
 }
 
 /// A signal to the app's session.

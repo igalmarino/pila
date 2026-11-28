@@ -10,57 +10,59 @@ use std::{
     io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::{mpsc, Mutex},
 };
 
 use tracing::warn;
 
 use crate::sync::Locked;
 
-/// The number of the next save asked for (`save`).
-static NEXT_SAVE: AtomicU64 = AtomicU64::new(1);
+/// A save asked for: the file, its name for the log, and what makes its text.
+type Save = (
+    PathBuf,
+    &'static str,
+    Box<dyn FnOnce() -> std::io::Result<String> + Send>,
+);
 
-/// The number of the last save written to each file (`write_in_order`).
-/// Held while writing, so no two threads write at once.
-static WRITTEN: Mutex<Option<HashMap<PathBuf, u64>>> = Mutex::new(None);
+/// The thread that writes the state files, one save after another
+/// (`save`); started at the first.
+static WRITER: Mutex<Option<mpsc::Sender<Save>>> = Mutex::new(None);
 
-/// Write what `text` makes to `path` on a thread of its own (`name`), whole
-/// or not at all, and in the order the saves were asked for: one asked for
-/// later and written first isn't undone by this one (a permission revoked
-/// mustn't come back). `what` names the file in the log.
+/// Write what `text` makes to `path`, whole or not at all, on the state
+/// files' thread: in the order the saves were asked for, so one asked for
+/// later is never undone by an earlier one (a permission revoked mustn't
+/// come back). `what` names the file in the log.
 pub fn save(
-    name: &str,
     path: PathBuf,
     what: &'static str,
     text: impl FnOnce() -> std::io::Result<String> + Send + 'static,
 ) {
-    let number = NEXT_SAVE.fetch_add(1, Ordering::Relaxed);
+    let mut writer = WRITER.locked();
+    let mut save: Save = (path, what, Box::new(text));
+    if let Some(sender) = writer.as_ref() {
+        match sender.send(save) {
+            Ok(()) => return,
+            // The thread went (it panicked): started again.
+            Err(mpsc::SendError(unsent)) => save = unsent,
+        }
+    }
+    let (sender, saves) = mpsc::channel::<Save>();
     let spawned = std::thread::Builder::new()
-        .name(name.into())
+        .name("pila-state-files".into())
         .spawn(move || {
-            if let Err(err) = text().and_then(|text| write_in_order(&path, &text, number)) {
-                warn!(%err, path = %path.display(), "can't save {what}");
+            for (path, what, text) in saves {
+                if let Err(err) = text().and_then(|text| write(&path, &text)) {
+                    warn!(%err, path = %path.display(), "can't save {what}");
+                }
             }
         });
     if let Err(err) = spawned {
-        warn!(?err, "can't save {what}");
+        warn!(?err, "can't save {}", save.1);
+        return;
     }
-}
-
-/// `write`, unless a save numbered after `number` was written to `path`
-/// already; whether it wrote.
-fn write_in_order(path: &Path, text: &str, number: u64) -> std::io::Result<bool> {
-    let mut written = WRITTEN.locked();
-    let written = written.get_or_insert_with(HashMap::new);
-    if written.get(path).is_some_and(|&last| last > number) {
-        return Ok(false);
-    }
-    write(path, text)?;
-    written.insert(path.to_path_buf(), number);
-    Ok(true)
+    // Received: the thread holds the other end.
+    let _ = sender.send(save);
+    *writer = Some(sender);
 }
 
 /// What `key` holds in a state file's `text` (`{"<key>": ...}`), which
@@ -93,10 +95,8 @@ pub fn read_keyed<T: serde::de::DeserializeOwned + Default>(
     })
 }
 
-/// `value` written under `key` to the state file `name` (`save`, on a
-/// thread named `thread`).
+/// `value` written under `key` to the state file `name` (`save`).
 pub fn save_keyed<T: serde::Serialize + Send + 'static>(
-    thread: &str,
     name: &str,
     key: &'static str,
     what: &'static str,
@@ -105,7 +105,7 @@ pub fn save_keyed<T: serde::Serialize + Send + 'static>(
     let Some(path) = path(name) else {
         return;
     };
-    save(thread, path, what, move || {
+    save(path, what, move || {
         let file = HashMap::from([(key, value)]);
         serde_json::to_string_pretty(&file).map_err(std::io::Error::other)
     });
@@ -156,16 +156,19 @@ pub fn random_id() -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Saves written out of order leave the last one asked for.
+    /// Saves are written in the order asked for: the last one stays.
     #[test]
-    fn a_save_asked_for_earlier_and_written_later_is_skipped() {
+    fn the_last_save_asked_for_is_the_one_kept() {
         let dir = std::env::temp_dir().join(format!("pila-state-order-{}", std::process::id()));
         let path = dir.join("grants.json");
-        assert!(write_in_order(&path, "newer", 11).unwrap());
-        assert!(!write_in_order(&path, "older", 10).unwrap());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "newer");
-        assert!(write_in_order(&path, "newest", 12).unwrap());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "newest");
+        for text in ["first", "second", "last"] {
+            save(path.clone(), "a test file", move || Ok(text.to_string()));
+        }
+        let started = std::time::Instant::now();
+        while std::fs::read_to_string(&path).ok().as_deref() != Some("last") {
+            assert!(started.elapsed().as_secs() < 5, "never written");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
