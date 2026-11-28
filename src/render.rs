@@ -40,7 +40,6 @@ use crate::{
     decoration::{self, TitleBarPart},
     rounded::{
         self, Corners, RoundedSolid, RoundedSurface, Rounding, Shadow, ShadowElement, ShapeDamage,
-        SurfaceElement,
     },
     workspace_slide::SceneSlide,
 };
@@ -56,15 +55,6 @@ smithay::backend::renderer::element::render_elements! {
     ShapeDamage=ShapeDamage,
     Shadow=ShadowElement,
     Rescaled=RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
-}
-
-impl From<SurfaceElement> for PilaRenderElement {
-    fn from(element: SurfaceElement) -> Self {
-        match element {
-            SurfaceElement::Plain(element) => Self::Surface(element),
-            SurfaceElement::Rounded(element) => Self::RoundedSurface(element),
-        }
-    }
 }
 
 /// Shaders kept in the EGL context's user data, compiled by `compile` the
@@ -945,10 +935,13 @@ fn single_window_elements(
                 .map(|surface| main_surface_element(renderer, &surface, location, surface_alpha))
                 .unwrap_or_default();
             match rounded {
-                Some((rounding, shaders)) => elements.extend(
-                    rounded::clip_surfaces(main, shaders, rounding, output_location, scale)
-                        .map(PilaRenderElement::from),
-                ),
+                Some((rounding, shaders)) => elements.extend(rounded::clip_surfaces(
+                    main,
+                    shaders,
+                    rounding,
+                    output_location,
+                    scale,
+                )),
                 None => elements.extend(main.into_iter().map(PilaRenderElement::Surface)),
             }
         }
@@ -1647,10 +1640,13 @@ fn window_tree_elements(
         Kind::Unspecified,
     );
     match rounded {
-        Some((rounding, shaders)) => elements.extend(
-            rounded::clip_surfaces(surfaces, shaders, rounding, output_location, scale)
-                .map(PilaRenderElement::from),
-        ),
+        Some((rounding, shaders)) => elements.extend(rounded::clip_surfaces(
+            surfaces,
+            shaders,
+            rounding,
+            output_location,
+            scale,
+        )),
         None => elements.extend(surfaces.into_iter().map(PilaRenderElement::Surface)),
     }
     elements

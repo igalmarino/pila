@@ -344,28 +344,22 @@ pub fn clip_surfaces(
     rounding: &Rounding,
     origin: Point<i32, Logical>,
     scale: Scale<f64>,
-) -> impl Iterator<Item = SurfaceElement> {
+) -> impl Iterator<Item = crate::render::PilaRenderElement> {
     let shape = rounding.physical(origin, scale);
     let program = shaders.texture.clone();
     elements.into_iter().map(move |element| {
         let clip = needs_clip(element.geometry(scale), &shape)
             && matches!(element.texture(), WaylandSurfaceTexture::Texture(_));
         if clip {
-            SurfaceElement::Rounded(RoundedSurface {
+            crate::render::PilaRenderElement::RoundedSurface(RoundedSurface {
                 inner: element,
                 program: program.clone(),
                 shape,
             })
         } else {
-            SurfaceElement::Plain(element)
+            crate::render::PilaRenderElement::Surface(element)
         }
     })
-}
-
-/// A window surface element, clipped to the window's shape or not.
-pub enum SurfaceElement {
-    Plain(WaylandSurfaceRenderElement<GlesRenderer>),
-    Rounded(RoundedSurface),
 }
 
 /// A surface element drawn through the rounding texture shader.
