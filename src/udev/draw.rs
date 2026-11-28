@@ -130,44 +130,35 @@ fn prepare(state: &mut Pila, id: OutputId) -> Option<Ready> {
             return None;
         }
     }
-    // An output that had nothing new to show just now waits its turn
-    // (`idle_wait`), unless what's asked surely shows or a lock waits.
     let now: Duration = state.clock.now().into();
     let lock_pending = state.lock_pending();
-    if let Some(Backend::Udev(data)) = &mut state.backend {
-        let wait = data.outputs.get(&id).and_then(|surface| {
-            let wait = idle_wait(
-                surface.crtc_state.idle_until,
-                now,
-                surface.redraw_content,
-                surface.crtc_state.idle_streak,
-                surface.crtc_state.frame_pending,
-                lock_pending,
-            );
-            wait.filter(|_| surface.redraw_needed)
-        });
-        if let Some(delay) = wait {
-            if let Some(request) = data
-                .outputs
-                .get_mut(&id)
-                .and_then(|surface| surface.crtc_state.request.as_mut())
-            {
-                request.held = true;
-            }
-            data.schedule_idle_redraw(id, delay);
-            return None;
-        }
-    }
-    let Some(Backend::Udev(data)) = &state.backend else {
+    let Some(Backend::Udev(data)) = &mut state.backend else {
         return None;
     };
-    let surface = data.outputs.get(&id)?;
+    let active = data.session.is_active();
+    let surface = data.outputs.get_mut(&id)?;
+    let content = surface.redraw?;
     if surface.crtc_state.frame_pending
-        || !surface.redraw_needed
         || surface.drm_output.is_none()
-        || !data.session.is_active()
+        || !active
         || surface.crtc_state.recovery.blocks_render()
     {
+        return None;
+    }
+    // An output that had nothing new to show just now waits its turn
+    // (`idle_wait`), unless what's asked surely shows or a lock waits.
+    let wait = idle_wait(
+        surface.crtc_state.idle_until,
+        now,
+        content,
+        surface.crtc_state.idle_streak,
+        lock_pending,
+    );
+    if let Some(delay) = wait {
+        if let Some(request) = surface.crtc_state.request.as_mut() {
+            request.held = true;
+        }
+        data.schedule_idle_redraw(id, delay);
         return None;
     }
     if hold_late(state, id, now, lock_pending) {
@@ -340,8 +331,7 @@ fn draw(
     let renderer = match &mut lent {
         OutputRenderer::Primary(lent) | OutputRenderer::Secondary(lent) => lent.as_mut(),
     };
-    surface.redraw_needed = false;
-    surface.redraw_content = crate::redraw::Content::Maybe;
+    surface.redraw = None;
     let request = surface.crtc_state.request.take();
     // Held to be drawn now, its margin before the vblank (`render_late.rs`).
     let held = surface.crtc_state.render_at.take();
@@ -551,7 +541,7 @@ fn draw(
                         }
                     }
                     Err(err) => {
-                        surface.redraw_needed = true;
+                        surface.needs_redraw();
                         failure = Some(("queue", format!("{err:?}")));
                     }
                 }
@@ -564,7 +554,7 @@ fn draw(
             }
         }
         Err(err) => {
-            surface.redraw_needed = true;
+            surface.needs_redraw();
             failure = Some(("render", err));
         }
     }
@@ -881,7 +871,6 @@ fn idle_wait(
     now: Duration,
     content: crate::redraw::Content,
     idle_streak: u32,
-    frame_pending: bool,
     lock_pending: bool,
 ) -> Option<Duration> {
     let until = idle_until.filter(|until| now < *until)?;
@@ -895,7 +884,7 @@ fn idle_wait(
         Content::Client => idle_streak <= 1,
         Content::Maybe => false,
     };
-    (!surely_new && !frame_pending && !lock_pending).then(|| until - now)
+    (!surely_new && !lock_pending).then(|| until - now)
 }
 
 /// How many redraws in a row may find nothing new before even a change of
@@ -1033,25 +1022,15 @@ mod tests {
         // before the vblank at 116: the next waits until 124.
         let until = Some(idle_until(Some(ms(100)), ms(110), period));
         // A client's new frame at 111 is drawn at once, in time for 116.
-        assert_eq!(
-            idle_wait(until, ms(111), Content::Client, 1, false, false),
-            None
-        );
+        assert_eq!(idle_wait(until, ms(111), Content::Client, 1, false), None);
         // A redraw that may bring nothing (a commit with no new picture) waits.
         assert_eq!(
-            idle_wait(until, ms(111), Content::Maybe, 1, false, false),
+            idle_wait(until, ms(111), Content::Maybe, 1, false),
             Some(ms(13))
         );
-        // Nor does anything wait with a frame in flight (its vblank draws
-        // it) or a lock waiting for its frame.
-        assert_eq!(
-            idle_wait(until, ms(111), Content::Maybe, 1, true, false),
-            None
-        );
-        assert_eq!(
-            idle_wait(until, ms(111), Content::Maybe, 1, false, true),
-            None
-        );
+        // Nor does anything wait with a lock waiting for its frame (with a
+        // frame in flight, `prepare` doesn't ask: its vblank draws it).
+        assert_eq!(idle_wait(until, ms(111), Content::Maybe, 1, true), None);
     }
 
     #[test]
@@ -1062,16 +1041,13 @@ mod tests {
         // once; if that found nothing either, the next waits like the rest:
         // a client sending what shows nowhere (covered, say) in a loop of
         // fifo barriers can't make an output redraw as fast as it loops.
+        assert_eq!(idle_wait(until, ms(111), Content::Client, 1, false), None);
         assert_eq!(
-            idle_wait(until, ms(111), Content::Client, 1, false, false),
-            None
-        );
-        assert_eq!(
-            idle_wait(until, ms(111), Content::Client, 2, false, false),
+            idle_wait(until, ms(111), Content::Client, 2, false),
             Some(ms(13))
         );
         assert_eq!(
-            idle_wait(until, ms(111), Content::Client, 5, false, false),
+            idle_wait(until, ms(111), Content::Client, 5, false),
             Some(ms(13))
         );
         // The streak starts over with each wait (once per refresh), and
@@ -1082,15 +1058,12 @@ mod tests {
         assert_eq!(idle_streak(5, false, false, false), 5);
         // A change of Pila's own (an animation starting, a window moved)
         // never waits: it shows, whatever came before.
-        assert_eq!(
-            idle_wait(until, ms(111), Content::Sure, 5, false, false),
-            None
-        );
+        assert_eq!(idle_wait(until, ms(111), Content::Sure, 5, false), None);
         // Unless it keeps finding nothing (something of Pila's asking in a
         // loop for what shows elsewhere): then even it waits, so no output
         // redraws with nothing new more than a few times a refresh.
         assert_eq!(
-            idle_wait(until, ms(111), Content::Sure, SURE_STREAK, false, false),
+            idle_wait(until, ms(111), Content::Sure, SURE_STREAK, false),
             Some(ms(13))
         );
     }

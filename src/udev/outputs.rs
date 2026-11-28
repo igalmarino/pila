@@ -364,7 +364,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             continue;
         }
         right_edge = right_edge.max(loc.x + width);
-        surface.redraw_needed = true;
+        surface.needs_redraw();
         placed.push((surface.output.clone(), loc));
     }
     for id in remodeled {
@@ -532,7 +532,7 @@ fn retrain_bad_links(state: &mut Pila) {
         refit |= output.current_mode() != mode_before;
         // A frame in flight still gets its vblank (`frame_finish`).
         if let Some(surface) = data.outputs.get_mut(&id) {
-            surface.redraw_needed = true;
+            surface.needs_redraw();
         }
         info!(name, "link set up again");
     }
@@ -676,7 +676,7 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
             mode: drm_mode,
             global: None,
             last_vblank_time: None,
-            redraw_needed: true,
+            redraw: Some(crate::redraw::Content::Maybe),
             modes,
             gamma: None,
             gamma_lut,
@@ -689,7 +689,6 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
             refused_scanout: None,
             scanout_feedback: None,
             idle_timer: false,
-            redraw_content: crate::redraw::Content::Maybe,
             render_timing: Default::default(),
 
             crtc_state: CrtcState::default(),

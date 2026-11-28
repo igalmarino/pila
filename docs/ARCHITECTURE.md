@@ -336,13 +336,15 @@ Key flows and invariants:
   vblank (`draw::idle_until`, `CrtcState::idle_until`; a one-shot timer,
   `schedule_idle_redraw`, draws what was asked meanwhile) before the next that may bring
   nothing (`draw::idle_wait`): at most one per refresh. What's asked says what it brings
-  (`redraw::Content`, the most of the requests since the last redraw: `redraw_content`): a
+  (`redraw::Content`, the most of the requests since the last redraw: `OutputSurface::redraw`,
+  `None` with none asked): a
   change of Pila's own (`Sure`: a window moved, an animation, a drawn cursor) never waits; a
   client's new picture (`Client`) doesn't, once per wait (and `Sure` not after
   `SURE_STREAK` redraws in a row found nothing, a bound on a loop of Pila's own requests): if that redraw finds nothing new
   either (`idle_streak`: two in a row, a covered surface's commits paced by its fifo barriers,
-  say), it waits too, until the wait is over. An output with a frame in flight (its vblank draws it)
-  or a lock waiting for its frame never waits. Past those waits a frame is drawn late, its
+  say), it waits too, until the wait is over. A lock waiting for its frame never waits; an output
+  that can't draw now (a frame in flight, whose vblank draws it; off; on another VT; recovering)
+  arms no wait (`draw::prepare` asks only one that can). Past those waits a frame is drawn late, its
   margin before the next vblank (`render-late`, on by default; `udev/render_late.rs`,
   `draw::hold_late`), but only in a steady scene: `CrtcState::render_at` holds the output
   and a timer (`schedule_late_render`) draws it then, so what clients and input bring meanwhile

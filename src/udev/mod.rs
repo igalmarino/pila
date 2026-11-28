@@ -257,8 +257,12 @@ struct OutputSurface {
     /// When the last frame was shown (the kernel's timestamp, on the
     /// presentation clock, if it gives one).
     last_vblank_time: Option<Duration>,
-    /// Something changed since the last frame.
-    redraw_needed: bool,
+    /// A redraw asked for since the last frame, and the most what was asked
+    /// brings (`redraw::Content`): a change of Pila's own waits only past
+    /// `SURE_STREAK` redraws in a row that found nothing new, a client's new
+    /// picture doesn't unless the last two redraws found nothing new
+    /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
+    redraw: Option<crate::redraw::Content>,
     /// The connector's modes, for `[[output]]` mode changes on reload.
     modes: Vec<DrmMode>,
     /// The gamma ramps a client set (`gamma_control.rs`), re-applied
@@ -297,12 +301,6 @@ struct OutputSurface {
     scanout_feedback: Option<DmabufFeedback>,
     /// That timer is set.
     idle_timer: bool,
-    /// The most the redraws asked for since the last one bring
-    /// (`redraw::Content`): a change of Pila's own waits only past
-    /// `SURE_STREAK` redraws in a row that found nothing new, a client's
-    /// new picture doesn't unless the last two redraws found nothing new
-    /// (`idle_streak`), what may bring nothing does (`draw::idle_wait`).
-    redraw_content: crate::redraw::Content,
     /// What its recent frames took to be ready, for rendering late
     /// (`render_late.rs`).
     render_timing: render_late::RenderTiming,
@@ -412,7 +410,13 @@ impl OutputSurface {
     fn crtc_set_up(&mut self, drm_output: PilaDrmOutput) {
         self.drm_output = Some(drm_output);
         self.crtc_state = CrtcState::default();
-        self.redraw_needed = true;
+        self.needs_redraw();
+    }
+
+    /// A redraw is due, of whatever it brings (a redraw asked already keeps
+    /// what it brings).
+    fn needs_redraw(&mut self) {
+        self.redraw.get_or_insert(crate::redraw::Content::Maybe);
     }
 
     /// The CRTC was cleared (powered off, disabled): no frame is on its way,
@@ -431,11 +435,10 @@ impl OutputSurface {
 
     /// Something changed on this output at `now`; `content`: surely shows.
     fn ask_redraw(&mut self, content: crate::redraw::Content, now: Duration) {
-        self.redraw_needed = true;
+        self.redraw = self.redraw.max(Some(content));
         if content == crate::redraw::Content::Maybe {
             return;
         }
-        self.redraw_content = self.redraw_content.max(content);
         if self.crtc_state.request.is_none() {
             self.crtc_state.request = self.last_vblank_time.map(|vblank| Request {
                 at: now,
@@ -511,7 +514,7 @@ impl UdevData {
                 data.take_master();
                 if let Some(surface) = data.outputs.get_mut(&id) {
                     surface.crtc_state.recovery.retry();
-                    surface.redraw_needed = true;
+                    surface.needs_redraw();
                 }
                 data.schedule_render();
             }
