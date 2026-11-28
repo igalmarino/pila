@@ -184,6 +184,17 @@ enum CastEvent {
     Disconnected(String),
 }
 
+/// What a cast draws this frame: part of the screen (an output's, or a
+/// region of it), or a window.
+enum View {
+    Screen {
+        name: String,
+        geo: Rectangle<i32, smithay::utils::Logical>,
+        area: Rectangle<i32, smithay::utils::Logical>,
+    },
+    Window(smithay::desktop::Window),
+}
+
 /// A started session's stream.
 struct Cast {
     id: u64,
@@ -712,6 +723,35 @@ impl Pila {
         self.end_casts();
     }
 
+    /// What `cast` shares changed size (a mode, a turn, a window resized):
+    /// the stream's format is offered again at it, and frames wait for
+    /// buffers of that size.
+    fn renegotiate_cast(&mut self, cast: &mut Cast, size: Size<i32, Physical>, scale: Scale<f64>) {
+        info!(
+            session = cast.session,
+            ?size,
+            "portal: what's shared changed size; negotiating again"
+        );
+        cast.size = size;
+        cast.scale = scale;
+        cast.tracker = None;
+        cast.buffers.set(cast.buffers.get() + 1);
+        let fps = self.cast_fps(&cast.target);
+        cast.memory.borrow_mut().offered = ((size.w, size.h), fps);
+        let offered = self
+            .screencast
+            .pipewire
+            .as_ref()
+            .map(modifiers_offered)
+            .unwrap_or_default();
+        let formats = format_params(size, fps, Modifiers::Offer(&offered));
+        let mut pods: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
+        if let Err(err) = cast.stream.update_params(&mut pods) {
+            warn!(%err, "portal: can't offer the new size");
+            cast.ended = true;
+        }
+    }
+
     fn process_cast(&mut self, cast: &mut Cast, input: &mut Option<render::FrameInput>) {
         let Some((size, scale)) =
             self.capture_geometry(&cast.target, Some((cast.size, cast.scale)))
@@ -720,33 +760,7 @@ impl Pila {
             return;
         };
         if size != cast.size {
-            // A new size (a mode, a turn, a window resized): the stream's
-            // format is offered again at it, and frames wait for buffers of
-            // that size.
-            info!(
-                session = cast.session,
-                ?size,
-                "portal: what's shared changed size; negotiating again"
-            );
-            cast.size = size;
-            cast.scale = scale;
-            cast.tracker = None;
-            cast.buffers.set(cast.buffers.get() + 1);
-            let fps = self.cast_fps(&cast.target);
-            cast.memory.borrow_mut().offered = ((size.w, size.h), fps);
-            let offered = self
-                .screencast
-                .pipewire
-                .as_ref()
-                .map(modifiers_offered)
-                .unwrap_or_default();
-            let formats = format_params(size, fps, Modifiers::Offer(&offered));
-            let mut pods: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
-            if let Err(err) = cast.stream.update_params(&mut pods) {
-                warn!(%err, "portal: can't offer the new size");
-                cast.ended = true;
-            }
-            return;
+            return self.renegotiate_cast(cast, size, scale);
         }
         if scale != cast.scale {
             // The same pixels at another scale: drawn anew, nothing to
@@ -763,7 +777,7 @@ impl Pila {
         // geometry's top-left the buffer's (`capture::Target`, as screen
         // captures draw it). A window's contents stay private while the
         // screen is locked.
-        let (origin, output, window) = match &cast.target {
+        let (origin, view) = match &cast.target {
             Target::Output(_) | Target::Region(..) => {
                 let Some(crate::capture::TargetArea { output, area, geo }) =
                     self.target_area(&cast.target)
@@ -771,7 +785,8 @@ impl Pila {
                     cast.ended = true;
                     return;
                 };
-                (area.loc, Some((output.name(), geo, area)), None)
+                let name = output.name();
+                (area.loc, View::Screen { name, geo, area })
             }
             Target::Toplevel(identifier) => {
                 if self.is_locked() {
@@ -782,7 +797,7 @@ impl Pila {
                     return;
                 };
                 let origin = self.space.element_location(&window).unwrap_or_default();
-                (origin, None, Some(window))
+                (origin, View::Window(window))
             }
             Target::Gone => {
                 cast.ended = true;
@@ -793,14 +808,17 @@ impl Pila {
         // The pointer shows over an output's stream, over a region's where
         // it's in it, and over a window's where it's over the window (and
         // the window on the screen).
-        let pointer_over = match (&window, &output) {
-            (None, Some((_, _, area))) => area.to_f64().contains(input.pointer),
-            (None, None) => true,
-            (Some(window), _) => self.space.element_location(window).is_some_and(|loc| {
+        let pointer_over = match &view {
+            View::Screen { area, .. } => area.to_f64().contains(input.pointer),
+            View::Window(window) => self.space.element_location(window).is_some_and(|loc| {
                 Rectangle::new(loc, window.geometry().size)
                     .to_f64()
                     .contains(input.pointer)
             }),
+        };
+        let window = match &view {
+            View::Window(window) => Some(window.clone()),
+            View::Screen { .. } => None,
         };
         let clear = crate::capture::clear_for(window.as_ref(), &input.scene);
         let cursor_frame = (cast.cursor == CursorMode::Metadata).then(|| {
@@ -832,11 +850,11 @@ impl Pila {
         if cast.cursor == CursorMode::Embedded && pointer_over {
             elements = render::pointer_elements(renderer, input, cursor_theme, origin, scale);
         }
-        match (&window, &output) {
-            (Some(window), _) => {
+        match &view {
+            View::Window(window) => {
                 elements.extend(crate::capture::window_elements(renderer, window, scale))
             }
-            (None, Some((name, geo, area))) => elements.extend(render::output_elements(
+            View::Screen { name, geo, area } => elements.extend(render::output_elements(
                 renderer,
                 blur,
                 &input.scene,
@@ -845,7 +863,6 @@ impl Pila {
                 area.loc,
                 scale,
             )),
-            (None, None) => return,
         }
 
         let tracker = cast
