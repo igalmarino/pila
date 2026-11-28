@@ -356,7 +356,7 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             .output
             .change_current_state(None, None, None, Some(loc));
         // Rotated a quarter turn, width and height swap.
-        let width = logical_width(&surface.output, transform, scale);
+        let width = crate::scale::logical_width(&surface.output, transform, scale);
         if let Some(on) = config.and_then(|c| c.adaptive_sync) {
             vrr.push((id, on));
         }
@@ -579,23 +579,6 @@ pub(super) fn connector_name(connector: &connector::Info) -> String {
     )
 }
 
-/// An output's width in the global logical space, rotation and scale
-/// applied: rounded up, as `Space::output_geometry` does, so that the next
-/// output starts where the `Space` says this one ends.
-pub(super) fn logical_width(output: &Output, transform: Transform, scale: f64) -> i32 {
-    output
-        .current_mode()
-        .map(|m| {
-            transform
-                .transform_size(m.size)
-                .to_f64()
-                .to_logical(scale)
-                .to_i32_ceil::<i32>()
-                .w
-        })
-        .unwrap_or(0)
-}
-
 pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, id: OutputId) {
     let name = match &state.backend {
         Some(Backend::Udev(data)) => unique_name(data, id, connector_name(&connector)),
@@ -642,7 +625,8 @@ pub(super) fn connector_connected(state: &mut Pila, connector: connector::Info, 
                 .map(|s| {
                     let o = &s.output;
                     let scale = o.current_scale().fractional_scale();
-                    o.current_location().x + logical_width(o, o.current_transform(), scale)
+                    o.current_location().x
+                        + crate::scale::logical_width(o, o.current_transform(), scale)
                 })
                 .max()
                 .unwrap_or(0),
@@ -842,10 +826,8 @@ pub(super) fn disable_output(state: &mut Pila, id: OutputId) {
     surface.crtc_cleared();
     surface.scanout_feedback = None;
     let output = surface.output.clone();
-    crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
     info!(name = output.name(), "output disabled");
-    state.space.unmap_output(&output);
-    state.output_removed(&output);
+    state.retire_output(&output, global);
 }
 
 /// Turn variable refresh rate on or off where the monitor supports it,
@@ -940,9 +922,7 @@ pub(super) fn connector_disconnected(state: &mut Pila, id: OutputId) {
     keep_a_screen_on(state);
     // Enabled: it has a global, and is mapped.
     if let Some(global) = surface.global {
-        crate::state::retire_global(&state.display_handle, &state.loop_handle, global);
-        state.space.unmap_output(&surface.output);
-        state.output_removed(&surface.output);
+        state.retire_output(&surface.output, global);
     }
     state.refresh_output_heads();
     state.queue_redraw();
@@ -980,31 +960,6 @@ pub(super) fn is_non_desktop(drm: &PilaDrmOutputManager, connector: &connector::
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// 1280 px at 1.5 are 853.33 logical: 854, as the `Space` has it, so
-    /// the next output doesn't overlap this one's last column.
-    #[test]
-    fn a_logical_width_rounds_up_as_the_space_does() {
-        use smithay::output::{Mode, PhysicalProperties, Subpixel};
-        let output = Output::new(
-            "A".to_string(),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: String::new(),
-                model: String::new(),
-                serial_number: String::new(),
-            },
-        );
-        let mode = Mode {
-            size: (1280, 800).into(),
-            refresh: 60_000,
-        };
-        output.change_current_state(Some(mode), None, None, None);
-        assert_eq!(logical_width(&output, Transform::Normal, 1.5), 854);
-        assert_eq!(logical_width(&output, Transform::_90, 1.5), 534);
-        assert_eq!(logical_width(&output, Transform::Normal, 1.0), 1280);
-    }
 
     #[test]
     fn an_outputs_formats_are_told_only_if_the_renderer_reads_some() {

@@ -153,3 +153,63 @@ impl Pila {
         }
     }
 }
+
+/// An output's width in the global logical space, rotation and scale
+/// applied: rounded up, as `Space::output_geometry` does, so that the next
+/// output starts where the `Space` says this one ends.
+pub(crate) fn logical_width(
+    output: &smithay::output::Output,
+    transform: smithay::utils::Transform,
+    scale: f64,
+) -> i32 {
+    output
+        .current_mode()
+        .map(|m| {
+            transform
+                .transform_size(m.size)
+                .to_f64()
+                .to_logical(scale)
+                .to_i32_ceil::<i32>()
+                .w
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 1280 px at 1.5 are 853.33 logical: 854, as the `Space` has it, so
+    /// the next output doesn't overlap this one's last column.
+    #[test]
+    fn a_logical_width_rounds_up_as_the_space_does() {
+        use smithay::output::{Mode, PhysicalProperties, Subpixel};
+        let output = smithay::output::Output::new(
+            "A".to_string(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
+        let mode = Mode {
+            size: (1280, 800).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, None);
+        assert_eq!(
+            logical_width(&output, smithay::utils::Transform::Normal, 1.5),
+            854
+        );
+        assert_eq!(
+            logical_width(&output, smithay::utils::Transform::_90, 1.5),
+            534
+        );
+        assert_eq!(
+            logical_width(&output, smithay::utils::Transform::Normal, 1.0),
+            1280
+        );
+    }
+}

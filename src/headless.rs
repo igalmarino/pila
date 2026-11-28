@@ -736,20 +736,8 @@ pub fn apply_output_config(state: &mut Pila) -> bool {
             o.global = Some(o.output.create_global::<Pila>(&display_handle));
             info!(name = o.output.name(), "output enabled");
         }
-        // Rounded up, as `Space::output_geometry` does: the next output
-        // starts where the `Space` says this one ends.
-        let size = o
-            .output
-            .current_mode()
-            .map(|m| {
-                transform
-                    .transform_size(m.size)
-                    .to_f64()
-                    .to_logical(scale)
-                    .to_i32_ceil::<i32>()
-            })
-            .unwrap_or_default();
-        right_edge = right_edge.max(loc.x + size.w);
+        let width = crate::scale::logical_width(&o.output, transform, scale);
+        right_edge = right_edge.max(loc.x + width);
         placed.push((o.output.clone(), loc));
     }
     for (output, loc) in placed {

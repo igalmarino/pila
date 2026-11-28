@@ -348,25 +348,16 @@ fn draw(
     // How long before its vblank a held frame was ready, if it is already.
     let mut spare = None;
 
-    let mut elements = Vec::new();
-    if pointer_here {
-        elements = render::pointer_elements(renderer, input, cursor_theme, output_geo.loc, scale);
-    }
-    elements.extend(render::screen_elements(
-        scene,
-        &output.name(),
-        output_geo.loc,
-        scale,
-    ));
-    elements.extend(render::output_elements(
+    let elements = render::frame_elements(
         renderer,
         blur,
-        scene,
+        cursor_theme,
+        input,
         &output.name(),
         output_geo,
-        output_geo.loc,
         scale,
-    ));
+        pointer_here,
+    );
 
     let cursor_wl_surface = input.cursor_wl_surface();
     // What failed at the DRM level, and how.
