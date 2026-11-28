@@ -48,15 +48,18 @@ const TEXTURES_PER_OUTPUT: usize = 3;
 /// How many are made ahead: what a slide from rest takes.
 const TEXTURES_AHEAD: usize = 2;
 
+/// An output's size and scale: what a texture for all of it needs.
+type OutputSize = (Size<i32, Logical>, Scale<f64>);
+
 /// The textures slides draw into, kept between slides (`Pila::slide_pool`):
 /// those no slide is using.
 #[derive(Default)]
 pub struct SlidePool {
     free: Vec<OffscreenWindow>,
     /// The outputs `(size, scale)` this pool is already prepared for, so
-    /// `prepare_slide_textures` does no work between output changes and slides.
-    prepared: Vec<(Size<i32, Logical>, Scale<f64>)>,
-    prepared_valid: bool,
+    /// `prepare_slide_textures` does no work between output changes and
+    /// slides; `None` once a slide took or gave back textures.
+    prepared: Option<Vec<OutputSize>>,
 }
 
 impl SlidePool {
@@ -69,7 +72,7 @@ impl SlidePool {
         rect: Rectangle<i32, Logical>,
         scale: Scale<f64>,
     ) -> Option<OffscreenWindow> {
-        self.prepared_valid = false;
+        self.prepared = None;
         match self.free.iter().position(|t| t.fits(rect, scale)) {
             Some(index) => {
                 let mut texture = self.free.swap_remove(index);
@@ -85,7 +88,7 @@ impl SlidePool {
 
     /// Take a slide's textures back.
     fn give_back(&mut self, slide: WorkspaceSlide) {
-        self.prepared_valid = false;
+        self.prepared = None;
         self.free.extend(slide.old.into_iter().map(|(_, t)| t));
         self.free
             .extend(slide.textures.borrow_mut().drain(..).map(|(_, t)| t));
@@ -94,20 +97,19 @@ impl SlidePool {
     /// Drop every kept texture (workspace switches aren't animated).
     fn clear(&mut self) {
         self.free.clear();
-        self.prepared.clear();
-        self.prepared_valid = false;
+        self.prepared = None;
     }
 
     /// Whether the pool already matches `space`'s current outputs and scales.
     fn is_prepared_for(&self, space: &Space<Window>) -> bool {
-        if !self.prepared_valid {
+        let Some(prepared) = &self.prepared else {
             return false;
-        }
+        };
         let current = space.outputs().filter_map(|output| {
             let rect = space.output_geometry(output)?;
             Some((rect.size, crate::scale::output_scale(output)))
         });
-        self.prepared.iter().copied().eq(current)
+        prepared.iter().copied().eq(current)
     }
 
     /// How many are kept for an output at `rect` and `scale`.
@@ -369,11 +371,12 @@ impl Pila {
             }
         }
         if all_ready {
-            self.slide_pool.prepared.clear();
-            self.slide_pool
-                .prepared
-                .extend(outputs.iter().map(|(rect, scale)| (rect.size, *scale)));
-            self.slide_pool.prepared_valid = true;
+            self.slide_pool.prepared = Some(
+                outputs
+                    .iter()
+                    .map(|(rect, scale)| (rect.size, *scale))
+                    .collect(),
+            );
         }
     }
 
