@@ -505,7 +505,7 @@ pub fn init_headless(
         }
     }
     if let Some((_, dev)) = node {
-        state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(dev, &renderer));
+        state.capture.dmabuf = crate::capture::DmabufTarget::new(dev, &renderer);
     }
 
     let checking = std::env::var_os("PILA_HEADLESS_CHECK_REDRAWS").is_some_and(|v| v == "1");

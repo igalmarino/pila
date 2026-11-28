@@ -146,10 +146,7 @@ pub fn init_winit(
         display_handle,
     );
     if let Some(node) = node {
-        state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(
-            node.dev_id(),
-            backend.renderer(),
-        ));
+        state.capture.dmabuf = crate::capture::DmabufTarget::new(node.dev_id(), backend.renderer());
     }
 
     let mode = Mode {

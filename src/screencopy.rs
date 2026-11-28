@@ -174,7 +174,7 @@ impl Pila {
         let (w, h) = (size.w as u32, size.h as u32);
         frame.buffer(SHM_FORMAT, w, h, w * 4);
         if frame.version() >= 3 {
-            if self.capture.dmabuf.as_ref().is_some_and(|d| d.offers()) {
+            if self.capture.dmabuf.is_some() {
                 frame.linux_dmabuf(capture::DMABUF_FORMATS[1] as u32, w, h);
             }
             frame.buffer_done();

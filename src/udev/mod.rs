@@ -1020,10 +1020,7 @@ pub fn init_udev(
     })?;
     let renderer = lent.as_mut();
     crate::render::warm_up(renderer);
-    state.capture.dmabuf = Some(crate::capture::DmabufTarget::new(
-        render_node.dev_id(),
-        renderer,
-    ));
+    state.capture.dmabuf = crate::capture::DmabufTarget::new(render_node.dev_id(), renderer);
 
     let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
     let drm = output_manager(drm, gbm, render_node, render_formats);

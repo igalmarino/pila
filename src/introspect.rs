@@ -424,7 +424,7 @@ impl Pila {
             },
             "capture": {
                 "textures": self.capture.texture_count(),
-                "dmabuf": self.capture.dmabuf.as_ref().is_some_and(|t| t.offers()),
+                "dmabuf": self.capture.dmabuf.is_some(),
             },
             // When a window or layer surface last appeared or a window drew
             // at a new size, in monotonic microseconds (`Pila::start_settling`).

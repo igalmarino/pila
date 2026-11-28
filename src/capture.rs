@@ -149,7 +149,9 @@ impl DmabufTarget {
             .unwrap_or_default()
     }
 
-    pub fn new(device: u64, renderer: &GlesRenderer) -> Self {
+    /// The dma-buf formats `renderer` can draw into on `device`: `None`
+    /// if there's none (only shm is offered then).
+    pub fn new(device: u64, renderer: &GlesRenderer) -> Option<Self> {
         let render_formats = renderer.egl_context().dmabuf_render_formats();
         let formats = DMABUF_FORMATS
             .iter()
@@ -162,13 +164,8 @@ impl DmabufTarget {
                 (code, modifiers)
             })
             .filter(|(_, modifiers)| !modifiers.is_empty())
-            .collect();
-        Self { device, formats }
-    }
-
-    /// Whether any dma-buf format is offered.
-    pub(crate) fn offers(&self) -> bool {
-        !self.formats.is_empty()
+            .collect::<Vec<_>>();
+        (!formats.is_empty()).then_some(Self { device, formats })
     }
 }
 
@@ -548,7 +545,7 @@ impl Session {
         for format in SHM_FORMATS {
             self.resource.shm_format(format);
         }
-        if let Some(dmabuf) = dmabuf.filter(|d| !d.formats.is_empty()) {
+        if let Some(dmabuf) = dmabuf {
             self.resource
                 .dmabuf_device(dmabuf.device.to_ne_bytes().to_vec());
             for (code, modifiers) in &dmabuf.formats {
