@@ -110,6 +110,38 @@ fn a_window_that_opens_fullscreen_fills_the_output() {
     });
 }
 
+/// Maximized, a window fills the output it is mostly on, the one it is
+/// listed on, even when its middle falls where no output is (beside a
+/// shorter one), which used to send it to the first output.
+#[test]
+fn maximizing_fills_the_output_the_window_is_mostly_on() {
+    let mut pila = TestPila::start_with(Options {
+        outputs: Some("A:1280x720,B:1920x1080".into()),
+        config: "[[window-rule]]\napp-id = \"a\"\ntitle-bar = false\n\
+                 size = [1400, 300]\nposition = [400, 700]\n"
+            .into(),
+        ..Options::default()
+    });
+    let client = pila.client();
+    let a = client.window("a").create();
+    pila.wait_focus("a");
+    // 880 x 20 on A, 520 x 300 on B; its middle (1100, 850) on neither.
+    let state = pila.wait("placed across both", |s| {
+        rect(&window_in(s, "a").unwrap()["geometry"]) == (400, 700, 1400, 300)
+    });
+    assert_eq!(window_in(&state, "a").unwrap()["output"], "B");
+    client.request(a, |t| t.set_maximized());
+    let state = pila.wait("maximized and drawn so", |s| {
+        let window = window_in(s, "a").unwrap();
+        window["maximized"] == true && rect(&window["geometry"]).2 != 1400
+    });
+    assert_eq!(
+        rect(&window_in(&state, "a").unwrap()["geometry"]),
+        (1280, 0, 1920, 1080),
+        "maximized on B"
+    );
+}
+
 #[test]
 fn fullscreen_on_a_named_output() {
     let mut pila = TestPila::start_with(Options {

@@ -1362,15 +1362,25 @@ impl Pila {
         }
     }
 
-    /// Geometry of the output a window is mostly on, falling back to the
-    /// pointer's output: all of it, or only the `usable` part.
+    /// Geometry of the output a window is mostly on, else the one under its
+    /// middle; for one not placed yet, where it opens: all of it, or only the
+    /// `usable` part.
     fn output_geometry_for_window(
         &self,
         window: &Window,
         usable: bool,
     ) -> Option<Rectangle<i32, Logical>> {
         let pos = match self.window_location(window) {
-            Some(loc) => (loc + window.geometry().size.downscale(2).to_point()).to_f64(),
+            Some(loc) => {
+                // The output it overlaps most, as `window_output` picks the
+                // one it draws for; its middle may be on none (beside a
+                // shorter output).
+                let rect = Rectangle::new(loc, window.geometry().size);
+                if let Some(output) = self.output_overlapping(rect) {
+                    return self.output_area(&output, usable);
+                }
+                (loc + window.geometry().size.downscale(2).to_point()).to_f64()
+            }
             // Not placed yet: where its rules or session put it, or at the
             // pointer.
             None => match self

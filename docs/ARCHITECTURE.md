@@ -1935,6 +1935,9 @@ Key flows and invariants:
   unsets fullscreen as a drag on its own title bar starts: `set_fill_state` would place a
   window that isn't filled); a client still gets its configure. Fullscreen on a given
   output still goes to `set_fill_state_on`, since that may move it to another output.
+  Filling and snapping take the output the window overlaps most (`output_geometry_for_window`,
+  as `window_output` for the output it draws for), not the one under its middle, which may be
+  none beside a shorter output.
 - **Decorations** (`decoration.rs`): Pila prefers server-side and honors client requests
   (`handlers/xdg_shell.rs`); clients that don't bind xdg-decoration (GTK, weston) draw
   their own. A decorated window's `Space` location is still its geometry origin; the title
