@@ -583,13 +583,8 @@ impl Pila {
         tracing::debug!(?target, rect = ?self.window_rect(window), "drop at an output edge");
         match target {
             SnapTarget::Side(side) => self.snap_window(window, side),
-            SnapTarget::Maximize => {
-                let before = self.forget_snap(window);
-                self.set_fill_state(window, true, false);
-                if let Some(before) = before {
-                    crate::state::set_restore_geometry(window, before);
-                }
-            }
+            // Maximizing a snapped window keeps where it was before the snap.
+            SnapTarget::Maximize => self.set_fill_state(window, true, false),
         }
         tracing::debug!(fill = ?fill_state(window), rect = ?self.window_rect(window), "after the drop");
     }
