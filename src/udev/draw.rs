@@ -254,6 +254,17 @@ fn hold_late(state: &mut Pila, id: OutputId, now: Duration, lock_pending: bool) 
 
 /// Draw `ready` from `input` (`Pila::frame_input`, shared by the outputs of a
 /// pass), whose building took `scene_cpu` (counted in this frame).
+/// How a draw ended.
+enum Outcome {
+    /// Rendering or queueing the frame failed at the DRM level: at which
+    /// stage, and how.
+    Failed(&'static str, String),
+    /// Rendered, with nothing new to show: no frame (`frame_stats.rs`, idle).
+    NothingNew,
+    /// A frame is on its way; `first`: the first since the output was set up.
+    Queued { first: bool },
+}
+
 fn draw(
     state: &mut Pila,
     ready: Ready,
@@ -350,13 +361,9 @@ fn draw(
     );
 
     let cursor_wl_surface = input.cursor_wl_surface();
-    // What failed at the DRM level, and how.
-    let mut failure: Option<(&str, String)> = None;
     // Captures filled from this frame, and the time they took.
     let mut composited = Vec::new();
     let mut capture_cpu = Duration::ZERO;
-    // Rendered, with nothing new to show: no frame (`frame_stats.rs`, idle).
-    let mut nothing_new = false;
     // The frame is a client's buffer as it is, on the primary plane.
     let mut direct = false;
     // What the GPU drew, to measure its time (`frame_stats.rs`).
@@ -464,7 +471,7 @@ fn draw(
     };
     drop(lent);
     let render_time = render_started.elapsed().saturating_sub(capture_cpu);
-    match rendered {
+    let outcome = match rendered {
         Ok((states, is_empty)) => {
             *hidden_frames_dirty |=
                 frame::update_primary_outputs(scene, cursor_wl_surface, &output, &states);
@@ -486,7 +493,13 @@ fn draw(
                     scanout,
                 );
             }
-            if !is_empty {
+            if is_empty {
+                if scene.locked {
+                    // Nothing changed: the screen already shows the locked scene.
+                    surface.crtc_state.lock_frame = LockFrame::Shown;
+                }
+                Outcome::NothingNew
+            } else {
                 let feedback =
                     frame::presentation_feedback(scene, cursor_wl_surface, &output, &states);
                 let queue_started = std::time::Instant::now();
@@ -539,29 +552,27 @@ fn draw(
                         if scene.locked {
                             surface.crtc_state.lock_frame = LockFrame::Queued;
                         }
+                        Outcome::Queued {
+                            first: std::mem::take(&mut surface.crtc_state.first_frame),
+                        }
                     }
                     Err(err) => {
                         surface.needs_redraw();
-                        failure = Some(("queue", format!("{err:?}")));
+                        Outcome::Failed("queue", format!("{err:?}"))
                     }
-                }
-            } else {
-                nothing_new = true;
-                if scene.locked {
-                    // Nothing changed: the screen already shows the locked scene.
-                    surface.crtc_state.lock_frame = LockFrame::Shown;
                 }
             }
         }
         Err(err) => {
             surface.needs_redraw();
-            failure = Some(("render", err));
+            Outcome::Failed("render", err)
         }
-    }
+    };
     if !scene.locked {
         surface.crtc_state.lock_frame = LockFrame::None;
     }
-    let queued = surface.crtc_state.frame_pending;
+    let queued = matches!(outcome, Outcome::Queued { .. });
+    let nothing_new = matches!(outcome, Outcome::NothingNew);
     if held.is_some() {
         surface.crtc_state.back_to_back =
             back_to_back_after_held(surface.crtc_state.back_to_back, queued);
@@ -580,27 +591,30 @@ fn draw(
         let period = crate::frame_stats::refresh_period(&output);
         idle_until(surface.last_vblank_time, now, period)
     });
-    let mut retry = None;
-    if let Some((stage, err)) = failure {
-        retry = surface.crtc_state.recovery.failed();
-        if surface.crtc_state.recovery.should_log() {
-            warn!(
-                output = output.name(),
-                stage,
-                err,
-                failures = surface.crtc_state.recovery.failures(),
-                retry_ms = retry.map(|d| d.as_millis() as u64),
-                "frame failed; trying again later"
-            );
+    match &outcome {
+        Outcome::Failed(stage, err) => {
+            let retry = surface.crtc_state.recovery.failed();
+            if surface.crtc_state.recovery.should_log() {
+                warn!(
+                    output = output.name(),
+                    stage,
+                    err,
+                    failures = surface.crtc_state.recovery.failures(),
+                    retry_ms = retry.map(|d| d.as_millis() as u64),
+                    "frame failed; trying again later"
+                );
+            }
+            if let Some(delay) = retry {
+                data.schedule_recovery(id, delay);
+            }
         }
-    } else if queued {
-        let failures = surface.crtc_state.recovery.succeeded();
-        if failures > 0 {
-            info!(output = output.name(), failures, "output recovered");
+        Outcome::Queued { .. } => {
+            let failures = surface.crtc_state.recovery.succeeded();
+            if failures > 0 {
+                info!(output = output.name(), failures, "output recovered");
+            }
         }
-    }
-    if let Some(delay) = retry {
-        data.schedule_recovery(id, delay);
+        Outcome::NothingNew => {}
     }
 
     if lock_pending {
@@ -613,7 +627,7 @@ fn draw(
     for _ in 0..captures {
         state.record_capture(capture_cpu / captures);
     }
-    if queued {
+    if let Outcome::Queued { first } = outcome {
         // The captures are counted apart (`frame_stats.rs`).
         let cpu = started.elapsed().saturating_sub(capture_cpu);
         tracing::trace!(
@@ -624,13 +638,6 @@ fn draw(
             animating = state.animating(),
             "queued"
         );
-        let first = match &mut state.backend {
-            Some(Backend::Udev(data)) => data
-                .outputs
-                .get_mut(&id)
-                .is_some_and(|s| std::mem::take(&mut s.crtc_state.first_frame)),
-            _ => false,
-        };
         if first {
             tracing::debug!(
                 target: "pila::frames",
