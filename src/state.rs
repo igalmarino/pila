@@ -144,9 +144,6 @@ pub struct Pila {
     pub config_path: Option<std::path::PathBuf>,
     /// A reload is scheduled (changes are coalesced).
     pub config_reload_pending: bool,
-    /// An output was drawn this event-loop iteration: `after_frames` has
-    /// housekeeping to do.
-    pub frame_drawn: bool,
     /// Frames drawn, on any output (`post_render`): a client's buffer is
     /// uploaded at its commit once between them (`upload.rs`).
     pub frames_drawn: u64,
@@ -160,9 +157,10 @@ pub struct Pila {
     /// Input came this iteration: `after_frames` tells the idle notifier,
     /// once however many events (`Pila::notify_activity`).
     pub input_activity: bool,
-    /// Captures may have something to do this iteration without a frame
-    /// drawn: a commit that shows on no output (a hidden window's, which may
-    /// be captured; `redraw_committed`), a capture client asking for a frame.
+    /// Captures may have something to do this iteration, and so does
+    /// `after_frames`' housekeeping: an output was drawn (`post_render`), a
+    /// commit showed on no output (a hidden window's, which may be captured;
+    /// `redraw_committed`), a capture client asked for a frame.
     pub capture_due: bool,
     /// Redraws held back by `defer_redraws` (`redraw.rs`), while it runs.
     pub deferred_redraws: Option<Vec<crate::redraw::Deferred>>,
@@ -623,7 +621,6 @@ impl Pila {
             snap_preview_buffer: SolidColorBuffer::default(),
             config_path: None,
             config_reload_pending: false,
-            frame_drawn: false,
             frames_drawn: 0,
             early_uploads: 0,
             housekeeping: false,
@@ -2033,7 +2030,7 @@ impl Pila {
         self.update_surface_scales(output);
         layer_map_for_output(output).cleanup();
         self.signal_barriers_on(output);
-        self.frame_drawn = true;
+        self.capture_due = true;
         self.frames_drawn += 1;
     }
 
@@ -2072,9 +2069,8 @@ impl Pila {
         if self.shortcuts_need_content() {
             self.draw_shortcuts_text();
         }
-        let drawn = std::mem::take(&mut self.frame_drawn);
         let capture_due = std::mem::take(&mut self.capture_due);
-        if !std::mem::take(&mut self.housekeeping) && !drawn && !capture_due {
+        if !std::mem::take(&mut self.housekeeping) && !capture_due {
             // A change no frame follows (every monitor turned off).
             self.send_ipc_events_due();
             return (false, std::time::Duration::ZERO);
@@ -2084,7 +2080,7 @@ impl Pila {
         // What a capture shows changes with a frame, or with a commit that
         // shows on no output (a hidden window's), and a capture client may
         // ask for a frame: not with every client dispatch.
-        if (drawn || capture_due)
+        if capture_due
             && (self.capture.has_work() || self.screencast.streaming() || self.share_picker_open())
         {
             let started = std::time::Instant::now();
