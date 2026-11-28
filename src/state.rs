@@ -731,19 +731,40 @@ impl Pila {
         }
     }
 
-    /// What's under `pos`, in stacking order: layer surfaces above the
-    /// windows, the windows, then layer surfaces below them. While locked,
-    /// only the lock surface of the output under it: nothing else can be hit.
-    /// One of Pila's modal panels is shown (the share picker, the color
-    /// picker, the global shortcuts panel, the capture permission prompt,
-    /// the quit dialog): it takes all input, and nothing opens over or
-    /// behind it.
+    /// The modal panel shown, if one is: it takes all input, and nothing
+    /// opens over or behind it (each waits, or refuses, while another is).
+    pub(crate) fn modal_panel(&self) -> Option<ModalPanel> {
+        [
+            (self.share_picker_open(), ModalPanel::SharePicker),
+            (self.color_pick_open(), ModalPanel::ColorPick),
+            (self.app_shortcuts_open(), ModalPanel::AppShortcuts),
+            (
+                self.capture_permission_open(),
+                ModalPanel::CapturePermission,
+            ),
+            (self.quit_dialog_open(), ModalPanel::QuitDialog),
+        ]
+        .into_iter()
+        .find_map(|(open, panel)| open.then_some(panel))
+    }
+
+    /// One of Pila's modal panels is shown (`modal_panel`).
     pub fn modal_panel_open(&self) -> bool {
-        self.share_picker_open()
-            || self.color_pick_open()
-            || self.app_shortcuts_open()
-            || self.capture_permission_open()
-            || self.quit_dialog_open()
+        self.modal_panel().is_some()
+    }
+
+    /// The modal panel shown, as the scene draws it.
+    fn scene_modal(&self) -> Option<crate::render::SceneModal> {
+        use crate::render::SceneModal;
+        match self.modal_panel()? {
+            ModalPanel::SharePicker => self.scene_share_picker().map(SceneModal::SharePicker),
+            ModalPanel::ColorPick => self.scene_color_pick().map(SceneModal::ColorPick),
+            ModalPanel::AppShortcuts => self.scene_app_shortcuts().map(SceneModal::AppShortcuts),
+            ModalPanel::CapturePermission => self
+                .scene_capture_permission()
+                .map(SceneModal::CapturePermission),
+            ModalPanel::QuitDialog => self.scene_quit_dialog().map(SceneModal::QuitDialog),
+        }
     }
 
     /// A key pressed while a modal panel is shown, for the one shown: the
@@ -757,36 +778,34 @@ impl Pila {
             raw,
             mods,
         } = key;
-        if self.app_shortcuts_open() {
-            if let Some(sym) = raw.filter(|sym| !sym.is_modifier_key()) {
-                self.app_shortcuts_key(sym, &mods);
+        match self.modal_panel() {
+            Some(ModalPanel::AppShortcuts) => {
+                if let Some(sym) = raw.filter(|sym| !sym.is_modifier_key()) {
+                    self.app_shortcuts_key(sym, &mods);
+                }
             }
-        } else if self.color_pick_open() {
-            self.color_pick_key(modified);
-        } else if self.capture_permission_open() {
-            self.capture_permission_key(modified);
-        } else if self.quit_dialog_open() {
-            if let Some(sym) = raw {
-                self.quit_dialog_key(sym, &mods);
+            Some(ModalPanel::ColorPick) => self.color_pick_key(modified),
+            Some(ModalPanel::CapturePermission) => self.capture_permission_key(modified),
+            Some(ModalPanel::QuitDialog) => {
+                if let Some(sym) = raw {
+                    self.quit_dialog_key(sym, &mods);
+                }
             }
-        } else if self.share_picker_open() {
-            self.share_picker_key(modified);
+            Some(ModalPanel::SharePicker) => self.share_picker_key(modified),
+            None => {}
         }
     }
 
     /// A press at `location` while a modal panel is shown, for the one
     /// shown.
     pub(crate) fn modal_panel_press(&mut self, location: Point<f64, Logical>) {
-        if self.app_shortcuts_open() {
-            self.app_shortcuts_press(location);
-        } else if self.color_pick_open() {
-            self.color_pick_press(location);
-        } else if self.quit_dialog_open() {
-            self.quit_dialog_press(location);
-        } else if self.capture_permission_open() {
-            self.capture_permission_press(location);
-        } else if self.share_picker_open() {
-            self.share_picker_press(location);
+        match self.modal_panel() {
+            Some(ModalPanel::AppShortcuts) => self.app_shortcuts_press(location),
+            Some(ModalPanel::ColorPick) => self.color_pick_press(location),
+            Some(ModalPanel::QuitDialog) => self.quit_dialog_press(location),
+            Some(ModalPanel::CapturePermission) => self.capture_permission_press(location),
+            Some(ModalPanel::SharePicker) => self.share_picker_press(location),
+            None => {}
         }
     }
 
@@ -807,6 +826,9 @@ impl Pila {
         self.show_capture_permission();
     }
 
+    /// What's under `pos`, in stacking order: layer surfaces above the
+    /// windows, the windows, then layer surfaces below them. While locked,
+    /// only the lock surface of the output under it: nothing else can be hit.
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<Under> {
         if self.is_locked() {
             return self
@@ -967,11 +989,7 @@ impl Pila {
             rounded_corners: self.config.rounded_corners,
             switcher: self.scene_switcher(),
             shortcuts: self.scene_shortcuts(),
-            share_picker: self.scene_share_picker(),
-            color_pick: self.scene_color_pick(),
-            app_shortcuts: self.scene_app_shortcuts(),
-            capture_permission: self.scene_capture_permission(),
-            quit_dialog: self.scene_quit_dialog(),
+            modal: self.scene_modal(),
             shared_regions: self.shared_regions(),
             capture_lights: self.capture_indicator.lights.clone(),
             outline_buffers: self.share_picker.outline_buffers.clone(),
@@ -2519,6 +2537,16 @@ impl Pila {
             self.notify_missing_programs(&command);
         }
     }
+}
+
+/// Pila's modal panels (`Pila::modal_panel`): one is shown at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModalPanel {
+    SharePicker,
+    ColorPick,
+    AppShortcuts,
+    CapturePermission,
+    QuitDialog,
 }
 
 /// What's under a point: a layer surface (with the surface hit and its origin

@@ -223,9 +223,12 @@ pub fn send_frames(scene: &Scene, cursor: Option<&WlSurface>, output: &Output, t
     }
     // So are the share picker's windows: hidden ones too (minimized, on
     // other workspaces).
-    for window in scene
-        .share_picker
-        .iter()
+    let picker = match &scene.modal {
+        Some(crate::render::SceneModal::SharePicker(view)) => Some(view),
+        _ => None,
+    };
+    for window in picker
+        .into_iter()
         .filter(|view| view.output == output.name())
         .flat_map(|view| view.windows())
     {

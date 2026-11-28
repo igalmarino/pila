@@ -923,8 +923,9 @@ Key flows and invariants:
   pointer left by other than motion meanwhile: a warp, its output unplugged). Not with a button held or a grab
   running (`is_grabbed`), over a fullscreen window, while locked, picking a color or a region, or
   with `hot-corner = false`; and the overview never opens behind a modal panel
-  (`Pila::modal_panel_open`: the share picker, the color picker, the shortcuts panel, the capture
-  prompt), whatever asks; and `[gestures]` binds `overview open`/`overview close` to 4-finger
+  (`Pila::modal_panel`: the share picker, the color picker, the shortcuts panel, the capture
+  prompt, the quit dialog; one at a time, a `ModalPanel`, drawn as the scene's `SceneModal`),
+  whatever asks; and `[gestures]` binds `overview open`/`overview close` to 4-finger
   swipes up and down.
   A workspace switch while it's open shows the new windows in their places without a slide
   (`show_workspace`). The strip (`Pila::overview_strip`) shows each workspace's part of the
@@ -1843,7 +1844,7 @@ Key flows and invariants:
   `permissions::evaluate` against `[[permission]]` rules (`rules::wildcard_match`, last match
   winning: `allow`, `ask`, `deny`) and the prompt's grants (in memory until Pila exits: the
   config is the only place a permission outlives the session, so there's one source of truth
-  and no precedence between stores). Unlisted clients open a modal panel (`panel.rs`, `Scene::capture_permission`,
+  and no precedence between stores). Unlisted clients open a modal panel (`panel.rs`, `SceneModal::CapturePermission`,
   blocking `Pila::under` and `Scene::tears`, coalescing concurrent requests from the same
   executable and queuing alongside `share_picker`, `color_pick` and `app_shortcuts`): Allow
   (`Enter`) grants until Pila exits and proceeds

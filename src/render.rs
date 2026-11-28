@@ -202,20 +202,9 @@ pub struct Scene {
     /// The overview: its windows are among `windows`, mapped onto their
     /// places; what it draws behind them is below them (`overview.rs`).
     pub overview: Option<crate::overview::SceneOverview>,
-    /// The screen-share picker, in front of everything but the cursor, its
-    /// dim over every output (`share_picker.rs`).
-    pub share_picker: Option<crate::share_picker::ScenePicker>,
-    /// The color picker's panel, in front of everything of Pila's
-    /// (`color_pick.rs`).
-    pub color_pick: Option<crate::color_pick::ScenePick>,
-    /// The panel confirming an app's shortcuts' keys, modal: the dim over
-    /// every output (`app_shortcuts.rs`).
-    pub app_shortcuts: Option<crate::app_shortcuts::ScenePanel>,
-    /// The modal prompt confirming direct Wayland screen capture
-    /// (`permissions.rs`).
-    pub capture_permission: Option<crate::permissions::ScenePrompt>,
-    /// The quit dialog, modal: the dim over every output (`quit_dialog.rs`).
-    pub quit_dialog: Option<crate::quit_dialog::SceneQuit>,
+    /// The modal panel shown (`Pila::modal_panel`), in front of everything
+    /// of Pila's but the window menu.
+    pub modal: Option<SceneModal>,
     /// The regions shared, by output, global: outlined on the screen alone
     /// (`screen_elements`), never in a capture (`share_region.rs`).
     pub shared_regions: Vec<(String, Rectangle<i32, Logical>)>,
@@ -225,6 +214,24 @@ pub struct Scene {
     pub outline_buffers:
         std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, SolidColorBuffer>>>,
     pub colors: Colors,
+}
+
+/// A modal panel as a scene draws it: one at a time. Not boxed: a scene
+/// holds one, made with every frame.
+#[allow(clippy::large_enum_variant)]
+pub enum SceneModal {
+    /// The screen-share picker, its dim over every output (`share_picker.rs`).
+    SharePicker(crate::share_picker::ScenePicker),
+    /// The color picker's panel, on the output under the pointer
+    /// (`color_pick.rs`).
+    ColorPick(crate::color_pick::ScenePick),
+    /// The panel confirming an app's shortcuts' keys, the dim over every
+    /// output (`app_shortcuts.rs`).
+    AppShortcuts(crate::app_shortcuts::ScenePanel),
+    /// The prompt confirming direct Wayland screen capture (`permissions.rs`).
+    CapturePermission(crate::permissions::ScenePrompt),
+    /// The quit dialog, the dim over every output (`quit_dialog.rs`).
+    QuitDialog(crate::quit_dialog::SceneQuit),
 }
 
 impl Scene {
@@ -248,11 +255,7 @@ impl Scene {
             switcher: None,
             shortcuts: None,
             overview: None,
-            share_picker: None,
-            color_pick: None,
-            app_shortcuts: None,
-            capture_permission: None,
-            quit_dialog: None,
+            modal: None,
             shared_regions: Vec::new(),
             capture_lights: Vec::new(),
             outline_buffers: Default::default(),
@@ -270,11 +273,7 @@ impl Scene {
             || self.switcher.is_some()
             || self.shortcuts.is_some()
             || self.overview.is_some()
-            || self.share_picker.is_some()
-            || self.color_pick.is_some()
-            || self.app_shortcuts.is_some()
-            || self.capture_permission.is_some()
-            || self.quit_dialog.is_some()
+            || self.modal.is_some()
             || self
                 .shared_regions
                 .iter()
@@ -1979,7 +1978,7 @@ pub fn output_elements(
         scale,
     );
     // Pila's own panels, front to back, none while locked: the window menu
-    // in front of all of them, then the modal panels (one shown at a time),
+    // in front of all of them, then the modal panel shown,
     // the cheatsheet (it dims every output) and the switcher.
     let mut elements = Vec::new();
     if !scene.locked {
@@ -1990,54 +1989,35 @@ pub fn output_elements(
                 renderer, menu, colors, origin, scale,
             ));
         }
-        if let Some(view) = scene
-            .color_pick
-            .as_ref()
-            .filter(|view| view.output == output_name)
-        {
-            elements.extend(crate::color_pick::elements(
-                renderer, view, colors, origin, scale,
-            ));
-        }
-        if let Some(view) = scene.quit_dialog.as_ref() {
-            elements.extend(crate::quit_dialog::elements(
+        match &scene.modal {
+            Some(SceneModal::ColorPick(view)) if view.output == output_name => {
+                elements.extend(crate::color_pick::elements(
+                    renderer, view, colors, origin, scale,
+                ));
+            }
+            Some(SceneModal::ColorPick(_)) | None => {}
+            Some(SceneModal::QuitDialog(view)) => elements.extend(crate::quit_dialog::elements(
                 renderer,
                 view,
                 colors,
                 output_name,
                 geo,
                 scale,
-            ));
-        }
-        if let Some(view) = scene.capture_permission.as_ref() {
-            elements.extend(crate::permissions::elements(
+            )),
+            Some(SceneModal::CapturePermission(view)) => elements.extend(
+                crate::permissions::elements(renderer, view, colors, output_name, geo, scale),
+            ),
+            Some(SceneModal::AppShortcuts(view)) => elements.extend(
+                crate::app_shortcuts::elements(renderer, view, colors, output_name, geo, scale),
+            ),
+            Some(SceneModal::SharePicker(view)) => elements.extend(crate::share_picker::elements(
                 renderer,
                 view,
                 colors,
                 output_name,
                 geo,
                 scale,
-            ));
-        }
-        if let Some(view) = scene.app_shortcuts.as_ref() {
-            elements.extend(crate::app_shortcuts::elements(
-                renderer,
-                view,
-                colors,
-                output_name,
-                geo,
-                scale,
-            ));
-        }
-        if let Some(view) = scene.share_picker.as_ref() {
-            elements.extend(crate::share_picker::elements(
-                renderer,
-                view,
-                colors,
-                output_name,
-                geo,
-                scale,
-            ));
+            )),
         }
         if let Some(view) = scene.shortcuts.as_ref() {
             elements.extend(crate::shortcuts_view::elements(
