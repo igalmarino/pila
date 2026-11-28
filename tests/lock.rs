@@ -456,7 +456,7 @@ fn nothing_but_the_lock_gets_input_or_shows_while_locked() {
     // Every action, as a binding runs it.
     let actions = pila.request(json!({ "cmd": "actions" }));
     let actions = actions["actions"].as_array().unwrap().clone();
-    assert!(actions.len() > 30, "{actions:?}");
+    assert!(actions.len() > 25, "{actions:?}");
     for (index, name) in actions.iter().enumerate() {
         // It ends Pila (and debug builds allow it while locked, to escape a
         // nested session).

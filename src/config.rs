@@ -46,7 +46,7 @@ use smithay::{
 };
 use tracing::{info, warn};
 
-use crate::snap::{Direction, KEYBOARD_STEP};
+use crate::snap::{Direction, Side, KEYBOARD_STEP};
 
 /// The largest `corner-radius` (logical pixels). A window's corners are
 /// further limited by its size and the title bar's height (`rounded.rs`).
@@ -302,17 +302,8 @@ pub enum Action {
     CycleFocus,
     CycleFocusBack,
     Minimize,
-    /// Snap to the left/right half of the output (`snap.rs`).
-    SnapLeft,
-    SnapRight,
-    /// Snap to the top/bottom half of the output.
-    SnapTop,
-    SnapBottom,
-    /// Snap to a quarter of the output.
-    SnapTopLeft,
-    SnapTopRight,
-    SnapBottomLeft,
-    SnapBottomRight,
+    /// Snap to a half or a quarter of the output (`snap.rs`).
+    Snap(Side),
     /// One step on the grid of halves and quarters (`snap::step`).
     SnapToward(Direction),
     /// Undo a snap or a maximize.
@@ -509,14 +500,14 @@ const NAMED_ACTIONS: &[(&str, Action)] = &[
     ("minimize", Action::Minimize),
     ("maximize", Action::ToggleMaximize),
     ("fullscreen", Action::ToggleFullscreen),
-    ("snap-left", Action::SnapLeft),
-    ("snap-right", Action::SnapRight),
-    ("snap-top", Action::SnapTop),
-    ("snap-bottom", Action::SnapBottom),
-    ("snap-top-left", Action::SnapTopLeft),
-    ("snap-top-right", Action::SnapTopRight),
-    ("snap-bottom-left", Action::SnapBottomLeft),
-    ("snap-bottom-right", Action::SnapBottomRight),
+    ("snap-left", Action::Snap(Side::Left)),
+    ("snap-right", Action::Snap(Side::Right)),
+    ("snap-top", Action::Snap(Side::Top)),
+    ("snap-bottom", Action::Snap(Side::Bottom)),
+    ("snap-top-left", Action::Snap(Side::TopLeft)),
+    ("snap-top-right", Action::Snap(Side::TopRight)),
+    ("snap-bottom-left", Action::Snap(Side::BottomLeft)),
+    ("snap-bottom-right", Action::Snap(Side::BottomRight)),
     ("restore", Action::Restore),
     ("move-left", Action::MoveWindow(-KEYBOARD_STEP, 0)),
     ("move-right", Action::MoveWindow(KEYBOARD_STEP, 0)),
@@ -590,14 +581,7 @@ action_examples! {
     Action::CycleFocus => Action::CycleFocus,
     Action::CycleFocusBack => Action::CycleFocusBack,
     Action::Minimize => Action::Minimize,
-    Action::SnapLeft => Action::SnapLeft,
-    Action::SnapRight => Action::SnapRight,
-    Action::SnapTop => Action::SnapTop,
-    Action::SnapBottom => Action::SnapBottom,
-    Action::SnapTopLeft => Action::SnapTopLeft,
-    Action::SnapTopRight => Action::SnapTopRight,
-    Action::SnapBottomLeft => Action::SnapBottomLeft,
-    Action::SnapBottomRight => Action::SnapBottomRight,
+    Action::Snap(_) => Action::Snap(Side::Left),
     Action::SnapToward(_) => Action::SnapToward(Direction::Up),
     Action::Restore => Action::Restore,
     Action::MoveWindow(..) => Action::MoveWindow(KEYBOARD_STEP, 0),
@@ -3750,7 +3734,7 @@ mod tests {
         assert_eq!(config.gesture_action(swipe(3, SwipeDirection::Up)), None);
         assert_eq!(
             config.gesture_action(swipe(4, SwipeDirection::Left)),
-            Some(Action::SnapLeft)
+            Some(Action::Snap(Side::Left))
         );
         assert!(config.handles_swipes(4));
 

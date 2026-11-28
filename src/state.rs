@@ -2155,30 +2155,8 @@ impl Pila {
                     self.minimize_window(&window);
                 }
             }
-            Action::SnapLeft | Action::SnapRight | Action::SnapTop | Action::SnapBottom => {
+            Action::Snap(side) => {
                 if let Some(window) = self.focused_window() {
-                    use crate::snap::Side;
-                    let side = match action {
-                        Action::SnapLeft => Side::Left,
-                        Action::SnapRight => Side::Right,
-                        Action::SnapTop => Side::Top,
-                        _ => Side::Bottom,
-                    };
-                    self.snap_window(&window, side);
-                }
-            }
-            Action::SnapTopLeft
-            | Action::SnapTopRight
-            | Action::SnapBottomLeft
-            | Action::SnapBottomRight => {
-                if let Some(window) = self.focused_window() {
-                    use crate::snap::Side;
-                    let side = match action {
-                        Action::SnapTopLeft => Side::TopLeft,
-                        Action::SnapTopRight => Side::TopRight,
-                        Action::SnapBottomLeft => Side::BottomLeft,
-                        _ => Side::BottomRight,
-                    };
                     self.snap_window(&window, side);
                 }
             }
