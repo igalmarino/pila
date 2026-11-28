@@ -1415,8 +1415,10 @@ Key flows and invariants:
   minimized or on another workspace, reports the outputs it comes back to, from
   `workspaces::space_location`: per-monitor taskbars keep it); new windows get a handle
   per manager, destroyed ones `closed` (`remove_foreign_toplevel`). Requests map onto
-  `focus_window`/`restore_window`, `minimize_window`/`show_window`, `set_fill_state(_on)`
-  and `close_window`, and are ignored while locked.
+  `focus_window`/`restore_window`, `minimize_window`, `set_fill_state(_on)` and
+  `close_window`, and are ignored while locked; activating a window and unminimizing a
+  minimized one are the same (`activate_toplevel`): its workspace shown first
+  (`reveal_workspace_of`), then the window restored with the focus.
 - **Gamma** (`gamma_control.rs`, wlr-gamma-control): one control per output, ramps set
   through `Backend::set_gamma` (nested: fails). Destroying the control restores linear.
   udev (`udev/gamma.rs`): a client's ramps wait in `OutputSurface.gamma_pending` (a newer

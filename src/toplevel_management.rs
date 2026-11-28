@@ -355,7 +355,12 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, String> for Pila {
             handle::Request::Activate { .. } => state.activate_toplevel(&window),
             handle::Request::Close => close_window(&window),
             handle::Request::SetMinimized => state.minimize_window(&window),
-            handle::Request::UnsetMinimized => state.show_window(&window),
+            // Restored as when activated: on its own workspace, shown, with
+            // the focus, as an X11 unminimize or `pila msg focus` does.
+            handle::Request::UnsetMinimized if state.is_minimized(&window) => {
+                state.activate_toplevel(&window);
+            }
+            handle::Request::UnsetMinimized => {}
             handle::Request::SetMaximized => {
                 let (_, fullscreen) = fill_state(&window);
                 state.request_fill_state(&window, true, fullscreen);

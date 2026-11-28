@@ -355,6 +355,29 @@ fn activating_a_window_elsewhere_switches_workspace() {
     assert_eq!(state["workspace"], 3);
 }
 
+/// A minimized window restored from a taskbar comes back on its own
+/// workspace, which is shown, with the focus: as it does when activated,
+/// not on the workspace the taskbar was used from.
+#[test]
+fn unminimizing_a_window_elsewhere_switches_to_its_workspace() {
+    let (mut pila, _app, taskbar) = taskbar_with(&["a"]);
+    pila.combo("Super+n");
+    pila.wait("minimized", |s| {
+        window_in(s, "a").unwrap()["minimized"] == true
+    });
+    pila.combo("Super+2");
+    pila.wait("workspace 2", |s| s["workspace"] == 2);
+    let a = handle(&taskbar, "a");
+    a.unset_minimized();
+    taskbar.flush();
+    let state = pila.wait("shown", |s| {
+        window_in(s, "a").unwrap()["minimized"] == false
+    });
+    assert_eq!(state["workspace"], 1);
+    assert_eq!(window_in(&state, "a").unwrap()["workspace"], 1);
+    pila.wait_focus("a");
+}
+
 #[test]
 fn requests_are_ignored_while_locked() {
     let (mut pila, app, taskbar) = taskbar_with(&["a"]);
@@ -732,9 +755,7 @@ fn taskbar_requests_for_the_current_state_change_nothing() {
             window_in(s, "a").unwrap()[key] == false && place(s) == before
         });
         if key == "minimized" {
-            // Shown again, not focused: give it back the focus.
-            a.activate(&taskbar.seat());
-            taskbar.flush();
+            // Shown again with the focus.
             pila.wait_focus("a");
         }
     }

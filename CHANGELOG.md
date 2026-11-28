@@ -5,6 +5,9 @@
 - **Fixed:** Reducing `workspaces` in a reload while on a workspace that goes no longer loses
   its windows: they come to the last workspace left, on screen, where they used to stay
   unmapped on the workspace gone, out of reach.
+- **Fixed:** A minimized window restored from a taskbar (wlr-foreign-toplevel's
+  `unset_minimized`) comes back on its own workspace, which is shown, and takes the focus, as
+  when it's activated; it used to appear on the workspace you were on, without the focus.
 
 ## 0.9.9 (2026-11-27)
 
