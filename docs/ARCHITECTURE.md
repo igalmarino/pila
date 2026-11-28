@@ -1680,7 +1680,10 @@ Key flows and invariants:
   locked (`portal::Request::ScreenSaverActive`); the rest of the interface isn't served. A cookie counts
   wherever its app is (no surface) but not while locked; only the app that got it can give
   it back, and an app's cookies go when it leaves the bus (`NameOwnerChanged`, on a thread of
-  its own). The event loop gets the list of holders (`portal::Request::DbusInhibitors`) on
+  its own); its leaving can be seen before a call it made just before is served, so `Inhibit`
+  asks the bus whether the caller is still there once the cookie is in, and drops it if not
+  (`still_on_the_bus`). A connection holds at most `screensaver::MAX_PER_APP` cookies, the
+  next refused with `LimitsExceeded`. The event loop gets the list of holders (`portal::Request::DbusInhibitors`) on
   each change. `pila msg idle-inhibitors` (`Pila::ipc_idle_inhibitors`) lists the holders and
   the visible surfaces whose inhibitor counts. A new input path
   must go through `process_input_event` (or set `input_activity`) to count as activity.

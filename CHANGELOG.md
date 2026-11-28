@@ -8,6 +8,10 @@
 - **Fixed:** A minimized window restored from a taskbar (wlr-foreign-toplevel's
   `unset_minimized`) comes back on its own workspace, which is shown, and takes the focus, as
   when it's activated; it used to appear on the workspace you were on, without the focus.
+- **Fixed:** An app that asks to keep the screen on over D-Bus (`org.freedesktop.ScreenSaver`'s
+  `Inhibit`) and leaves the bus right away no longer keeps it on for good: its leaving could be
+  seen before its call, leaving a cookie no one would give back. An app now holds at most 32
+  such inhibitors at once; the next is refused.
 
 ## 0.9.9 (2026-11-27)
 

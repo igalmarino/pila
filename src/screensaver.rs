@@ -12,7 +12,9 @@
 //! (`portal::Request::DbusInhibitors`) whenever that changes. A cookie lives
 //! until its app gives it back (`UnInhibit`) or leaves the bus
 //! (`NameOwnerChanged`, watched on a thread of its own), so an app that
-//! crashes doesn't keep the session awake. If another program has the
+//! crashes doesn't keep the session awake; one that leaves before its call
+//! is served keeps none either (`still_on_the_bus`). A connection holds at
+//! most `MAX_PER_APP` cookies. If another program has the
 //! name, it's theirs, and nothing is left at the paths either.
 
 use std::{
@@ -24,6 +26,10 @@ use tracing::{info, warn};
 use zbus::{fdo, message::Header};
 
 use crate::{portal::Request, sync::Locked};
+
+/// The most cookies one connection holds at once: an app keeps one or two
+/// (a video, a call), and no app grows the map without end.
+pub const MAX_PER_APP: usize = 32;
 
 /// The name apps call.
 pub const BUS_NAME: &str = "org.freedesktop.ScreenSaver";
@@ -80,30 +86,56 @@ impl ScreenSaver {
     async fn inhibit(
         &self,
         #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
         application_name: String,
         reason_for_inhibit: String,
     ) -> fdo::Result<u32> {
         let Some(owner) = header.sender() else {
             return Err(fdo::Error::Failed("no sender".into()));
         };
+        let cookie = {
+            let mut cookies = self.cookies.locked();
+            let its_own = cookies
+                .held
+                .values()
+                .filter(|held| held.owner == owner.as_str())
+                .count();
+            if its_own >= MAX_PER_APP {
+                warn!(
+                    app = application_name,
+                    max = MAX_PER_APP,
+                    "idle: an app asked for too many inhibitors"
+                );
+                return Err(fdo::Error::LimitsExceeded(format!(
+                    "at most {MAX_PER_APP} inhibitors per connection"
+                )));
+            }
+            let cookie = cookies.next();
+            cookies.held.insert(
+                cookie,
+                Held {
+                    owner: owner.to_string(),
+                    inhibitor: Inhibitor {
+                        app: application_name.clone(),
+                        reason: reason_for_inhibit.clone(),
+                    },
+                },
+            );
+            cookie
+        };
+        // An app that called and left at once: its leaving may have reached
+        // `watch_departures` before the cookie was in. Still on the bus
+        // now, its leaving is yet to come and finds the cookie.
+        if !still_on_the_bus(connection, owner.as_str()).await {
+            self.cookies.locked().held.remove(&cookie);
+            return Err(fdo::Error::Failed("the caller left the bus".into()));
+        }
         info!(
             app = application_name,
             reason = reason_for_inhibit,
             "idle: an app inhibits idling"
         );
-        let mut cookies = self.cookies.locked();
-        let cookie = cookies.next();
-        cookies.held.insert(
-            cookie,
-            Held {
-                owner: owner.to_string(),
-                inhibitor: Inhibitor {
-                    app: application_name,
-                    reason: reason_for_inhibit,
-                },
-            },
-        );
-        cookies.changed();
+        self.cookies.locked().changed();
         Ok(cookie)
     }
 
@@ -144,6 +176,25 @@ impl ScreenSaver {
         }
         answer.await.unwrap_or(false)
     }
+}
+
+/// Whether `name` (a connection's unique name) is on the bus; if the bus
+/// can't say, it is.
+async fn still_on_the_bus(connection: &zbus::Connection, name: &str) -> bool {
+    let Ok(name) = zbus::names::BusName::try_from(name) else {
+        return true;
+    };
+    let answer = match fdo::DBusProxy::new(connection).await {
+        Ok(bus) => bus.name_has_owner(name).await,
+        Err(err) => Err(err.into()),
+    };
+    answer.unwrap_or_else(|err| {
+        warn!(
+            ?err,
+            "idle: can't ask the bus whether an app is still on it"
+        );
+        true
+    })
 }
 
 /// Take the interface off `PATHS` again.

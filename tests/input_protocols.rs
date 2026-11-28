@@ -222,6 +222,67 @@ fn a_dbus_inhibit_cookie_is_given_back_only_by_its_app() {
     pila.wait("not inhibited", |s| s["idle_inhibited"] == false);
 }
 
+/// Apps that call `Inhibit` and leave the bus at once, without waiting for
+/// the answer: their leaving may reach Pila before their call is served,
+/// and no cookie of theirs is left keeping the screen on.
+#[test]
+fn a_dbus_inhibit_from_an_app_already_gone_doesnt_stay() {
+    let (mut pila, bus, client) = on_a_bus();
+    // Served once an inhibit gets through.
+    let first = app_on(&bus);
+    let cookie = inhibit(&first, "/org/freedesktop/ScreenSaver");
+    uninhibit(&first, "/org/freedesktop/ScreenSaver", cookie);
+    for _ in 0..40 {
+        let app = app_on(&bus);
+        let call = zbus::Message::method_call("/org/freedesktop/ScreenSaver", "Inhibit")
+            .destination("org.freedesktop.ScreenSaver")
+            .interface("org.freedesktop.ScreenSaver")
+            .build(&("Firefox", "video-playing"))
+            .unwrap();
+        zbus::block_on(async {
+            app.send(&call).await.unwrap();
+            app.close().await.unwrap();
+        });
+    }
+    pila.wait("not inhibited", |s| {
+        s["idle_inhibited"] == false && s["idle_inhibitors"] == serde_json::json!([])
+    });
+    pila.stays("not inhibited", Duration::from_millis(300), |s| {
+        s["idle_inhibited"] == false
+    });
+    let _n = idle_notification(&client);
+    client.wait_logged("idle", "Idled");
+}
+
+/// One connection holds at most `MAX_PER_APP` cookies: the next is
+/// refused, until it gives one back; another app's still get through.
+#[test]
+fn a_dbus_app_holds_a_limited_number_of_inhibits() {
+    let (mut pila, bus, _client) = on_a_bus();
+    let max = pila::screensaver::MAX_PER_APP;
+    let app = app_on(&bus);
+    let cookies: Vec<u32> = (0..max)
+        .map(|_| inhibit(&app, "/org/freedesktop/ScreenSaver"))
+        .collect();
+    let refused = screensaver_call(&app, "Inhibit", &("Firefox", "one too many"));
+    assert!(
+        matches!(&refused, Err(zbus::Error::FDO(err)) if matches!(**err, zbus::fdo::Error::LimitsExceeded(_))),
+        "not refused: {refused:?}"
+    );
+    let state = pila.wait("every cookie listed", |s| {
+        s["idle_inhibitors"].as_array().map(Vec::len) == Some(max)
+    });
+    assert_eq!(state["idle_inhibited"], true);
+
+    let other = app_on(&bus);
+    inhibit(&other, "/org/freedesktop/ScreenSaver");
+    uninhibit(&app, "/org/freedesktop/ScreenSaver", cookies[0]);
+    inhibit(&app, "/org/freedesktop/ScreenSaver");
+    pila.wait("both apps' cookies listed", |s| {
+        s["idle_inhibitors"].as_array().map(Vec::len) == Some(max + 1)
+    });
+}
+
 /// `SimulateUserActivity` counts as activity: an idle client resumes.
 #[test]
 fn a_dbus_simulate_user_activity_counts_as_activity() {
