@@ -307,7 +307,6 @@ impl Pila {
     pub(crate) fn bind_app_shortcuts(
         &mut self,
         session: String,
-        app: Option<String>,
         parent: Option<crate::portal::ParentWindow>,
         asked: Vec<Asked>,
         reply: Reply<Result<Vec<Bound>, Refused>>,
@@ -373,7 +372,7 @@ impl Pila {
         }
         self.ask_app_shortcuts(
             session,
-            app.or(Some(app_key).filter(|a| !a.is_empty())),
+            Some(app_key).filter(|a| !a.is_empty()),
             rows,
             Some(reply),
         );

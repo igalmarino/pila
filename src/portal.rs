@@ -103,26 +103,10 @@ pub enum Request {
     Serving(zbus::Connection),
     /// The bus couldn't be served.
     Failed(String),
-    /// Start the streams of `session` and reply with them: what's shared
-    /// is picked now, by the user (`share_picker.rs`).
-    Start {
-        session: String,
-        cursor: CursorMode,
-        sources: Sources,
-        /// Who asks, as the portal names it (empty for an app it doesn't),
-        /// and as the picker names it: its desktop entry's name, else its
-        /// app id; `None` if the portal didn't say (`app_name`).
-        app_id: String,
-        app: Option<String>,
-        /// The app's window the request came from (`parent_handle`).
-        parent: Option<ParentWindow>,
-        /// How long the app asks for the share to be remembered
-        /// (`persist_mode`), and the grant it was remembered by before, if
-        /// it asks to restore one (`restore_data`, `screen_grants.rs`).
-        persist: u32,
-        restore: Option<String>,
-        reply: Reply<Result<Started, Refused>>,
-    },
+    /// Start the streams of a session and reply with them: what's shared
+    /// is picked now, by the user (`share_picker.rs`), unless it was
+    /// remembered.
+    Start(crate::screencast::Share),
     /// The app (or xdg-desktop-portal) closed `session`: stop its streams.
     Close { session: String },
     /// A screenshot, answered with its file's URI: of every output at once,
@@ -130,9 +114,7 @@ pub enum Request {
     /// permission to take one unasked).
     Screenshot {
         ask: bool,
-        app: Option<String>,
-        parent: Option<ParentWindow>,
-        reply: Reply<Result<String, Refused>>,
+        shot: crate::screenshot::Shot,
     },
     /// A color the user picks on the screen (`color_pick.rs`).
     PickColor {
@@ -149,7 +131,6 @@ pub enum Request {
     /// A session binds its shortcuts: answered once they are.
     BindShortcuts {
         session: String,
-        app: Option<String>,
         parent: Option<ParentWindow>,
         shortcuts: Vec<crate::app_shortcuts::Asked>,
         reply: Reply<Result<Vec<crate::app_shortcuts::Bound>, Refused>>,
@@ -468,16 +449,18 @@ impl ScreenCast {
             return (RESPONSE_OTHER, Results::new());
         };
         let session = session_handle.to_string();
-        let asked = ask(&self.send, |reply| Request::Start {
-            session,
-            cursor: selection.cursor,
-            sources: selection.sources,
-            app: app_name(&app_id, &data_dirs()),
-            app_id,
-            parent: parent_handle(&parent_window),
-            persist: selection.persist,
-            restore: selection.restore,
-            reply,
+        let asked = ask(&self.send, |reply| {
+            Request::Start(crate::screencast::Share {
+                session,
+                cursor: selection.cursor,
+                sources: selection.sources,
+                app: app_name(&app_id, &data_dirs()),
+                app_id,
+                parent: parent_handle(&parent_window),
+                persist: selection.persist,
+                restore: selection.restore,
+                reply,
+            })
         });
         let started = match asked.await {
             Ok(started) => started,
@@ -583,7 +566,6 @@ impl GlobalShortcuts {
             .collect();
         let bound = ask(&self.send, |reply| Request::BindShortcuts {
             session: session_handle.to_string(),
-            app: None,
             parent: parent_handle(&parent_window),
             shortcuts: asked,
             reply,
@@ -734,9 +716,11 @@ impl Screenshot {
         debug!(app_id, ask, "portal: screenshot");
         let taken = self::ask(&self.send, |reply| Request::Screenshot {
             ask,
-            app: app_name(&app_id, &data_dirs()),
-            parent: parent_handle(&parent_window),
-            reply,
+            shot: crate::screenshot::Shot {
+                app: app_name(&app_id, &data_dirs()),
+                parent: parent_handle(&parent_window),
+                reply,
+            },
         });
         match taken.await {
             Ok(uri) => one_result("uri", Variant::from(uri)),

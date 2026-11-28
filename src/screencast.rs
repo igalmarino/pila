@@ -135,15 +135,18 @@ pub fn warm_pipewire() {
     );
 }
 
-/// A request to share, from the portal's `Start`.
+/// A request to share, from the portal's `Start` (`portal::Request::Start`).
 pub struct Share {
     /// The portal session, by its object path.
     pub session: String,
     /// How the pointer shows in the stream.
     pub cursor: CursorMode,
-    /// Who asks (`portal::Request::Start`), and the window it asks from.
+    /// Who asks, as the portal names it (empty for an app it doesn't), and
+    /// as the picker names it: its desktop entry's name, else its app id;
+    /// `None` if the portal didn't say (`portal::app_name`).
     pub app_id: String,
     pub app: Option<String>,
+    /// The app's window the request came from (`portal::parent_handle`).
     pub parent: Option<crate::portal::ParentWindow>,
     /// What it may share: the picker offers these.
     pub sources: portal::Sources,
@@ -190,7 +193,6 @@ struct Cast {
     session: String,
     /// What's shared: an output or a window.
     target: Target,
-    source_type: portal::SourceType,
     cursor: CursorMode,
     /// The cursor metadata last sent (`CursorMode::Metadata`): where, and
     /// which image.
@@ -203,12 +205,9 @@ struct Cast {
     /// Dropped before `stream`.
     _listener: StreamListener<()>,
     stream: StreamRc,
-    /// `Start`'s answer, once the node has an id, and the grant the share
-    /// is remembered by (kept then, if new).
-    reply: Option<Reply<Result<portal::Started, Refused>>>,
-    remembered: Option<crate::screen_grants::Remembered>,
-    position: (i32, i32),
-    logical_size: (i32, i32),
+    /// `Start`, answered once the node has an id (dropped unanswered, it
+    /// fails).
+    start: Option<PendingStart>,
     /// A consumer is linked: frames go out.
     streaming: bool,
     /// Changes since the last frame sent; `None` before the first.
@@ -223,12 +222,18 @@ struct Cast {
     seq: u64,
 }
 
+/// A cast's `Start`, waiting for its stream to have a node.
+struct PendingStart {
+    reply: Reply<Result<portal::Started, Refused>>,
+    /// The stream as `Start` describes it, its node id still to come.
+    stream: portal::Stream,
+    /// The grant the share is remembered by (kept then, if new).
+    remembered: Option<crate::screen_grants::Remembered>,
+}
+
 impl Drop for Cast {
     fn drop(&mut self) {
         self.buffers.set(self.buffers.get() + 1);
-        if let Some(reply) = self.reply.take() {
-            reply.send(Err(Refused::Failed));
-        }
         let _ = self.stream.disconnect();
     }
 }
@@ -277,32 +282,11 @@ impl Pila {
                 warn!(err, "portal: can't serve the session bus");
                 self.startup_step_done();
             }
-            Request::Start {
-                session,
-                cursor,
-                sources,
-                app_id,
-                app,
-                parent,
-                persist,
-                restore,
-                reply,
-            } => {
+            Request::Start(share) => {
                 // Connected at startup; again if the connection went.
                 if let Err(err) = self.connect_pipewire() {
                     warn!(err, "portal: can't connect to PipeWire");
                 }
-                let share = Share {
-                    session,
-                    cursor,
-                    app_id,
-                    app,
-                    parent,
-                    sources,
-                    persist,
-                    restore,
-                    reply,
-                };
                 // Remembered for the app: shared at once, if it's there.
                 if let Some((target, remembered)) = self.restored_share(&share) {
                     return self.start_cast(share, target, remembered);
@@ -320,11 +304,10 @@ impl Pila {
             }
             Request::BindShortcuts {
                 session,
-                app,
                 parent,
                 shortcuts,
                 reply,
-            } => self.bind_app_shortcuts(session, app, parent, shortcuts, reply),
+            } => self.bind_app_shortcuts(session, parent, shortcuts, reply),
             Request::ListShortcuts { session, reply } => {
                 reply.send(self.list_app_shortcuts(&session))
             }
@@ -333,14 +316,7 @@ impl Pila {
             // Told the idle notifier with this iteration's input.
             Request::UserActivity => self.input_activity = true,
             Request::ScreenSaverActive { reply } => reply.send(self.is_locked()),
-            Request::Screenshot {
-                ask,
-                app,
-                parent,
-                reply,
-            } => {
-                self.portal_screenshot(ask, crate::screenshot::Shot { app, parent, reply });
-            }
+            Request::Screenshot { ask, shot } => self.portal_screenshot(ask, shot),
             Request::Close { session } => {
                 debug!(session, "portal: session closed");
                 self.screencast
@@ -469,7 +445,6 @@ impl Pila {
             app,
             session,
             target,
-            source_type,
             cursor,
             cursor_sent: None,
             memory,
@@ -477,10 +452,16 @@ impl Pila {
             scale,
             _listener: listener,
             stream,
-            reply: Some(reply),
-            remembered,
-            position,
-            logical_size,
+            start: Some(PendingStart {
+                reply,
+                stream: portal::Stream {
+                    node_id: 0,
+                    source_type,
+                    position,
+                    size: logical_size,
+                },
+                remembered,
+            }),
             streaming: false,
             tracker: None,
             buffers: Rc::new(Cell::new(0)),
@@ -596,17 +577,16 @@ impl Pila {
             match event {
                 CastEvent::State(StreamState::Paused) => {
                     cast.streaming = false;
-                    if let Some(reply) = cast.reply.take() {
-                        let node_id = cast.stream.node_id();
-                        debug!(node_id, "portal: stream ready");
-                        let remembered = cast.remembered.take();
+                    if let Some(PendingStart {
+                        reply,
+                        mut stream,
+                        remembered,
+                    }) = cast.start.take()
+                    {
+                        stream.node_id = cast.stream.node_id();
+                        debug!(node_id = stream.node_id, "portal: stream ready");
                         reply.send(Ok(portal::Started {
-                            streams: vec![portal::Stream {
-                                node_id,
-                                source_type: cast.source_type,
-                                position: cast.position,
-                                size: cast.logical_size,
-                            }],
+                            streams: vec![stream],
                             remembered: remembered.as_ref().map(|r| (r.id.clone(), r.mode)),
                         }));
                         if let Some(crate::screen_grants::Remembered {
