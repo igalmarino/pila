@@ -1885,9 +1885,7 @@ impl Pila {
         // A maximized, fullscreen or snapped window stays as it is until the
         // pointer has really moved (a click on its title bar isn't a drag):
         // then the grab restores it under the cursor (`restore_for_drag`).
-        let (maximized, fullscreen) = fill_state(&window);
-        let restore_on_drag =
-            maximized || fullscreen || crate::snap::snapped_side(&window).is_some();
+        let restore_on_drag = is_filled(&window) || crate::snap::snapped_side(&window).is_some();
 
         let Some(initial_window_location) = self.space.element_location(&window) else {
             return;
@@ -1914,8 +1912,7 @@ impl Pila {
         pressed: Point<f64, Logical>,
         at: Point<f64, Logical>,
     ) {
-        let (maximized, fullscreen) = fill_state(window);
-        if maximized || fullscreen {
+        if is_filled(window) {
             let width = restore_geometry(window)
                 .map(|r| r.size.w)
                 .unwrap_or(window.geometry().size.w);
@@ -1952,8 +1949,7 @@ impl Pila {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let (maximized, fullscreen) = fill_state(&window);
-        if maximized || fullscreen || self.is_locked() {
+        if is_filled(&window) || self.is_locked() {
             return;
         }
         // A resized window isn't snapped anymore.
@@ -2568,6 +2564,13 @@ impl Pila {
         let (maximized, fullscreen) = fill_state(window);
         fullscreen || (maximized && self.config.gaps == 0)
     }
+}
+
+/// Maximized or fullscreen (`fill_state`): it fills its area, so it isn't
+/// moved, snapped or centered by hand.
+pub fn is_filled(window: &Window) -> bool {
+    let (maximized, fullscreen) = fill_state(window);
+    maximized || fullscreen
 }
 
 /// (maximized, fullscreen) as last requested by the compositor.

@@ -431,6 +431,15 @@ struct LayerShown(std::cell::Cell<bool>);
 #[derive(Default)]
 struct DrawnSize(std::cell::Cell<smithay::utils::Size<i32, Logical>>);
 
+/// Whether `surface`'s commit on its way takes its buffer away
+/// (`attach(null)`): from a pre-commit hook.
+fn removes_buffer(surface: &WlSurface) -> bool {
+    with_states(surface, |states| {
+        let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+        matches!(attributes.pending().buffer, Some(BufferAssignment::Removed))
+    })
+}
+
 /// Fade a layer surface out while its content is still there: when its
 /// client takes the buffer away (pre-commit) or the surface is destroyed
 /// (`layer_destroyed` comes first when the client destroys the role; a dead
@@ -441,11 +450,7 @@ pub fn watch_layer(surface: &WlSurface) {
         state.animate_layer_close(surface, Surfaces::MainOnly);
     });
     add_pre_commit_hook::<Pila, _>(surface, |state, _, surface| {
-        let removed = with_states(surface, |states| {
-            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
-            matches!(attributes.pending().buffer, Some(BufferAssignment::Removed))
-        });
-        if removed && crate::state::has_buffer(surface) {
+        if removes_buffer(surface) && crate::state::has_buffer(surface) {
             state.animate_layer_close(surface, Surfaces::Tree);
         }
     });
@@ -465,11 +470,7 @@ pub fn watch_unmap(surface: &WlSurface) {
         }
     });
     add_pre_commit_hook::<Pila, _>(surface, |state, _, surface| {
-        let removed = with_states(surface, |states| {
-            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
-            matches!(attributes.pending().buffer, Some(BufferAssignment::Removed))
-        });
-        if !removed {
+        if !removes_buffer(surface) {
             return;
         }
         if let Some(window) = state.mapped_window(surface) {

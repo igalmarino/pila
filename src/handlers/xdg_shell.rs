@@ -174,16 +174,9 @@ impl XdgShellHandler for Pila {
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some(seat) = Seat::from_resource(&seat) else {
-            return;
-        };
-        let Some(start_data) = check_grab(&seat, surface.wl_surface(), serial) else {
-            return;
-        };
-        let Some(window) = self.window_for_surface(surface.wl_surface()) else {
-            return;
-        };
-        self.begin_move(window, start_data, serial);
+        if let Some((window, start_data)) = self.grab_request(&surface, &seat, serial) {
+            self.begin_move(window, start_data, serial);
+        }
     }
 
     fn resize_request(
@@ -193,16 +186,9 @@ impl XdgShellHandler for Pila {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let Some(seat) = Seat::from_resource(&seat) else {
-            return;
-        };
-        let Some(start_data) = check_grab(&seat, surface.wl_surface(), serial) else {
-            return;
-        };
-        let Some(window) = self.window_for_surface(surface.wl_surface()) else {
-            return;
-        };
-        self.begin_resize(window, edges.into(), start_data, serial);
+        if let Some((window, start_data)) = self.grab_request(&surface, &seat, serial) {
+            self.begin_resize(window, edges.into(), start_data, serial);
+        }
     }
 
     fn minimize_request(&mut self, surface: ToplevelSurface) {
@@ -377,6 +363,22 @@ fn restore_decoration_mode(toplevel: &ToplevelSurface) {
 
 /// Only start a client-requested move/resize if the client really holds a
 /// pointer button press on that surface.
+impl Pila {
+    /// The window of a move or resize `surface` asks for, and the press it
+    /// starts from, if `serial` is that of a press `seat` holds now.
+    fn grab_request(
+        &self,
+        surface: &ToplevelSurface,
+        seat: &wl_seat::WlSeat,
+        serial: Serial,
+    ) -> Option<(Window, PointerGrabStartData<Pila>)> {
+        let seat = Seat::from_resource(seat)?;
+        let start_data = check_grab(&seat, surface.wl_surface(), serial)?;
+        let window = self.window_for_surface(surface.wl_surface())?;
+        Some((window, start_data))
+    }
+}
+
 fn check_grab(
     seat: &Seat<Pila>,
     surface: &WlSurface,

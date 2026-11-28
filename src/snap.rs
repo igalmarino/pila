@@ -21,7 +21,11 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
 };
 
-use crate::{decoration, state::fill_state, Pila};
+use crate::{
+    decoration,
+    state::{fill_state, is_filled},
+    Pila,
+};
 
 /// How far keyboard moves and resizes go per press.
 pub const KEYBOARD_STEP: i32 = 40;
@@ -228,6 +232,32 @@ pub fn gapped(area: Rectangle<i32, Logical>, gap: u32) -> Rectangle<i32, Logical
 /// The rectangle (window geometry, below a `bar`-high title bar) for the
 /// half or quarter of `area` that `side` names, `gap` from the area's edges
 /// and from the other halves (`gaps`).
+/// No side of `state` tiled (xdg-shell's `tiled_*`): not snapped.
+fn unset_tiled(state: &mut smithay::wayland::shell::xdg::ToplevelState) {
+    use xdg_toplevel::State::*;
+    for s in [TiledLeft, TiledRight, TiledTop, TiledBottom] {
+        state.states.unset(s);
+    }
+}
+
+impl Pila {
+    /// `side_rect` of `area` for `window`: under its title bar, with the
+    /// configured gaps.
+    fn window_side_rect(
+        &self,
+        window: &Window,
+        area: Rectangle<i32, Logical>,
+        side: Side,
+    ) -> Rectangle<i32, Logical> {
+        side_rect(
+            area,
+            side,
+            decoration::layout_offset(window, false),
+            self.config.gaps,
+        )
+    }
+}
+
 pub fn side_rect(
     area: Rectangle<i32, Logical>,
     side: Side,
@@ -319,9 +349,7 @@ impl Pila {
         if let Some(toplevel) = window.toplevel() {
             toplevel.with_pending_state(|state| {
                 use xdg_toplevel::State::*;
-                for s in [TiledLeft, TiledRight, TiledTop, TiledBottom] {
-                    state.states.unset(s);
-                }
+                unset_tiled(state);
                 if let Some(side) = side {
                     if side.touches_top() {
                         state.states.set(TiledTop);
@@ -376,19 +404,13 @@ impl Pila {
             return;
         };
         self.animate_geometry(window);
-        let (maximized, fullscreen) = fill_state(window);
-        if maximized || fullscreen {
+        if is_filled(window) {
             self.clear_fill_state(window);
         }
         let Some(area) = self.usable_area_for(window) else {
             return;
         };
-        let rect = side_rect(
-            area,
-            side,
-            decoration::layout_offset(window, false),
-            self.config.gaps,
-        );
+        let rect = self.window_side_rect(window, area, side);
         set_snap_state(window, Some((side, before)));
         self.apply_rect(window, rect, Some(side));
     }
@@ -408,12 +430,7 @@ impl Pila {
             let Some(area) = self.usable_area_for(&window) else {
                 continue;
             };
-            let rect = side_rect(
-                area,
-                side,
-                decoration::layout_offset(&window, false),
-                self.config.gaps,
-            );
+            let rect = self.window_side_rect(&window, area, side);
             if self.window_rect(&window) != Some(rect) {
                 self.place_rect(&window, rect, Some(side), false);
             }
@@ -434,12 +451,7 @@ impl Pila {
         before.loc = moved(before);
         self.animate_geometry(window);
         set_snap_state(window, Some((side, before)));
-        let rect = side_rect(
-            area,
-            side,
-            decoration::layout_offset(window, false),
-            self.config.gaps,
-        );
+        let rect = self.window_side_rect(window, area, side);
         self.apply_rect(window, rect, Some(side));
         true
     }
@@ -464,12 +476,7 @@ impl Pila {
         let (_, before) = snap_state(window)?;
         set_snap_state(window, None);
         if let Some(toplevel) = window.toplevel() {
-            toplevel.with_pending_state(|state| {
-                use xdg_toplevel::State::*;
-                for s in [TiledLeft, TiledRight, TiledTop, TiledBottom] {
-                    state.states.unset(s);
-                }
-            });
+            toplevel.with_pending_state(unset_tiled);
         }
         Some(before)
     }
@@ -506,8 +513,7 @@ impl Pila {
     /// Mod+Shift+arrows: move by `delta`. A snapped window is unsnapped
     /// first (keeping its place); maximized/fullscreen ones don't move.
     pub fn move_window_by(&mut self, window: &Window, delta: Point<i32, Logical>) {
-        let (maximized, fullscreen) = fill_state(window);
-        if maximized || fullscreen || self.is_locked() {
+        if is_filled(window) || self.is_locked() {
             return;
         }
         if let Some(rect) = self.window_rect(window) {
@@ -522,8 +528,7 @@ impl Pila {
     /// Mod+Ctrl+arrows: grow or shrink by `delta` (width, height; right and
     /// bottom edge). Not a `Size`: shrinking makes it negative.
     pub fn resize_window_by(&mut self, window: &Window, delta: (i32, i32)) {
-        let (maximized, fullscreen) = fill_state(window);
-        if maximized || fullscreen || self.is_locked() {
+        if is_filled(window) || self.is_locked() {
             return;
         }
         self.forget_snap(window);
@@ -538,8 +543,7 @@ impl Pila {
 
     /// Mod+C: center in the output's usable area.
     pub fn center_window(&mut self, window: &Window) {
-        let (maximized, fullscreen) = fill_state(window);
-        if maximized || fullscreen || self.is_locked() {
+        if is_filled(window) || self.is_locked() {
             return;
         }
         self.forget_snap(window);

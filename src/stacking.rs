@@ -209,16 +209,7 @@ impl Pila {
             return;
         }
         let at = pointer.current_location();
-        let Some(from) = self
-            .space
-            .outputs()
-            .find(|output| {
-                self.space
-                    .output_geometry(output)
-                    .is_some_and(|geo| geo.to_f64().contains(at))
-            })
-            .cloned()
-        else {
+        let Some(from) = self.space.output_under(at).next().cloned() else {
             return;
         };
         let Some(to) = neighbor(&self.outputs_in_order(), &from, target) else {
