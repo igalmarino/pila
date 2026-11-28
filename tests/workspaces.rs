@@ -313,6 +313,30 @@ fn fewer_workspaces_after_a_reload_bring_windows_to_the_last_one() {
     assert_eq!(a["workspace"], 2);
 }
 
+/// The window on screen when its workspace goes comes along to the last one
+/// left, on screen: switching away first parked it on the workspace that
+/// went, out of reach.
+#[test]
+fn fewer_workspaces_bring_the_windows_on_screen_to_the_last_one() {
+    let mut pila = TestPila::with_config("workspaces = 4\n");
+    let client = pila.client();
+    client.window("a").create();
+    pila.wait_focus("a");
+    pila.combo("Super+Shift+4");
+    pila.wait("a on 4", |s| window_in(s, "a").unwrap()["workspace"] == 4);
+    pila.combo("Super+4");
+    pila.wait_focus("a");
+    pila.write_config("workspaces = 2\n");
+    pila.wait("2 workspaces, on 2", |s| {
+        s["workspaces"] == 2 && s["workspace"] == 2
+    });
+    let state = pila.settle();
+    let a = window_in(&state, "a").unwrap();
+    assert_eq!(a["workspace"], 2);
+    assert_eq!(a["mapped"], true);
+    assert_eq!(state["focused"], "a");
+}
+
 #[test]
 fn a_minimized_window_keeps_its_workspace() {
     let mut pila = TestPila::start();

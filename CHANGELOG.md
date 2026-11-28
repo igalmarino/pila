@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** Reducing `workspaces` in a reload while on a workspace that goes no longer loses
+  its windows: they come to the last workspace left, on screen, where they used to stay
+  unmapped on the workspace gone, out of reach.
+
 ## 0.9.9 (2026-11-27)
 
 - **Changed (breaking):** Direct screen capture permissions are kept in one place, the

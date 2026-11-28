@@ -336,6 +336,12 @@ impl Pila {
     /// workspaces that are gone move to the last one left.
     pub fn apply_workspace_count(&mut self) {
         let last = self.config.workspaces - 1;
+        let active_gone = self.workspaces.active > last;
+        if active_gone {
+            // Even while locked: the active workspace must exist. First, so
+            // that the windows it parks are moved below with the others.
+            self.show_workspace(last);
+        }
         for window in self.off_space_windows() {
             let data = on_workspace(window);
             if data.index.get() > last {
@@ -343,18 +349,17 @@ impl Pila {
             }
         }
         self.workspaces.parked.retain(IsAlive::alive);
-        if self.workspaces.active > last {
-            // Even while locked: the active workspace must exist.
-            self.show_workspace(last);
-        } else {
-            // Windows moved onto the active workspace come on screen, below
-            // those on top.
-            self.unpark_active();
-            self.keep_on_top();
-            self.refresh_pointer_focus();
-            self.refresh_workspaces();
-            self.queue_redraw();
+        // Windows moved onto the active workspace come on screen, below
+        // those on top.
+        self.unpark_active();
+        if active_gone {
+            // The window that had the focus on the workspace gone came along.
+            self.focus_arriving_window();
         }
+        self.keep_on_top();
+        self.refresh_pointer_focus();
+        self.refresh_workspaces();
+        self.queue_redraw();
     }
 }
 
